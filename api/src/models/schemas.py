@@ -27,6 +27,7 @@ class ProfileBase(BaseModel):
         "write": "review",
         "edit": "review",
         "images": "review",
+        "ready": "review",
     }
     recrawl_interval: str | None = None
 
@@ -93,6 +94,7 @@ class PostBase(BaseModel):
         "write": "review",
         "edit": "review",
         "images": "review",
+        "ready": "review",
     }
 
 
@@ -124,6 +126,7 @@ class PostUpdate(BaseModel):
     draft_content: str | None = None
     final_md_content: str | None = None
     final_html_content: str | None = None
+    ready_content: str | None = None
 
 
 class PostRead(PostBase):
@@ -141,6 +144,7 @@ class PostRead(PostBase):
     final_md_content: str | None = None
     final_html_content: str | None = None
     image_manifest: dict | None = None
+    ready_content: str | None = None
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
