@@ -2,7 +2,8 @@
 
 Graph structure:
   START → research_node → research_gate → outline_node → outline_gate →
-    write_node → write_gate → edit_node → edit_gate → images_node → images_gate → END
+    write_node → write_gate → edit_node → edit_gate → images_node →
+    images_gate → ready_node → ready_gate → END
 """
 
 from __future__ import annotations
@@ -17,11 +18,13 @@ from src.pipeline.gates import (
     edit_gate,
     images_gate,
     outline_gate,
+    ready_gate,
     research_gate,
     write_gate,
 )
 from src.pipeline.stages.edit import edit_node
 from src.pipeline.stages.images import images_node
+from src.pipeline.stages.ready import ready_node
 from src.pipeline.stages.outline import outline_node
 from src.pipeline.stages.research import research_node
 from src.pipeline.stages.write import write_node
@@ -40,6 +43,7 @@ def build_graph() -> StateGraph:
     builder.add_node("write_node", write_node)
     builder.add_node("edit_node", edit_node)
     builder.add_node("images_node", images_node)
+    builder.add_node("ready_node", ready_node)
 
     # Add gate nodes
     builder.add_node("research_gate", research_gate)
@@ -47,6 +51,7 @@ def build_graph() -> StateGraph:
     builder.add_node("write_gate", write_gate)
     builder.add_node("edit_gate", edit_gate)
     builder.add_node("images_gate", images_gate)
+    builder.add_node("ready_gate", ready_gate)
 
     # Wire edges: START → research → gate → outline → gate → ... → END
     builder.add_edge(START, "research_node")
@@ -56,6 +61,7 @@ def build_graph() -> StateGraph:
     builder.add_edge("write_node", "write_gate")
     builder.add_edge("edit_node", "edit_gate")
     builder.add_edge("images_node", "images_gate")
+    builder.add_edge("ready_node", "ready_gate")
 
     return builder
 

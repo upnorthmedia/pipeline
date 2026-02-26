@@ -24,6 +24,7 @@ STAGE_OUTPUT_KEY: dict[str, str] = {
     "write": "draft",
     "edit": "final_md",
     "images": "image_manifest",
+    "ready": "ready",
 }
 
 
@@ -47,6 +48,7 @@ def make_gate(stage: str):
             "write_node",
             "edit_node",
             "images_node",
+            "ready_node",
             "__end__",
         ]
     ]:
@@ -112,3 +114,4 @@ outline_gate = make_gate("outline")
 write_gate = make_gate("write")
 edit_gate = make_gate("edit")
 images_gate = make_gate("images")
+ready_gate = make_gate("ready")
