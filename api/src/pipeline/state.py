@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TypedDict
 
 # Ordered list of pipeline stages
-STAGES = ["research", "outline", "write", "edit", "images"]
+STAGES = ["research", "outline", "write", "edit", "images", "ready"]
 
 # Maps stage name → Post model column for content storage
 STAGE_CONTENT_MAP: dict[str, str] = {
@@ -14,6 +14,7 @@ STAGE_CONTENT_MAP: dict[str, str] = {
     "write": "draft_content",
     "edit": "final_md_content",
     "images": "image_manifest",
+    "ready": "ready_content",
 }
 
 # Maps stage name → LLM provider
@@ -23,6 +24,7 @@ STAGE_PROVIDER_MAP: dict[str, str] = {
     "write": "claude",
     "edit": "claude",
     "images": "gemini",
+    "ready": "claude",
 }
 
 # Maps stage name → rule file name
@@ -32,6 +34,7 @@ STAGE_RULES_MAP: dict[str, str] = {
     "write": "blog-write.md",
     "edit": "blog-edit.md",
     "images": "blog-images.md",
+    "ready": "blog-ready.md",
 }
 
 # Valid gate modes
@@ -79,6 +82,7 @@ class PipelineState(TypedDict, total=False):
     final_md: str
     final_html: str
     image_manifest: dict
+    ready: str
 
     # Pipeline control
     current_stage: str
@@ -115,6 +119,7 @@ def state_from_post(post, internal_links: list[dict] | None = None) -> PipelineS
         final_md=post.final_md_content or "",
         final_html=post.final_html_content or "",
         image_manifest=post.image_manifest or {},
+        ready=post.ready_content or "",
         current_stage=post.current_stage or "pending",
         stage_settings=post.stage_settings or {s: "review" for s in STAGES},
         stage_status=post.stage_status or {},
