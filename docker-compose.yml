@@ -1,0 +1,116 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: pipeline
+      POSTGRES_PASSWORD: pipeline
+      POSTGRES_DB: content_pipeline
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pipeline -d content_pipeline"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./api
+      target: builder
+    command: uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pipeline:pipeline@db:5432/content_pipeline
+      DATABASE_URL_SYNC: postgresql://pipeline:pipeline@db:5432/content_pipeline
+      REDIS_URL: redis://redis:6379
+      RULES_DIR: /app/rules
+      MEDIA_DIR: /app/media
+    volumes:
+      - ./api/src:/app/src
+      - ./api/alembic:/app/alembic
+      - ./api/alembic.ini:/app/alembic.ini
+      - ./rules:/app/rules
+      - mediadata:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    build:
+      context: ./api
+      target: builder
+    command: uv run python -m src.worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pipeline:pipeline@db:5432/content_pipeline
+      DATABASE_URL_SYNC: postgresql://pipeline:pipeline@db:5432/content_pipeline
+      REDIS_URL: redis://redis:6379
+      RULES_DIR: /app/rules
+      MEDIA_DIR: /app/media
+    volumes:
+      - ./api/src:/app/src
+      - ./api/alembic:/app/alembic
+      - ./api/alembic.ini:/app/alembic.ini
+      - ./rules:/app/rules
+      - mediadata:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "/app/.venv/bin/python -c \"import redis; redis.from_url('redis://redis:6379').ping()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  web:
+    build:
+      context: ./web
+      target: deps
+    command: pnpm dev
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    volumes:
+      - ./web/src:/app/src
+      - ./web/public:/app/public
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  pgdata:
+  redisdata:
+  mediadata:
