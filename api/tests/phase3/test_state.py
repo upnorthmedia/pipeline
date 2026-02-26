@@ -15,7 +15,7 @@ from src.pipeline.state import (
 
 class TestConstants:
     def test_stages_order(self):
-        assert STAGES == ["research", "outline", "write", "edit", "images"]
+        assert STAGES == ["research", "outline", "write", "edit", "images", "ready"]
 
     def test_stage_content_map_covers_all_stages(self):
         for stage in STAGES:
@@ -78,7 +78,7 @@ class TestPipelineState:
             "stage_status": {},
         }
         assert state["word_count"] == 2000
-        assert len(state["stage_settings"]) == 5
+        assert len(state["stage_settings"]) == 6
 
 
 class FakePost:
@@ -111,6 +111,7 @@ class FakePost:
             "final_md_content": None,
             "final_html_content": None,
             "image_manifest": None,
+            "ready_content": None,
             "current_stage": "pending",
             "stage_settings": {s: "review" for s in STAGES},
             "stage_status": {},

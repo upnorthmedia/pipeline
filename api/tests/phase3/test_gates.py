@@ -40,10 +40,10 @@ class TestAutoMode:
             assert result.goto == "outline_node"
 
     def test_auto_mode_last_stage_goes_to_end(self):
-        gate = make_gate("images")
+        gate = make_gate("ready")
         state = {
-            "stage_settings": {"images": "auto"},
-            "image_manifest": {"images": []},
+            "stage_settings": {"ready": "auto"},
+            "ready": "Final content",
         }
         with patch("src.pipeline.gates.interrupt"):
             result = gate(state)
@@ -156,7 +156,8 @@ class TestGateRouting:
             ("outline", "write_node"),
             ("write", "edit_node"),
             ("edit", "images_node"),
-            ("images", "__end__"),
+            ("images", "ready_node"),
+            ("ready", "__end__"),
         ],
     )
     def test_gate_routes_to_correct_next_node(self, stage, expected_next):

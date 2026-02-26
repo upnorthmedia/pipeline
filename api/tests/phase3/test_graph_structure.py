@@ -23,8 +23,8 @@ class TestGraphStructure:
 
     def test_graph_has_correct_node_count(self):
         builder = build_graph()
-        # 5 stages + 5 gates = 10 nodes
-        assert len(builder.nodes) == 10
+        # 6 stages + 6 gates = 12 nodes
+        assert len(builder.nodes) == 12
 
     def test_graph_compiles_without_checkpointer(self):
         builder = build_graph()

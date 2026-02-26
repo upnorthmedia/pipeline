@@ -26,6 +26,7 @@ from src.pipeline.helpers import (
 from src.pipeline.stages.edit import edit_node
 from src.pipeline.stages.images import images_node
 from src.pipeline.stages.outline import outline_node
+from src.pipeline.stages.ready import ready_node
 from src.pipeline.stages.research import research_node
 from src.pipeline.stages.write import write_node
 from src.pipeline.state import STAGES, state_from_post
@@ -37,6 +38,7 @@ STAGE_NODE_FN = {
     "write": write_node,
     "edit": edit_node,
     "images": images_node,
+    "ready": ready_node,
 }
 
 logger = logging.getLogger(__name__)
@@ -122,6 +124,7 @@ async def _run_single_stage(
         "write": "draft",
         "edit": "final_md",
         "images": "image_manifest",
+        "ready": "ready",
     }
 
     try:
@@ -242,6 +245,7 @@ async def _run_full_pipeline(
                     "write": "draft",
                     "edit": "final_md",
                     "images": "image_manifest",
+                    "ready": "ready",
                 }
                 content = result.get(
                     content_key_map.get(stage_name, "")

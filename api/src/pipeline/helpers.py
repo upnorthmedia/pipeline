@@ -158,6 +158,7 @@ def _get_previous_output(stage: str, state: PipelineState) -> str:
         "write": "draft",
         "edit": "final_md",
         "images": "image_manifest",
+        "ready": "ready",
     }
     key = output_keys.get(prev_stage, "")
     if not key:
