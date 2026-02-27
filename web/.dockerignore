@@ -1,0 +1,29 @@
+# Dependencies (reinstalled in container)
+node_modules/
+
+# Build output
+.next/
+out/
+
+# Tests
+src/__tests__/
+src/e2e/
+src/test/
+playwright-report/
+test-results/
+
+# IDE
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Misc
+*.md
+*.log
