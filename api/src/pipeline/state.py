@@ -1,4 +1,4 @@
-"""Pipeline state schema for LangGraph content generation pipeline."""
+"""Pipeline state schema for content generation pipeline."""
 
 from __future__ import annotations
 
@@ -37,6 +37,16 @@ STAGE_RULES_MAP: dict[str, str] = {
     "ready": "blog-ready.md",
 }
 
+# Maps stage name → output key in node function return dict / PipelineState
+STAGE_OUTPUT_KEY: dict[str, str] = {
+    "research": "research",
+    "outline": "outline",
+    "write": "draft",
+    "edit": "final_md",
+    "images": "image_manifest",
+    "ready": "ready",
+}
+
 # Valid gate modes
 GATE_MODES = ("auto", "review", "approve_only")
 
@@ -49,7 +59,7 @@ STATUS_FAILED = "failed"
 
 
 class PipelineState(TypedDict, total=False):
-    """State schema for the content pipeline LangGraph."""
+    """State schema for the content pipeline."""
 
     # Post identity
     post_id: str
@@ -88,6 +98,9 @@ class PipelineState(TypedDict, total=False):
     current_stage: str
     stage_settings: dict[str, str]
     stage_status: dict[str, str]
+
+    # Per-stage execution metadata (set by node, read by worker)
+    _stage_meta: dict
 
 
 def state_from_post(post, internal_links: list[dict] | None = None) -> PipelineState:

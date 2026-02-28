@@ -75,12 +75,12 @@ export default function NewPostPage() {
   const [relatedKeywords, setRelatedKeywords] = useState("");
   const [competitorUrls, setCompetitorUrls] = useState("");
   const [stageSettings, setStageSettings] = useState<Record<PipelineStage, StageMode>>({
-    research: "review",
-    outline: "review",
-    write: "review",
-    edit: "review",
-    images: "review",
-    ready: "review",
+    research: "auto",
+    outline: "auto",
+    write: "auto",
+    edit: "auto",
+    images: "auto",
+    ready: "auto",
   });
 
   useEffect(() => {

@@ -10,7 +10,7 @@ from src.database import get_session
 from src.models.post import Post
 from src.models.schemas import PostRead
 from src.pipeline.state import STAGES
-from src.worker import DLQ_KEY
+from src.worker import DLQ_KEY, WORKER_LAST_COMPLETED_KEY
 
 router = APIRouter(prefix="/api/queue", tags=["queue"])
 
@@ -44,6 +44,47 @@ async def queue_status(session: AsyncSession = Depends(get_session)):
         "failed": counts.get("failed", 0),
         "paused": counts.get("paused", 0),
         "total": sum(counts.values()),
+    }
+
+
+@router.get("/worker-status")
+async def worker_status(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Check worker health: alive, active/queued jobs, last completed time."""
+    redis = request.app.state.redis
+
+    # Check for ARQ worker heartbeat keys
+    worker_keys = []
+    async for key in redis.scan_iter("arq:worker:*"):
+        if isinstance(key, bytes):
+            key = key.decode()
+        if key != WORKER_LAST_COMPLETED_KEY:
+            worker_keys.append(key)
+
+    # Count jobs in the ARQ queue
+    queued_jobs = await redis.zcard("arq:queue")
+
+    # Count active (in-progress) jobs via running posts in the DB
+    result = await session.execute(
+        select(func.count(Post.id)).where(Post.current_stage.in_(STAGES))
+    )
+    active_jobs = result.scalar_one()
+
+    # Last completed timestamp
+    last_completed_raw = await redis.get(WORKER_LAST_COMPLETED_KEY)
+    last_completed = None
+    if last_completed_raw:
+        if isinstance(last_completed_raw, bytes):
+            last_completed_raw = last_completed_raw.decode()
+        last_completed = last_completed_raw
+
+    return {
+        "worker_alive": len(worker_keys) > 0,
+        "active_jobs": active_jobs,
+        "queued_jobs": queued_jobs,
+        "last_completed": last_completed,
     }
 
 

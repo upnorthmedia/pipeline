@@ -34,7 +34,7 @@ class InternalLink(UUIDMixin, Base):
     )
     post_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("posts.id"),
+        ForeignKey("posts.id", ondelete="SET NULL"),
     )
     keywords: Mapped[dict] = mapped_column(JSONB, server_default="[]", default=list)
     created_at: Mapped[datetime] = mapped_column(

@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from arq.connections import RedisSettings
 from arq.cron import cron
 from sqlalchemy import select
+from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.api.events import publish_event
@@ -16,8 +17,8 @@ from src.config import settings
 from src.models.link import InternalLink
 from src.models.post import Post
 from src.models.profile import WebsiteProfile
-from src.pipeline.graph import create_pipeline_graph
 from src.pipeline.helpers import (
+    append_execution_log,
     clear_event_context,
     log_stage_execution,
     save_stage_output,
@@ -29,7 +30,7 @@ from src.pipeline.stages.outline import outline_node
 from src.pipeline.stages.ready import ready_node
 from src.pipeline.stages.research import research_node
 from src.pipeline.stages.write import write_node
-from src.pipeline.state import STAGES, state_from_post
+from src.pipeline.state import STAGE_OUTPUT_KEY, STAGES, state_from_post
 from src.services.sitemap import crawl_sitemap
 
 STAGE_NODE_FN = {
@@ -44,245 +45,351 @@ STAGE_NODE_FN = {
 logger = logging.getLogger(__name__)
 
 DLQ_KEY = "arq:dead_letter_queue"
+WORKER_LAST_COMPLETED_KEY = "arq:worker:last_completed"
 MAX_ATTEMPTS = 3
 
 
 async def run_pipeline_stage(ctx, post_id: str, stage: str | None = None):
-    """Execute the pipeline for a post, running from the current stage forward.
+    """Execute the pipeline for a post.
 
-    If `stage` is specified, runs only that stage. Otherwise, runs the full
-    pipeline from the beginning (or resumes from where it left off via checkpointing).
+    If `stage` is specified, runs only that stage (no gate checks).
+    Otherwise, runs all remaining stages sequentially (with gate checks).
 
     Retries up to MAX_ATTEMPTS times. On final failure, moves to dead letter queue.
     """
     job_try = ctx.get("job_try", 1)
     session_factory: async_sessionmaker = ctx["session_factory"]
+    redis = ctx["redis"]
 
+    # Verify post exists
     async with session_factory() as session:
         post = await session.get(Post, uuid.UUID(post_id))
         if not post:
             logger.error(f"Post {post_id} not found")
             return
 
-        # Fetch internal links for the edit stage
-        internal_links: list[dict] = []
-        if post.profile_id:
-            result = await session.execute(
-                select(InternalLink).where(InternalLink.profile_id == post.profile_id)
-            )
-            links = result.scalars().all()
-            internal_links = [
-                {"url": link.url, "title": link.title, "slug": link.slug}
-                for link in links
-            ]
-
-        # Build initial state from post
-        initial_state = state_from_post(post, internal_links)
-
-        # Generate or reuse thread_id for LangGraph checkpointing
-        thread_id = post.thread_id or f"post-{post_id}"
-        if not post.thread_id:
-            post.thread_id = thread_id
-            await session.commit()
-
-        config = {"configurable": {"thread_id": thread_id}}
-
-    redis = ctx["redis"]
-
     if stage:
-        # Single-stage rerun: call the node function directly
-        await _run_single_stage(
-            ctx, post_id, stage, initial_state, redis,
-            session_factory, job_try,
+        # Single-stage: run just this stage, skip gate checks
+        await _run_pipeline(
+            ctx,
+            post_id,
+            redis,
+            session_factory,
+            job_try,
+            stages=[stage],
+            check_gates=False,
         )
     else:
-        # Full pipeline run via LangGraph
-        await _run_full_pipeline(
-            ctx, post_id, initial_state, config, redis,
-            session_factory, job_try,
+        # Full pipeline: all remaining stages with gate checks
+        await _run_pipeline(
+            ctx,
+            post_id,
+            redis,
+            session_factory,
+            job_try,
         )
 
 
-async def _run_single_stage(
+async def _run_pipeline(
     ctx,
     post_id: str,
-    stage: str,
-    initial_state: dict,
     redis,
     session_factory,
     job_try: int,
+    stages: list[str] | None = None,
+    check_gates: bool = True,
 ):
-    """Run a single stage node directly (for reruns)."""
-    node_fn = STAGE_NODE_FN.get(stage)
-    if not node_fn:
-        logger.error(f"No node function for stage '{stage}'")
-        return
+    """Run one or more pipeline stages sequentially.
 
-    content_key_map = {
-        "research": "research",
-        "outline": "outline",
-        "write": "draft",
-        "edit": "final_md",
-        "images": "image_manifest",
-        "ready": "ready",
-    }
+    Args:
+        stages: Specific stages to run, or None for all remaining.
+        check_gates: Whether to check gate modes. True for full pipeline runs,
+                    False for single-stage reruns (direct execution).
+
+    Each iteration:
+    1. Loads fresh post state from DB
+    2. Checks gate mode — pauses for review if needed (when check_gates=True)
+    3. Calls the stage node function directly
+    4. Saves output to DB immediately (crash recovery = resume from last saved)
+    5. Logs metrics and publishes SSE events
+    """
+    is_full_pipeline = stages is None
+    target_stages = stages if stages is not None else STAGES
 
     try:
-        await publish_event(redis, post_id, "stage_start", {
-            "stage": stage,
-            "message": f"Starting {stage}...",
-        })
-        set_event_context(redis, post_id)
-
-        result = await node_fn(initial_state)
-
-        clear_event_context()
-
-        # Save output and log metrics
-        async with session_factory() as session:
-            meta = result.get("_stage_meta")
-            if isinstance(meta, dict):
-                await log_stage_execution(
-                    session, post_id, stage,
-                    meta["model"], meta["tokens_in"],
-                    meta["tokens_out"], meta["duration_s"],
+        if is_full_pipeline:
+            # Log pipeline_start to DB
+            async with session_factory() as session:
+                await append_execution_log(
+                    session,
+                    post_id,
+                    "",
+                    "info",
+                    "pipeline_start",
+                    "Full pipeline run initiated",
                 )
 
-            content = result.get(content_key_map.get(stage, ""))
-            stage_status = result.get("stage_status")
-            if content:
-                await save_stage_output(
-                    session, post_id, stage, content,
-                    stage_status=stage_status,
-                )
-
-            # Restore current_stage for completed post
-            post = await session.get(Post, uuid.UUID(post_id))
-            if post:
-                # If all stages are complete, mark post complete
-                ss = post.stage_status or {}
-                if all(ss.get(s) == "complete" for s in STAGES):
-                    post.current_stage = "complete"
-                await session.commit()
-
-        await publish_event(redis, post_id, "stage_complete", {
-            "stage": stage,
-            "model": meta["model"] if meta else "",
-            "duration_s": round(
-                meta["duration_s"], 2
-            ) if meta else 0,
-        })
-
-    except Exception as e:
-        clear_event_context()
-        logger.exception(
-            f"Stage {stage} attempt {job_try}/{MAX_ATTEMPTS} "
-            f"failed for post {post_id}"
+        # Fetch internal links once (needed by edit stage prompt)
+        internal_links = await _fetch_internal_links_from_factory(
+            session_factory, post_id
         )
-        await publish_event(redis, post_id, "stage_error", {
-            "stage": stage,
-            "error": str(e),
-            "message": f"Stage {stage} failed: {e}",
-        })
-        if job_try >= MAX_ATTEMPTS:
-            await _move_to_dlq(
-                ctx, post_id, stage, str(e), job_try
+
+        for stage in target_stages:
+            node_fn = STAGE_NODE_FN.get(stage)
+            if not node_fn:
+                logger.error(f"No node function for stage '{stage}'")
+                continue
+
+            # Load fresh post from DB each iteration
+            async with session_factory() as session:
+                post = await session.get(Post, uuid.UUID(post_id))
+                if not post:
+                    logger.error(f"Post {post_id} not found during pipeline")
+                    return
+
+                # Skip already-completed stages (full pipeline only)
+                if is_full_pipeline:
+                    ss = post.stage_status or {}
+                    if ss.get(stage) == "complete":
+                        continue
+
+                # Check gate mode (full pipeline only)
+                if check_gates:
+                    mode = (post.stage_settings or {}).get(stage, "review")
+                    if mode in ("review", "approve_only"):
+                        # Pause for human review
+                        ss_new = dict(post.stage_status or {})
+                        ss_new[stage] = "review"
+                        post.stage_status = ss_new
+                        post.current_stage = stage
+                        await session.commit()
+
+                        await append_execution_log(
+                            session,
+                            post_id,
+                            stage,
+                            "info",
+                            "stage_review",
+                            f"Stage {stage} paused for review",
+                        )
+
+                        await publish_event(
+                            redis,
+                            post_id,
+                            "stage_review",
+                            {
+                                "stage": stage,
+                                "message": f"Stage {stage} paused for review",
+                            },
+                        )
+                        logger.info(
+                            f"Pipeline paused at stage '{stage}' "
+                            f"for post {post_id} (gate mode: {mode})"
+                        )
+                        return
+
+                # Build state from fresh post data
+                initial_state = state_from_post(post, internal_links)
+
+            # Execute the stage
+            await publish_event(
+                redis,
+                post_id,
+                "stage_start",
+                {"stage": stage, "message": f"Starting {stage}..."},
             )
-            return
-        raise
+            set_event_context(redis, post_id, session_factory)
 
-
-async def _run_full_pipeline(
-    ctx,
-    post_id: str,
-    initial_state: dict,
-    config: dict,
-    redis,
-    session_factory,
-    job_try: int,
-):
-    """Run the full LangGraph pipeline."""
-    graph, checkpointer_cm = await create_pipeline_graph()
-    try:
-        await publish_event(redis, post_id, "stage_start", {
-            "stage": STAGES[0],
-            "message": f"Starting {STAGES[0]}...",
-        })
-        set_event_context(redis, post_id)
-
-        result = await graph.ainvoke(initial_state, config)
-
-        clear_event_context()
-
-        # Save outputs and log metrics for each completed stage
-        async with session_factory() as session:
-            for stage_name in STAGES:
-                meta = result.get("_stage_meta")
-                if (
-                    isinstance(meta, dict)
-                    and meta.get("stage") == stage_name
-                ):
-                    await log_stage_execution(
-                        session, post_id, stage_name,
-                        meta["model"], meta["tokens_in"],
-                        meta["tokens_out"], meta["duration_s"],
-                    )
-                    await publish_event(
-                        redis, post_id, "stage_complete", {
-                            "stage": stage_name,
-                            "model": meta["model"],
-                            "tokens_in": meta["tokens_in"],
-                            "tokens_out": meta["tokens_out"],
-                            "duration_s": round(
-                                meta["duration_s"], 2
-                            ),
-                        },
-                    )
-
-                content_key_map = {
-                    "research": "research",
-                    "outline": "outline",
-                    "write": "draft",
-                    "edit": "final_md",
-                    "images": "image_manifest",
-                    "ready": "ready",
-                }
-                content = result.get(
-                    content_key_map.get(stage_name, "")
+            async with session_factory() as session:
+                await append_execution_log(
+                    session,
+                    post_id,
+                    stage,
+                    "info",
+                    "stage_start",
+                    f"Starting {stage}...",
                 )
-                if content:
-                    await save_stage_output(
-                        session, post_id, stage_name, content,
-                        stage_status=result.get("stage_status"),
+
+            result = await node_fn(initial_state)
+
+            clear_event_context()
+
+            # Save output and log metrics immediately
+            async with session_factory() as session:
+                meta = result.get("_stage_meta")
+                if isinstance(meta, dict):
+                    await log_stage_execution(
+                        session,
+                        post_id,
+                        stage,
+                        meta["model"],
+                        meta["tokens_in"],
+                        meta["tokens_out"],
+                        meta["duration_s"],
                     )
 
-            await _post_completion_hook(session, post_id, result)
+                content = result.get(STAGE_OUTPUT_KEY.get(stage, ""))
+                stage_status = result.get("stage_status")
+                if content is not None:
+                    await save_stage_output(
+                        session,
+                        post_id,
+                        stage,
+                        content,
+                        stage_status=stage_status,
+                    )
 
-        await publish_event(redis, post_id, "pipeline_complete", {
-            "message": "Pipeline finished",
-        })
+                # Edit stage: also save final_html if present
+                if stage == "edit" and result.get("final_html"):
+                    stmt = (
+                        sql_update(Post)
+                        .where(Post.id == post_id)
+                        .values(final_html_content=result["final_html"])
+                    )
+                    await session.execute(stmt)
+                    await session.commit()
+
+                # Single-stage rerun: check if all stages are now complete
+                if not is_full_pipeline:
+                    post = await session.get(Post, uuid.UUID(post_id))
+                    if post:
+                        ss = post.stage_status or {}
+                        if all(ss.get(s) == "complete" for s in STAGES):
+                            post.current_stage = "complete"
+                        await session.commit()
+
+                # Log stage_complete to DB
+                await append_execution_log(
+                    session,
+                    post_id,
+                    stage,
+                    "info",
+                    "stage_complete",
+                    f"Stage {stage} complete",
+                    data={
+                        "model": meta["model"],
+                        "tokens_in": meta["tokens_in"],
+                        "tokens_out": meta["tokens_out"],
+                        "duration_s": round(meta["duration_s"], 2),
+                        "cost_usd": round(
+                            (meta["tokens_in"] / 1_000_000 * 15.0)
+                            + (meta["tokens_out"] / 1_000_000 * 75.0),
+                            6,
+                        ),
+                    }
+                    if meta
+                    else {},
+                )
+
+            await publish_event(
+                redis,
+                post_id,
+                "stage_complete",
+                {
+                    "stage": stage,
+                    "model": meta["model"] if meta else "",
+                    "duration_s": round(meta["duration_s"], 2) if meta else 0,
+                },
+            )
+
+        # Full pipeline completion
+        if is_full_pipeline:
+            async with session_factory() as session:
+                post = await session.get(Post, uuid.UUID(post_id))
+                if post:
+                    state = state_from_post(post, internal_links)
+                    await _post_completion_hook(session, post_id, state)
+
+                await append_execution_log(
+                    session,
+                    post_id,
+                    "",
+                    "info",
+                    "pipeline_complete",
+                    "Pipeline finished",
+                )
+
+            await publish_event(
+                redis,
+                post_id,
+                "pipeline_complete",
+                {"message": "Pipeline finished"},
+            )
+
+        await _record_job_completed(redis)
 
     except Exception as e:
         clear_event_context()
+        failed_stage = target_stages[0] if len(target_stages) == 1 else ""
         logger.exception(
-            f"Pipeline attempt {job_try}/{MAX_ATTEMPTS} "
-            f"failed for post {post_id}"
+            f"Pipeline attempt {job_try}/{MAX_ATTEMPTS} failed for post {post_id}"
         )
-        await publish_event(redis, post_id, "stage_error", {
-            "stage": "",
-            "error": str(e),
-            "message": f"Pipeline failed: {e}",
-        })
-        if job_try >= MAX_ATTEMPTS:
-            await _move_to_dlq(ctx, post_id, None, str(e), job_try)
-            return
+        await publish_event(
+            redis,
+            post_id,
+            "stage_error",
+            {
+                "stage": failed_stage,
+                "error": str(e),
+                "message": f"Pipeline failed: {e}",
+            },
+        )
+        # Log error + retry to DB
         async with session_factory() as session:
-            post = await session.get(Post, uuid.UUID(post_id))
-            if post:
-                await session.commit()
+            if job_try < MAX_ATTEMPTS:
+                await append_execution_log(
+                    session,
+                    post_id,
+                    failed_stage,
+                    "warning",
+                    "retry",
+                    f"Pipeline attempt {job_try} failed, retrying...",
+                    data={
+                        "attempt": job_try,
+                        "max_attempts": MAX_ATTEMPTS,
+                        "error": str(e),
+                    },
+                )
+            else:
+                await append_execution_log(
+                    session,
+                    post_id,
+                    failed_stage,
+                    "error",
+                    "stage_error",
+                    f"Pipeline failed after {job_try} attempts: {e}",
+                    data={
+                        "error": str(e),
+                        "attempts": job_try,
+                        "moved_to_dlq": True,
+                    },
+                )
+        if job_try >= MAX_ATTEMPTS:
+            await _move_to_dlq(ctx, post_id, failed_stage or None, str(e), job_try)
+            return
         raise
-    finally:
-        await checkpointer_cm.__aexit__(None, None, None)
+
+
+async def _fetch_internal_links(session: AsyncSession, post: Post) -> list[dict]:
+    """Fetch internal links for a post's profile."""
+    if not post.profile_id:
+        return []
+    result = await session.execute(
+        select(InternalLink).where(InternalLink.profile_id == post.profile_id)
+    )
+    links = result.scalars().all()
+    return [{"url": link.url, "title": link.title, "slug": link.slug} for link in links]
+
+
+async def _fetch_internal_links_from_factory(
+    session_factory, post_id: str
+) -> list[dict]:
+    """Fetch internal links using a session factory (for the sequential pipeline)."""
+    async with session_factory() as session:
+        post = await session.get(Post, uuid.UUID(post_id))
+        if not post:
+            return []
+        return await _fetch_internal_links(session, post)
 
 
 async def _move_to_dlq(
@@ -368,6 +475,11 @@ async def _post_completion_hook(
     await session.commit()
 
     logger.info(f"Post {post_id} completed, added to internal links: {post_url}")
+
+
+async def _record_job_completed(redis) -> None:
+    """Record the timestamp of the last completed job in Redis."""
+    await redis.set(WORKER_LAST_COMPLETED_KEY, datetime.now(UTC).isoformat())
 
 
 async def crawl_profile_sitemap(ctx, profile_id: str):
@@ -502,7 +614,7 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     max_jobs = settings.worker_max_jobs
-    job_timeout = 600  # 10 minutes per stage
+    job_timeout = 3600  # 60 minutes — full 6-stage pipeline with extended thinking
     max_tries = MAX_ATTEMPTS
     retry_delay = 10  # seconds between retries
     handle_signals = True  # ARQ handles SIGTERM/SIGINT gracefully

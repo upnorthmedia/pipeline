@@ -7,7 +7,6 @@ import {
   Plus,
   Search,
   Trash2,
-  Play,
   Pause,
   MoreHorizontal,
   Copy,
@@ -32,6 +31,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -75,6 +84,8 @@ export default function PostsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [profileFilter, setProfileFilter] = useState<string>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [showBulkDelete, setShowBulkDelete] = useState(false);
 
   const fetchPosts = useCallback(async () => {
     try {
@@ -113,13 +124,15 @@ export default function PostsPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const confirmDelete = async (id: string) => {
     try {
       await posts.delete(id);
       toast.success("Post deleted");
       fetchPosts();
     } catch {
       toast.error("Failed to delete post");
+    } finally {
+      setDeleteTarget(null);
     }
   };
 
@@ -133,20 +146,8 @@ export default function PostsPage() {
     }
   };
 
-  const handleBulkRun = async () => {
-    for (const id of selected) {
-      try {
-        await posts.run(id);
-      } catch {
-        // continue with remaining
-      }
-    }
-    toast.success(`Started ${selected.size} posts`);
-    setSelected(new Set());
-    fetchPosts();
-  };
-
-  const handleBulkDelete = async () => {
+  const confirmBulkDelete = async () => {
+    const count = selected.size;
     for (const id of selected) {
       try {
         await posts.delete(id);
@@ -154,8 +155,9 @@ export default function PostsPage() {
         // continue with remaining
       }
     }
-    toast.success(`Deleted ${selected.size} posts`);
+    toast.success(`Deleted ${count} posts`);
     setSelected(new Set());
+    setShowBulkDelete(false);
     fetchPosts();
   };
 
@@ -233,14 +235,10 @@ export default function PostsPage() {
             {selected.size} selected
           </span>
           <div className="ml-auto flex gap-2">
-            <Button variant="outline" size="sm" onClick={handleBulkRun}>
-              <Play className="h-3.5 w-3.5 mr-1.5" />
-              Run
-            </Button>
             <Button
               variant="outline"
               size="sm"
-              onClick={handleBulkDelete}
+              onClick={() => setShowBulkDelete(true)}
               className="text-destructive hover:text-destructive"
             >
               <Trash2 className="h-3.5 w-3.5 mr-1.5" />
@@ -357,12 +355,6 @@ export default function PostsPage() {
                           Open
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                          onClick={() => posts.run(post.id).then(fetchPosts)}
-                        >
-                          <Play className="h-3.5 w-3.5 mr-2" />
-                          Run Next Stage
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
                           onClick={() => posts.pause(post.id).then(fetchPosts)}
                         >
                           <Pause className="h-3.5 w-3.5 mr-2" />
@@ -376,7 +368,7 @@ export default function PostsPage() {
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
-                          onClick={() => handleDelete(post.id)}
+                          onClick={() => setDeleteTarget(post.id)}
                           className="text-destructive focus:text-destructive"
                         >
                           <Trash2 className="h-3.5 w-3.5 mr-2" />
@@ -391,6 +383,49 @@ export default function PostsPage() {
           </TableBody>
         </Table>
       </div>
+      {/* Single delete confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete post?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the post and its generated images.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteTarget && confirmDelete(deleteTarget)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk delete confirmation */}
+      <AlertDialog open={showBulkDelete} onOpenChange={setShowBulkDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selected.size} posts?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the selected posts and their generated
+              images. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmBulkDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete {selected.size} posts
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

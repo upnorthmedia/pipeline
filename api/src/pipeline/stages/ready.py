@@ -49,9 +49,17 @@ async def ready_node(state: PipelineState) -> dict:
         await claude.close()
 
     await publish_stage_log(
-        f"Final assembly complete ({response.tokens_out} tokens in {timer.duration:.1f}s)",
+        f"Assembly done ({response.tokens_out} tokens, {timer.duration:.1f}s)",
         stage="ready",
     )
+
+    meta = {
+        "stage": "ready",
+        "model": response.model,
+        "tokens_in": response.tokens_in,
+        "tokens_out": response.tokens_out,
+        "duration_s": timer.duration,
+    }
 
     return {
         "ready": response.content,
@@ -60,13 +68,7 @@ async def ready_node(state: PipelineState) -> dict:
             **state.get("stage_status", {}),
             "ready": "complete",
         },
-        "_stage_meta": {
-            "stage": "ready",
-            "model": response.model,
-            "tokens_in": response.tokens_in,
-            "tokens_out": response.tokens_out,
-            "duration_s": timer.duration,
-        },
+        "_stage_meta": meta,
     }
 
 
@@ -78,8 +80,13 @@ def _build_ready_prompt(rules: str, state: PipelineState) -> str:
         sections.append(rules)
 
     # Post config
-    sections.append(f"## Post Configuration\n\n- **SLUG**: {state.get('slug', '')}")
-    sections.append(f"- **OUTPUT_FORMAT**: {state.get('output_format', 'markdown')}")
+    from datetime import UTC, datetime
+
+    sections.append(
+        f"## Post Configuration\n\n- **SLUG**: {state.get('slug', '')}\n"
+        f"- **OUTPUT_FORMAT**: {state.get('output_format', 'markdown')}\n"
+        f"- **TODAY_DATE**: {datetime.now(UTC).strftime('%Y-%m-%d')}"
+    )
 
     # Final markdown content from edit stage
     final_md = state.get("final_md", "")

@@ -44,6 +44,14 @@ async def outline_node(state: PipelineState) -> dict:
         stage="outline",
     )
 
+    meta = {
+        "stage": "outline",
+        "model": response.model,
+        "tokens_in": response.tokens_in,
+        "tokens_out": response.tokens_out,
+        "duration_s": timer.duration,
+    }
+
     return {
         "outline": response.content,
         "current_stage": "outline",
@@ -51,11 +59,5 @@ async def outline_node(state: PipelineState) -> dict:
             **state.get("stage_status", {}),
             "outline": "complete",
         },
-        "_stage_meta": {
-            "stage": "outline",
-            "model": response.model,
-            "tokens_in": response.tokens_in,
-            "tokens_out": response.tokens_out,
-            "duration_s": timer.duration,
-        },
+        "_stage_meta": meta,
     }

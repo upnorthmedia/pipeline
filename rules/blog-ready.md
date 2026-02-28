@@ -27,7 +27,7 @@ Replace the existing frontmatter with this exact schema:
 title: "[Title from existing frontmatter]"
 slug: "[slug from existing frontmatter or post config]"
 description: "[Meta description from publishing notes SEO section, 150-160 chars]"
-date: "[YYYY-MM-DD from today or existing date]"
+date: "[Use TODAY_DATE from Post Configuration — NEVER use any other date]"
 author: "[author from existing frontmatter, or profile default]"
 category: "[Derive from content niche/topic — single primary category]"
 featuredImage: "[URL of the featured image from manifest]"

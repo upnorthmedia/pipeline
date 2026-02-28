@@ -22,6 +22,7 @@ def compute_analytics(
     primary_keyword: str = "",
     secondary_keywords: list[str] | None = None,
     title: str = "",
+    website_url: str = "",
 ) -> ContentAnalytics:
     """Compute content analytics for a piece of text."""
     if not content:
@@ -61,7 +62,7 @@ def compute_analytics(
             density[kw] = round((kw_count * kw_words / word_count) * 100, 2)
 
     # SEO checklist
-    seo = _seo_checklist(content, plain, title, primary_keyword)
+    seo = _seo_checklist(content, plain, title, primary_keyword, website_url)
 
     return ContentAnalytics(
         word_count=word_count,
@@ -75,9 +76,15 @@ def compute_analytics(
 
 
 def _seo_checklist(
-    markdown: str, plain: str, title: str, primary_keyword: str
+    markdown: str,
+    plain: str,
+    title: str,
+    primary_keyword: str,
+    website_url: str = "",
 ) -> dict[str, bool]:
     """Run SEO checks against content."""
+    from urllib.parse import urlparse
+
     checks: dict[str, bool] = {}
     pk_lower = primary_keyword.lower() if primary_keyword else ""
 
@@ -98,13 +105,22 @@ def _seo_checklist(
     # Has H2 headings
     checks["has_h2_headings"] = len(h2s) > 0
 
-    # Internal links (markdown links)
+    # Internal links (markdown links) — domain-aware classification
+    domain = urlparse(website_url).netloc if website_url else ""
     link_pattern = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
     links = link_pattern.findall(markdown)
     internal_links = [
-        url for _, url in links if url.startswith("/") or url.startswith("#")
+        url
+        for _, url in links
+        if url.startswith("/")
+        or url.startswith("#")
+        or (domain and domain in urlparse(url).netloc)
     ]
-    external_links = [url for _, url in links if url.startswith("http")]
+    external_links = [
+        url
+        for _, url in links
+        if url.startswith("http") and not (domain and domain in urlparse(url).netloc)
+    ]
     checks["has_internal_links"] = len(internal_links) >= 1
     checks["has_external_links"] = len(external_links) >= 1
     checks["internal_link_count"] = len(internal_links)  # type: ignore[assignment]

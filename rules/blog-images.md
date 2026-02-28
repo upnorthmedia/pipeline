@@ -56,7 +56,7 @@ Define these elements:
 
 **Treatment:** Define rendering characteristics: lighting style, texture, level of detail, background approach.
 
-**Negative Prompt:** What should never appear in any image. Always include: "no text, no labels, no watermarks, no logos, no words, no letters, no numbers overlaid on image." Add IMAGE_EXCLUDE items from `00-input.md`.
+**Negative Prompt:** What should never appear in any image. Always include: "no text, no labels, no watermarks, no logos, no words, no letters, no numbers overlaid on image, no white space at edges, no margins, no blank areas at borders, no padding." Add IMAGE_EXCLUDE items from `00-input.md`.
 
 **Audience Context:** Brief description of who these images should appeal to, derived from TARGET_AUDIENCE.
 
@@ -84,6 +84,7 @@ Write detailed prompts (50-150 words each) for each image. Use rich visual langu
 - Should capture the post's core theme as a hero visual
 - Must work as a standalone thumbnail and in-page hero
 - The style brief's color palette and mood still apply, but the rendering should be photorealistic with natural lighting and real-world textures
+- Full-bleed composition — the image must extend to all edges with no empty space, white bars, or margins at any border
 
 **Content Images:**
 - Style: Uses the style brief's overall_style (defaults to editorial illustration)
@@ -97,6 +98,7 @@ Write detailed prompts (50-150 words each) for each image. Use rich visual langu
 - Always incorporate the style brief descriptors (style, colors, mood, treatment)
 - Focus on scenes, objects, compositions, and visual metaphors
 - Be specific about composition: foreground, background, perspective, framing
+- Compose all images to fill the frame edge-to-edge with no blank margins, padding, or negative space at the borders
 - For niches with potential safety filter issues (firearms, medical, etc.), focus on business/commerce contexts: retail counters, workshops, tools, accessories, educational settings. Avoid depicting the items themselves in action or in threatening contexts.
 
 **Safety Filter Guidance:**
@@ -139,7 +141,7 @@ Structure:
     {
       "id": "featured",
       "type": "featured",
-      "filename": "featured.png",
+      "filename": "featured-MMDDYY-XX.png",
       "aspect_ratio": "16:9",
       "image_size": "2K",
       "prompt": "[50-150 word detailed visual prompt]",
@@ -171,7 +173,7 @@ Structure:
 ```
 
 **Filename conventions:**
-- Featured image: `featured.png`
+- Featured image: `featured-MMDDYY-XX.png` (date + 2 random digits, e.g. `featured-022726-47.png`). The pipeline overrides this automatically.
 - Content images: descriptive kebab-case names like `workshop-tools-layout.png`, `customer-comparison-guide.png`
 
 ### Step 8: Run Generation Script

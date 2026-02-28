@@ -1,13 +1,11 @@
 [project]
 name = "content-pipeline-api"
 version = "0.1.0"
-description = "Content pipeline API with LangGraph orchestration"
+description = "Content pipeline API with sequential stage orchestration"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
-    "langgraph>=0.4",
-    "langgraph-checkpoint-postgres>=2.0",
     "anthropic>=0.52",
     "httpx>=0.28",
     "google-genai>=1.0",
@@ -23,7 +21,7 @@ dependencies = [
     "lxml>=5.3",
     "beautifulsoup4>=4.12",
     "redis>=5.2",
-    "psycopg[binary]>=3.2",
+    "watchfiles>=1.0",
 ]
 
 [project.optional-dependencies]

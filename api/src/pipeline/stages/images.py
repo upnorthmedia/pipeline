@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import random
+from datetime import UTC, datetime
 from pathlib import Path
 
 from src.config import settings
@@ -27,15 +30,16 @@ async def images_node(state: PipelineState) -> dict:
     """
     logger.info(f"Images stage starting for post {state.get('post_id')}")
 
-    # Step 1: Generate image manifest via Claude
-    rules = load_rules("images")
-    await publish_stage_log("Rules loaded, building prompt...", stage="images")
-    prompt = build_stage_prompt("images", rules, state)
+    # Timer wraps the entire stage (manifest + all image generation)
+    with StageTimer() as timer:
+        # Step 1: Generate image manifest via Claude
+        rules = load_rules("images")
+        await publish_stage_log("Rules loaded, building prompt...", stage="images")
+        prompt = build_stage_prompt("images", rules, state)
 
-    claude = ClaudeClient()
-    await publish_stage_log("Calling Claude for image manifest...", stage="images")
-    try:
-        with StageTimer() as timer:
+        claude = ClaudeClient()
+        await publish_stage_log("Calling Claude for image manifest...", stage="images")
+        try:
             response: LLMResponse = await claude.chat(
                 prompt=prompt,
                 system=(
@@ -46,88 +50,146 @@ async def images_node(state: PipelineState) -> dict:
                 ),
                 max_tokens=8000,
             )
-    finally:
-        await claude.close()
+        finally:
+            await claude.close()
 
-    await publish_stage_log(
-        f"Manifest received ({response.tokens_out} tokens in {timer.duration:.1f}s)",
-        stage="images",
-    )
+        await publish_stage_log(
+            f"Manifest received ({response.tokens_out} tokens)",
+            stage="images",
+        )
 
-    # Parse manifest JSON from response
-    manifest = _parse_manifest(response.content)
+        # Parse manifest JSON from response
+        manifest = _parse_manifest(response.content)
 
-    # Step 2: Generate images via Gemini
-    num_images = len(manifest.get("images", []))
-    await publish_stage_log(
-        f"Generating {num_images} images via Gemini...", stage="images"
-    )
-    post_id = state.get("post_id", "unknown")
-    media_dir = Path(settings.media_dir) / post_id
-    media_dir.mkdir(parents=True, exist_ok=True)
+        if manifest.get("error"):
+            error_msg = manifest["error"]
+            raw_snippet = response.content[:500]
+            await publish_stage_log(
+                f"Manifest parse failed: {error_msg}",
+                stage="images",
+                level="warning",
+                event="log",
+                data={"error": error_msg, "raw_snippet": raw_snippet},
+            )
+            meta = {
+                "stage": "images",
+                "model": response.model,
+                "tokens_in": response.tokens_in,
+                "tokens_out": response.tokens_out,
+                "duration_s": timer.duration,
+            }
+            return {
+                "image_manifest": manifest,
+                "current_stage": "images",
+                "stage_status": {
+                    **state.get("stage_status", {}),
+                    "images": "failed",
+                },
+                "_stage_meta": meta,
+            }
 
-    gemini = GeminiClient()
-    generated_images: list[dict] = []
-    try:
-        for i, image_spec in enumerate(manifest.get("images", [])):
+        # Step 2: Generate images via Gemini
+        num_images = len(manifest.get("images", []))
+        await publish_stage_log(
+            f"Generating {num_images} images via Gemini...", stage="images"
+        )
+        post_id = state.get("post_id", "unknown")
+        media_dir = Path(settings.media_dir) / post_id
+        media_dir.mkdir(parents=True, exist_ok=True)
+
+        gemini = GeminiClient()
+        sem = asyncio.Semaphore(3)
+
+        async def _generate_one(i: int, image_spec: dict) -> dict:
             image_prompt = image_spec.get("prompt", "")
             if not image_prompt:
-                continue
+                return {
+                    **image_spec,
+                    "generated": False,
+                    "error": "no prompt",
+                    "index": i,
+                }
 
             aspect_ratio = image_spec.get("aspect_ratio", "4:3")
             image_size = image_spec.get("image_size", "1K")
 
-            # Featured images are larger
             if image_spec.get("placement") == "featured":
                 image_size = "2K"
                 if "aspect_ratio" not in image_spec:
                     aspect_ratio = "16:9"
 
-            try:
-                image_bytes = await gemini.generate_image(
-                    prompt=image_prompt,
-                    aspect_ratio=aspect_ratio,
-                    image_size=image_size,
-                )
-                # Save image to disk
-                filename = image_spec.get("filename", f"image-{i}.png")
-                image_path = media_dir / filename
-                image_path.write_bytes(image_bytes)
-                image_url = f"/media/{post_id}/{filename}"
+            async with sem:
+                try:
+                    image_bytes = await gemini.generate_image(
+                        prompt=image_prompt,
+                        aspect_ratio=aspect_ratio,
+                        image_size=image_size,
+                    )
+                    filename = image_spec.get("filename", f"image-{i}.png")
 
-                generated_images.append(
-                    {
+                    # Override featured image filename with date+random suffix
+                    is_featured = (
+                        image_spec.get("placement") == "featured"
+                        or image_spec.get("type") == "featured"
+                    )
+                    if is_featured:
+                        now = datetime.now(UTC)
+                        date_str = now.strftime("%m%d%y")
+                        rand_digits = f"{random.randint(10, 99)}"
+                        filename = f"featured-{date_str}-{rand_digits}.png"
+                    image_path = media_dir / filename
+                    image_path.write_bytes(image_bytes)
+                    image_url = f"/media/{post_id}/{filename}"
+
+                    await publish_stage_log(
+                        f"Image {i} generated ({len(image_bytes)} bytes)",
+                        stage="images",
+                        event="image_generated",
+                        data={"index": i, "bytes": len(image_bytes), "path": image_url},
+                    )
+                    return {
                         **image_spec,
                         "generated": True,
                         "size_bytes": len(image_bytes),
                         "url": image_url,
                         "index": i,
                     }
-                )
-                logger.info(
-                    f"Generated image {i}: {len(image_bytes)} bytes"
-                    f" -> {image_url}"
-                )
-            except Exception as e:
-                logger.error(f"Failed to generate image {i}: {e}")
-                generated_images.append(
-                    {
+                except Exception as e:
+                    logger.error(f"Failed to generate image {i}: {e}")
+                    await publish_stage_log(
+                        f"Image {i} failed: {e}",
+                        stage="images",
+                        level="error",
+                        event="image_failed",
+                        data={"index": i, "error": str(e)},
+                    )
+                    return {
                         **image_spec,
                         "generated": False,
                         "error": str(e),
                         "index": i,
                     }
-                )
-    finally:
-        pass  # GeminiClient doesn't need explicit close
 
-    manifest["images"] = generated_images
-    manifest["total_generated"] = sum(
-        1 for img in generated_images if img.get("generated")
-    )
-    manifest["total_failed"] = sum(
-        1 for img in generated_images if not img.get("generated")
-    )
+        tasks = [
+            _generate_one(i, spec) for i, spec in enumerate(manifest.get("images", []))
+        ]
+        generated_images = list(await asyncio.gather(*tasks))
+
+        manifest["images"] = generated_images
+        manifest["total_generated"] = sum(
+            1 for img in generated_images if img.get("generated")
+        )
+        manifest["total_failed"] = sum(
+            1 for img in generated_images if not img.get("generated")
+        )
+
+    meta = {
+        "stage": "images",
+        "model": response.model,
+        "tokens_in": response.tokens_in,
+        "tokens_out": response.tokens_out,
+        "duration_s": timer.duration,
+    }
 
     return {
         "image_manifest": manifest,
@@ -136,13 +198,7 @@ async def images_node(state: PipelineState) -> dict:
             **state.get("stage_status", {}),
             "images": "complete",
         },
-        "_stage_meta": {
-            "stage": "images",
-            "model": response.model,
-            "tokens_in": response.tokens_in,
-            "tokens_out": response.tokens_out,
-            "duration_s": timer.duration,
-        },
+        "_stage_meta": meta,
     }
 
 

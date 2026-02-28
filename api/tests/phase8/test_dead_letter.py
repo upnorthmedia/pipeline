@@ -99,6 +99,8 @@ async def test_retry_dead_letter_success(
         }
     ]
     # Mark post as failed
+    # Reset mock to count only retry enqueue calls (create_post also enqueues)
+    mock_redis.enqueue_job.reset_mock()
 
     # Use the API to set failed state
     resp = await client.post(f"/api/queue/dead-letter/{post['id']}/retry")

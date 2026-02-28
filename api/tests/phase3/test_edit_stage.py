@@ -115,3 +115,55 @@ class TestEditNode:
 
         assert result["current_stage"] == "edit"
         assert result["stage_status"]["edit"] == "complete"
+
+    @pytest.mark.asyncio
+    async def test_analytics_in_prompt(self, sample_state, mock_claude_response_both):
+        """Prompt should contain analytics when draft and keywords exist."""
+        sample_state["draft"] = (
+            "# Best Python Frameworks\n\n"
+            "Python frameworks are essential for web development. "
+            "Django and Flask are the most popular python frameworks "
+            "used by developers worldwide. This guide covers the best "
+            "python frameworks available today."
+        )
+        sample_state["related_keywords"] = [
+            "python frameworks",
+            "django vs flask",
+        ]
+        with patch("src.pipeline.stages.edit.ClaudeClient") as MockClient:
+            instance = MockClient.return_value
+            instance.chat = AsyncMock(return_value=mock_claude_response_both)
+            instance.close = AsyncMock()
+
+            await edit_node(sample_state)
+
+            call_args = instance.chat.call_args
+            prompt = call_args.kwargs.get(
+                "prompt",
+                call_args.args[0] if call_args.args else "",
+            )
+            assert "Current Content Analytics" in prompt
+            assert "Word Count" in prompt
+            assert "Flesch Reading Ease" in prompt
+            assert "SEO Checklist" in prompt
+
+    @pytest.mark.asyncio
+    async def test_no_analytics_without_draft(
+        self, sample_state, mock_claude_response_both
+    ):
+        """Analytics section should be skipped when draft is empty."""
+        sample_state["draft"] = ""
+        sample_state["related_keywords"] = ["python frameworks"]
+        with patch("src.pipeline.stages.edit.ClaudeClient") as MockClient:
+            instance = MockClient.return_value
+            instance.chat = AsyncMock(return_value=mock_claude_response_both)
+            instance.close = AsyncMock()
+
+            await edit_node(sample_state)
+
+            call_args = instance.chat.call_args
+            prompt = call_args.kwargs.get(
+                "prompt",
+                call_args.args[0] if call_args.args else "",
+            )
+            assert "Current Content Analytics" not in prompt

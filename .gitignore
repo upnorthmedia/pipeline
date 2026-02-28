@@ -46,3 +46,4 @@ docker-compose.override.yml
 *.log
 plan.md
 CLAUDE.md
+repomix*

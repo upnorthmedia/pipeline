@@ -8,8 +8,9 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
-from sqlalchemy import update
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
@@ -23,26 +24,35 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _event_redis: Any | None = None
 _event_post_id: str | None = None
+_event_session_factory: Any | None = None
 
 
-def set_event_context(redis: Any, post_id: str) -> None:
+def set_event_context(
+    redis: Any, post_id: str, session_factory: Any | None = None
+) -> None:
     """Set the module-level Redis + post_id so stage nodes can publish logs."""
-    global _event_redis, _event_post_id  # noqa: PLW0603
+    global _event_redis, _event_post_id, _event_session_factory  # noqa: PLW0603
     _event_redis = redis
     _event_post_id = post_id
+    _event_session_factory = session_factory
 
 
 def clear_event_context() -> None:
     """Clear the module-level event context after pipeline execution."""
-    global _event_redis, _event_post_id  # noqa: PLW0603
+    global _event_redis, _event_post_id, _event_session_factory  # noqa: PLW0603
     _event_redis = None
     _event_post_id = None
+    _event_session_factory = None
 
 
 async def publish_stage_log(
-    message: str, stage: str = "", level: str = "info"
+    message: str,
+    stage: str = "",
+    level: str = "info",
+    event: str = "log",
+    data: dict | None = None,
 ) -> None:
-    """Publish a log event via SSE if event context is set.
+    """Publish a log event via SSE and persist to execution_logs.
 
     Safe to call even when no context is set (e.g. during tests) — it will
     silently no-op.
@@ -55,14 +65,66 @@ async def publish_stage_log(
     await publish_event(
         _event_redis,
         _event_post_id,
-        "log",
+        event,
         {
             "stage": stage,
             "message": message,
             "level": level,
             "timestamp": datetime.now(UTC).isoformat(),
+            **({"data": data} if data else {}),
         },
     )
+
+    # Persist to DB if session factory is available
+    if _event_session_factory is not None:
+        try:
+            async with _event_session_factory() as session:
+                await append_execution_log(
+                    session,
+                    _event_post_id,
+                    stage,
+                    level,
+                    event,
+                    message,
+                    data,
+                )
+        except Exception:
+            logger.debug("Failed to persist execution log entry", exc_info=True)
+
+
+async def append_execution_log(
+    session: AsyncSession,
+    post_id: str | UUID,
+    stage: str,
+    level: str,
+    event: str,
+    message: str,
+    data: dict | None = None,
+) -> None:
+    """Append a log entry to the post's execution_logs array (atomic, DB only).
+
+    This is the low-level DB writer. For combined SSE + DB logging from stage
+    nodes, use publish_stage_log() which calls this automatically when a
+    session factory is in context.
+    """
+    entry = {
+        "ts": datetime.now(UTC).isoformat(),
+        "stage": stage,
+        "level": level,
+        "event": event,
+        "message": message,
+    }
+    if data:
+        entry["data"] = data
+
+    # Atomic jsonb append — no read-modify-write race
+    stmt = text(
+        "UPDATE posts SET execution_logs = execution_logs || CAST(:entry AS jsonb) "
+        "WHERE id = :post_id"
+    )
+    await session.execute(stmt, {"entry": json.dumps([entry]), "post_id": str(post_id)})
+    await session.commit()
+
 
 # Approximate cost per 1M tokens (USD) — update as pricing changes
 MODEL_COSTS: dict[str, dict[str, float]] = {
@@ -139,6 +201,8 @@ def _build_config_context(state: PipelineState) -> str:
     if competitors:
         lines.append(f"- **COMPETITOR_URLS**: {', '.join(competitors)}")
 
+    lines.append(f"- **TODAY_DATE**: {datetime.now(UTC).strftime('%Y-%m-%d')}")
+
     return "\n".join(lines)
 
 
@@ -176,7 +240,17 @@ def _build_links_context(state: PipelineState) -> str:
     if not links:
         return ""
 
+    website_url = state.get("website_url", "")
     lines = [f"## Available Internal Links ({len(links)} total)\n"]
+    if website_url:
+        lines.append(
+            f"**YOUR DOMAIN**: {website_url} — "
+            "Any link to this domain is an internal link.\n"
+            "**INSTRUCTION**: Use these URLs directly. "
+            "Do NOT search for internal links. "
+            "Insert 3-5 of these into the content "
+            "with natural anchor text.\n"
+        )
     for link in links[:50]:  # Cap at 50 most relevant
         url = link.get("url", "")
         title = link.get("title", "")

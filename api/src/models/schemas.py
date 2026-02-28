@@ -22,12 +22,12 @@ class ProfileBase(BaseModel):
     required_mentions: str | None = None
     related_keywords: list[str] = []
     default_stage_settings: dict = {
-        "research": "review",
-        "outline": "review",
-        "write": "review",
-        "edit": "review",
-        "images": "review",
-        "ready": "review",
+        "research": "auto",
+        "outline": "auto",
+        "write": "auto",
+        "edit": "auto",
+        "images": "auto",
+        "ready": "auto",
     }
     recrawl_interval: str | None = None
 
@@ -89,12 +89,12 @@ class PostBase(BaseModel):
     avoid: str | None = None
     required_mentions: str | None = None
     stage_settings: dict = {
-        "research": "review",
-        "outline": "review",
-        "write": "review",
-        "edit": "review",
-        "images": "review",
-        "ready": "review",
+        "research": "auto",
+        "outline": "auto",
+        "write": "auto",
+        "edit": "auto",
+        "images": "auto",
+        "ready": "auto",
     }
 
 
@@ -136,7 +136,7 @@ class PostRead(PostBase):
     current_stage: str = "pending"
     stage_status: dict = {}
     stage_logs: dict = {}
-    thread_id: str | None = None
+    execution_logs: list[dict] = []
     priority: int = 0
     research_content: str | None = None
     outline_content: str | None = None

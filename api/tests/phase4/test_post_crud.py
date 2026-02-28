@@ -14,7 +14,8 @@ async def test_create_post(client: AsyncClient, sample_post_data):
     data = resp.json()
     assert data["slug"] == sample_post_data["slug"]
     assert data["topic"] == sample_post_data["topic"]
-    assert data["current_stage"] == "pending"
+    assert data["current_stage"] == "research"
+    assert data["stage_status"]["research"] == "running"
     assert "id" in data
 
 
@@ -38,8 +39,8 @@ async def test_list_posts(client: AsyncClient, sample_post_data):
 
 async def test_list_posts_filter_by_status(client: AsyncClient, sample_post_data):
     await client.post("/api/posts", json=sample_post_data)
-    # Filter by pending (should match)
-    resp = await client.get("/api/posts", params={"status": "pending"})
+    # Filter by research (should match — new posts start with current_stage="research")
+    resp = await client.get("/api/posts", params={"status": "research"})
     assert len(resp.json()) == 1
     # Filter by complete (should not match)
     resp = await client.get("/api/posts", params={"status": "complete"})

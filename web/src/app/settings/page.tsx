@@ -34,6 +34,7 @@ const RULE_NAMES = [
   "blog-write",
   "blog-edit",
   "blog-images",
+  "blog-ready",
 ] as const;
 
 export default function SettingsPage() {

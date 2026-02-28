@@ -69,6 +69,9 @@ class Post(UUIDMixin, TimestampMixin, Base):
 
     # Execution logs
     stage_logs: Mapped[dict] = mapped_column(JSONB, server_default="{}", default=dict)
+    execution_logs: Mapped[list] = mapped_column(
+        JSONB, server_default="[]", default=list
+    )
 
     # Pipeline state
     current_stage: Mapped[str] = mapped_column(
@@ -87,7 +90,6 @@ class Post(UUIDMixin, TimestampMixin, Base):
         },
     )
     stage_status: Mapped[dict] = mapped_column(JSONB, server_default="{}", default=dict)
-    thread_id: Mapped[str | None] = mapped_column(String(255))
     priority: Mapped[int] = mapped_column(Integer, server_default="0", default=0)
 
     # Timestamps

@@ -18,8 +18,8 @@ def test_worker_settings_retry_delay():
 
 
 def test_worker_settings_job_timeout():
-    """Job timeout should be 10 minutes."""
-    assert WorkerSettings.job_timeout == 600
+    """Job timeout should be 60 minutes for full pipeline runs."""
+    assert WorkerSettings.job_timeout == 3600
 
 
 def test_worker_settings_handle_signals():

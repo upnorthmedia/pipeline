@@ -5,8 +5,6 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
-  Play,
-  FastForward,
   RefreshCw,
   Check,
   Pause,
@@ -38,6 +36,7 @@ import {
   posts,
   type Post,
   type PipelineStage,
+  type PostStage,
   type PostAnalytics,
   STAGES,
 } from "@/lib/api";
@@ -66,7 +65,7 @@ const STAGE_LABELS: Record<PipelineStage, string> = {
   research: "Research",
   outline: "Outline",
   write: "Draft",
-  edit: "Final",
+  edit: "Editing",
   images: "Images",
   ready: "Ready",
 };
@@ -158,6 +157,21 @@ export default function PostDetailPage() {
         }
       }
 
+      if (event.event === "stage_start" && event.stage) {
+        // Optimistically show this stage as "running" in the progress UI
+        setPost((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            current_stage: event.stage as PostStage,
+            stage_status: {
+              ...prev.stage_status,
+              [event.stage as string]: "running" as const,
+            },
+          };
+        });
+      }
+
       if (event.event === "stage_complete" || event.event === "stage_error" || event.event === "pipeline_complete") {
         fetchPost();
       }
@@ -168,7 +182,7 @@ export default function PostDetailPage() {
       if (event.event === "stage_error") {
         toast.error(`${event.stage || "Pipeline"} failed`);
       }
-      if (event.event === "review_needed") {
+      if (event.event === "review_needed" || event.event === "stage_review") {
         toast.info(`${event.stage} needs review`);
         fetchPost();
       }
@@ -198,26 +212,6 @@ export default function PostDetailPage() {
     },
     [post, activeTab, postId, fetchAnalytics]
   );
-
-  const handleRun = async (stage?: string) => {
-    try {
-      await posts.run(postId, stage);
-      toast.success(`Running ${stage || "next stage"}`);
-      fetchPost();
-    } catch {
-      toast.error("Failed to start stage");
-    }
-  };
-
-  const handleRunAll = async () => {
-    try {
-      await posts.runAll(postId);
-      toast.success("Running to completion");
-      fetchPost();
-    } catch {
-      toast.error("Failed to start pipeline");
-    }
-  };
 
   const handleApprove = async () => {
     // Approve with the current editor content if it's been modified
@@ -275,7 +269,7 @@ export default function PostDetailPage() {
   const isComplete = post.current_stage === "complete";
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 max-w-6xl mx-auto">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-3">
@@ -308,18 +302,6 @@ export default function PostDetailPage() {
               <Check className="h-3.5 w-3.5 mr-1.5" />
               Approve
             </Button>
-          )}
-          {!isComplete && !isRunning && (
-            <>
-              <Button variant="outline" size="sm" onClick={() => handleRun()}>
-                <Play className="h-3.5 w-3.5 mr-1.5" />
-                Run Next
-              </Button>
-              <Button variant="outline" size="sm" onClick={handleRunAll}>
-                <FastForward className="h-3.5 w-3.5 mr-1.5" />
-                Run All
-              </Button>
-            </>
           )}
           {isRunning && (
             <Button variant="outline" size="sm" onClick={handlePause}>
@@ -419,13 +401,22 @@ export default function PostDetailPage() {
                 content ? (
                   <Card>
                     <CardHeader className="flex flex-row items-center justify-between py-3">
-                      <CardTitle className="text-base">Ready — Final Preview</CardTitle>
+                      <CardTitle className="text-base">Ready — Live Preview</CardTitle>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => copyContent(content as string)}
+                        className="text-xs"
+                      >
+                        <Copy className="h-3 w-3 mr-1" />
+                        Copy
+                      </Button>
                     </CardHeader>
                     <Separator />
                     <CardContent className="p-0">
                       <ContentPreview
                         content={content as string}
-                        height="700px"
+                        height="800px"
                       />
                     </CardContent>
                   </Card>
@@ -437,17 +428,6 @@ export default function PostDetailPage() {
                           ? "Running Ready..."
                           : "No ready content yet"}
                       </p>
-                      {!post.stage_status[stage] && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="mt-3"
-                          onClick={() => handleRun(stage)}
-                        >
-                          <Play className="h-3.5 w-3.5 mr-1.5" />
-                          Run Ready
-                        </Button>
-                      )}
                     </CardContent>
                   </Card>
                 )
@@ -464,37 +444,15 @@ export default function PostDetailPage() {
                   </CardHeader>
                   <Separator />
                   <CardContent className="p-0">
-                    <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-border">
-                      {/* Editor pane */}
-                      <div className="min-w-0">
-                        <div className="px-3 py-1.5 border-b border-border bg-muted/30">
-                          <span className="text-xs font-medium text-muted-foreground">
-                            Editor
-                          </span>
-                        </div>
-                        <MarkdownEditor
-                          content={editorContent}
-                          onChange={setEditorContent}
-                          onSave={handleSave}
-                          height="500px"
-                          readOnly={
-                            post.stage_status[stage] === "running"
-                          }
-                        />
-                      </div>
-                      {/* Preview pane */}
-                      <div className="min-w-0">
-                        <div className="px-3 py-1.5 border-b border-border bg-muted/30">
-                          <span className="text-xs font-medium text-muted-foreground">
-                            Preview
-                          </span>
-                        </div>
-                        <ContentPreview
-                          content={editorContent}
-                          height="500px"
-                        />
-                      </div>
-                    </div>
+                    <MarkdownEditor
+                      content={editorContent}
+                      onChange={setEditorContent}
+                      onSave={handleSave}
+                      height="500px"
+                      readOnly={
+                        post.stage_status[stage] === "running"
+                      }
+                    />
                   </CardContent>
                 </Card>
               ) : (
@@ -505,17 +463,6 @@ export default function PostDetailPage() {
                         ? `Running ${STAGE_LABELS[stage]}...`
                         : `No ${STAGE_LABELS[stage].toLowerCase()} content yet`}
                     </p>
-                    {!post.stage_status[stage] && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="mt-3"
-                        onClick={() => handleRun(stage)}
-                      >
-                        <Play className="h-3.5 w-3.5 mr-1.5" />
-                        Run {STAGE_LABELS[stage]}
-                      </Button>
-                    )}
                   </CardContent>
                 </Card>
               )}
@@ -550,7 +497,7 @@ export default function PostDetailPage() {
         <Card>
           <CardHeader className="py-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Execution Logs</CardTitle>
+              <CardTitle className="text-base">Cost Tracking</CardTitle>
               {(() => {
                 const stageEntries = Object.entries(post.stage_logs).filter(([k]) => !k.startsWith("_"));
                 const totalCost = stageEntries.reduce((sum, [, log]) => {

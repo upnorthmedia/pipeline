@@ -31,7 +31,7 @@ async def test_queue_status_with_posts(client: AsyncClient):
 
     resp = await client.get("/api/queue")
     data = resp.json()
-    assert data["pending"] == 3
+    assert data["running"] == 3
     assert data["total"] == 3
 
 
@@ -103,6 +103,9 @@ async def test_resume_all(client: AsyncClient):
         )
 
     await client.post("/api/queue/pause-all")
+
+    # Reset mock to count only resume-all enqueue calls
+    mock_redis.enqueue_job.reset_mock()
 
     resp = await client.post("/api/queue/resume-all")
     assert resp.status_code == 200

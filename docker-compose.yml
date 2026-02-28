@@ -63,7 +63,7 @@ services:
     build:
       context: ./api
       target: builder
-    command: uv run python -m src.worker
+    command: uv run watchfiles "python -m src.worker" src/
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://pipeline:pipeline@db:5432/content_pipeline

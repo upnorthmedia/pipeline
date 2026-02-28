@@ -1,4 +1,5 @@
 import uuid
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -50,6 +51,9 @@ async def client(db_engine):
             yield session
 
     app.dependency_overrides[get_session] = override_get_session
+
+    # Provide a mock Redis so endpoints that enqueue jobs don't crash
+    app.state.redis = AsyncMock()
 
     async with AsyncClient(
         transport=ASGITransport(app=app),

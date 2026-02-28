@@ -13,6 +13,7 @@ ALLOWED_FILES = {
     "blog-write",
     "blog-edit",
     "blog-images",
+    "blog-ready",
 }
 
 

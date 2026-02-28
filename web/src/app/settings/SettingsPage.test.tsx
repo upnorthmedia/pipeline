@@ -46,6 +46,7 @@ const testRuleFiles = [
   { name: "blog-write", filename: "blog-write.md", exists: true, size: 3072 },
   { name: "blog-edit", filename: "blog-edit.md", exists: true, size: 4096 },
   { name: "blog-images", filename: "blog-images.md", exists: false, size: 0 },
+  { name: "blog-ready", filename: "blog-ready.md", exists: true, size: 512 },
 ];
 
 beforeEach(() => {
@@ -90,7 +91,7 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect(screen.getByText(/Save blog-research/)).toBeInTheDocument();
     });
-    for (const name of ["blog-research", "blog-outline", "blog-write", "blog-edit", "blog-images"]) {
+    for (const name of ["blog-research", "blog-outline", "blog-write", "blog-edit", "blog-images", "blog-ready"]) {
       expect(screen.getByRole("button", { name: new RegExp(`^${name}`) })).toBeInTheDocument();
     }
   });

@@ -1,7 +1,6 @@
 """Post CRUD, duplication, batch creation, and pipeline control endpoints."""
 
 import io
-import json
 import uuid
 import zipfile
 from pathlib import Path
@@ -77,6 +76,7 @@ async def list_posts(
 @router.post("", response_model=PostRead, status_code=201)
 async def create_post(
     data: PostCreate,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ):
     post_data = data.model_dump()
@@ -101,9 +101,16 @@ async def create_post(
             post_data["stage_settings"] = profile.default_stage_settings
 
     post = Post(**post_data)
+    post.current_stage = STAGES[0]
+    post.stage_status = {STAGES[0]: "running"}
     session.add(post)
     await session.commit()
     await session.refresh(post)
+
+    # Auto-enqueue pipeline — the runner handles gate checks (pausing at review stages)
+    redis = request.app.state.redis
+    await redis.enqueue_job("run_pipeline_stage", str(post.id))
+
     return post
 
 
@@ -147,6 +154,15 @@ async def delete_post(
 
     await session.delete(post)
     await session.commit()
+
+    # Clean up media directory
+    import shutil
+
+    from src.config import settings
+
+    media_dir = Path(settings.media_dir) / str(post_id)
+    if media_dir.exists():
+        shutil.rmtree(media_dir)
 
 
 # --- Duplication ---
@@ -199,6 +215,7 @@ async def duplicate_post(
 @router.post("/batch", response_model=list[PostRead], status_code=201)
 async def batch_create_posts(
     posts: list[PostCreate],
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ):
     created = []
@@ -230,6 +247,12 @@ async def batch_create_posts(
     await session.commit()
     for post in created:
         await session.refresh(post)
+
+    # Auto-enqueue pipeline for each post
+    redis = request.app.state.redis
+    for post in created:
+        await redis.enqueue_job("run_pipeline_stage", str(post.id))
+
     return created
 
 
@@ -360,9 +383,12 @@ async def approve_stage(
     next_stage = _next_stage(post)
     if next_stage:
         post.current_stage = next_stage
-        # Auto-enqueue next stage
+        status[next_stage] = "running"
+        post.stage_status = status
+        # Enqueue full pipeline (no stage arg) so it continues through
+        # all remaining auto stages, pausing again at the next review gate
         redis = request.app.state.redis
-        await redis.enqueue_job("run_pipeline_stage", str(post_id), next_stage)
+        await redis.enqueue_job("run_pipeline_stage", str(post_id))
     else:
         post.current_stage = "complete"
 
@@ -399,13 +425,17 @@ async def export_markdown(
     post = await session.get(Post, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    if not post.final_md_content:
+
+    content = post.ready_content or post.final_md_content
+    if not content:
         raise HTTPException(status_code=404, detail="No markdown content available")
 
+    export_content = content.replace(f"/media/{post_id}/", "/")
+
     return Response(
-        content=post.final_md_content,
+        content=export_content,
         media_type="text/markdown",
-        headers={"Content-Disposition": f'attachment; filename="{post.slug}.md"'},
+        headers={"Content-Disposition": f'attachment; filename="{post.slug}.mdx"'},
     )
 
 
@@ -436,59 +466,76 @@ async def export_all(
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
 
+    content = post.ready_content or post.final_md_content
+    if not content:
+        raise HTTPException(status_code=404, detail="No content available to export")
+
+    from src.config import settings
+
+    media_dir = Path(settings.media_dir) / str(post_id)
+    image_files: list[Path] = []
+    if media_dir.is_dir():
+        image_files = [f for f in media_dir.iterdir() if f.is_file()]
+
+    # Rewrite image URLs from /media/{id}/filename to /filename
+    export_content = content.replace(f"/media/{post_id}/", "/")
+
+    # Check if output_format requests WordPress HTML
+    has_wp_separator = "---WORDPRESS_HTML---" in export_content
+    is_wordpress = post.output_format in ("wordpress", "both") or has_wp_separator
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # Post config as input
-        config = {
-            "topic": post.topic,
-            "slug": post.slug,
-            "niche": post.niche,
-            "target_audience": post.target_audience,
-            "intent": post.intent,
-            "word_count": post.word_count,
-            "tone": post.tone,
-            "output_format": post.output_format,
-            "website_url": post.website_url,
-            "related_keywords": post.related_keywords,
-            "competitor_urls": post.competitor_urls,
-        }
-        zf.writestr("00-input.json", json.dumps(config, indent=2))
+        if is_wordpress and has_wp_separator:
+            # Split into markdown and WordPress HTML parts
+            parts = export_content.split("---WORDPRESS_HTML---", 1)
+            md_part = parts[0].strip()
+            wp_part = parts[1].strip() if len(parts) > 1 else ""
 
-        if post.research_content:
-            zf.writestr("01-research.md", post.research_content)
-        if post.outline_content:
-            zf.writestr("02-outline.md", post.outline_content)
-        if post.draft_content:
-            zf.writestr("03-draft.md", post.draft_content)
-        if post.final_md_content:
-            zf.writestr("final.md", post.final_md_content)
-        if post.final_html_content:
-            zf.writestr("final.html", post.final_html_content)
-        if post.image_manifest:
-            zf.writestr(
-                "04-image-manifest.json",
-                json.dumps(post.image_manifest, indent=2),
-            )
-            # Include generated image files
-            from src.config import settings
+            if md_part:
+                zf.writestr(f"{post.slug}.mdx", md_part)
+            if wp_part:
+                zf.writestr(f"{post.slug}.html", wp_part)
+        else:
+            zf.writestr(f"{post.slug}.mdx", export_content)
 
-            media_dir = Path(settings.media_dir) / str(post_id)
-            if media_dir.is_dir():
-                for img_file in media_dir.iterdir():
-                    if img_file.is_file():
-                        zf.write(
-                            img_file,
-                            f"images/{img_file.name}",
-                        )
+        for img_file in image_files:
+            zf.write(img_file, img_file.name)
 
     buf.seek(0)
     return StreamingResponse(
         buf,
         media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{post.slug}-export.zip"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="{post.slug}.zip"'},
     )
+
+
+# --- Execution Logs ---
+
+
+@router.get("/{post_id}/logs")
+async def get_execution_logs(
+    post_id: uuid.UUID,
+    level: list[str] | None = Query(None, description="Filter by level(s)"),
+    stage: str | None = Query(None, description="Filter by stage name"),
+    since: str | None = Query(None, description="ISO timestamp filter"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return execution logs for a post, with optional filtering."""
+    post = await session.get(Post, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    logs = list(post.execution_logs or [])
+
+    if level:
+        logs = [entry for entry in logs if entry.get("level") in level]
+    if stage:
+        logs = [entry for entry in logs if entry.get("stage") == stage]
+    if since:
+        logs = [entry for entry in logs if entry.get("ts", "") > since]
+
+    return logs
 
 
 # --- Analytics ---
@@ -521,6 +568,7 @@ async def post_analytics(
         primary_keyword=primary_kw,
         secondary_keywords=secondary_kws,
         title=post.topic or "",
+        website_url=post.website_url or "",
     )
 
     return {

@@ -92,7 +92,7 @@ describe("ExportButton", () => {
     );
 
     expect(screen.getByText("Copy Markdown")).toBeInTheDocument();
-    expect(screen.getByText("Download .md")).toBeInTheDocument();
+    expect(screen.getByText("Download .mdx")).toBeInTheDocument();
   });
 
   it("shows HTML options when HTML is available", () => {
@@ -155,7 +155,7 @@ describe("ExportButton", () => {
       <ExportButton postId="test-123" hasMd={true} hasHtml={false} />
     );
 
-    const link = screen.getByText("Download .md").closest("a");
+    const link = screen.getByText("Download .mdx").closest("a");
     expect(link).toHaveAttribute(
       "href",
       "http://localhost:8000/api/posts/test-123/export/markdown"

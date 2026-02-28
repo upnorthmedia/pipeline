@@ -25,7 +25,10 @@ async def write_node(state: PipelineState) -> dict:
     prompt = build_stage_prompt("write", rules, state)
 
     client = ClaudeClient()
-    await publish_stage_log("Calling Claude for draft (up to 16k tokens)...", stage="write")
+    await publish_stage_log(
+        "Calling Claude for draft (up to 16k tokens)...",
+        stage="write",
+    )
     try:
         with StageTimer() as timer:
             response: LLMResponse = await client.chat(
@@ -47,6 +50,14 @@ async def write_node(state: PipelineState) -> dict:
         stage="write",
     )
 
+    meta = {
+        "stage": "write",
+        "model": response.model,
+        "tokens_in": response.tokens_in,
+        "tokens_out": response.tokens_out,
+        "duration_s": timer.duration,
+    }
+
     return {
         "draft": response.content,
         "current_stage": "write",
@@ -54,11 +65,5 @@ async def write_node(state: PipelineState) -> dict:
             **state.get("stage_status", {}),
             "write": "complete",
         },
-        "_stage_meta": {
-            "stage": "write",
-            "model": response.model,
-            "tokens_in": response.tokens_in,
-            "tokens_out": response.tokens_out,
-            "duration_s": timer.duration,
-        },
+        "_stage_meta": meta,
     }

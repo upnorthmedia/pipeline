@@ -15,17 +15,55 @@ MAX_RETRIES = 3
 BASE_DELAY = 1.0
 
 
+def _is_retryable(exc: Exception) -> bool:
+    """Return True if the error is transient and worth retrying."""
+    # httpx HTTP status errors
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        return code == 429 or code >= 500
+    # Anthropic API errors
+    if isinstance(exc, anthropic.APIStatusError):
+        return exc.status_code == 429 or exc.status_code >= 500
+    # Network-level errors (timeout, connection refused, etc.)
+    if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError)):
+        return True
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, ConnectionError, OSError)):
+        return True
+    return False
+
+
+def _retry_after(exc: Exception) -> float | None:
+    """Extract Retry-After header value (seconds) if present."""
+    headers = None
+    if isinstance(exc, httpx.HTTPStatusError):
+        headers = exc.response.headers
+    elif isinstance(exc, anthropic.APIStatusError) and hasattr(exc, "response"):
+        headers = exc.response.headers
+    if headers:
+        val = headers.get("retry-after")
+        if val:
+            try:
+                return float(val)
+            except ValueError:
+                pass
+    return None
+
+
 async def _retry(fn, retries: int = MAX_RETRIES, base_delay: float = BASE_DELAY):
-    """Retry an async function with exponential backoff."""
+    """Retry an async function with exponential backoff on transient errors only."""
     for attempt in range(retries):
         try:
             return await fn()
         except Exception as e:
-            if attempt == retries - 1:
+            if attempt == retries - 1 or not _is_retryable(e):
                 raise
-            delay = base_delay * (2**attempt)
+            retry_delay = _retry_after(e)
+            delay = (
+                retry_delay if retry_delay is not None else base_delay * (2**attempt)
+            )
             logger.warning(
-                f"Attempt {attempt + 1} failed: {e}. Retrying in {delay}s..."
+                f"Attempt {attempt + 1} failed ({type(e).__name__}): {e}. "
+                f"Retrying in {delay}s..."
             )
             await asyncio.sleep(delay)
 
@@ -88,7 +126,10 @@ class ClaudeClient:
 
     def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.anthropic_api_key
-        self._client = anthropic.AsyncAnthropic(api_key=self.api_key)
+        self._client = anthropic.AsyncAnthropic(
+            api_key=self.api_key,
+            timeout=httpx.Timeout(300.0),
+        )
 
     async def chat(
         self,
@@ -116,9 +157,7 @@ class ClaudeClient:
 
             # Extract text content (skip thinking blocks)
             text_parts = [
-                block.text
-                for block in response.content
-                if block.type == "text"
+                block.text for block in response.content if block.type == "text"
             ]
             content = "\n".join(text_parts)
 
@@ -159,13 +198,16 @@ class GeminiClient:
                     image_size=image_size,
                 ),
             )
-            # genai client is sync, run in thread
+            # genai client is sync, run in thread with 180s timeout
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self._client.models.generate_content(
-                    model=model, contents=prompt, config=config
+            response = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: self._client.models.generate_content(
+                        model=model, contents=prompt, config=config
+                    ),
                 ),
+                timeout=180.0,
             )
 
             if not response.parts:

@@ -43,6 +43,14 @@ async def research_node(state: PipelineState) -> dict:
         stage="research",
     )
 
+    meta = {
+        "stage": "research",
+        "model": response.model,
+        "tokens_in": response.tokens_in,
+        "tokens_out": response.tokens_out,
+        "duration_s": timer.duration,
+    }
+
     return {
         "research": response.content,
         "current_stage": "research",
@@ -50,12 +58,5 @@ async def research_node(state: PipelineState) -> dict:
             **state.get("stage_status", {}),
             "research": "complete",
         },
-        # Stash metrics for the caller to log
-        "_stage_meta": {
-            "stage": "research",
-            "model": response.model,
-            "tokens_in": response.tokens_in,
-            "tokens_out": response.tokens_out,
-            "duration_s": timer.duration,
-        },
+        "_stage_meta": meta,
     }
