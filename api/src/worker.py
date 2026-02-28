@@ -191,16 +191,15 @@ async def _run_pipeline(
                 # Build state from fresh post data
                 initial_state = state_from_post(post, internal_links)
 
-            # Execute the stage
-            await publish_event(
-                redis,
-                post_id,
-                "stage_start",
-                {"stage": stage, "message": f"Starting {stage}..."},
-            )
-            set_event_context(redis, post_id, session_factory)
-
+            # Persist "running" to DB before SSE so fetchPost reads correct state
             async with session_factory() as session:
+                post_obj = await session.get(Post, uuid.UUID(post_id))
+                if post_obj:
+                    ss = dict(post_obj.stage_status or {})
+                    ss[stage] = "running"
+                    post_obj.stage_status = ss
+                    post_obj.current_stage = stage
+                    await session.commit()
                 await append_execution_log(
                     session,
                     post_id,
@@ -209,6 +208,15 @@ async def _run_pipeline(
                     "stage_start",
                     f"Starting {stage}...",
                 )
+
+            # SSE after DB is committed
+            await publish_event(
+                redis,
+                post_id,
+                "stage_start",
+                {"stage": stage, "message": f"Starting {stage}..."},
+            )
+            set_event_context(redis, post_id, session_factory)
 
             result = await node_fn(initial_state)
 

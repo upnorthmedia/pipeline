@@ -87,7 +87,20 @@ export default function PostDetailPage() {
   const fetchPost = useCallback(async () => {
     try {
       const data = await posts.get(postId);
-      setPost(data);
+      setPost((prev) => {
+        if (!prev) return data;
+        // Preserve optimistic "running" when API returns stale "pending"
+        const mergedStatus = { ...data.stage_status };
+        let hasPreserved = false;
+        for (const stage of STAGES) {
+          if (prev.stage_status[stage] === "running" && mergedStatus[stage] === "pending") {
+            mergedStatus[stage] = "running";
+            hasPreserved = true;
+          }
+        }
+        if (!hasPreserved) return data;
+        return { ...data, stage_status: mergedStatus, current_stage: prev.current_stage };
+      });
       const lastComplete = [...STAGES]
         .reverse()
         .find((s) => data.stage_status[s] === "complete");
