@@ -20,9 +20,7 @@ from src.database import engine
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: create ArqRedis pool (supports enqueue_job)
-    app.state.redis = await create_pool(
-        RedisSettings.from_dsn(settings.redis_url)
-    )
+    app.state.redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     yield
     # Shutdown
     await app.state.redis.aclose()
@@ -37,7 +35,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[settings.cors_origin],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

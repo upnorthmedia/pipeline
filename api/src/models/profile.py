@@ -70,7 +70,7 @@ class WebsiteProfile(UUIDMixin, TimestampMixin, Base):
     )
     recrawl_interval: Mapped[str | None] = mapped_column(
         String(20), server_default=sa.null(), default=None
-    )  # "weekly" | "monthly" | None (disabled)
+    )  # "weekly" | "biweekly" | "monthly" | None (disabled)
 
     # Relationships
     links: Mapped[list[InternalLink]] = relationship(

@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.models.link import InternalLink
 from src.models.profile import WebsiteProfile
 from src.worker import check_recrawl_schedules
 
@@ -189,45 +188,52 @@ async def test_recrawl_skips_currently_crawling(db_session: AsyncSession, db_eng
     redis.enqueue_job.assert_not_called()
 
 
-async def test_recrawl_preserves_generated_links(db_session: AsyncSession, db_engine):
-    """Re-crawl should not affect links with source='generated'."""
+async def test_recrawl_biweekly_due(db_session: AsyncSession, db_engine):
+    """Biweekly profile crawled 15 days ago should be re-enqueued."""
     from sqlalchemy.ext.asyncio import AsyncSession as AS
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     sf = async_sessionmaker(db_engine, class_=AS, expire_on_commit=False)
 
     profile = WebsiteProfile(
-        name="Preserve Links",
+        name="Biweekly Due",
         website_url="https://example.com",
-        recrawl_interval="weekly",
+        recrawl_interval="biweekly",
         crawl_status="complete",
-        last_crawled_at=datetime.now(UTC) - timedelta(days=10),
+        last_crawled_at=datetime.now(UTC) - timedelta(days=15),
     )
     db_session.add(profile)
-    await db_session.commit()
-    await db_session.refresh(profile)
-
-    # Add a generated link
-    gen_link = InternalLink(
-        profile_id=profile.id,
-        url="https://example.com/my-generated-post/",
-        title="Generated Post",
-        slug="my-generated-post",
-        source="generated",
-    )
-    db_session.add(gen_link)
     await db_session.commit()
 
     redis = AsyncMock()
     ctx = _make_ctx(sf, redis)
     await check_recrawl_schedules(ctx)
 
-    # Re-crawl was enqueued (the job itself would preserve generated links)
     redis.enqueue_job.assert_called_once()
 
-    # Verify generated link still exists
-    await db_session.refresh(gen_link)
-    assert gen_link.source == "generated"
+
+async def test_recrawl_biweekly_not_due(db_session: AsyncSession, db_engine):
+    """Biweekly profile crawled 10 days ago should not be re-enqueued."""
+    from sqlalchemy.ext.asyncio import AsyncSession as AS
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    sf = async_sessionmaker(db_engine, class_=AS, expire_on_commit=False)
+
+    profile = WebsiteProfile(
+        name="Biweekly Not Due",
+        website_url="https://example.com",
+        recrawl_interval="biweekly",
+        crawl_status="complete",
+        last_crawled_at=datetime.now(UTC) - timedelta(days=10),
+    )
+    db_session.add(profile)
+    await db_session.commit()
+
+    redis = AsyncMock()
+    ctx = _make_ctx(sf, redis)
+    await check_recrawl_schedules(ctx)
+
+    redis.enqueue_job.assert_not_called()
 
 
 async def test_recrawl_profile_api_field(client, sample_profile_data):

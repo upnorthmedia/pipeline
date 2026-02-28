@@ -21,6 +21,7 @@ COPY --from=builder /app/.venv /app/.venv
 COPY src/ src/
 COPY alembic/ alembic/
 COPY alembic.ini .
+COPY entrypoint.sh .
 
 # Ensure venv binaries are on PATH
 ENV PATH="/app/.venv/bin:$PATH"

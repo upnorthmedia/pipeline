@@ -35,5 +35,8 @@ class Settings(BaseSettings):
     # Media directory for generated images
     media_dir: str = str(Path(__file__).resolve().parent.parent.parent / "media")
 
+    # CORS
+    cors_origin: str = "http://localhost:3000"
+
 
 settings = Settings()

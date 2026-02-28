@@ -440,49 +440,16 @@ async def _move_to_dlq(
 async def _post_completion_hook(
     session: AsyncSession, post_id: str, state: dict
 ) -> None:
-    """After pipeline completes, add the generated post to internal_links."""
+    """After pipeline completes, mark the post as complete."""
     post = await session.get(Post, uuid.UUID(post_id))
-    if not post or not post.profile_id:
+    if not post:
         return
 
-    # Build the post URL from profile website_url + slug
-    profile = await session.get(WebsiteProfile, post.profile_id)
-    if not profile:
-        return
-
-    website_url = profile.website_url.rstrip("/")
-    post_url = f"{website_url}/{post.slug}/"
-
-    # Check if already exists
-    existing = await session.execute(
-        select(InternalLink).where(
-            InternalLink.profile_id == post.profile_id,
-            InternalLink.url == post_url,
-        )
-    )
-    if existing.scalar_one_or_none():
-        return
-
-    # Extract keywords from research content
-    keywords = state.get("related_keywords", [])
-
-    link = InternalLink(
-        profile_id=post.profile_id,
-        url=post_url,
-        title=post.topic,
-        slug=post.slug,
-        source="generated",
-        post_id=post.id,
-        keywords=keywords,
-    )
-    session.add(link)
-
-    # Mark post as completed
     post.current_stage = "complete"
     post.completed_at = datetime.now(UTC)
     await session.commit()
 
-    logger.info(f"Post {post_id} completed, added to internal links: {post_url}")
+    logger.info(f"Post {post_id} completed")
 
 
 async def _record_job_completed(redis) -> None:
@@ -583,6 +550,9 @@ async def check_recrawl_schedules(ctx):
 
             delta = now - profile.last_crawled_at
             if profile.recrawl_interval == "weekly" and delta.days >= 7:
+                await redis.enqueue_job("crawl_profile_sitemap", str(profile.id))
+                enqueued += 1
+            elif profile.recrawl_interval == "biweekly" and delta.days >= 14:
                 await redis.enqueue_job("crawl_profile_sitemap", str(profile.id))
                 enqueued += 1
             elif profile.recrawl_interval == "monthly" and delta.days >= 30:

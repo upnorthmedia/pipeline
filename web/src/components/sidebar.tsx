@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -8,7 +9,6 @@ import {
   ListChecks,
   Activity,
   Settings,
-  PenTool,
   Menu,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -59,9 +59,7 @@ const SidebarContent = ({ onNavigate }: { onNavigate?: () => void }) => {
     <div className="flex h-full flex-col">
       {/* Logo */}
       <div className="flex items-center gap-2.5 border-b border-border px-4 py-4">
-        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
-          <PenTool className="h-4 w-4 text-primary-foreground" />
-        </div>
+        <Image src="/icon.svg" alt="Logo" width={32} height={32} className="h-8 w-8 rounded-md" />
         <div>
           <h1 className="text-sm font-semibold tracking-tight">Pipeline</h1>
           <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">

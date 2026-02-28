@@ -12,6 +12,11 @@ from src.pipeline.helpers import (
 )
 from src.pipeline.state import PipelineState
 from src.services.analytics import compute_analytics
+from src.services.link_validator import (
+    ValidationResult,
+    strip_dead_links_html,
+    validate_links,
+)
 from src.services.llm import ClaudeClient, LLMResponse
 
 logger = logging.getLogger(__name__)
@@ -85,8 +90,23 @@ async def edit_node(state: PipelineState) -> dict:
     # Post-edit validation (log warnings, don't block pipeline)
     await _validate_edit_output(response.content, state)
 
+    # Validate links — strip confirmed 404s (best-effort, never blocks pipeline)
+    try:
+        validation = await validate_links(response.content)
+    except Exception:
+        logger.exception("Link validation failed, skipping")
+        validation = ValidationResult(content=response.content)
+
+    if validation.removed:
+        urls = [r.url for r in validation.removed]
+        await publish_stage_log(
+            f"Stripped {len(validation.removed)} dead link(s): {', '.join(urls)}",
+            stage="edit",
+            level="warning",
+        )
+
     # Parse output into markdown and html parts
-    content = response.content
+    content = validation.content
     final_md = content
     final_html = ""
 
@@ -117,6 +137,9 @@ async def edit_node(state: PipelineState) -> dict:
     }
 
     if final_html:
+        if validation.removed:
+            dead_urls = {r.url for r in validation.removed}
+            final_html = strip_dead_links_html(final_html, dead_urls)
         result["final_html"] = final_html
 
     return result

@@ -4,7 +4,6 @@ import uuid
 
 import pytest
 from sqlalchemy import select
-from src.models.link import InternalLink
 from src.models.post import Post
 from src.models.profile import WebsiteProfile
 from src.worker import _post_completion_hook
@@ -38,23 +37,6 @@ async def post_in_db(db_session, profile_in_db):
 
 class TestPostCompletionHook:
     @pytest.mark.asyncio
-    async def test_creates_internal_link(self, db_session, post_in_db, profile_in_db):
-        state = {"related_keywords": ["python", "testing"]}
-        await _post_completion_hook(db_session, str(post_in_db.id), state)
-
-        result = await db_session.execute(
-            select(InternalLink).where(
-                InternalLink.profile_id == profile_in_db.id,
-                InternalLink.source == "generated",
-            )
-        )
-        link = result.scalar_one()
-        assert link.url == "https://testblog.com/my-test-post/"
-        assert link.title == "How to Test Python Code"
-        assert link.slug == "my-test-post"
-        assert link.keywords == ["python", "testing"]
-
-    @pytest.mark.asyncio
     async def test_marks_post_complete(self, db_session, post_in_db, profile_in_db):
         await _post_completion_hook(db_session, str(post_in_db.id), {})
 
@@ -62,21 +44,6 @@ class TestPostCompletionHook:
         post = result.scalar_one()
         assert post.current_stage == "complete"
         assert post.completed_at is not None
-
-    @pytest.mark.asyncio
-    async def test_no_duplicate_links(self, db_session, post_in_db, profile_in_db):
-        # Run twice — second should be a no-op
-        await _post_completion_hook(db_session, str(post_in_db.id), {})
-        await _post_completion_hook(db_session, str(post_in_db.id), {})
-
-        result = await db_session.execute(
-            select(InternalLink).where(
-                InternalLink.profile_id == profile_in_db.id,
-                InternalLink.url == "https://testblog.com/my-test-post/",
-            )
-        )
-        links = result.scalars().all()
-        assert len(links) == 1
 
     @pytest.mark.asyncio
     async def test_no_profile_skips(self, db_session):
@@ -91,9 +58,10 @@ class TestPostCompletionHook:
 
         await _post_completion_hook(db_session, str(post.id), {})
 
-        # Should not crash, no links created
-        result = await db_session.execute(select(InternalLink))
-        assert result.scalars().all() == []
+        # Post without profile should still be marked complete
+        result = await db_session.execute(select(Post).where(Post.id == post.id))
+        updated = result.scalar_one()
+        assert updated.current_stage == "complete"
 
     @pytest.mark.asyncio
     async def test_post_not_found_skips(self, db_session):
