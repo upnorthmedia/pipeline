@@ -47,23 +47,21 @@ import {
   profiles,
   type Profile,
   type InternalLink,
-  type PaginatedLinks,
   type StageMode,
   type PipelineStage,
+  type WPCategory,
+  type WPAuthor,
   STAGES,
 } from "@/lib/api";
 import { toast } from "sonner";
 
 const OUTPUT_FORMATS = [
-  { value: "both", label: "Both (MD + HTML)" },
-  { value: "markdown", label: "Markdown only" },
-  { value: "wordpress", label: "WordPress HTML only" },
+  { value: "markdown", label: "Markdown" },
+  { value: "wordpress", label: "WordPress (Direct Publish)" },
 ];
 
 const STAGE_MODES: { value: StageMode; label: string }[] = [
-  { value: "review", label: "Review" },
   { value: "auto", label: "Auto" },
-  { value: "approve_only", label: "Approve" },
 ];
 
 const CRAWL_STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
@@ -91,7 +89,7 @@ export default function ProfileDetailPage() {
   const [tone, setTone] = useState("Conversational and friendly");
   const [brandVoice, setBrandVoice] = useState("");
   const [wordCount, setWordCount] = useState(2000);
-  const [outputFormat, setOutputFormat] = useState("both");
+  const [outputFormat, setOutputFormat] = useState("markdown");
   const [imageStyle, setImageStyle] = useState("");
   const [imageBrandColors, setImageBrandColors] = useState("");
   const [imageExclude, setImageExclude] = useState("");
@@ -100,13 +98,25 @@ export default function ProfileDetailPage() {
   const [relatedKeywords, setRelatedKeywords] = useState("");
   const [recrawlInterval, setRecrawlInterval] = useState<string>("disabled");
   const [stageSettings, setStageSettings] = useState<Record<PipelineStage, StageMode>>({
-    research: "review",
-    outline: "review",
-    write: "review",
-    edit: "review",
-    images: "review",
-    ready: "review",
+    research: "auto",
+    outline: "auto",
+    write: "auto",
+    edit: "auto",
+    images: "auto",
+    ready: "auto",
   });
+
+  // WordPress state
+  const [wpUrl, setWpUrl] = useState("");
+  const [wpUsername, setWpUsername] = useState("");
+  const [wpAppPassword, setWpAppPassword] = useState("");
+  const [wpDefaultStatus, setWpDefaultStatus] = useState("publish");
+  const [wpDefaultCategoryId, setWpDefaultCategoryId] = useState<number | null>(null);
+  const [wpDefaultAuthorId, setWpDefaultAuthorId] = useState<number | null>(null);
+  const [wpCategories, setWpCategories] = useState<WPCategory[]>([]);
+  const [wpAuthors, setWpAuthors] = useState<WPAuthor[]>([]);
+  const [wpTesting, setWpTesting] = useState(false);
+  const [wpConnected, setWpConnected] = useState(false);
 
   // Links state
   const [links, setLinks] = useState<InternalLink[]>([]);
@@ -129,7 +139,7 @@ export default function ProfileDetailPage() {
     setTone(p.tone || "Conversational and friendly");
     setBrandVoice(p.brand_voice || "");
     setWordCount(p.word_count || 2000);
-    setOutputFormat(p.output_format || "both");
+    setOutputFormat(p.output_format || "markdown");
     setImageStyle(p.image_style || "");
     setImageBrandColors((p.image_brand_colors || []).join(", "));
     setImageExclude((p.image_exclude || []).join(", "));
@@ -138,6 +148,13 @@ export default function ProfileDetailPage() {
     setRelatedKeywords((p.related_keywords || []).join(", "));
     setRecrawlInterval(p.recrawl_interval || "disabled");
     setStageSettings(p.default_stage_settings);
+    setWpUrl(p.wp_url || "");
+    setWpUsername(p.wp_username || "");
+    setWpAppPassword("");
+    setWpDefaultStatus(p.wp_default_status || "publish");
+    setWpDefaultCategoryId(p.wp_default_category_id);
+    setWpDefaultAuthorId(p.wp_default_author_id);
+    setWpConnected(Boolean(p.wp_url && p.wp_username));
   }, []);
 
   const fetchProfile = useCallback(async () => {
@@ -249,6 +266,12 @@ export default function ProfileDetailPage() {
           : [],
         default_stage_settings: stageSettings,
         recrawl_interval: recrawlInterval === "disabled" ? null : recrawlInterval,
+        wp_url: wpUrl || null,
+        wp_username: wpUsername || null,
+        ...(wpAppPassword ? { wp_app_password: wpAppPassword } : {}),
+        wp_default_status: wpDefaultStatus,
+        wp_default_category_id: wpDefaultCategoryId,
+        wp_default_author_id: wpDefaultAuthorId,
       };
       const updated = await profiles.update(profileId, data);
       setProfile(updated);
@@ -270,6 +293,53 @@ export default function ProfileDetailPage() {
       toast.error("Failed to start crawl");
     }
   };
+
+  const fetchWpData = useCallback(async () => {
+    try {
+      const [cats, auths] = await Promise.all([
+        profiles.wpCategories(profileId),
+        profiles.wpAuthors(profileId),
+      ]);
+      setWpCategories(cats);
+      setWpAuthors(auths);
+    } catch {
+      // Silently ignore — may not be connected
+    }
+  }, [profileId]);
+
+  const handleWpTest = async () => {
+    setWpTesting(true);
+    try {
+      // Save credentials first so the backend can use them
+      const saveData: Record<string, unknown> = {
+        wp_url: wpUrl || null,
+        wp_username: wpUsername || null,
+      };
+      if (wpAppPassword) saveData.wp_app_password = wpAppPassword;
+      await profiles.update(profileId, saveData);
+
+      const result = await profiles.wpTest(profileId);
+      if (result.connected) {
+        setWpConnected(true);
+        toast.success(`Connected to ${result.site_name || "WordPress"}`);
+        await fetchWpData();
+      } else {
+        setWpConnected(false);
+        toast.error(result.error || "Connection failed");
+      }
+    } catch {
+      toast.error("Failed to test connection");
+    } finally {
+      setWpTesting(false);
+    }
+  };
+
+  // Fetch WP categories/authors when profile loads and is connected
+  useEffect(() => {
+    if (!loading && wpConnected) {
+      fetchWpData();
+    }
+  }, [loading, wpConnected, fetchWpData]);
 
   const handleAddLink = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -566,6 +636,136 @@ export default function ProfileDetailPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* WordPress Integration */}
+        {(outputFormat === "wordpress" || wpConnected) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">WordPress Integration</CardTitle>
+              <CardDescription>
+                Direct publish to WordPress after pipeline completes
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="wpUrl">WordPress URL</Label>
+                  <Input
+                    id="wpUrl"
+                    value={wpUrl}
+                    onChange={(e) => setWpUrl(e.target.value)}
+                    placeholder="https://yoursite.com"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="wpUsername">Username</Label>
+                  <Input
+                    id="wpUsername"
+                    value={wpUsername}
+                    onChange={(e) => setWpUsername(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="wpAppPassword">Application Password</Label>
+                  <Input
+                    id="wpAppPassword"
+                    type="password"
+                    value={wpAppPassword}
+                    onChange={(e) => setWpAppPassword(e.target.value)}
+                    placeholder={wpConnected ? "(unchanged)" : "Enter app password"}
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Generate in WordPress &gt; Users &gt; Application Passwords
+                  </p>
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleWpTest}
+                    disabled={wpTesting || !wpUrl || !wpUsername}
+                  >
+                    {wpTesting ? (
+                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                    )}
+                    Test Connection
+                  </Button>
+                  {wpConnected && (
+                    <Badge variant="outline" className="ml-2 text-green-600 border-green-600">
+                      Connected
+                    </Badge>
+                  )}
+                </div>
+              </div>
+
+              {wpConnected && (
+                <>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label>Default Category</Label>
+                      <Select
+                        value={wpDefaultCategoryId?.toString() || "none"}
+                        onValueChange={(v) =>
+                          setWpDefaultCategoryId(v === "none" ? null : Number(v))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select category" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          {wpCategories.map((c) => (
+                            <SelectItem key={c.id} value={c.id.toString()}>
+                              {c.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Default Author</Label>
+                      <Select
+                        value={wpDefaultAuthorId?.toString() || "none"}
+                        onValueChange={(v) =>
+                          setWpDefaultAuthorId(v === "none" ? null : Number(v))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select author" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          {wpAuthors.map((a) => (
+                            <SelectItem key={a.id} value={a.id.toString()}>
+                              {a.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Default Status</Label>
+                      <Select value={wpDefaultStatus} onValueChange={setWpDefaultStatus}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="publish">Publish</SelectItem>
+                          <SelectItem value="draft">Draft</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <div className="flex justify-end">
           <Button type="submit" disabled={saving}>

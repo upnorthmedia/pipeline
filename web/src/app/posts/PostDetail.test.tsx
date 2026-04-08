@@ -28,17 +28,18 @@ vi.mock("@/lib/api", async () => {
       update: vi.fn(),
       run: vi.fn(),
       runAll: vi.fn(),
-      approve: vi.fn(),
       pause: vi.fn(),
       rerun: vi.fn(),
+      restart: vi.fn(),
       analytics: vi.fn(),
-      exportMarkdown: (id: string) => `http://localhost:8000/api/posts/${id}/export/markdown`,
-      exportHtml: (id: string) => `http://localhost:8000/api/posts/${id}/export/html`,
-      exportAll: (id: string) => `http://localhost:8000/api/posts/${id}/export/all`,
+      publish: vi.fn(),
+      exportMarkdown: (id: string) => `http://localhost:8055/api/posts/${id}/export/markdown`,
+      exportHtml: (id: string) => `http://localhost:8055/api/posts/${id}/export/html`,
+      exportAll: (id: string) => `http://localhost:8055/api/posts/${id}/export/all`,
     },
     sseUrl: {
-      post: (id: string) => `http://localhost:8000/api/events/${id}`,
-      global: () => `http://localhost:8000/api/events`,
+      post: (id: string) => `http://localhost:8055/api/events/${id}`,
+      global: () => `http://localhost:8055/api/events`,
     },
   };
 });
@@ -154,19 +155,6 @@ describe("PostDetailPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Run Next")).toBeInTheDocument();
       expect(screen.getByText("Run All")).toBeInTheDocument();
-    });
-  });
-
-  it("shows Approve button when stage is in review", async () => {
-    const post = makePost({
-      current_stage: "research",
-      stage_status: { research: "review" },
-    });
-    mockGet.mockResolvedValue(post);
-    renderWithProviders(<PostDetailPage />);
-
-    await waitFor(() => {
-      expect(screen.getByText("Approve")).toBeInTheDocument();
     });
   });
 

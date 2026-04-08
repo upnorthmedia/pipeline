@@ -17,13 +17,13 @@ def sample_state():
         "niche": "technology",
         "word_count": 2000,
         "tone": "Conversational and friendly",
-        "output_format": "both",
+        "output_format": "markdown",
         "draft": "# Blog Post\n\nDraft content here...",
         "internal_links": [
             {"url": "/django-guide/", "title": "Django Guide"},
             {"url": "/flask-tutorial/", "title": "Flask Tutorial"},
         ],
-        "stage_settings": {"edit": "review"},
+        "stage_settings": {"edit": "auto"},
         "stage_status": {
             "research": "complete",
             "outline": "complete",
@@ -56,7 +56,10 @@ def mock_claude_response_md_only():
 
 class TestEditNode:
     @pytest.mark.asyncio
-    async def test_parses_both_formats(self, sample_state, mock_claude_response_both):
+    async def test_always_outputs_markdown(
+        self, sample_state, mock_claude_response_both
+    ):
+        """Edit stage always outputs markdown only (WP HTML at publish time)."""
         with patch("src.pipeline.stages.edit.ClaudeClient") as MockClient:
             instance = MockClient.return_value
             instance.chat = AsyncMock(return_value=mock_claude_response_both)
@@ -66,8 +69,7 @@ class TestEditNode:
 
         assert "final_md" in result
         assert "Final markdown" in result["final_md"]
-        assert "final_html" in result
-        assert "Final HTML" in result["final_html"]
+        assert "final_html" not in result
 
     @pytest.mark.asyncio
     async def test_markdown_only_format(

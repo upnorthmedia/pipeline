@@ -23,7 +23,7 @@ class TestWebsiteProfile:
         assert result.tone == "Conversational and friendly"
         assert result.word_count == 2000
         assert result.crawl_status == "pending"
-        assert result.default_stage_settings["research"] == "review"
+        assert result.default_stage_settings["research"] == "auto"
 
     async def test_update(self, db_session):
         profile = WebsiteProfile(name="Old Name", website_url="https://old.com")
@@ -69,7 +69,7 @@ class TestPost:
         assert result.slug == "test-post"
         assert result.profile_id == profile.id
         assert result.current_stage == "pending"
-        assert result.stage_settings["research"] == "review"
+        assert result.stage_settings["research"] == "auto"
 
     async def test_create_without_profile(self, db_session):
         post = Post(slug="standalone-post", topic="Standalone Topic")
@@ -176,7 +176,7 @@ class TestSetting:
     async def test_create_and_read(self, db_session):
         setting = Setting(
             key="default_stage_settings",
-            value={"research": "auto", "outline": "review"},
+            value={"research": "auto", "outline": "auto"},
         )
         db_session.add(setting)
         await db_session.commit()

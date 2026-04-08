@@ -95,78 +95,66 @@ async def test_run_all(client: AsyncClient, sample_post_data):
 
 
 async def test_rerun_stage(client: AsyncClient, sample_post_data):
+    """Rerun detects the first non-complete stage and re-queues from there."""
     create_resp = await client.post("/api/posts", json=sample_post_data)
     post = create_resp.json()
 
+    # Simulate research complete, outline stuck at running
     from src.main import app
 
-    mock_redis = AsyncMock()
-    app.state.redis = mock_redis
-
-    resp = await client.post(f"/api/posts/{post['id']}/rerun/research")
-    assert resp.status_code == 202
-    assert resp.json()["stage"] == "research"
-
-    # Verify stage status updated
-    get_resp = await client.get(f"/api/posts/{post['id']}")
-    assert get_resp.json()["stage_status"]["research"] == "running"
-
-
-async def test_rerun_invalid_stage(client: AsyncClient, sample_post_data):
-    create_resp = await client.post("/api/posts", json=sample_post_data)
-    post = create_resp.json()
-
-    from src.main import app
-
-    app.state.redis = AsyncMock()
-
-    resp = await client.post(f"/api/posts/{post['id']}/rerun/invalid")
-    assert resp.status_code == 400
-
-
-async def test_approve_stage_not_in_review(client: AsyncClient, sample_post_data):
-    """Approving a post that isn't in review should fail."""
-    create_resp = await client.post("/api/posts", json=sample_post_data)
-    post = create_resp.json()
-
-    from src.main import app
-
-    app.state.redis = AsyncMock()
-
-    resp = await client.post(f"/api/posts/{post['id']}/approve")
-    assert resp.status_code == 400
-
-
-async def test_approve_stage_in_review(
-    client: AsyncClient, db_session, sample_post_data
-):
-    """Test approving a stage that is actually in review."""
-    create_resp = await client.post("/api/posts", json=sample_post_data)
-    post_data = create_resp.json()
-    post_id = post_data["id"]
-
-    # Set the post to review state via DB
-    from src.models.post import Post
-
-    post = await db_session.get(Post, uuid.UUID(post_id))
-    post.current_stage = "research"
-    post.stage_status = {"research": "review"}
-    post.research_content = "Original research"
-    await db_session.commit()
-
-    from src.main import app
-
-    mock_redis = AsyncMock()
-    app.state.redis = mock_redis
-
-    # Approve with edited content
-    resp = await client.post(
-        f"/api/posts/{post_id}/approve",
-        params={"content": "Edited research content"},
+    await client.patch(
+        f"/api/posts/{post['id']}",
+        json={"research_content": "some research"},
     )
-    assert resp.status_code == 200
-    result = resp.json()
-    assert result["stage_status"]["research"] == "complete"
+    # Manually set stage_status via direct DB — use run endpoint to set status first
+    mock_redis = AsyncMock()
+    app.state.redis = mock_redis
+
+    resp = await client.post(f"/api/posts/{post['id']}/rerun")
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["mode"] == "rerun"
+    assert data["rerun_from"] == "research"  # first non-complete stage
+    mock_redis.enqueue_job.assert_called_once()
+
+    # Verify stage status reset
+    get_resp = await client.get(f"/api/posts/{post['id']}")
+    assert get_resp.json()["stage_status"]["research"] == "pending"
+    assert get_resp.json()["current_stage"] == "pending"
+
+
+async def test_restart_pipeline(client: AsyncClient, sample_post_data):
+    """Force restart clears all content and stages, starts fresh."""
+    create_resp = await client.post("/api/posts", json=sample_post_data)
+    post = create_resp.json()
+
+    # Add some content first
+    await client.patch(
+        f"/api/posts/{post['id']}",
+        json={
+            "research_content": "some research",
+            "outline_content": "some outline",
+        },
+    )
+
+    from src.main import app
+
+    mock_redis = AsyncMock()
+    app.state.redis = mock_redis
+
+    resp = await client.post(f"/api/posts/{post['id']}/restart")
+    assert resp.status_code == 202
+    assert resp.json()["mode"] == "restart"
+    mock_redis.enqueue_job.assert_called_once()
+
+    # Verify everything is cleared
+    get_resp = await client.get(f"/api/posts/{post['id']}")
+    data = get_resp.json()
+    assert data["current_stage"] == "pending"
+    assert data["research_content"] is None
+    assert data["outline_content"] is None
+    for stage in ["research", "outline", "write", "edit", "images", "ready"]:
+        assert data["stage_status"][stage] == "pending"
 
 
 async def test_pause_post(client: AsyncClient, sample_post_data):

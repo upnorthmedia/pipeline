@@ -24,7 +24,7 @@ async def write_node(state: PipelineState) -> dict:
     await publish_stage_log("Rules loaded, building prompt...", stage="write")
     prompt = build_stage_prompt("write", rules, state)
 
-    client = ClaudeClient()
+    client = ClaudeClient(api_key=state.get("api_keys", {}).get("anthropic"))
     await publish_stage_log(
         "Calling Claude for draft (up to 16k tokens)...",
         stage="write",

@@ -90,13 +90,13 @@ describe("useSSE", () => {
   it("connects to global SSE endpoint when no postId", async () => {
     renderHook(() => useSSE());
     await waitFor(() => expect(instances).toHaveLength(1));
-    expect(instances[0].url).toBe("http://localhost:8000/api/events");
+    expect(instances[0].url).toBe("http://localhost:8055/api/events");
   });
 
   it("connects to post-specific SSE endpoint", async () => {
     renderHook(() => useSSE("post-123"));
     await waitFor(() => expect(instances).toHaveLength(1));
-    expect(instances[0].url).toBe("http://localhost:8000/api/events/post-123");
+    expect(instances[0].url).toBe("http://localhost:8055/api/events/post-123");
   });
 
   it("sets connected to true on open", async () => {

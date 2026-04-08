@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.auth import get_current_user
 from src.database import get_session
+from src.models.auth import AuthUser
 from src.models.link import InternalLink
 from src.models.profile import WebsiteProfile
 from src.models.schemas import LinkCreate, LinkRead
@@ -15,9 +17,15 @@ router = APIRouter(prefix="/api/profiles/{profile_id}/links", tags=["links"])
 
 
 async def _get_profile_or_404(
-    profile_id: uuid.UUID, session: AsyncSession
+    profile_id: uuid.UUID, user: AuthUser, session: AsyncSession
 ) -> WebsiteProfile:
-    profile = await session.get(WebsiteProfile, profile_id)
+    result = await session.execute(
+        select(WebsiteProfile).where(
+            WebsiteProfile.id == profile_id,
+            WebsiteProfile.user_id == user.id,
+        )
+    )
+    profile = result.scalar_one_or_none()
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
     return profile
@@ -29,9 +37,10 @@ async def list_links(
     q: str | None = Query(None, description="Search by URL or title"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    await _get_profile_or_404(profile_id, session)
+    await _get_profile_or_404(profile_id, user, session)
 
     query = select(InternalLink).where(InternalLink.profile_id == profile_id)
 
@@ -64,9 +73,10 @@ async def list_links(
 async def create_link(
     profile_id: uuid.UUID,
     data: LinkCreate,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    await _get_profile_or_404(profile_id, session)
+    await _get_profile_or_404(profile_id, user, session)
 
     # Check for duplicate URL
     existing = await session.execute(
@@ -91,6 +101,7 @@ async def create_link(
 async def delete_link(
     profile_id: uuid.UUID,
     link_id: uuid.UUID,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     link = await session.execute(

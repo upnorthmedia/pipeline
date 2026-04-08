@@ -8,8 +8,8 @@ vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
   return {
     ...actual,
-    settings: {
-      list: vi.fn(),
+    apiKeys: {
+      get: vi.fn(),
       update: vi.fn(),
     },
     rules: {
@@ -28,17 +28,19 @@ vi.mock("sonner", () => ({
   },
 }));
 
-const { settings, rules } = await import("@/lib/api");
+const { apiKeys, rules } = await import("@/lib/api");
 const { toast } = await import("sonner");
-const mockSettingsList = vi.mocked(settings.list);
-const mockSettingsUpdate = vi.mocked(settings.update);
+const mockApiKeysGet = vi.mocked(apiKeys.get);
+const mockApiKeysUpdate = vi.mocked(apiKeys.update);
 const mockRulesList = vi.mocked(rules.list);
 const mockRulesGet = vi.mocked(rules.get);
 const mockRulesUpdate = vi.mocked(rules.update);
 
-const testSettings = [
-  { key: "worker_max_jobs", value: { max_jobs: 5 }, updated_at: "2025-01-01T00:00:00Z" },
-];
+const testKeyStatuses = {
+  anthropic: { provider: "anthropic", configured: true, source: "db" as const, hint: "...ab12", valid: null },
+  perplexity: { provider: "perplexity", configured: false, source: "none" as const, hint: "", valid: null },
+  gemini: { provider: "gemini", configured: true, source: "db" as const, hint: "...xyz9", valid: true },
+};
 
 const testRuleFiles = [
   { name: "blog-research", filename: "blog-research.md", exists: true, size: 1024 },
@@ -51,7 +53,7 @@ const testRuleFiles = [
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockSettingsList.mockResolvedValue(testSettings);
+  mockApiKeysGet.mockResolvedValue(testKeyStatuses);
   mockRulesList.mockResolvedValue(testRuleFiles);
   mockRulesGet.mockResolvedValue({ name: "blog-research", content: "# Research Rules\nContent here" });
 });
@@ -61,14 +63,94 @@ describe("SettingsPage", () => {
     renderWithProviders(<SettingsPage />);
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
-      expect(screen.getByText("Worker configuration and rule file editor")).toBeInTheDocument();
+      expect(screen.getByText("API keys and rule file editor")).toBeInTheDocument();
     });
   });
 
-  it("calls settings.list on mount", async () => {
+  it("calls apiKeys.get on mount", async () => {
     renderWithProviders(<SettingsPage />);
     await waitFor(() => {
-      expect(mockSettingsList).toHaveBeenCalled();
+      expect(mockApiKeysGet).toHaveBeenCalled();
+    });
+  });
+
+  it("shows configured status for anthropic", async () => {
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Configured")).toBeInTheDocument();
+    });
+  });
+
+  it("shows not configured for perplexity", async () => {
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Not configured")).toBeInTheDocument();
+    });
+  });
+
+  it("shows valid badge for gemini", async () => {
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Valid")).toBeInTheDocument();
+    });
+  });
+
+  it("validates format on blur", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Anthropic")).toBeInTheDocument();
+    });
+
+    const input = screen.getByLabelText("Anthropic");
+    await user.type(input, "bad-key");
+    await user.tab();
+
+    await waitFor(() => {
+      expect(screen.getByText("Expected prefix: sk-ant-")).toBeInTheDocument();
+    });
+  });
+
+  it("save calls apiKeys.update", async () => {
+    const user = userEvent.setup();
+    mockApiKeysUpdate.mockResolvedValue({
+      anthropic: { provider: "anthropic", configured: true, source: "db" as const, hint: "...newk", valid: true },
+      perplexity: { provider: "perplexity", configured: false, source: "none" as const, hint: "", valid: null },
+      gemini: { provider: "gemini", configured: true, source: "db" as const, hint: "...xyz9", valid: true },
+    });
+
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Anthropic")).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByLabelText("Anthropic"), "sk-ant-test1234");
+    await user.click(screen.getByText("Save & Validate"));
+
+    await waitFor(() => {
+      expect(mockApiKeysUpdate).toHaveBeenCalledWith({ anthropic: "sk-ant-test1234" });
+      expect(toast.success).toHaveBeenCalledWith("API keys saved and validated");
+    });
+  });
+
+  it("shows validation failure toast", async () => {
+    const user = userEvent.setup();
+    mockApiKeysUpdate.mockResolvedValue({
+      anthropic: { provider: "anthropic", configured: true, source: "db" as const, hint: "...newk", valid: false },
+      perplexity: { provider: "perplexity", configured: false, source: "none" as const, hint: "", valid: null },
+      gemini: { provider: "gemini", configured: true, source: "db" as const, hint: "...xyz9", valid: true },
+    });
+
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Anthropic")).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByLabelText("Anthropic"), "sk-ant-badkey123");
+    await user.click(screen.getByText("Save & Validate"));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("Some keys failed validation — check status badges");
     });
   });
 
@@ -76,13 +158,6 @@ describe("SettingsPage", () => {
     renderWithProviders(<SettingsPage />);
     await waitFor(() => {
       expect(mockRulesList).toHaveBeenCalled();
-    });
-  });
-
-  it("loads worker max_jobs", async () => {
-    renderWithProviders(<SettingsPage />);
-    await waitFor(() => {
-      expect(screen.getByLabelText("Worker Concurrency")).toHaveValue(5);
     });
   });
 

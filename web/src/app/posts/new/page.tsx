@@ -28,22 +28,24 @@ import {
   profiles,
   type Profile,
   type PostCreate,
-  type StageMode,
-  type PipelineStage,
-  STAGES,
+  type WPCategory,
+  type WPAuthor,
 } from "@/lib/api";
 import { toast } from "sonner";
 
 const OUTPUT_FORMATS = [
-  { value: "both", label: "Both (MD + HTML)" },
-  { value: "markdown", label: "Markdown only" },
-  { value: "wordpress", label: "WordPress HTML only" },
+  { value: "markdown", label: "Markdown" },
+  { value: "wordpress", label: "WordPress (Direct Publish)" },
 ];
 
-const STAGE_MODES: { value: StageMode; label: string; desc: string }[] = [
-  { value: "review", label: "Review", desc: "Pause for human review" },
-  { value: "auto", label: "Auto", desc: "Run without stopping" },
-  { value: "approve_only", label: "Approve", desc: "Quick approval needed" },
+const ARTICLE_TYPES = [
+  { value: "guide", label: "Guide" },
+  { value: "how-to", label: "How-To" },
+  { value: "listicle", label: "Listicle" },
+  { value: "review", label: "Review" },
+  { value: "comparison", label: "Comparison" },
+  { value: "news", label: "News" },
+  { value: "opinion", label: "Opinion" },
 ];
 
 function slugify(text: string): string {
@@ -68,20 +70,19 @@ export default function NewPostPage() {
   const [targetAudience, setTargetAudience] = useState("");
   const [tone, setTone] = useState("Conversational and friendly");
   const [wordCount, setWordCount] = useState(2000);
-  const [outputFormat, setOutputFormat] = useState("both");
+  const [outputFormat, setOutputFormat] = useState("markdown");
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [brandVoice, setBrandVoice] = useState("");
   const [avoid, setAvoid] = useState("");
   const [relatedKeywords, setRelatedKeywords] = useState("");
   const [competitorUrls, setCompetitorUrls] = useState("");
-  const [stageSettings, setStageSettings] = useState<Record<PipelineStage, StageMode>>({
-    research: "auto",
-    outline: "auto",
-    write: "auto",
-    edit: "auto",
-    images: "auto",
-    ready: "auto",
-  });
+  const [wpCategoryId, setWpCategoryId] = useState<number | null>(null);
+  const [wpAuthorId, setWpAuthorId] = useState<number | null>(null);
+  const [articleType, setArticleType] = useState("");
+  const [additionalInfo, setAdditionalInfo] = useState("");
+  const [requiredMentions, setRequiredMentions] = useState("");
+  const [wpCategories, setWpCategories] = useState<WPCategory[]>([]);
+  const [wpAuthors, setWpAuthors] = useState<WPAuthor[]>([]);
 
   useEffect(() => {
     profiles.list().then(setProfileList).catch(() => {});
@@ -102,12 +103,22 @@ export default function NewPostPage() {
       setTargetAudience(profile.target_audience || "");
       setTone(profile.tone || "Conversational and friendly");
       setWordCount(profile.word_count || 2000);
-      setOutputFormat(profile.output_format || "both");
+      setOutputFormat(profile.output_format || "markdown");
       setWebsiteUrl(profile.website_url || "");
       setBrandVoice(profile.brand_voice || "");
       setAvoid(profile.avoid || "");
       setRelatedKeywords((profile.related_keywords || []).join(", "));
-      setStageSettings(profile.default_stage_settings);
+
+      // Load WP data if profile has WordPress configured
+      setWpCategoryId(profile.wp_default_category_id);
+      setWpAuthorId(profile.wp_default_author_id);
+      if (profile.wp_url && profile.wp_username) {
+        profiles.wpCategories(profile.id).then(setWpCategories).catch(() => {});
+        profiles.wpAuthors(profile.id).then(setWpAuthors).catch(() => {});
+      } else {
+        setWpCategories([]);
+        setWpAuthors([]);
+      }
     }
   };
 
@@ -139,7 +150,11 @@ export default function NewPostPage() {
         competitor_urls: competitorUrls
           ? competitorUrls.split("\n").map((s) => s.trim()).filter(Boolean)
           : [],
-        stage_settings: stageSettings,
+        article_type: articleType || undefined,
+        additional_info: additionalInfo || undefined,
+        required_mentions: requiredMentions || undefined,
+        wp_category_id: wpCategoryId,
+        wp_author_id: wpAuthorId,
       };
       const post = await posts.create(data);
       toast.success("Post created");
@@ -232,19 +247,36 @@ export default function NewPostPage() {
                 className="font-mono text-sm"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="intent">Search Intent</Label>
-              <Select value={intent} onValueChange={setIntent}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select intent" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="informational">Informational</SelectItem>
-                  <SelectItem value="commercial">Commercial</SelectItem>
-                  <SelectItem value="transactional">Transactional</SelectItem>
-                  <SelectItem value="navigational">Navigational</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="intent">Search Intent</Label>
+                <Select value={intent} onValueChange={setIntent}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select intent" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="informational">Informational</SelectItem>
+                    <SelectItem value="commercial">Commercial</SelectItem>
+                    <SelectItem value="transactional">Transactional</SelectItem>
+                    <SelectItem value="navigational">Navigational</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="articleType">Article Type</Label>
+                <Select value={articleType} onValueChange={setArticleType}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ARTICLE_TYPES.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -342,6 +374,25 @@ export default function NewPostPage() {
                 placeholder="Words or phrases to avoid"
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="requiredMentions">Required Mentions</Label>
+              <Input
+                id="requiredMentions"
+                value={requiredMentions}
+                onChange={(e) => setRequiredMentions(e.target.value)}
+                placeholder="Topics, products, or links that must appear in the article"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="additionalInfo">Additional Information</Label>
+              <Textarea
+                id="additionalInfo"
+                value={additionalInfo}
+                onChange={(e) => setAdditionalInfo(e.target.value)}
+                placeholder="Any additional context, requirements, or instructions for the AI..."
+                rows={3}
+              />
+            </div>
           </CardContent>
         </Card>
 
@@ -376,46 +427,63 @@ export default function NewPostPage() {
           </CardContent>
         </Card>
 
-        {/* Pipeline settings */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Pipeline Settings</CardTitle>
-            <CardDescription>
-              Control how each stage runs
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {STAGES.map((stage) => (
-                <div
-                  key={stage}
-                  className="flex items-center justify-between rounded-md border border-border px-3 py-2"
-                >
-                  <span className="text-sm font-medium capitalize">
-                    {stage}
-                  </span>
+        {/* WordPress Settings */}
+        {selectedProfile?.wp_url && selectedProfile?.wp_username && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">WordPress Publishing</CardTitle>
+              <CardDescription>
+                Override category and author for this post
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Category</Label>
                   <Select
-                    value={stageSettings[stage]}
-                    onValueChange={(v: StageMode) =>
-                      setStageSettings((prev) => ({ ...prev, [stage]: v }))
+                    value={wpCategoryId?.toString() || "none"}
+                    onValueChange={(v) =>
+                      setWpCategoryId(v === "none" ? null : Number(v))
                     }
                   >
-                    <SelectTrigger className="w-[140px] h-8">
-                      <SelectValue />
+                    <SelectTrigger>
+                      <SelectValue placeholder="Profile default" />
                     </SelectTrigger>
                     <SelectContent>
-                      {STAGE_MODES.map((m) => (
-                        <SelectItem key={m.value} value={m.value}>
-                          <span>{m.label}</span>
+                      <SelectItem value="none">Profile default</SelectItem>
+                      {wpCategories.map((c) => (
+                        <SelectItem key={c.id} value={c.id.toString()}>
+                          {c.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+                <div className="space-y-2">
+                  <Label>Author</Label>
+                  <Select
+                    value={wpAuthorId?.toString() || "none"}
+                    onValueChange={(v) =>
+                      setWpAuthorId(v === "none" ? null : Number(v))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Profile default" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Profile default</SelectItem>
+                      {wpAuthors.map((a) => (
+                        <SelectItem key={a.id} value={a.id.toString()}>
+                          {a.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Separator />
 

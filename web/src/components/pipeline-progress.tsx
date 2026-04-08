@@ -10,7 +10,6 @@ import {
   Circle,
   Loader2,
   AlertCircle,
-  Eye,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -39,11 +38,6 @@ const STATUS_STYLES: Record<string, { ring: string; bg: string; icon: React.Comp
     ring: "ring-amber-500/30",
     bg: "bg-amber-500",
     icon: Loader2,
-  },
-  review: {
-    ring: "ring-blue-500/30",
-    bg: "bg-blue-500",
-    icon: Eye,
   },
   failed: {
     ring: "ring-red-500/30",
@@ -138,11 +132,9 @@ export const PipelineProgress = ({
                         ? "bg-emerald-500/15"
                         : status === "running"
                           ? "bg-amber-500/15"
-                          : status === "review"
-                            ? "bg-blue-500/15"
-                            : status === "failed"
-                              ? "bg-red-500/15"
-                              : "bg-muted"
+                          : status === "failed"
+                            ? "bg-red-500/15"
+                            : "bg-muted"
                     )}
                   >
                     <Icon
@@ -150,7 +142,6 @@ export const PipelineProgress = ({
                         "h-3.5 w-3.5",
                         status === "complete" && "text-emerald-500",
                         status === "running" && "text-amber-500 animate-spin",
-                        status === "review" && "text-blue-500",
                         status === "failed" && "text-red-500",
                         status === "pending" && "text-muted-foreground/50"
                       )}

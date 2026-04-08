@@ -24,21 +24,6 @@ export const GlobalNotifications = () => {
         });
         break;
 
-      case "review_needed":
-        toast.info(`${stage} needs review`, {
-          description: `Post ${postId?.slice(0, 8)}...`,
-          duration: 10000,
-          action: postId
-            ? {
-                label: "Review",
-                onClick: () => {
-                  window.location.href = `/posts/${postId}`;
-                },
-              }
-            : undefined,
-        });
-        break;
-
       case "stage_error":
         toast.error(`${stage} failed`, {
           description: event.error || `Post ${postId?.slice(0, 8)}...`,

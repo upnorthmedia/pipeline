@@ -3,7 +3,6 @@
 import uuid
 
 from src.pipeline.state import (
-    GATE_MODES,
     STAGE_CONTENT_MAP,
     STAGE_PROVIDER_MAP,
     STAGE_RULES_MAP,
@@ -30,11 +29,6 @@ class TestConstants:
             assert stage in STAGE_RULES_MAP
             assert STAGE_RULES_MAP[stage].endswith(".md")
 
-    def test_gate_modes(self):
-        assert "auto" in GATE_MODES
-        assert "review" in GATE_MODES
-        assert "approve_only" in GATE_MODES
-
 
 class TestPipelineState:
     def test_create_minimal_state(self):
@@ -56,7 +50,7 @@ class TestPipelineState:
             "intent": "informational",
             "word_count": 2000,
             "tone": "friendly",
-            "output_format": "both",
+            "output_format": "markdown",
             "website_url": "https://example.com",
             "related_keywords": ["python", "api"],
             "competitor_urls": [],
@@ -74,7 +68,7 @@ class TestPipelineState:
             "final_html": "",
             "image_manifest": {},
             "current_stage": "pending",
-            "stage_settings": {s: "review" for s in STAGES},
+            "stage_settings": {s: "auto" for s in STAGES},
             "stage_status": {},
         }
         assert state["word_count"] == 2000
@@ -95,7 +89,7 @@ class FakePost:
             "intent": "informational",
             "word_count": 2000,
             "tone": "Conversational and friendly",
-            "output_format": "both",
+            "output_format": "markdown",
             "website_url": "https://example.com",
             "related_keywords": ["kw1"],
             "competitor_urls": [],
@@ -105,6 +99,8 @@ class FakePost:
             "brand_voice": None,
             "avoid": None,
             "required_mentions": None,
+            "article_type": None,
+            "additional_info": None,
             "research_content": None,
             "outline_content": None,
             "draft_content": None,
@@ -113,7 +109,7 @@ class FakePost:
             "image_manifest": None,
             "ready_content": None,
             "current_stage": "pending",
-            "stage_settings": {s: "review" for s in STAGES},
+            "stage_settings": {s: "auto" for s in STAGES},
             "stage_status": {},
         }
         defaults.update(kwargs)

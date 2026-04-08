@@ -59,6 +59,9 @@ Review and improve:
 - Remove redundancies
 - **Replace all em-dashes (—) with alternatives:** commas, colons, parentheses, or separate sentences
 
+**Article Type Consistency:**
+- If ARTICLE_TYPE is provided, verify the article structure matches the expected format (e.g., listicle items are numbered consistently, how-to steps are sequential, review includes pros/cons)
+
 **Engagement:**
 - Strengthen the opening hook if needed
 - Improve weak transitions
@@ -150,6 +153,8 @@ Based on OUTPUT_FORMAT, generate the appropriate files:
 
 Clean, publication-ready Markdown with NO inline comments. All suggestions go at the end.
 
+**IMPORTANT: Do not include an H1 (`#`) title in the body.** The title lives in the YAML frontmatter only. The blog template renders the frontmatter `title` as the page H1. Start the body content directly with the opening paragraph, then use H2 (`##`), H3 (`###`), etc. for sections.
+
 ```markdown
 ---
 title: "[Final Title]"
@@ -158,8 +163,6 @@ keywords: "[primary], [secondary1], [secondary2], ..."
 author: ""
 date: "[Use TODAY_DATE from Post Configuration]"
 ---
-
-# [Title]
 
 [Opening paragraph - the hook]
 

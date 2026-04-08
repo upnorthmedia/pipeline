@@ -19,9 +19,10 @@ const NAMED_EVENTS = [
   "stage_start",
   "stage_complete",
   "stage_error",
-  "review_needed",
-  "stage_review",
   "pipeline_complete",
+  "publish_start",
+  "publish_complete",
+  "publish_error",
   "log",
 ] as const;
 

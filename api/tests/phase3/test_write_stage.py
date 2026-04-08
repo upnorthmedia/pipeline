@@ -17,9 +17,9 @@ def sample_state():
         "niche": "technology",
         "word_count": 2000,
         "tone": "Conversational and friendly",
-        "output_format": "both",
+        "output_format": "markdown",
         "outline": "## Introduction\n## Django\n## Flask",
-        "stage_settings": {"write": "review"},
+        "stage_settings": {"write": "auto"},
         "stage_status": {"research": "complete", "outline": "complete"},
     }
 

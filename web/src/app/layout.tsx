@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Pipeline | Content Engine",
-  description: "Blog content pipeline dashboard",
+  title: "Content Crew",
+  description: "AI-powered content pipeline",
 };
 
 export default function RootLayout({
@@ -27,7 +27,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <head>
-        <meta name="apple-mobile-web-app-title" content="Pipeline" />
+        <meta name="apple-mobile-web-app-title" content="Content Crew" />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
@@ -38,7 +38,7 @@ export default function RootLayout({
             {/* Mobile header */}
             <header className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b border-border bg-background/80 px-4 backdrop-blur-sm md:hidden">
               <MobileSidebar />
-              <span className="text-sm font-semibold">Pipeline</span>
+              <span className="text-sm font-semibold">Content Crew</span>
             </header>
 
             <main className="min-h-[calc(100vh-3.5rem)] md:min-h-screen">

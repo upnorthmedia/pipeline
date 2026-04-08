@@ -6,9 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.auth import get_current_user
 from src.database import get_session
+from src.models.auth import AuthUser
 from src.models.post import Post
-from src.models.schemas import PostRead
+from src.models.profile import WebsiteProfile
 from src.pipeline.state import STAGES
 from src.worker import DLQ_KEY, WORKER_LAST_COMPLETED_KEY
 
@@ -16,30 +18,26 @@ router = APIRouter(prefix="/api/queue", tags=["queue"])
 
 
 @router.get("")
-async def queue_status(session: AsyncSession = Depends(get_session)):
+async def queue_status(
+    user: AuthUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     """Current queue status: counts by stage status."""
-    # Count posts by current_stage
+    # Count posts by current_stage (scoped to user)
     result = await session.execute(
-        select(Post.current_stage, func.count(Post.id)).group_by(Post.current_stage)
+        select(Post.current_stage, func.count(Post.id))
+        .join(WebsiteProfile, Post.profile_id == WebsiteProfile.id)
+        .where(WebsiteProfile.user_id == user.id)
+        .group_by(Post.current_stage)
     )
     counts = {row[0]: row[1] for row in result.all()}
 
     # Categorize
     running = sum(v for k, v in counts.items() if k in STAGES)
-    review = 0
-    for stage in STAGES:
-        # Count posts where any stage_status value is "review"
-        review_count = await session.execute(
-            select(func.count(Post.id)).where(
-                Post.stage_status[stage].as_string() == "review"
-            )
-        )
-        review += review_count.scalar_one()
 
     return {
         "running": running,
         "pending": counts.get("pending", 0),
-        "review": review,
         "complete": counts.get("complete", 0),
         "failed": counts.get("failed", 0),
         "paused": counts.get("paused", 0),
@@ -50,6 +48,7 @@ async def queue_status(session: AsyncSession = Depends(get_session)):
 @router.get("/worker-status")
 async def worker_status(
     request: Request,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Check worker health: alive, active/queued jobs, last completed time."""
@@ -88,28 +87,17 @@ async def worker_status(
     }
 
 
-@router.get("/review", response_model=list[PostRead])
-async def review_queue(session: AsyncSession = Depends(get_session)):
-    """Posts with stages awaiting human review."""
-    # Find posts where any stage has "review" status
-    posts = []
-    for stage in STAGES:
-        result = await session.execute(
-            select(Post)
-            .where(Post.stage_status[stage].as_string() == "review")
-            .order_by(Post.updated_at.asc())
-        )
-        for post in result.scalars().all():
-            if post.id not in {p.id for p in posts}:
-                posts.append(post)
-    return posts
-
-
 @router.post("/pause-all", status_code=200)
-async def pause_all(session: AsyncSession = Depends(get_session)):
+async def pause_all(
+    user: AuthUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
     """Pause all running and pending posts."""
     result = await session.execute(
-        select(Post).where(Post.current_stage.in_(["pending", *STAGES]))
+        select(Post)
+        .join(WebsiteProfile, Post.profile_id == WebsiteProfile.id)
+        .where(WebsiteProfile.user_id == user.id)
+        .where(Post.current_stage.in_(["pending", *STAGES]))
     )
     posts = result.scalars().all()
     count = 0
@@ -123,10 +111,16 @@ async def pause_all(session: AsyncSession = Depends(get_session)):
 @router.post("/resume-all", status_code=200)
 async def resume_all(
     request: Request,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Resume all paused posts."""
-    result = await session.execute(select(Post).where(Post.current_stage == "paused"))
+    result = await session.execute(
+        select(Post)
+        .join(WebsiteProfile, Post.profile_id == WebsiteProfile.id)
+        .where(WebsiteProfile.user_id == user.id)
+        .where(Post.current_stage == "paused")
+    )
     posts = result.scalars().all()
     count = 0
     redis = request.app.state.redis
@@ -151,7 +145,10 @@ async def resume_all(
 
 
 @router.get("/dead-letter")
-async def dead_letter_queue(request: Request):
+async def dead_letter_queue(
+    request: Request,
+    user: AuthUser = Depends(get_current_user),
+):
     """List all entries in the dead letter queue."""
     redis = request.app.state.redis
     raw_entries = await redis.lrange(DLQ_KEY, 0, -1)
@@ -166,6 +163,7 @@ async def dead_letter_queue(request: Request):
 async def retry_dead_letter(
     post_id: str,
     request: Request,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Retry a failed job from the dead letter queue."""
@@ -202,7 +200,10 @@ async def retry_dead_letter(
 
 
 @router.delete("/dead-letter", status_code=200)
-async def clear_dead_letter(request: Request):
+async def clear_dead_letter(
+    request: Request,
+    user: AuthUser = Depends(get_current_user),
+):
     """Clear all entries from the dead letter queue."""
     redis = request.app.state.redis
     count = await redis.llen(DLQ_KEY)

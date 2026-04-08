@@ -10,9 +10,9 @@ vi.mock("@/lib/api", async () => {
     ...actual,
     posts: {
       ...actual.posts,
-      exportMarkdown: (id: string) => `http://localhost:8000/api/posts/${id}/export/markdown`,
-      exportHtml: (id: string) => `http://localhost:8000/api/posts/${id}/export/html`,
-      exportAll: (id: string) => `http://localhost:8000/api/posts/${id}/export/all`,
+      exportMarkdown: (id: string) => `http://localhost:8055/api/posts/${id}/export/markdown`,
+      exportHtml: (id: string) => `http://localhost:8055/api/posts/${id}/export/html`,
+      exportAll: (id: string) => `http://localhost:8055/api/posts/${id}/export/all`,
     },
   };
 });
@@ -158,7 +158,7 @@ describe("ExportButton", () => {
     const link = screen.getByText("Download .mdx").closest("a");
     expect(link).toHaveAttribute(
       "href",
-      "http://localhost:8000/api/posts/test-123/export/markdown"
+      "http://localhost:8055/api/posts/test-123/export/markdown"
     );
   });
 });

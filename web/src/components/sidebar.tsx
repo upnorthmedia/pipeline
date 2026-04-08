@@ -6,8 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   FileText,
   Globe,
-  ListChecks,
-  Activity,
+  BarChart3,
   Settings,
   Menu,
 } from "lucide-react";
@@ -19,8 +18,7 @@ import { useState } from "react";
 const NAV_ITEMS = [
   { href: "/", label: "Posts", icon: FileText },
   { href: "/profiles", label: "Profiles", icon: Globe },
-  { href: "/queue", label: "Queue", icon: ListChecks },
-  { href: "/monitor", label: "Monitor", icon: Activity },
+  { href: "/monitor", label: "Observability", icon: BarChart3 },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -61,7 +59,7 @@ const SidebarContent = ({ onNavigate }: { onNavigate?: () => void }) => {
       <div className="flex items-center gap-2.5 border-b border-border px-4 py-4">
         <Image src="/icon.svg" alt="Logo" width={32} height={32} className="h-8 w-8 rounded-md" />
         <div>
-          <h1 className="text-sm font-semibold tracking-tight">Pipeline</h1>
+          <h1 className="text-sm font-semibold tracking-tight">Content Crew</h1>
           <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
             Content Engine
           </p>

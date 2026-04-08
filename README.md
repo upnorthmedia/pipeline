@@ -11,7 +11,7 @@ A blog content pipeline with a Next.js dashboard. Takes a topic and produces a p
                      └─────┬─────┘
                            │ SSE
                      ┌─────▼─────┐
-                     │  FastAPI   │ :8000
+                     │  FastAPI   │ :8055
                      │    API     │
                      └──┬─────┬──┘
                         │     │
@@ -71,7 +71,7 @@ cp .env.example .env
 docker compose up
 ```
 
-The dashboard is available at `http://localhost:3000` and the API at `http://localhost:8000`.
+The dashboard is available at `http://localhost:3000` and the API at `http://localhost:8055`.
 
 ## Development
 

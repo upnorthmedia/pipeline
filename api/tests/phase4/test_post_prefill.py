@@ -30,9 +30,9 @@ async def profile_with_defaults(client: AsyncClient):
             "related_keywords": ["ar-15", "build kit"],
             "default_stage_settings": {
                 "research": "auto",
-                "outline": "review",
+                "outline": "auto",
                 "write": "auto",
-                "edit": "review",
+                "edit": "auto",
                 "images": "auto",
             },
         },
@@ -74,7 +74,7 @@ async def test_create_post_with_profile_prefill(
     # Stage settings from profile defaults
     assert post["stage_settings"]["research"] == "auto"
     assert post["stage_settings"]["write"] == "auto"
-    assert post["stage_settings"]["edit"] == "review"
+    assert post["stage_settings"]["edit"] == "auto"
 
 
 async def test_create_post_explicit_values_override_profile(
@@ -129,4 +129,4 @@ async def test_create_post_without_profile(client: AsyncClient):
     assert post["profile_id"] is None
     assert post["word_count"] == 2000
     assert post["tone"] == "Conversational and friendly"
-    assert post["output_format"] == "both"
+    assert post["output_format"] == "markdown"

@@ -47,13 +47,9 @@ STAGE_OUTPUT_KEY: dict[str, str] = {
     "ready": "ready",
 }
 
-# Valid gate modes
-GATE_MODES = ("auto", "review", "approve_only")
-
 # Stage status values
 STATUS_PENDING = "pending"
 STATUS_RUNNING = "running"
-STATUS_REVIEW = "review"
 STATUS_COMPLETE = "complete"
 STATUS_FAILED = "failed"
 
@@ -83,6 +79,8 @@ class PipelineState(TypedDict, total=False):
     brand_voice: str
     avoid: str
     required_mentions: str
+    article_type: str
+    additional_info: str
     internal_links: list[dict]
 
     # Stage outputs
@@ -93,6 +91,9 @@ class PipelineState(TypedDict, total=False):
     final_html: str
     image_manifest: dict
     ready: str
+
+    # API keys (loaded from DB at pipeline start)
+    api_keys: dict[str, str]
 
     # Pipeline control
     current_stage: str
@@ -115,7 +116,7 @@ def state_from_post(post, internal_links: list[dict] | None = None) -> PipelineS
         intent=post.intent or "",
         word_count=post.word_count or 2000,
         tone=post.tone or "Conversational and friendly",
-        output_format=post.output_format or "both",
+        output_format=post.output_format or "markdown",
         website_url=post.website_url or "",
         related_keywords=post.related_keywords or [],
         competitor_urls=post.competitor_urls or [],
@@ -125,6 +126,8 @@ def state_from_post(post, internal_links: list[dict] | None = None) -> PipelineS
         brand_voice=post.brand_voice or "",
         avoid=post.avoid or "",
         required_mentions=post.required_mentions or "",
+        article_type=post.article_type or "",
+        additional_info=post.additional_info or "",
         internal_links=internal_links or [],
         research=post.research_content or "",
         outline=post.outline_content or "",
@@ -134,6 +137,6 @@ def state_from_post(post, internal_links: list[dict] | None = None) -> PipelineS
         image_manifest=post.image_manifest or {},
         ready=post.ready_content or "",
         current_stage=post.current_stage or "pending",
-        stage_settings=post.stage_settings or {s: "review" for s in STAGES},
+        stage_settings=post.stage_settings or {s: "auto" for s in STAGES},
         stage_status=post.stage_status or {},
     )

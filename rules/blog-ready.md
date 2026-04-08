@@ -108,4 +108,5 @@ The markdown goes first, WordPress HTML second.
 - Only REMOVE publishing notes
 - If an image's `generated` field is `false`, skip it (do not insert failed images)
 - Keep all existing links intact
+- If the body starts with an H1 heading (`# ...`) that matches or closely matches the frontmatter title, remove it. The frontmatter `title` is rendered as the page H1 by the blog template — a duplicate H1 in the body must not appear.
 - The output should be immediately publishable with zero manual edits

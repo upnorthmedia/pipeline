@@ -6,9 +6,12 @@ import Link from "next/link";
 import {
   ArrowLeft,
   RefreshCw,
-  Check,
+  RotateCcw,
   Pause,
   Copy,
+  ExternalLink,
+  Loader2,
+  Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +23,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 import { PipelineProgress } from "@/components/pipeline-progress";
 import { StageBadge } from "@/components/stage-badge";
 import { MarkdownEditor } from "@/components/markdown-editor";
@@ -195,8 +199,16 @@ export default function PostDetailPage() {
       if (event.event === "stage_error") {
         toast.error(`${event.stage || "Pipeline"} failed`);
       }
-      if (event.event === "review_needed" || event.event === "stage_review") {
-        toast.info(`${event.stage} needs review`);
+      if (event.event === "publish_start") {
+        toast.info("Publishing to WordPress...");
+        setPost((prev) => prev ? { ...prev, wp_publish_status: "publishing" } : prev);
+      }
+      if (event.event === "publish_complete") {
+        toast.success("Published to WordPress!");
+        fetchPost();
+      }
+      if (event.event === "publish_error") {
+        toast.error(`Publish failed: ${event.error || "Unknown error"}`);
         fetchPost();
       }
     },
@@ -226,19 +238,6 @@ export default function PostDetailPage() {
     [post, activeTab, postId, fetchAnalytics]
   );
 
-  const handleApprove = async () => {
-    // Approve with the current editor content if it's been modified
-    const content =
-      editorContent !== lastSavedRef.current ? editorContent : undefined;
-    try {
-      await posts.approve(postId, content);
-      toast.success("Approved");
-      fetchPost();
-    } catch {
-      toast.error("Failed to approve");
-    }
-  };
-
   const handlePause = async () => {
     try {
       await posts.pause(postId);
@@ -249,13 +248,33 @@ export default function PostDetailPage() {
     }
   };
 
-  const handleRerun = async (stage: string) => {
+  const handleRerun = async () => {
     try {
-      await posts.rerun(postId, stage);
-      toast.success(`Re-running ${stage}`);
+      const result = await posts.rerun(postId);
+      toast.success(`Re-running from ${result.rerun_from}`);
       fetchPost();
     } catch {
       toast.error("Failed to re-run stage");
+    }
+  };
+
+  const handleRestart = async () => {
+    try {
+      await posts.restart(postId);
+      toast.success("Restarting pipeline from scratch");
+      fetchPost();
+    } catch {
+      toast.error("Failed to restart pipeline");
+    }
+  };
+
+  const handlePublish = async () => {
+    try {
+      await posts.publish(postId);
+      toast.info("Publishing to WordPress...");
+      setPost((prev) => prev ? { ...prev, wp_publish_status: "publishing" } : prev);
+    } catch {
+      toast.error("Failed to publish");
     }
   };
 
@@ -276,8 +295,6 @@ export default function PostDetailPage() {
 
   if (!post) return null;
 
-  const currentStageStatus = post.stage_status[post.current_stage as PipelineStage];
-  const isInReview = currentStageStatus === "review";
   const isRunning = STAGES.some((s) => post.stage_status[s] === "running");
   const isComplete = post.current_stage === "complete";
 
@@ -300,6 +317,28 @@ export default function PostDetailPage() {
                 {post.slug}
               </span>
               <StageBadge stage={post.current_stage} />
+              {post.wp_publish_status === "published" && post.wp_post_url && (
+                <a
+                  href={post.wp_post_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1"
+                >
+                  <Badge variant="outline" className="text-green-600 border-green-600">
+                    Published
+                    <ExternalLink className="h-3 w-3 ml-1" />
+                  </Badge>
+                </a>
+              )}
+              {post.wp_publish_status === "publishing" && (
+                <Badge variant="outline">
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  Publishing...
+                </Badge>
+              )}
+              {post.wp_publish_status === "failed" && (
+                <Badge variant="destructive">Publish failed</Badge>
+              )}
               {saving && (
                 <span className="text-xs text-muted-foreground animate-pulse">
                   Saving...
@@ -310,18 +349,35 @@ export default function PostDetailPage() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {isInReview && (
-            <Button onClick={handleApprove} size="sm">
-              <Check className="h-3.5 w-3.5 mr-1.5" />
-              Approve
-            </Button>
-          )}
           {isRunning && (
             <Button variant="outline" size="sm" onClick={handlePause}>
               <Pause className="h-3.5 w-3.5 mr-1.5" />
               Pause
             </Button>
           )}
+          <Button variant="outline" size="sm" onClick={handleRerun}>
+            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+            Rerun Stage
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleRestart}>
+            <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+            Force Restart
+          </Button>
+          {post.output_format === "wordpress" &&
+            isComplete &&
+            (!post.wp_publish_status || post.wp_publish_status === "pending") && (
+              <Button size="sm" onClick={handlePublish}>
+                <Upload className="h-3.5 w-3.5 mr-1.5" />
+                Publish to WordPress
+              </Button>
+            )}
+          {post.output_format === "wordpress" &&
+            post.wp_publish_status === "failed" && (
+              <Button size="sm" variant="outline" onClick={handlePublish}>
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                Retry Publish
+              </Button>
+            )}
 
           <ExportButton
             postId={postId}
@@ -329,6 +385,7 @@ export default function PostDetailPage() {
             hasHtml={!!post.final_html_content}
             mdContent={post.ready_content || post.final_md_content}
             htmlContent={post.final_html_content}
+            wpPostUrl={post.wp_post_url}
           />
         </div>
       </div>
@@ -351,18 +408,14 @@ export default function PostDetailPage() {
           <TabsList>
             {STAGES.map((stage) => {
               const hasContent = !!post[STAGE_CONTENT_FIELDS[stage]];
-              const status = post.stage_status[stage];
               return (
                 <TabsTrigger
                   key={stage}
                   value={stage}
                   className="relative"
-                  disabled={!hasContent && status !== "review"}
+                  disabled={!hasContent}
                 >
                   {STAGE_LABELS[stage]}
-                  {status === "review" && (
-                    <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-blue-500" />
-                  )}
                 </TabsTrigger>
               );
             })}
@@ -387,18 +440,6 @@ export default function PostDetailPage() {
                 >
                   <Copy className="h-3 w-3 mr-1" />
                   Copy
-                </Button>
-              )}
-            {activeTab &&
-              post.stage_status[activeTab as PipelineStage] === "complete" && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleRerun(activeTab)}
-                  className="text-xs"
-                >
-                  <RefreshCw className="h-3 w-3 mr-1" />
-                  Re-run
                 </Button>
               )}
           </div>

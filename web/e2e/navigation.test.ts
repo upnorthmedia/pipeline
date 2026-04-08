@@ -15,7 +15,6 @@ test.describe("Navigation", () => {
     const sidebar = page.locator("aside");
     await expect(sidebar.getByText("Posts", { exact: true })).toBeVisible();
     await expect(sidebar.getByText("Profiles", { exact: true })).toBeVisible();
-    await expect(sidebar.getByText("Queue", { exact: true })).toBeVisible();
     await expect(sidebar.getByText("Monitor", { exact: true })).toBeVisible();
     await expect(sidebar.getByText("Settings", { exact: true })).toBeVisible();
   });
@@ -25,13 +24,6 @@ test.describe("Navigation", () => {
     await page.locator("aside").getByText("Profiles", { exact: true }).click();
     await expect(page).toHaveURL("/profiles");
     await expect(page.getByRole("heading", { name: "Website Profiles" })).toBeVisible();
-  });
-
-  test("navigates to queue page", async ({ page }) => {
-    await page.goto("/");
-    await page.locator("aside").getByText("Queue", { exact: true }).click();
-    await expect(page).toHaveURL("/queue");
-    await expect(page.getByRole("heading", { name: "Review Queue" })).toBeVisible();
   });
 
   test("navigates to monitor page", async ({ page }) => {
@@ -99,7 +91,7 @@ test.describe("Navigation", () => {
   });
 
   test("all pages load without errors", async ({ page }) => {
-    const routes = ["/", "/profiles", "/queue", "/monitor", "/settings", "/posts/new"];
+    const routes = ["/", "/profiles", "/monitor", "/settings", "/posts/new"];
     for (const route of routes) {
       const response = await page.goto(route);
       expect(response?.status()).toBeLessThan(400);

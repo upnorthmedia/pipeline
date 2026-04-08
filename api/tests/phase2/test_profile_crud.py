@@ -12,7 +12,7 @@ def profile_payload():
         "target_audience": "developers",
         "tone": "Professional",
         "word_count": 2500,
-        "output_format": "both",
+        "output_format": "markdown",
     }
 
 

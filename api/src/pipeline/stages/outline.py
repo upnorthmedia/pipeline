@@ -24,7 +24,7 @@ async def outline_node(state: PipelineState) -> dict:
     await publish_stage_log("Rules loaded, building prompt...", stage="outline")
     prompt = build_stage_prompt("outline", rules, state)
 
-    client = ClaudeClient()
+    client = ClaudeClient(api_key=state.get("api_keys", {}).get("anthropic"))
     await publish_stage_log("Calling Claude for outline...", stage="outline")
     try:
         with StageTimer() as timer:

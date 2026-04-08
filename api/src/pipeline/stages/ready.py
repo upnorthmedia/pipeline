@@ -30,7 +30,7 @@ async def ready_node(state: PipelineState) -> dict:
 
     prompt = _build_ready_prompt(rules, state)
 
-    claude = ClaudeClient()
+    claude = ClaudeClient(api_key=state.get("api_keys", {}).get("anthropic"))
     await publish_stage_log("Calling Claude for final assembly...", stage="ready")
     try:
         with StageTimer() as timer:

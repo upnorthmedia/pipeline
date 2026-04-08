@@ -14,7 +14,7 @@ class ProfileBase(BaseModel):
     tone: str = "Conversational and friendly"
     brand_voice: str | None = None
     word_count: int = 2000
-    output_format: str = "both"
+    output_format: str = "markdown"
     image_style: str | None = None
     image_brand_colors: list[str] = []
     image_exclude: list[str] = []
@@ -33,7 +33,12 @@ class ProfileBase(BaseModel):
 
 
 class ProfileCreate(ProfileBase):
-    pass
+    wp_url: str | None = None
+    wp_username: str | None = None
+    wp_app_password: str | None = None
+    wp_default_author_id: int | None = None
+    wp_default_category_id: int | None = None
+    wp_default_status: str | None = "publish"
 
 
 class ProfileUpdate(BaseModel):
@@ -53,6 +58,12 @@ class ProfileUpdate(BaseModel):
     related_keywords: list[str] | None = None
     default_stage_settings: dict | None = None
     recrawl_interval: str | None = None
+    wp_url: str | None = None
+    wp_username: str | None = None
+    wp_app_password: str | None = None
+    wp_default_author_id: int | None = None
+    wp_default_category_id: int | None = None
+    wp_default_status: str | None = None
 
 
 class ProfileRead(ProfileBase):
@@ -62,8 +73,17 @@ class ProfileRead(ProfileBase):
     sitemap_urls: list[str] = []
     last_crawled_at: datetime | None = None
     crawl_status: str = "pending"
+    wp_url: str | None = None
+    wp_username: str | None = None
+    wp_default_author_id: int | None = None
+    wp_default_category_id: int | None = None
+    wp_default_status: str | None = "publish"
     created_at: datetime
     updated_at: datetime
+
+    @property
+    def wp_connected(self) -> bool:
+        return bool(self.wp_url and self.wp_username)
 
 
 # --- Post Schemas ---
@@ -78,7 +98,7 @@ class PostBase(BaseModel):
     intent: str | None = None
     word_count: int = 2000
     tone: str = "Conversational and friendly"
-    output_format: str = "both"
+    output_format: str = "markdown"
     website_url: str | None = None
     related_keywords: list[str] = []
     competitor_urls: list[str] = []
@@ -88,6 +108,8 @@ class PostBase(BaseModel):
     brand_voice: str | None = None
     avoid: str | None = None
     required_mentions: str | None = None
+    article_type: str | None = None
+    additional_info: str | None = None
     stage_settings: dict = {
         "research": "auto",
         "outline": "auto",
@@ -99,7 +121,8 @@ class PostBase(BaseModel):
 
 
 class PostCreate(PostBase):
-    pass
+    wp_category_id: int | None = None
+    wp_author_id: int | None = None
 
 
 class PostUpdate(BaseModel):
@@ -119,7 +142,11 @@ class PostUpdate(BaseModel):
     brand_voice: str | None = None
     avoid: str | None = None
     required_mentions: str | None = None
+    article_type: str | None = None
+    additional_info: str | None = None
     stage_settings: dict | None = None
+    wp_category_id: int | None = None
+    wp_author_id: int | None = None
     # Allow updating stage content directly
     research_content: str | None = None
     outline_content: str | None = None
@@ -145,6 +172,11 @@ class PostRead(PostBase):
     final_html_content: str | None = None
     image_manifest: dict | None = None
     ready_content: str | None = None
+    wp_category_id: int | None = None
+    wp_author_id: int | None = None
+    wp_post_id: int | None = None
+    wp_post_url: str | None = None
+    wp_publish_status: str | None = None
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
@@ -187,3 +219,20 @@ class SettingRead(BaseModel):
 
 class SettingUpdate(BaseModel):
     value: dict
+
+
+# --- API Key Schemas ---
+
+
+class ApiKeyUpdate(BaseModel):
+    anthropic: str | None = None
+    perplexity: str | None = None
+    gemini: str | None = None
+
+
+class ApiKeyStatus(BaseModel):
+    provider: str
+    configured: bool
+    source: str  # "db", "env", "none"
+    hint: str
+    valid: bool | None = None

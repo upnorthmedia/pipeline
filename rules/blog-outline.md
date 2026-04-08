@@ -40,6 +40,16 @@ Create an outline that:
 5. Incorporates the unique angles
 6. Ends with a clear CTA aligned with the intent
 
+If ARTICLE_TYPE is provided in the Post Configuration, apply the matching structural pattern:
+
+- **Guide** — Hierarchical knowledge-building sections, progressing from fundamentals to advanced topics
+- **How-To** — Numbered steps with a prerequisites intro, each step as its own H2
+- **Listicle** — Ranked or numbered items with consistent sub-structure per item
+- **Review** — Specs overview, feature deep-dives, pros/cons, verdict/recommendation
+- **Comparison** — Criteria framework, per-item analysis sections, final recommendation
+- **News** — Inverted pyramid: key facts first, then context, then implications
+- **Opinion** — Thesis statement, supporting arguments, counterpoints, conclusion
+
 ### Step 4: Calculate Section Distribution
 
 Based on WORD_COUNT, distribute content appropriately:

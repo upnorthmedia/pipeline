@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { posts, profiles, queue, settings, sseUrl } from "./api";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = "http://localhost:8055";
 
 // Track all fetch calls
 let fetchCalls: { url: string; init?: RequestInit }[] = [];
@@ -161,24 +161,25 @@ describe("api client", () => {
       expect(fetchCalls[0].url).toBe(`${API_BASE}/api/posts/post-1/run-all`);
     });
 
-    it("approves a post", async () => {
-      mockResponse.body = { id: "post-1" };
-      await posts.approve("post-1");
-      expect(fetchCalls[0].url).toBe(`${API_BASE}/api/posts/post-1/approve`);
-      expect(fetchCalls[0].init?.method).toBe("POST");
-    });
-
     it("pauses a post", async () => {
       mockResponse.body = { status: "paused" };
       await posts.pause("post-1");
       expect(fetchCalls[0].url).toBe(`${API_BASE}/api/posts/post-1/pause`);
     });
 
-    it("reruns a specific stage", async () => {
-      mockResponse.body = { status: "running", stage: "research" };
-      await posts.rerun("post-1", "research");
+    it("reruns from current stage", async () => {
+      mockResponse.body = { status: "queued", mode: "rerun", rerun_from: "research" };
+      await posts.rerun("post-1");
       expect(fetchCalls[0].url).toBe(
-        `${API_BASE}/api/posts/post-1/rerun/research`
+        `${API_BASE}/api/posts/post-1/rerun`
+      );
+    });
+
+    it("force restarts pipeline", async () => {
+      mockResponse.body = { status: "queued", mode: "restart" };
+      await posts.restart("post-1");
+      expect(fetchCalls[0].url).toBe(
+        `${API_BASE}/api/posts/post-1/restart`
       );
     });
 
@@ -224,12 +225,6 @@ describe("api client", () => {
       mockResponse.body = { running: 1, pending: 3 };
       await queue.status();
       expect(fetchCalls[0].url).toBe(`${API_BASE}/api/queue`);
-    });
-
-    it("fetches review queue", async () => {
-      mockResponse.body = [];
-      await queue.review();
-      expect(fetchCalls[0].url).toBe(`${API_BASE}/api/queue/review`);
     });
 
     it("pauses all", async () => {

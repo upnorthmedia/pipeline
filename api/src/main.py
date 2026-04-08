@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from src.api.analytics import router as analytics_router
 from src.api.events import router as events_router
 from src.api.links import router as links_router
 from src.api.posts import router as posts_router
@@ -13,6 +14,7 @@ from src.api.profiles import router as profiles_router
 from src.api.queue import router as queue_router
 from src.api.rules import router as rules_router
 from src.api.settings import router as settings_router
+from src.api.wordpress import router as wordpress_router
 from src.config import settings
 from src.database import engine
 
@@ -28,7 +30,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Content Pipeline API",
+    title="Content Crew API",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -49,6 +51,8 @@ app.include_router(events_router)
 app.include_router(settings_router)
 app.include_router(queue_router)
 app.include_router(rules_router)
+app.include_router(wordpress_router)
+app.include_router(analytics_router)
 
 # Serve generated images
 media_path = Path(settings.media_dir)

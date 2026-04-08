@@ -9,7 +9,6 @@ from urllib.parse import urlparse
 from arq.connections import RedisSettings
 from arq.cron import cron
 from sqlalchemy import select
-from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.api.events import publish_event
@@ -24,6 +23,7 @@ from src.pipeline.helpers import (
     save_stage_output,
     set_event_context,
 )
+from src.pipeline.publish import publish_to_wordpress
 from src.pipeline.stages.edit import edit_node
 from src.pipeline.stages.images import images_node
 from src.pipeline.stages.outline import outline_node
@@ -31,6 +31,7 @@ from src.pipeline.stages.ready import ready_node
 from src.pipeline.stages.research import research_node
 from src.pipeline.stages.write import write_node
 from src.pipeline.state import STAGE_OUTPUT_KEY, STAGES, state_from_post
+from src.services.api_keys import get_api_keys
 from src.services.sitemap import crawl_sitemap
 
 STAGE_NODE_FN = {
@@ -69,7 +70,7 @@ async def run_pipeline_stage(ctx, post_id: str, stage: str | None = None):
             return
 
     if stage:
-        # Single-stage: run just this stage, skip gate checks
+        # Single-stage: run just this stage
         await _run_pipeline(
             ctx,
             post_id,
@@ -77,10 +78,9 @@ async def run_pipeline_stage(ctx, post_id: str, stage: str | None = None):
             session_factory,
             job_try,
             stages=[stage],
-            check_gates=False,
         )
     else:
-        # Full pipeline: all remaining stages with gate checks
+        # Full pipeline: all remaining stages
         await _run_pipeline(
             ctx,
             post_id,
@@ -97,21 +97,17 @@ async def _run_pipeline(
     session_factory,
     job_try: int,
     stages: list[str] | None = None,
-    check_gates: bool = True,
 ):
     """Run one or more pipeline stages sequentially.
 
     Args:
         stages: Specific stages to run, or None for all remaining.
-        check_gates: Whether to check gate modes. True for full pipeline runs,
-                    False for single-stage reruns (direct execution).
 
     Each iteration:
     1. Loads fresh post state from DB
-    2. Checks gate mode — pauses for review if needed (when check_gates=True)
-    3. Calls the stage node function directly
-    4. Saves output to DB immediately (crash recovery = resume from last saved)
-    5. Logs metrics and publishes SSE events
+    2. Calls the stage node function directly
+    3. Saves output to DB immediately (crash recovery = resume from last saved)
+    4. Logs metrics and publishes SSE events
     """
     is_full_pipeline = stages is None
     target_stages = stages if stages is not None else STAGES
@@ -128,6 +124,10 @@ async def _run_pipeline(
                     "pipeline_start",
                     "Full pipeline run initiated",
                 )
+
+        # Load API keys from DB (with env var fallback)
+        async with session_factory() as session:
+            api_keys = await get_api_keys(session)
 
         # Fetch internal links once (needed by edit stage prompt)
         internal_links = await _fetch_internal_links_from_factory(
@@ -153,43 +153,9 @@ async def _run_pipeline(
                     if ss.get(stage) == "complete":
                         continue
 
-                # Check gate mode (full pipeline only)
-                if check_gates:
-                    mode = (post.stage_settings or {}).get(stage, "review")
-                    if mode in ("review", "approve_only"):
-                        # Pause for human review
-                        ss_new = dict(post.stage_status or {})
-                        ss_new[stage] = "review"
-                        post.stage_status = ss_new
-                        post.current_stage = stage
-                        await session.commit()
-
-                        await append_execution_log(
-                            session,
-                            post_id,
-                            stage,
-                            "info",
-                            "stage_review",
-                            f"Stage {stage} paused for review",
-                        )
-
-                        await publish_event(
-                            redis,
-                            post_id,
-                            "stage_review",
-                            {
-                                "stage": stage,
-                                "message": f"Stage {stage} paused for review",
-                            },
-                        )
-                        logger.info(
-                            f"Pipeline paused at stage '{stage}' "
-                            f"for post {post_id} (gate mode: {mode})"
-                        )
-                        return
-
                 # Build state from fresh post data
                 initial_state = state_from_post(post, internal_links)
+                initial_state["api_keys"] = api_keys
 
             # Persist "running" to DB before SSE so fetchPost reads correct state
             async with session_factory() as session:
@@ -236,6 +202,23 @@ async def _run_pipeline(
                         meta["duration_s"],
                     )
 
+                # Log additional model calls (e.g. Gemini image gen)
+                gemini_meta = result.get("_stage_meta_gemini")
+                has_gemini = (
+                    isinstance(gemini_meta, dict)
+                    and gemini_meta.get("tokens_out", 0) > 0
+                )
+                if has_gemini:
+                    await log_stage_execution(
+                        session,
+                        post_id,
+                        gemini_meta["stage"],
+                        gemini_meta["model"],
+                        gemini_meta["tokens_in"],
+                        gemini_meta["tokens_out"],
+                        gemini_meta["duration_s"],
+                    )
+
                 content = result.get(STAGE_OUTPUT_KEY.get(stage, ""))
                 stage_status = result.get("stage_status")
                 if content is not None:
@@ -246,16 +229,6 @@ async def _run_pipeline(
                         content,
                         stage_status=stage_status,
                     )
-
-                # Edit stage: also save final_html if present
-                if stage == "edit" and result.get("final_html"):
-                    stmt = (
-                        sql_update(Post)
-                        .where(Post.id == post_id)
-                        .values(final_html_content=result["final_html"])
-                    )
-                    await session.execute(stmt)
-                    await session.commit()
 
                 # Single-stage rerun: check if all stages are now complete
                 if not is_full_pipeline:
@@ -302,11 +275,15 @@ async def _run_pipeline(
 
         # Full pipeline completion
         if is_full_pipeline:
+            should_publish_wp = False
             async with session_factory() as session:
                 post = await session.get(Post, uuid.UUID(post_id))
                 if post:
                     state = state_from_post(post, internal_links)
                     await _post_completion_hook(session, post_id, state)
+                    # Check if WP publish was queued
+                    await session.refresh(post)
+                    should_publish_wp = post.wp_publish_status == "pending"
 
                 await append_execution_log(
                     session,
@@ -323,6 +300,9 @@ async def _run_pipeline(
                 "pipeline_complete",
                 {"message": "Pipeline finished"},
             )
+
+            if should_publish_wp:
+                await redis.enqueue_job("publish_to_wordpress", post_id)
 
         await _record_job_completed(redis)
 
@@ -440,7 +420,7 @@ async def _move_to_dlq(
 async def _post_completion_hook(
     session: AsyncSession, post_id: str, state: dict
 ) -> None:
-    """After pipeline completes, mark the post as complete."""
+    """After pipeline completes, mark the post as complete and optionally publish."""
     post = await session.get(Post, uuid.UUID(post_id))
     if not post:
         return
@@ -450,6 +430,21 @@ async def _post_completion_hook(
     await session.commit()
 
     logger.info(f"Post {post_id} completed")
+
+    # Auto-publish to WordPress if configured
+    if post.output_format == "wordpress" and post.profile_id:
+        profile = await session.get(WebsiteProfile, post.profile_id)
+        wp_configured = (
+            profile
+            and profile.wp_url
+            and profile.wp_username
+            and profile.wp_app_password
+        )
+        if wp_configured:
+            post.wp_publish_status = "pending"
+            await session.commit()
+            # Import redis from the session's bind context — we pass it via caller
+            # The caller (_run_pipeline) will enqueue the job after this returns
 
 
 async def _record_job_completed(redis) -> None:
@@ -587,7 +582,7 @@ async def shutdown(ctx):
 
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    functions = [run_pipeline_stage, crawl_profile_sitemap]
+    functions = [run_pipeline_stage, crawl_profile_sitemap, publish_to_wordpress]
     cron_jobs = [cron(check_recrawl_schedules, hour=0, minute=0)]
     on_startup = startup
     on_shutdown = shutdown

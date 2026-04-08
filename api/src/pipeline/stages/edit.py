@@ -14,7 +14,6 @@ from src.pipeline.state import PipelineState
 from src.services.analytics import compute_analytics
 from src.services.link_validator import (
     ValidationResult,
-    strip_dead_links_html,
     validate_links,
 )
 from src.services.llm import ClaudeClient, LLMResponse
@@ -41,21 +40,11 @@ async def edit_node(state: PipelineState) -> dict:
     if analytics_section:
         prompt = prompt + "\n\n---\n\n" + analytics_section
 
-    # Build system prompt with output format instructions
-    output_format = state.get("output_format", "both")
-    format_instruction = ""
-    if output_format == "markdown":
-        format_instruction = "Output only the final Markdown with YAML frontmatter."
-    elif output_format == "wordpress":
-        format_instruction = "Output only WordPress Gutenberg HTML blocks."
-    else:
-        format_instruction = (
-            "Output both formats. First the complete Markdown "
-            "with YAML frontmatter, then after a separator "
-            "'---WORDPRESS_HTML---', the WordPress Gutenberg HTML."
-        )
+    # Edit stage always outputs markdown regardless of output_format.
+    # WordPress HTML conversion happens at publish time.
+    format_instruction = "Output only the final Markdown with YAML frontmatter."
 
-    client = ClaudeClient()
+    client = ClaudeClient(api_key=state.get("api_keys", {}).get("anthropic"))
     await publish_stage_log("Calling Claude for editing + SEO polish...", stage="edit")
     try:
         with StageTimer() as timer:
@@ -105,18 +94,7 @@ async def edit_node(state: PipelineState) -> dict:
             level="warning",
         )
 
-    # Parse output into markdown and html parts
     content = validation.content
-    final_md = content
-    final_html = ""
-
-    if output_format == "both" and "---WORDPRESS_HTML---" in content:
-        parts = content.split("---WORDPRESS_HTML---", 1)
-        final_md = parts[0].strip()
-        final_html = parts[1].strip()
-    elif output_format == "wordpress":
-        final_html = content
-        final_md = ""
 
     meta = {
         "stage": "edit",
@@ -126,8 +104,8 @@ async def edit_node(state: PipelineState) -> dict:
         "duration_s": timer.duration,
     }
 
-    result: dict = {
-        "final_md": final_md,
+    return {
+        "final_md": content,
         "current_stage": "edit",
         "stage_status": {
             **state.get("stage_status", {}),
@@ -135,14 +113,6 @@ async def edit_node(state: PipelineState) -> dict:
         },
         "_stage_meta": meta,
     }
-
-    if final_html:
-        if validation.removed:
-            dead_urls = {r.url for r in validation.removed}
-            final_html = strip_dead_links_html(final_html, dead_urls)
-        result["final_html"] = final_html
-
-    return result
 
 
 def _build_analytics_section(state: PipelineState) -> str:

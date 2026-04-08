@@ -16,15 +16,11 @@ def test_settings_loads_defaults(monkeypatch):
         redis_url="redis://localhost:6379",
     )
     assert s.worker_max_jobs == 3
-    assert s.perplexity_api_key == ""
-    assert s.anthropic_api_key == ""
 
 
 def test_settings_loads_from_env(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://custom:custom@db/mydb")
     monkeypatch.setenv("REDIS_URL", "redis://custom:6380")
-    monkeypatch.setenv("PERPLEXITY_API_KEY", "pplx-test-key")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     monkeypatch.setenv("WORKER_MAX_JOBS", "5")
 
     from src.config import Settings
@@ -32,8 +28,6 @@ def test_settings_loads_from_env(monkeypatch):
     s = Settings()
     assert s.database_url == "postgresql+asyncpg://custom:custom@db/mydb"
     assert s.redis_url == "redis://custom:6380"
-    assert s.perplexity_api_key == "pplx-test-key"
-    assert s.anthropic_api_key == "sk-ant-test"
     assert s.worker_max_jobs == 5
 
 

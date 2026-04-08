@@ -10,13 +10,30 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.auth import get_current_user
 from src.database import get_session
+from src.models.auth import AuthUser
 from src.models.post import Post
 from src.models.profile import WebsiteProfile
 from src.models.schemas import PostCreate, PostRead, PostUpdate
+from src.pipeline.helpers import strip_leading_h1
 from src.pipeline.state import STAGES
 
 router = APIRouter(prefix="/api/posts", tags=["posts"])
+
+
+async def _get_user_post(
+    post_id: uuid.UUID, user: AuthUser, session: AsyncSession
+) -> Post:
+    result = await session.execute(
+        select(Post)
+        .join(WebsiteProfile, Post.profile_id == WebsiteProfile.id)
+        .where(Post.id == post_id, WebsiteProfile.user_id == user.id)
+    )
+    post = result.scalar_one_or_none()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return post
 
 # Fields copied from profile to post on creation
 _PROFILE_PREFILL_FIELDS = [
@@ -35,6 +52,12 @@ _PROFILE_PREFILL_FIELDS = [
     "related_keywords",
 ]
 
+# WordPress defaults copied from profile to post
+_WP_PREFILL = {
+    "wp_default_category_id": "wp_category_id",
+    "wp_default_author_id": "wp_author_id",
+}
+
 
 # --- CRUD ---
 
@@ -49,9 +72,12 @@ async def list_posts(
     order: str = Query("desc", description="Sort order: asc or desc"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    query = select(Post)
+    query = select(Post).join(
+        WebsiteProfile, Post.profile_id == WebsiteProfile.id
+    ).where(WebsiteProfile.user_id == user.id)
 
     # Filters
     stage_filter = status or stage
@@ -77,13 +103,20 @@ async def list_posts(
 async def create_post(
     data: PostCreate,
     request: Request,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     post_data = data.model_dump()
 
     # Profile-driven prefill
     if data.profile_id:
-        profile = await session.get(WebsiteProfile, data.profile_id)
+        result = await session.execute(
+            select(WebsiteProfile).where(
+                WebsiteProfile.id == data.profile_id,
+                WebsiteProfile.user_id == user.id,
+            )
+        )
+        profile = result.scalar_one_or_none()
         if not profile:
             raise HTTPException(status_code=404, detail="Profile not found")
 
@@ -99,6 +132,13 @@ async def create_post(
         # Copy stage settings from profile defaults
         if data.stage_settings == PostCreate.model_fields["stage_settings"].default:
             post_data["stage_settings"] = profile.default_stage_settings
+
+        # Copy WP defaults from profile
+        for profile_field, post_field in _WP_PREFILL.items():
+            if post_data.get(post_field) is None:
+                val = getattr(profile, profile_field, None)
+                if val is not None:
+                    post_data[post_field] = val
 
     post = Post(**post_data)
     post.current_stage = STAGES[0]
@@ -117,23 +157,20 @@ async def create_post(
 @router.get("/{post_id}", response_model=PostRead)
 async def get_post(
     post_id: uuid.UUID,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    post = await session.get(Post, post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
-    return post
+    return await _get_user_post(post_id, user, session)
 
 
 @router.patch("/{post_id}", response_model=PostRead)
 async def update_post(
     post_id: uuid.UUID,
     data: PostUpdate,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    post = await session.get(Post, post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
+    post = await _get_user_post(post_id, user, session)
 
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(post, field, value)
@@ -146,11 +183,10 @@ async def update_post(
 @router.delete("/{post_id}", status_code=204)
 async def delete_post(
     post_id: uuid.UUID,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    post = await session.get(Post, post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
+    post = await _get_user_post(post_id, user, session)
 
     await session.delete(post)
     await session.commit()
@@ -171,11 +207,10 @@ async def delete_post(
 @router.post("/{post_id}/duplicate", response_model=PostRead, status_code=201)
 async def duplicate_post(
     post_id: uuid.UUID,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    original = await session.get(Post, post_id)
-    if not original:
-        raise HTTPException(status_code=404, detail="Post not found")
+    original = await _get_user_post(post_id, user, session)
 
     new_slug = f"{original.slug}-copy-{uuid.uuid4().hex[:6]}"
     config_fields = [
@@ -216,6 +251,7 @@ async def duplicate_post(
 async def batch_create_posts(
     posts: list[PostCreate],
     request: Request,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     created = []
@@ -239,6 +275,13 @@ async def batch_create_posts(
                 ss_default = PostCreate.model_fields["stage_settings"].default
                 if data.stage_settings == ss_default:
                     post_data["stage_settings"] = profile.default_stage_settings
+
+                # Copy WP defaults from profile
+                for profile_field, post_field in _WP_PREFILL.items():
+                    if post_data.get(post_field) is None:
+                        val = getattr(profile, profile_field, None)
+                        if val is not None:
+                            post_data[post_field] = val
 
         post = Post(**post_data)
         session.add(post)
@@ -264,12 +307,11 @@ async def run_post(
     post_id: uuid.UUID,
     request: Request,
     stage: str | None = None,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Trigger the next pipeline stage (or a specific stage)."""
-    post = await session.get(Post, post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
+    post = await _get_user_post(post_id, user, session)
 
     if stage and stage not in STAGES:
         raise HTTPException(status_code=400, detail=f"Invalid stage: {stage}")
@@ -296,12 +338,11 @@ async def run_post(
 async def run_all(
     post_id: uuid.UUID,
     request: Request,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Run pipeline to completion (set all remaining stages to auto)."""
-    post = await session.get(Post, post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
+    post = await _get_user_post(post_id, user, session)
 
     # Override remaining stages to auto mode
     stage_settings = dict(post.stage_settings or {})
@@ -318,100 +359,142 @@ async def run_all(
     return {"status": "queued", "mode": "run-all", "post_id": str(post_id)}
 
 
-@router.post("/{post_id}/rerun/{stage}", status_code=202)
+@router.post("/{post_id}/rerun", status_code=202)
 async def rerun_stage(
     post_id: uuid.UUID,
-    stage: str,
     request: Request,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Re-run a specific pipeline stage."""
-    post = await session.get(Post, post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
+    """Re-run the current/stuck stage and continue through remaining stages.
 
-    if stage not in STAGES:
-        raise HTTPException(status_code=400, detail=f"Invalid stage: {stage}")
+    Detects the first non-complete stage (or stuck "running" stage),
+    resets it and all downstream stages, clears their content, then
+    enqueues a full pipeline run.
+    """
+    post = await _get_user_post(post_id, user, session)
 
-    # Reset stage status
-    status = dict(post.stage_status or {})
-    status[stage] = "running"
-    post.stage_status = status
-    post.current_stage = stage
+    ss = dict(post.stage_status or {})
+
+    # Find the first non-complete stage (the one to rerun from)
+    rerun_from = None
+    for s in STAGES:
+        if ss.get(s) != "complete":
+            rerun_from = s
+            break
+
+    if rerun_from is None:
+        # All stages complete — rerun the last stage
+        rerun_from = STAGES[-1]
+
+    # Reset this stage and all downstream stages
+    rerun_idx = STAGES.index(rerun_from)
+    content_map = {
+        "research": "research_content",
+        "outline": "outline_content",
+        "write": "draft_content",
+        "edit": "final_md_content",
+        "images": "image_manifest",
+        "ready": "ready_content",
+    }
+    for s in STAGES[rerun_idx:]:
+        ss[s] = "pending"
+        # Clear downstream content so stale data doesn't show
+        col = content_map.get(s)
+        if col:
+            setattr(post, col, None)
+
+    post.stage_status = ss
+    post.current_stage = "pending"
+    post.completed_at = None
     await session.commit()
 
     redis = request.app.state.redis
-    await redis.enqueue_job("run_pipeline_stage", str(post_id), stage)
+    await redis.enqueue_job("run_pipeline_stage", str(post_id))
 
-    return {"status": "queued", "stage": stage, "post_id": str(post_id)}
+    return {
+        "status": "queued",
+        "mode": "rerun",
+        "rerun_from": rerun_from,
+        "post_id": str(post_id),
+    }
 
 
-@router.post("/{post_id}/approve", status_code=200)
-async def approve_stage(
+@router.post("/{post_id}/restart", status_code=202)
+async def restart_pipeline(
     post_id: uuid.UUID,
     request: Request,
-    content: str | None = None,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Approve the current review gate, optionally with edited content."""
-    post = await session.get(Post, post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
+    """Force restart: clear all content and stages, begin fresh from research."""
+    post = await _get_user_post(post_id, user, session)
 
-    current = post.current_stage
-    if not current or current in ("pending", "complete", "failed"):
-        raise HTTPException(status_code=400, detail="No stage awaiting review")
+    # Reset all stage statuses
+    post.stage_status = {s: "pending" for s in STAGES}
+    post.current_stage = "pending"
+    post.completed_at = None
 
-    # Check if stage is in review status
-    stage_status = post.stage_status or {}
-    if stage_status.get(current) != "review":
-        raise HTTPException(
-            status_code=400, detail=f"Stage '{current}' is not in review"
-        )
+    # Clear all stage content
+    post.research_content = None
+    post.outline_content = None
+    post.draft_content = None
+    post.final_md_content = None
+    post.final_html_content = None
+    post.image_manifest = None
+    post.ready_content = None
 
-    # If content provided, update the stage content
-    if content is not None:
-        from src.pipeline.helpers import save_stage_output
-
-        await save_stage_output(session, str(post_id), current, content)
-
-    # Mark as complete and set next stage
-    status = dict(stage_status)
-    status[current] = "complete"
-    post.stage_status = status
-
-    next_stage = _next_stage(post)
-    if next_stage:
-        post.current_stage = next_stage
-        status[next_stage] = "running"
-        post.stage_status = status
-        # Enqueue full pipeline (no stage arg) so it continues through
-        # all remaining auto stages, pausing again at the next review gate
-        redis = request.app.state.redis
-        await redis.enqueue_job("run_pipeline_stage", str(post_id))
-    else:
-        post.current_stage = "complete"
+    # Clear stage logs and error info
+    post.stage_logs = {}
 
     await session.commit()
-    await session.refresh(post)
 
-    return PostRead.model_validate(post)
+    redis = request.app.state.redis
+    await redis.enqueue_job("run_pipeline_stage", str(post_id))
+
+    return {"status": "queued", "mode": "restart", "post_id": str(post_id)}
 
 
 @router.post("/{post_id}/pause", status_code=200)
 async def pause_post(
     post_id: uuid.UUID,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Pause pipeline execution."""
-    post = await session.get(Post, post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
+    post = await _get_user_post(post_id, user, session)
 
     post.current_stage = "paused"
     await session.commit()
 
     return {"status": "paused", "post_id": str(post_id)}
+
+
+@router.post("/{post_id}/publish", status_code=202)
+async def publish_post(
+    post_id: uuid.UUID,
+    request: Request,
+    user: AuthUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Manually trigger WordPress publishing."""
+    post = await _get_user_post(post_id, user, session)
+
+    if not post.ready_content and not post.final_md_content:
+        raise HTTPException(status_code=400, detail="No content to publish")
+
+    if post.output_format != "wordpress":
+        raise HTTPException(
+            status_code=400, detail="Post output_format is not 'wordpress'"
+        )
+
+    post.wp_publish_status = "pending"
+    await session.commit()
+
+    redis = request.app.state.redis
+    await redis.enqueue_job("publish_to_wordpress", str(post_id))
+
+    return {"status": "queued", "post_id": str(post_id)}
 
 
 # --- Export ---
@@ -420,17 +503,17 @@ async def pause_post(
 @router.get("/{post_id}/export/markdown")
 async def export_markdown(
     post_id: uuid.UUID,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    post = await session.get(Post, post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
+    post = await _get_user_post(post_id, user, session)
 
     content = post.ready_content or post.final_md_content
     if not content:
         raise HTTPException(status_code=404, detail="No markdown content available")
 
-    export_content = content.replace(f"/media/{post_id}/", "/")
+    export_content = strip_leading_h1(content)
+    export_content = export_content.replace(f"/media/{post_id}/", "/")
 
     return Response(
         content=export_content,
@@ -442,11 +525,10 @@ async def export_markdown(
 @router.get("/{post_id}/export/html")
 async def export_html(
     post_id: uuid.UUID,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    post = await session.get(Post, post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
+    post = await _get_user_post(post_id, user, session)
     if not post.final_html_content:
         raise HTTPException(status_code=404, detail="No HTML content available")
 
@@ -460,11 +542,10 @@ async def export_html(
 @router.get("/{post_id}/export/all")
 async def export_all(
     post_id: uuid.UUID,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    post = await session.get(Post, post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
+    post = await _get_user_post(post_id, user, session)
 
     content = post.ready_content or post.final_md_content
     if not content:
@@ -477,27 +558,13 @@ async def export_all(
     if media_dir.is_dir():
         image_files = [f for f in media_dir.iterdir() if f.is_file()]
 
-    # Rewrite image URLs from /media/{id}/filename to /filename
-    export_content = content.replace(f"/media/{post_id}/", "/")
-
-    # Check if output_format requests WordPress HTML
-    has_wp_separator = "---WORDPRESS_HTML---" in export_content
-    is_wordpress = post.output_format in ("wordpress", "both") or has_wp_separator
+    # Strip leading H1 and rewrite image URLs
+    export_content = strip_leading_h1(content)
+    export_content = export_content.replace(f"/media/{post_id}/", "/")
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        if is_wordpress and has_wp_separator:
-            # Split into markdown and WordPress HTML parts
-            parts = export_content.split("---WORDPRESS_HTML---", 1)
-            md_part = parts[0].strip()
-            wp_part = parts[1].strip() if len(parts) > 1 else ""
-
-            if md_part:
-                zf.writestr(f"{post.slug}.mdx", md_part)
-            if wp_part:
-                zf.writestr(f"{post.slug}.html", wp_part)
-        else:
-            zf.writestr(f"{post.slug}.mdx", export_content)
+        zf.writestr(f"{post.slug}.mdx", export_content)
 
         for img_file in image_files:
             zf.write(img_file, img_file.name)
@@ -519,12 +586,11 @@ async def get_execution_logs(
     level: list[str] | None = Query(None, description="Filter by level(s)"),
     stage: str | None = Query(None, description="Filter by stage name"),
     since: str | None = Query(None, description="ISO timestamp filter"),
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Return execution logs for a post, with optional filtering."""
-    post = await session.get(Post, post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
+    post = await _get_user_post(post_id, user, session)
 
     logs = list(post.execution_logs or [])
 
@@ -544,12 +610,11 @@ async def get_execution_logs(
 @router.get("/{post_id}/analytics")
 async def post_analytics(
     post_id: uuid.UUID,
+    user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Compute analytics for a post's final content."""
-    post = await session.get(Post, post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
+    post = await _get_user_post(post_id, user, session)
 
     from src.services.analytics import compute_analytics
 

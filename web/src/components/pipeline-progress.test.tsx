@@ -103,15 +103,6 @@ describe("PipelineProgress", () => {
       expect(amberRing).toBeInTheDocument();
     });
 
-    it("applies blue color to review stages", () => {
-      const stageStatus: StageStatusMap = { outline: "review" };
-      const { container } = renderWithProviders(
-        <PipelineProgress stageStatus={stageStatus} currentStage="outline" />
-      );
-      const blueRing = container.querySelector(".ring-blue-500\\/30");
-      expect(blueRing).toBeInTheDocument();
-    });
-
     it("applies red color to failed stages", () => {
       const stageStatus: StageStatusMap = { write: "failed" };
       const { container } = renderWithProviders(

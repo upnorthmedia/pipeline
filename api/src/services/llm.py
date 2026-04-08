@@ -7,8 +7,6 @@ import httpx
 from google import genai
 from google.genai import types as genai_types
 
-from src.config import settings
-
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
@@ -76,13 +74,23 @@ class LLMResponse:
     tokens_out: int
 
 
+@dataclass
+class ImageGenResponse:
+    image_bytes: bytes
+    model: str
+    tokens_in: int
+    tokens_out: int
+
+
 class PerplexityClient:
     """Perplexity API client using their OpenAI-compatible endpoint."""
 
     BASE_URL = "https://api.perplexity.ai"
 
     def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or settings.perplexity_api_key
+        if not api_key:
+            raise ValueError("Perplexity API key not configured")
+        self.api_key = api_key
         self._client = httpx.AsyncClient(
             base_url=self.BASE_URL,
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -125,7 +133,9 @@ class ClaudeClient:
     """Anthropic Claude API client."""
 
     def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or settings.anthropic_api_key
+        if not api_key:
+            raise ValueError("Anthropic API key not configured")
+        self.api_key = api_key
         self._client = anthropic.AsyncAnthropic(
             api_key=self.api_key,
             timeout=httpx.Timeout(300.0),
@@ -178,7 +188,9 @@ class GeminiClient:
     """Google Gemini API client for image generation."""
 
     def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or settings.gemini_api_key
+        if not api_key:
+            raise ValueError("Gemini API key not configured")
+        self.api_key = api_key
         self._client = genai.Client(api_key=self.api_key)
 
     async def generate_image(
@@ -187,8 +199,8 @@ class GeminiClient:
         model: str = "gemini-3.1-flash-image-preview",
         aspect_ratio: str = "4:3",
         image_size: str = "1K",
-    ) -> bytes:
-        """Generate an image and return PNG bytes."""
+    ) -> ImageGenResponse:
+        """Generate an image and return bytes with usage metadata."""
 
         async def _call():
             config = genai_types.GenerateContentConfig(
@@ -215,10 +227,45 @@ class GeminiClient:
                     "Empty response from Gemini (possible safety filter)"
                 )
 
+            image_data: bytes | None = None
             for part in response.parts:
                 if part.inline_data:
-                    return part.inline_data.data
+                    image_data = part.inline_data.data
+                    break
 
-            raise RuntimeError("No image returned in Gemini response")
+            if image_data is None:
+                raise RuntimeError("No image returned in Gemini response")
+
+            # Extract token usage from response metadata
+            tokens_in = 0
+            tokens_out = 0
+            usage = getattr(response, "usage_metadata", None)
+            if usage:
+                tokens_in = (
+                    getattr(usage, "prompt_token_count", 0) or 0
+                )
+                tokens_out = (
+                    getattr(usage, "candidates_token_count", 0)
+                    or 0
+                )
+
+            # Fallback: estimate output tokens from image size
+            # when API doesn't report them (known per-image
+            # token counts from Gemini pricing)
+            if tokens_out == 0:
+                size_tokens = {
+                    "512": 750,
+                    "1K": 1100,
+                    "2K": 1700,
+                    "4K": 2500,
+                }
+                tokens_out = size_tokens.get(image_size, 1100)
+
+            return ImageGenResponse(
+                image_bytes=image_data,
+                model=model,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+            )
 
         return await _retry(_call)

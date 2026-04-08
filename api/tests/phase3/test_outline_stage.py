@@ -18,9 +18,9 @@ def sample_state():
         "intent": "informational",
         "word_count": 2000,
         "tone": "Conversational and friendly",
-        "output_format": "both",
+        "output_format": "markdown",
         "research": "# Research data\n\nKeywords: python, django...",
-        "stage_settings": {"outline": "review"},
+        "stage_settings": {"outline": "auto"},
         "stage_status": {"research": "complete"},
     }
 

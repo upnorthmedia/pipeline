@@ -113,16 +113,13 @@ describe("NewPostPage", () => {
     expect(screen.getByText("Content")).toBeInTheDocument();
     expect(screen.getByText("Writing Config")).toBeInTheDocument();
     expect(screen.getByText("SEO & Research")).toBeInTheDocument();
-    expect(screen.getByText("Pipeline Settings")).toBeInTheDocument();
   });
 
-  it("renders all 5 pipeline stage settings", () => {
+  it("renders article type and additional fields", () => {
     renderWithProviders(<NewPostPage />);
-    expect(screen.getByText("research")).toBeInTheDocument();
-    expect(screen.getByText("outline")).toBeInTheDocument();
-    expect(screen.getByText("write")).toBeInTheDocument();
-    expect(screen.getByText("edit")).toBeInTheDocument();
-    expect(screen.getByText("images")).toBeInTheDocument();
+    expect(screen.getByText("Article Type")).toBeInTheDocument();
+    expect(screen.getByLabelText("Required Mentions")).toBeInTheDocument();
+    expect(screen.getByLabelText("Additional Information")).toBeInTheDocument();
   });
 
   it("shows validation error when submitting without topic", async () => {

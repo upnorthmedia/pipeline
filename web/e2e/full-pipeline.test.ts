@@ -28,8 +28,6 @@ test.describe("Full Pipeline E2E", () => {
 
     // Check if any posts exist, if not verify empty state
     const emptyState = page.getByText(/no posts/i);
-    const tableRows = page.locator("tbody tr");
-
     if (await emptyState.isVisible()) {
       // Navigate to create form
       const newPostLink = page.getByRole("link", { name: /create|new/i });

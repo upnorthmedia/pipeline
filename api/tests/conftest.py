@@ -73,7 +73,7 @@ def sample_profile_data():
         "target_audience": "developers",
         "tone": "Conversational and friendly",
         "word_count": 2000,
-        "output_format": "both",
+        "output_format": "markdown",
     }
 
 

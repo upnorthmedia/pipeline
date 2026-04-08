@@ -1,11 +1,31 @@
 """Tests for the images stage node."""
 
+import io
 import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from src.pipeline.stages.images import _parse_manifest, images_node
-from src.services.llm import LLMResponse
+from PIL import Image
+
+from src.pipeline.stages.images import _parse_manifest, images_node, optimize_image
+from src.services.llm import ImageGenResponse, LLMResponse
+
+
+def _make_png(width: int = 100, height: int = 80) -> bytes:
+    """Create a minimal valid PNG for testing."""
+    buf = io.BytesIO()
+    Image.new("RGB", (width, height), color="red").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _make_image_response(width: int = 100, height: int = 80) -> ImageGenResponse:
+    """Create an ImageGenResponse with a valid PNG for testing."""
+    return ImageGenResponse(
+        image_bytes=_make_png(width, height),
+        model="gemini-3.1-flash-image-preview",
+        tokens_in=50,
+        tokens_out=1100,
+    )
 
 
 @pytest.fixture
@@ -15,12 +35,12 @@ def sample_state():
         "slug": "test-post",
         "topic": "Best Python Frameworks",
         "word_count": 2000,
-        "output_format": "both",
+        "output_format": "markdown",
         "final_md": "# Blog\n\nSome content...",
         "image_style": "photorealistic",
         "image_brand_colors": ["#1a1a2e"],
         "image_exclude": ["text overlay"],
-        "stage_settings": {"images": "review"},
+        "stage_settings": {"images": "auto"},
         "stage_status": {"edit": "complete"},
     }
 
@@ -69,7 +89,7 @@ class TestImagesNode:
             claude.close = AsyncMock()
 
             gemini = MockGemini.return_value
-            gemini.generate_image = AsyncMock(return_value=b"\x89PNG" * 100)
+            gemini.generate_image = AsyncMock(return_value=_make_image_response())
 
             result = await images_node(sample_state)
 
@@ -77,6 +97,12 @@ class TestImagesNode:
         assert manifest["total_generated"] == 2
         assert manifest["total_failed"] == 0
         assert len(manifest["images"]) == 2
+
+        # Verify Gemini meta is tracked
+        gemini_meta = result["_stage_meta_gemini"]
+        assert gemini_meta["model"] == "gemini-3.1-flash-image-preview"
+        assert gemini_meta["tokens_in"] == 100  # 50 * 2 images
+        assert gemini_meta["tokens_out"] == 2200  # 1100 * 2 images
 
     @pytest.mark.asyncio
     async def test_handles_image_generation_failure(
@@ -94,7 +120,7 @@ class TestImagesNode:
             # First image succeeds, second fails
             gemini.generate_image = AsyncMock(
                 side_effect=[
-                    b"\x89PNG" * 100,
+                    _make_image_response(),
                     RuntimeError("Generation failed"),
                 ]
             )
@@ -116,7 +142,7 @@ class TestImagesNode:
             claude.close = AsyncMock()
 
             gemini = MockGemini.return_value
-            gemini.generate_image = AsyncMock(return_value=b"\x89PNG" * 100)
+            gemini.generate_image = AsyncMock(return_value=_make_image_response())
 
             await images_node(sample_state)
 
@@ -145,3 +171,27 @@ class TestParseManifest:
     def test_handles_empty_string(self):
         result = _parse_manifest("")
         assert "error" in result
+
+
+class TestOptimizeImage:
+    def test_converts_to_webp(self):
+        png = _make_png(200, 150)
+        result, ext = optimize_image(png)
+        assert ext == ".webp"
+        assert len(result) < len(png)
+        img = Image.open(io.BytesIO(result))
+        assert img.format == "WEBP"
+
+    def test_resizes_when_over_max_width(self):
+        png = _make_png(2752, 1536)
+        result, _ = optimize_image(png, max_width=1920)
+        img = Image.open(io.BytesIO(result))
+        assert img.width == 1920
+        assert img.height == int(1536 * (1920 / 2752))
+
+    def test_no_resize_when_under_max_width(self):
+        png = _make_png(800, 600)
+        result, _ = optimize_image(png, max_width=1200)
+        img = Image.open(io.BytesIO(result))
+        assert img.width == 800
+        assert img.height == 600

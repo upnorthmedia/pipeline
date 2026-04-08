@@ -19,9 +19,9 @@ async def test_update_settings_creates_new(client: AsyncClient):
             "worker_concurrency": {"max_jobs": 5},
             "default_stage_settings": {
                 "research": "auto",
-                "outline": "review",
+                "outline": "auto",
                 "write": "auto",
-                "edit": "review",
+                "edit": "auto",
                 "images": "auto",
             },
         },

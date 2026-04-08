@@ -5,7 +5,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8055";
 
 function resolveImageSrc(src: string | undefined): string {
   if (!src) return "";

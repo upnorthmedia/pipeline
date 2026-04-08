@@ -21,11 +21,6 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379"
 
-    # LLM API Keys
-    perplexity_api_key: str = ""
-    anthropic_api_key: str = ""
-    gemini_api_key: str = ""
-
     # Worker
     worker_max_jobs: int = 3
 
@@ -34,6 +29,12 @@ class Settings(BaseSettings):
 
     # Media directory for generated images
     media_dir: str = str(Path(__file__).resolve().parent.parent.parent / "media")
+
+    # WordPress encryption key (Fernet)
+    wp_encryption_key: str = ""
+
+    # Anthropic Admin API key (optional, for billing data)
+    anthropic_admin_key: str = ""
 
     # CORS
     cors_origin: str = "http://localhost:3000"

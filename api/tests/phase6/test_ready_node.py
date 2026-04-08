@@ -40,7 +40,7 @@ def ready_state():
             ],
             "style_brief": {"overall_style": "editorial illustration"},
         },
-        "stage_settings": {"ready": "review"},
+        "stage_settings": {"ready": "auto"},
         "stage_status": {"images": "complete"},
     }
 

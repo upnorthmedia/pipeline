@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -130,7 +131,7 @@ async def append_execution_log(
 MODEL_COSTS: dict[str, dict[str, float]] = {
     "sonar-pro": {"input": 3.0, "output": 15.0},
     "claude-opus-4-6": {"input": 15.0, "output": 75.0},
-    "gemini-3.1-flash-image-preview": {"input": 0.0, "output": 0.0},
+    "gemini-3.1-flash-image-preview": {"input": 0.10, "output": 60.0},
 }
 
 
@@ -180,6 +181,8 @@ def _build_config_context(state: PipelineState) -> str:
         ("TARGET_AUDIENCE", "target_audience"),
         ("NICHE", "niche"),
         ("INTENT", "intent"),
+        ("ARTICLE_TYPE", "article_type"),
+        ("ADDITIONAL_INFO", "additional_info"),
         ("WORD_COUNT", "word_count"),
         ("TONE", "tone"),
         ("OUTPUT_FORMAT", "output_format"),
@@ -332,6 +335,42 @@ async def log_stage_execution(
         f"Logged {stage} execution: {tokens_in}in/{tokens_out}out tokens, "
         f"{duration_s:.1f}s, ${cost_usd:.4f}"
     )
+
+
+def strip_leading_h1(content: str) -> str:
+    """Remove a leading H1 from markdown body if it duplicates the frontmatter title.
+
+    Blog templates render the frontmatter `title` as the page H1, so an H1 in
+    the body creates a duplicate. This strips it when present.
+    """
+    # Split frontmatter from body
+    match = re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)$", content, re.DOTALL)
+    if not match:
+        return content
+
+    frontmatter_block, body = match.group(1), match.group(2)
+
+    # Extract title from frontmatter
+    pattern = r'^title:\s*["\']?(.+?)["\']?\s*$'
+    title_match = re.search(pattern, frontmatter_block, re.MULTILINE)
+    if not title_match:
+        return content
+
+    fm_title = title_match.group(1).strip()
+
+    # Check if body starts with an H1 (allowing leading whitespace/newlines)
+    h1_match = re.match(r"^\s*#\s+(.+?)(?:\s*\n)", body)
+    if not h1_match:
+        return content
+
+    h1_text = h1_match.group(1).strip()
+
+    # Compare (case-insensitive, ignore surrounding quotes/punctuation)
+    if h1_text.lower().strip("\"'") == fm_title.lower().strip("\"'"):
+        cleaned_body = body[h1_match.end() :].lstrip("\n")
+        return f"---\n{frontmatter_block}\n---\n\n{cleaned_body}"
+
+    return content
 
 
 class StageTimer:

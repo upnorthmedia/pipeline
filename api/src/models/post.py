@@ -38,7 +38,7 @@ class Post(UUIDMixin, TimestampMixin, Base):
         default="Conversational and friendly",
     )
     output_format: Mapped[str] = mapped_column(
-        String(20), server_default="both", default="both"
+        String(20), server_default="markdown", default="markdown"
     )
     website_url: Mapped[str | None] = mapped_column(Text)
     related_keywords: Mapped[dict] = mapped_column(
@@ -57,6 +57,8 @@ class Post(UUIDMixin, TimestampMixin, Base):
     brand_voice: Mapped[str | None] = mapped_column(Text)
     avoid: Mapped[str | None] = mapped_column(Text)
     required_mentions: Mapped[str | None] = mapped_column(Text)
+    article_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    additional_info: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Stage content
     research_content: Mapped[str | None] = mapped_column(Text)
@@ -66,6 +68,13 @@ class Post(UUIDMixin, TimestampMixin, Base):
     final_html_content: Mapped[str | None] = mapped_column(Text)
     image_manifest: Mapped[dict | None] = mapped_column(JSONB)
     ready_content: Mapped[str | None] = mapped_column(Text)
+
+    # WordPress publishing
+    wp_category_id: Mapped[int | None] = mapped_column(Integer)
+    wp_author_id: Mapped[int | None] = mapped_column(Integer)
+    wp_post_id: Mapped[int | None] = mapped_column(Integer)
+    wp_post_url: Mapped[str | None] = mapped_column(Text)
+    wp_publish_status: Mapped[str | None] = mapped_column(String(20))
 
     # Execution logs
     stage_logs: Mapped[dict] = mapped_column(JSONB, server_default="{}", default=dict)
@@ -79,14 +88,14 @@ class Post(UUIDMixin, TimestampMixin, Base):
     )
     stage_settings: Mapped[dict] = mapped_column(
         JSONB,
-        server_default='{"research":"review","outline":"review","write":"review","edit":"review","images":"review","ready":"review"}',
+        server_default='{"research":"auto","outline":"auto","write":"auto","edit":"auto","images":"auto","ready":"auto"}',
         default=lambda: {
-            "research": "review",
-            "outline": "review",
-            "write": "review",
-            "edit": "review",
-            "images": "review",
-            "ready": "review",
+            "research": "auto",
+            "outline": "auto",
+            "write": "auto",
+            "edit": "auto",
+            "images": "auto",
+            "ready": "auto",
         },
     )
     stage_status: Mapped[dict] = mapped_column(JSONB, server_default="{}", default=dict)

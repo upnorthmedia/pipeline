@@ -39,6 +39,15 @@ Transform the outline into engaging prose that:
 - Includes relevant examples and analogies
 - Addresses the reader directly ("you")
 
+If ARTICLE_TYPE is provided in the Post Configuration, adapt your writing patterns:
+- **Listicle** — Consistent intro per item, scannable format, clear numbering
+- **How-To** — Imperative voice for steps, clear prerequisites, expected outcomes per step
+- **Review** — Balanced assessment, evidence-based opinions, clear verdict
+- **Comparison** — Parallel structure across compared items, fair treatment of each option
+- **Guide** — Progressive depth, build on previous sections, comprehensive coverage
+- **News** — Factual tone, attribution of sources, clear timeline
+- **Opinion** — Strong voice, backed by evidence, acknowledge counterpoints
+
 ## Writing Style Guidelines
 
 ### Voice & Tone
@@ -94,11 +103,11 @@ Transform the outline into engaging prose that:
 
 ## Output Format
 
+**IMPORTANT: Do not include an H1 (`#`) title in the body.** The title is handled separately in frontmatter during later stages. Start the body directly with the opening paragraph, then use H2 (`##`), H3 (`###`), etc. for sections.
+
 Create the file `03-draft.md` in the same directory with this structure:
 
 ```markdown
-# [Blog Post Title]
-
 [Introduction - Hook the reader immediately. Address their pain point. Promise the value they'll get.]
 
 [Continue introduction - Build credibility, preview content, thesis statement]

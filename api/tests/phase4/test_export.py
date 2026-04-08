@@ -145,19 +145,14 @@ async def test_export_zip_no_content(client: AsyncClient, sample_post_data):
     assert resp.status_code == 404
 
 
-async def test_export_zip_wordpress_split(client: AsyncClient, sample_post_data):
-    """ZIP should split markdown and WordPress HTML when separator present."""
+async def test_export_zip_no_html_split(client: AsyncClient, sample_post_data):
+    """ZIP export no longer splits on WORDPRESS_HTML separator (removed)."""
     create_resp = await client.post(
-        "/api/posts", json={**sample_post_data, "output_format": "both"}
+        "/api/posts", json={**sample_post_data, "output_format": "markdown"}
     )
     post = create_resp.json()
 
-    ready = (
-        "# Markdown Version\n\nContent here.\n\n"
-        "---WORDPRESS_HTML---\n\n"
-        "<!-- wp:paragraph --><p>WP content</p>"
-        "<!-- /wp:paragraph -->"
-    )
+    ready = "# Markdown Version\n\nContent here."
     await client.patch(
         f"/api/posts/{post['id']}",
         json={"ready_content": ready},
@@ -168,14 +163,8 @@ async def test_export_zip_wordpress_split(client: AsyncClient, sample_post_data)
     with zipfile.ZipFile(buf) as zf:
         names = zf.namelist()
         assert f"{post['slug']}.mdx" in names
-        assert f"{post['slug']}.html" in names
-
-        md = zf.read(f"{post['slug']}.mdx").decode()
-        assert "Markdown Version" in md
-        assert "WORDPRESS_HTML" not in md
-
-        html = zf.read(f"{post['slug']}.html").decode()
-        assert "wp:paragraph" in html
+        # No separate HTML file — WP HTML conversion happens at publish time
+        assert f"{post['slug']}.html" not in names
 
 
 async def test_export_not_found(client: AsyncClient):

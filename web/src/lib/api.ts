@@ -1,9 +1,9 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8055";
 
 // --- Types ---
 
-export type StageMode = "auto" | "review" | "approve_only";
-export type StageStatus = "pending" | "running" | "review" | "complete" | "failed";
+export type StageMode = "auto";
+export type StageStatus = "pending" | "running" | "complete" | "failed";
 export type PipelineStage = "research" | "outline" | "write" | "edit" | "images" | "ready";
 export type PostStage = PipelineStage | "pending" | "complete" | "failed" | "paused";
 
@@ -33,6 +33,11 @@ export interface Profile {
   last_crawled_at: string | null;
   crawl_status: string;
   recrawl_interval: string | null;
+  wp_url: string | null;
+  wp_username: string | null;
+  wp_default_author_id: number | null;
+  wp_default_category_id: number | null;
+  wp_default_status: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -54,6 +59,31 @@ export interface ProfileCreate {
   related_keywords?: string[];
   default_stage_settings?: Partial<StageSettings>;
   recrawl_interval?: string | null;
+  wp_url?: string | null;
+  wp_username?: string | null;
+  wp_app_password?: string | null;
+  wp_default_author_id?: number | null;
+  wp_default_category_id?: number | null;
+  wp_default_status?: string | null;
+}
+
+export interface WPCategory {
+  id: number;
+  name: string;
+  slug: string;
+  count: number;
+}
+
+export interface WPAuthor {
+  id: number;
+  name: string;
+  slug: string;
+}
+
+export interface WPConnectionTest {
+  connected: boolean;
+  site_name?: string;
+  error?: string;
 }
 
 export interface Post {
@@ -76,6 +106,8 @@ export interface Post {
   brand_voice: string | null;
   avoid: string | null;
   required_mentions: string | null;
+  article_type: string | null;
+  additional_info: string | null;
   stage_settings: StageSettings;
   current_stage: PostStage;
   stage_status: StageStatusMap;
@@ -89,6 +121,11 @@ export interface Post {
   final_html_content: string | null;
   image_manifest: Record<string, unknown> | null;
   ready_content: string | null;
+  wp_category_id: number | null;
+  wp_author_id: number | null;
+  wp_post_id: number | null;
+  wp_post_url: string | null;
+  wp_publish_status: string | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -113,7 +150,11 @@ export interface PostCreate {
   brand_voice?: string | null;
   avoid?: string | null;
   required_mentions?: string | null;
+  article_type?: string | null;
+  additional_info?: string | null;
   stage_settings?: Partial<StageSettings>;
+  wp_category_id?: number | null;
+  wp_author_id?: number | null;
 }
 
 export interface PostUpdate {
@@ -165,7 +206,6 @@ export interface PaginatedLinks {
 export interface QueueStatus {
   running: number;
   pending: number;
-  review: number;
   complete: number;
   failed: number;
   paused: number;
@@ -190,6 +230,14 @@ export interface RuleContent {
   content: string;
 }
 
+export interface ApiKeyStatus {
+  provider: string;
+  configured: boolean;
+  source: "db" | "env" | "none";
+  hint: string;
+  valid: boolean | null;
+}
+
 export interface PostAnalytics {
   word_count: number;
   sentence_count: number;
@@ -198,6 +246,75 @@ export interface PostAnalytics {
   flesch_reading_ease: number;
   keyword_density: Record<string, number>;
   seo_checklist: Record<string, boolean>;
+}
+
+// --- Analytics Types ---
+
+export interface DashboardStats {
+  by_status: Record<string, number>;
+  total: number;
+  complete: number;
+  completion_rate: number;
+  avg_duration_s: number | null;
+  by_profile: { name: string; count: number }[];
+  over_time: { date: string; count: number }[];
+  posts_today: number;
+}
+
+export interface CostAnalytics {
+  total_tokens_in: number;
+  total_tokens_out: number;
+  total_cost: number;
+  avg_cost_per_post: number;
+  by_model: Record<string, { tokens_in: number; tokens_out: number; cost_usd: number; calls: number }>;
+  by_stage: Record<string, { tokens_in: number; tokens_out: number; cost_usd: number; calls: number }>;
+  by_profile: { name: string; cost_usd: number }[];
+  cost_over_time: { date: string; cost_usd: number }[];
+  model_costs_reference: Record<string, { input: number; output: number }>;
+}
+
+export interface ModelAnalytics {
+  models: {
+    model: string;
+    call_count: number;
+    avg_tokens_in: number;
+    avg_tokens_out: number;
+    avg_duration_s: number;
+    total_cost: number;
+  }[];
+  stage_performance: {
+    stage: string;
+    runs: number;
+    avg_duration_s: number;
+    total_cost: number;
+  }[];
+  stage_success_rates: {
+    stage: string;
+    total: number;
+    complete: number;
+    failed: number;
+    success_rate: number;
+  }[];
+}
+
+export interface LogEntry {
+  post_id: string;
+  slug: string;
+  topic: string;
+  timestamp: string;
+  stage: string;
+  level: string;
+  event: string;
+  message: string;
+  data: Record<string, unknown> | null;
+}
+
+export interface PaginatedLogs {
+  items: LogEntry[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
 }
 
 // --- Fetch wrapper ---
@@ -212,6 +329,7 @@ class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...init?.headers,
@@ -271,6 +389,10 @@ export const profiles = {
 
   deleteLink: (profileId: string, linkId: string) =>
     request<void>(`/api/profiles/${profileId}/links/${linkId}`, { method: "DELETE" }),
+
+  wpTest: (id: string) => request<WPConnectionTest>(`/api/profiles/${id}/wordpress/test`),
+  wpCategories: (id: string) => request<WPCategory[]>(`/api/profiles/${id}/wordpress/categories`),
+  wpAuthors: (id: string) => request<WPAuthor[]>(`/api/profiles/${id}/wordpress/authors`),
 };
 
 // --- Posts ---
@@ -334,21 +456,24 @@ export const posts = {
       method: "POST",
     }),
 
-  rerun: (id: string, stage: string) =>
-    request<{ status: string; stage: string }>(`/api/posts/${id}/rerun/${stage}`, {
+  rerun: (id: string) =>
+    request<{ status: string; mode: string; rerun_from: string }>(`/api/posts/${id}/rerun`, {
       method: "POST",
     }),
 
-  approve: (id: string, content?: string) =>
-    request<Post>(`/api/posts/${id}/approve`, {
+  restart: (id: string) =>
+    request<{ status: string; mode: string }>(`/api/posts/${id}/restart`, {
       method: "POST",
-      body: JSON.stringify(content !== undefined ? content : null),
     }),
 
   pause: (id: string) =>
     request<{ status: string }>(`/api/posts/${id}/pause`, {
       method: "POST",
     }),
+
+  // Publish
+  publish: (id: string) =>
+    request<{ status: string }>(`/api/posts/${id}/publish`, { method: "POST" }),
 
   // Export
   exportMarkdown: (id: string) => `${API_BASE}/api/posts/${id}/export/markdown`,
@@ -363,8 +488,6 @@ export const posts = {
 
 export const queue = {
   status: () => request<QueueStatus>("/api/queue"),
-
-  review: () => request<Post[]>("/api/queue/review"),
 
   pauseAll: () =>
     request<{ status: string; count: number }>("/api/queue/pause-all", {
@@ -389,6 +512,23 @@ export const settings = {
     }),
 };
 
+// --- API Keys ---
+
+export const apiKeys = {
+  get: () => request<Record<string, ApiKeyStatus>>("/api/settings/api-keys"),
+
+  reveal: (provider: string) =>
+    request<{ provider: string; key: string }>(
+      `/api/settings/api-keys/${provider}/reveal`
+    ),
+
+  update: (keys: { anthropic?: string; perplexity?: string; gemini?: string }) =>
+    request<Record<string, ApiKeyStatus>>("/api/settings/api-keys", {
+      method: "PUT",
+      body: JSON.stringify(keys),
+    }),
+};
+
 // --- Rules ---
 
 export const rules = {
@@ -401,6 +541,52 @@ export const rules = {
       method: "PUT",
       body: JSON.stringify({ content }),
     }),
+};
+
+// --- Analytics ---
+
+export const analytics = {
+  dashboard: (days = 30) =>
+    request<DashboardStats>(`/api/analytics/dashboard?days=${days}`),
+
+  costs: (params?: { days?: number; profile_id?: string; model?: string }) => {
+    const search = new URLSearchParams();
+    if (params?.days) search.set("days", String(params.days));
+    if (params?.profile_id) search.set("profile_id", params.profile_id);
+    if (params?.model) search.set("model", params.model);
+    const qs = search.toString();
+    return request<CostAnalytics>(`/api/analytics/costs${qs ? `?${qs}` : ""}`);
+  },
+
+  models: (params?: { model?: string }) => {
+    const search = new URLSearchParams();
+    if (params?.model) search.set("model", params.model);
+    const qs = search.toString();
+    return request<ModelAnalytics>(`/api/analytics/models${qs ? `?${qs}` : ""}`);
+  },
+
+  logs: (params?: {
+    level?: string;
+    stage?: string;
+    profile_id?: string;
+    q?: string;
+    since?: string;
+    until?: string;
+    page?: number;
+    per_page?: number;
+  }) => {
+    const search = new URLSearchParams();
+    if (params?.level) search.set("level", params.level);
+    if (params?.stage) search.set("stage", params.stage);
+    if (params?.profile_id) search.set("profile_id", params.profile_id);
+    if (params?.q) search.set("q", params.q);
+    if (params?.since) search.set("since", params.since);
+    if (params?.until) search.set("until", params.until);
+    if (params?.page) search.set("page", String(params.page));
+    if (params?.per_page) search.set("per_page", String(params.per_page));
+    const qs = search.toString();
+    return request<PaginatedLogs>(`/api/analytics/logs${qs ? `?${qs}` : ""}`);
+  },
 };
 
 // --- SSE URL helpers ---

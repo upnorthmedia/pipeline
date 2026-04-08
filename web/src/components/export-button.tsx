@@ -17,6 +17,7 @@ interface ExportButtonProps {
   hasHtml: boolean;
   mdContent?: string | null;
   htmlContent?: string | null;
+  wpPostUrl?: string | null;
 }
 
 export function ExportButton({
@@ -25,6 +26,7 @@ export function ExportButton({
   hasHtml,
   mdContent,
   htmlContent,
+  wpPostUrl,
 }: ExportButtonProps) {
   if (!hasMd && !hasHtml) return null;
 
@@ -42,6 +44,18 @@ export function ExportButton({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
+        {wpPostUrl && (
+          <DropdownMenuItem asChild>
+            <a
+              href={wpPostUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <ExternalLink className="h-3.5 w-3.5 mr-2" />
+              View on WordPress
+            </a>
+          </DropdownMenuItem>
+        )}
         {hasMd && mdContent && (
           <DropdownMenuItem
             onClick={() => copyToClipboard(mdContent, "Markdown")}

@@ -52,6 +52,15 @@ import {
 import { toast } from "sonner";
 
 const INTENTS = ["informational", "commercial", "transactional", "navigational"];
+const ARTICLE_TYPES = [
+  { value: "guide", label: "Guide" },
+  { value: "how-to", label: "How-To" },
+  { value: "listicle", label: "Listicle" },
+  { value: "review", label: "Review" },
+  { value: "comparison", label: "Comparison" },
+  { value: "news", label: "News" },
+  { value: "opinion", label: "Opinion" },
+];
 const MAX_ROWS = 20;
 
 function slugify(text: string): string {
@@ -63,7 +72,7 @@ function slugify(text: string): string {
 
 function parseCSV(
   text: string
-): Array<{ topic: string; slug?: string; intent?: string; niche?: string }> {
+): Array<{ topic: string; slug?: string; intent?: string; niche?: string; article_type?: string }> {
   const lines = text.trim().split("\n");
   const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
   return lines
@@ -74,7 +83,7 @@ function parseCSV(
       headers.forEach((h, i) => {
         row[h] = values[i] || "";
       });
-      return row as { topic: string; slug?: string; intent?: string; niche?: string };
+      return row as { topic: string; slug?: string; intent?: string; niche?: string; article_type?: string };
     })
     .filter((row) => row.topic);
 }
@@ -84,10 +93,11 @@ interface BatchRow {
   slug: string;
   intent: string;
   niche: string;
+  article_type: string;
 }
 
 function emptyRow(): BatchRow {
-  return { topic: "", slug: "", intent: "", niche: "" };
+  return { topic: "", slug: "", intent: "", niche: "", article_type: "" };
 }
 
 export default function BatchCreatePage() {
@@ -139,6 +149,7 @@ export default function BatchCreatePage() {
           slug: r.slug || slugify(r.topic),
           intent: r.intent || "",
           niche: r.niche || "",
+          article_type: r.article_type || "",
         }));
         setCsvRows(rows);
         setCsvFilename(file.name);
@@ -218,11 +229,12 @@ export default function BatchCreatePage() {
         target_audience: selectedProfile?.target_audience || undefined,
         tone: selectedProfile?.tone || "Conversational and friendly",
         word_count: selectedProfile?.word_count || 2000,
-        output_format: selectedProfile?.output_format || "both",
+        output_format: selectedProfile?.output_format || "markdown",
         website_url: selectedProfile?.website_url || undefined,
         brand_voice: selectedProfile?.brand_voice || undefined,
         avoid: selectedProfile?.avoid || undefined,
         related_keywords: selectedProfile?.related_keywords || [],
+        article_type: row.article_type || undefined,
         stage_settings: selectedProfile?.default_stage_settings,
       }));
 
@@ -300,7 +312,7 @@ export default function BatchCreatePage() {
             <CardHeader>
               <CardTitle className="text-base">Upload CSV</CardTitle>
               <CardDescription>
-                CSV must have a &quot;topic&quot; column. Optional columns: slug, intent, niche.
+                CSV must have a &quot;topic&quot; column. Optional columns: slug, intent, niche, article_type.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -336,6 +348,7 @@ export default function BatchCreatePage() {
                     <TableHead className="w-[180px]">Slug</TableHead>
                     <TableHead className="w-[140px]">Intent</TableHead>
                     <TableHead className="w-[160px]">Niche</TableHead>
+                    <TableHead className="w-[120px]">Type</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -353,6 +366,9 @@ export default function BatchCreatePage() {
                       </TableCell>
                       <TableCell className="text-sm">
                         {row.niche || "-"}
+                      </TableCell>
+                      <TableCell className="text-sm capitalize">
+                        {row.article_type || "-"}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -407,6 +423,26 @@ export default function BatchCreatePage() {
                         {INTENTS.map((intent) => (
                           <SelectItem key={intent} value={intent}>
                             <span className="capitalize">{intent}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="w-[130px] shrink-0">
+                    <Select
+                      value={row.article_type || "none"}
+                      onValueChange={(v) =>
+                        updateManualRow(i, "article_type", v === "none" ? "" : v)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No type</SelectItem>
+                        {ARTICLE_TYPES.map((t) => (
+                          <SelectItem key={t.value} value={t.value}>
+                            {t.label}
                           </SelectItem>
                         ))}
                       </SelectContent>

@@ -35,25 +35,6 @@ export default function Loading() {
         </div>
       </div>
 
-      {/* Worker Config Card */}
-      <div className="rounded-md border border-border">
-        <div className="p-6 space-y-1.5">
-          <Skeleton className="h-5 w-40" />
-          <Skeleton className="h-4 w-56" />
-        </div>
-        <div className="px-6 pb-6 space-y-4">
-          <div className="space-y-2">
-            <Skeleton className="h-4 w-32" />
-            <Skeleton className="h-10 w-40" />
-            <Skeleton className="h-3 w-64" />
-          </div>
-          <Skeleton className="h-px w-full" />
-          <div className="flex justify-end">
-            <Skeleton className="h-9 w-20" />
-          </div>
-        </div>
-      </div>
-
       {/* Rule Files Card */}
       <div className="rounded-md border border-border">
         <div className="p-6 space-y-1.5">

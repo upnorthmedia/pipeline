@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,6 +17,10 @@ if TYPE_CHECKING:
 
 class WebsiteProfile(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "website_profiles"
+
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("auth_users.id"), nullable=False, index=True
+    )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     website_url: Mapped[str] = mapped_column(Text, nullable=False)
@@ -35,7 +39,7 @@ class WebsiteProfile(UUIDMixin, TimestampMixin, Base):
         Integer, server_default="2000", default=2000
     )
     output_format: Mapped[str] = mapped_column(
-        String(20), server_default="both", default="both"
+        String(20), server_default="markdown", default="markdown"
     )
     image_style: Mapped[str | None] = mapped_column(Text)
     image_brand_colors: Mapped[dict] = mapped_column(
@@ -53,14 +57,25 @@ class WebsiteProfile(UUIDMixin, TimestampMixin, Base):
     # Pipeline defaults
     default_stage_settings: Mapped[dict] = mapped_column(
         JSONB,
-        server_default='{"research":"review","outline":"review","write":"review","edit":"review","images":"review"}',
+        server_default='{"research":"auto","outline":"auto","write":"auto","edit":"auto","images":"auto","ready":"auto"}',
         default=lambda: {
-            "research": "review",
-            "outline": "review",
-            "write": "review",
-            "edit": "review",
-            "images": "review",
+            "research": "auto",
+            "outline": "auto",
+            "write": "auto",
+            "edit": "auto",
+            "images": "auto",
+            "ready": "auto",
         },
+    )
+
+    # WordPress integration
+    wp_url: Mapped[str | None] = mapped_column(Text)
+    wp_username: Mapped[str | None] = mapped_column(Text)
+    wp_app_password: Mapped[str | None] = mapped_column(Text)
+    wp_default_author_id: Mapped[int | None] = mapped_column(Integer)
+    wp_default_category_id: Mapped[int | None] = mapped_column(Integer)
+    wp_default_status: Mapped[str | None] = mapped_column(
+        String(20), server_default="publish", default="publish"
     )
 
     # Sitemap crawl status
