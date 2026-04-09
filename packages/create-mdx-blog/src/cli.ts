@@ -111,11 +111,19 @@ async function runScaffoldMode(
     const envLines = [
       `JENA_API_KEY=${jena.apiKey ?? ""}`,
       `JENA_WEBHOOK_SECRET=${webhookSecret}`,
+      `GITHUB_TOKEN=${jena.githubToken ?? ""}`,
+      `GITHUB_REPO=${jena.githubRepo ?? ""}`,
+      `GITHUB_BRANCH=${jena.githubBranch ?? "main"}`,
+      `JENA_CONTENT_PATH=${config.blog?.contentDir ?? "content/blog"}`,
     ];
 
     appendEnvLocal(rootDir, envLines);
-    envEntries.push("JENA_API_KEY", "JENA_WEBHOOK_SECRET");
+    envEntries.push("JENA_API_KEY", "JENA_WEBHOOK_SECRET", "GITHUB_TOKEN", "GITHUB_REPO", "GITHUB_BRANCH", "JENA_CONTENT_PATH");
     verifyGitignore(rootDir);
+
+    console.log();
+    ui.info(`Webhook secret: ${webhookSecret}`);
+    ui.info("Add this secret to your Jena AI profile's Next.js Integration settings.");
   }
 
   // Install dependencies if needed
@@ -145,6 +153,9 @@ async function runConnectMode(
 
   const mapping = buildFrontmatterMapping(schema);
 
+  // Prompt for Jena AI + GitHub connection
+  const jena = await promptJenaConnection();
+
   // Connect
   const spinner = ora("Setting up Jena AI connection...").start();
   const result = await connectToExistingBlog({
@@ -167,13 +178,22 @@ async function runConnectMode(
 
   // Write env vars
   const webhookSecret = randomBytes(32).toString("base64");
-  appendEnvLocal(rootDir, [
-    "JENA_API_KEY=",
+  const envLines = [
+    `JENA_API_KEY=${jena.apiKey ?? ""}`,
     `JENA_WEBHOOK_SECRET=${webhookSecret}`,
-  ]);
+    `GITHUB_TOKEN=${jena.githubToken ?? ""}`,
+    `GITHUB_REPO=${jena.githubRepo ?? ""}`,
+    `GITHUB_BRANCH=${jena.githubBranch ?? "main"}`,
+    `JENA_CONTENT_PATH=${blog.contentDir}`,
+  ];
+  appendEnvLocal(rootDir, envLines);
   verifyGitignore(rootDir);
 
-  ui.summary(writtenFiles, ["JENA_API_KEY", "JENA_WEBHOOK_SECRET"]);
+  console.log();
+  ui.info(`Webhook secret: ${webhookSecret}`);
+  ui.info("Add this secret to your Jena AI profile's Next.js Integration settings.");
+
+  ui.summary(writtenFiles, ["JENA_API_KEY", "JENA_WEBHOOK_SECRET", "GITHUB_TOKEN", "GITHUB_REPO", "GITHUB_BRANCH", "JENA_CONTENT_PATH"]);
 }
 
 function appendEnvLocal(rootDir: string, lines: string[]): void {

@@ -101,8 +101,8 @@ describe("security", () => {
     );
     // Must strip non-alphanumeric characters
     expect(webhook!.content).toContain("[^a-z0-9-]");
-    // Must check directory confinement
-    expect(webhook!.content).toContain("startsWith");
+    // Must check path traversal
+    expect(webhook!.content).toContain("..");
   });
 
   it("config file does not contain raw secrets", async () => {

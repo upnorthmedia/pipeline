@@ -90,6 +90,9 @@ export async function promptBlogConfig(): Promise<BlogConfig> {
 export async function promptJenaConnection(): Promise<{
   connect: boolean;
   apiKey?: string;
+  githubToken?: string;
+  githubRepo?: string;
+  githubBranch?: string;
 }> {
   const { connect } = await prompts({
     type: "confirm",
@@ -106,7 +109,56 @@ export async function promptJenaConnection(): Promise<{
     message: "Jena AI API key",
   });
 
-  return { connect: true, apiKey };
+  console.log();
+  ui.info("Jena AI delivers posts by committing them to your repo via GitHub API.");
+  ui.info("Create a fine-grained token at:");
+  console.log();
+  console.log("    https://github.com/settings/personal-access-tokens/new");
+  console.log();
+  ui.info("Required permission: Contents → Read and write");
+  ui.info("Scope: Only the repository for this project");
+  console.log();
+
+  const github = await prompts([
+    {
+      type: "password",
+      name: "githubToken",
+      message: "GitHub personal access token",
+    },
+    {
+      type: "text",
+      name: "githubRepo",
+      message: "GitHub repo (owner/repo)",
+      initial: await detectGitHubRepo(),
+    },
+    {
+      type: "text",
+      name: "githubBranch",
+      message: "Branch to commit to",
+      initial: "main",
+    },
+  ]);
+
+  return {
+    connect: true,
+    apiKey,
+    githubToken: github.githubToken,
+    githubRepo: github.githubRepo,
+    githubBranch: github.githubBranch ?? "main",
+  };
+}
+
+/** Auto-detect GitHub repo from git remote */
+async function detectGitHubRepo(): Promise<string> {
+  try {
+    const { execSync } = await import("node:child_process");
+    const remote = execSync("git remote get-url origin", { encoding: "utf-8" }).trim();
+    // Parse "https://github.com/owner/repo.git" or "git@github.com:owner/repo.git"
+    const match = remote.match(/github\.com[/:]([^/]+\/[^/.]+)/);
+    return match ? match[1] : "";
+  } catch {
+    return "";
+  }
 }
 
 /** Prompt: confirm detected frontmatter schema */
