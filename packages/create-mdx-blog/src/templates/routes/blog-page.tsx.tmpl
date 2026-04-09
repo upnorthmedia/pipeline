@@ -1,0 +1,37 @@
+import type { Metadata } from "next";
+import { getAllPosts, getCategories, getPaginatedPosts } from "{{LIB_PATH}}/blog/content";
+import { PostCard } from "{{COMPONENTS_PATH}}/blog/post-card";
+import { Pagination } from "{{COMPONENTS_PATH}}/blog/pagination";
+import { CategoryNav } from "{{COMPONENTS_PATH}}/blog/category-nav";
+
+export const metadata: Metadata = {
+  title: "Blog | {{SITE_NAME}}",
+  description: "{{SITE_DESCRIPTION}}",
+};
+
+export default async function BlogPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { page: pageParam } = await searchParams;
+  const page = Math.max(1, parseInt(pageParam ?? "1", 10));
+  const { posts, totalPages } = getPaginatedPosts(page);
+  const categories = getCategories();
+
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-12">
+      <h1 className="mb-8 text-4xl font-bold">Blog</h1>
+      <CategoryNav categories={categories} />
+      <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
+        {posts.map((post) => (
+          <PostCard key={post.slug} post={post} />
+        ))}
+      </div>
+      {posts.length === 0 && (
+        <p className="text-center text-gray-500">No posts yet.</p>
+      )}
+      <Pagination currentPage={page} totalPages={totalPages} />
+    </div>
+  );
+}
