@@ -477,24 +477,30 @@ async def publish_post(
     user: AuthUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Manually trigger WordPress publishing."""
+    """Manually trigger publishing (WordPress or Next.js)."""
     post = await _get_user_post(post_id, user, session)
 
     if not post.ready_content and not post.final_md_content:
         raise HTTPException(status_code=400, detail="No content to publish")
 
-    if post.output_format != "wordpress":
-        raise HTTPException(
-            status_code=400, detail="Post output_format is not 'wordpress'"
-        )
-
-    post.wp_publish_status = "pending"
-    await session.commit()
-
     redis = request.app.state.redis
-    await redis.enqueue_job("publish_to_wordpress", str(post_id))
 
-    return {"status": "queued", "post_id": str(post_id)}
+    if post.output_format == "wordpress":
+        post.wp_publish_status = "pending"
+        await session.commit()
+        await redis.enqueue_job("publish_to_wordpress", str(post_id))
+        return {"status": "queued", "post_id": str(post_id)}
+
+    if post.output_format == "nextjs":
+        post.nextjs_publish_status = "pending"
+        await session.commit()
+        await redis.enqueue_job("publish_to_nextjs", str(post_id))
+        return {"status": "queued", "post_id": str(post_id)}
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"Publishing not supported for output_format '{post.output_format}'",
+    )
 
 
 # --- Export ---
