@@ -58,6 +58,7 @@ import { toast } from "sonner";
 const OUTPUT_FORMATS = [
   { value: "markdown", label: "Markdown" },
   { value: "wordpress", label: "WordPress (Direct Publish)" },
+  { value: "nextjs", label: "Next.js (Webhook)" },
 ];
 
 const STAGE_MODES: { value: StageMode; label: string }[] = [
@@ -118,6 +119,13 @@ export default function ProfileDetailPage() {
   const [wpTesting, setWpTesting] = useState(false);
   const [wpConnected, setWpConnected] = useState(false);
 
+  // Next.js state
+  const [nextjsWebhookUrl, setNextjsWebhookUrl] = useState("");
+  const [nextjsWebhookSecret, setNextjsWebhookSecret] = useState("");
+  const [nextjsFrontmatterMap, setNextjsFrontmatterMap] = useState("");
+  const [nextjsTesting, setNextjsTesting] = useState(false);
+  const [nextjsConnected, setNextjsConnected] = useState(false);
+
   // Links state
   const [links, setLinks] = useState<InternalLink[]>([]);
   const [linksLoading, setLinksLoading] = useState(false);
@@ -155,6 +163,12 @@ export default function ProfileDetailPage() {
     setWpDefaultCategoryId(p.wp_default_category_id);
     setWpDefaultAuthorId(p.wp_default_author_id);
     setWpConnected(Boolean(p.wp_url && p.wp_username));
+    setNextjsWebhookUrl(p.nextjs_webhook_url || "");
+    setNextjsWebhookSecret("");
+    setNextjsFrontmatterMap(
+      p.nextjs_frontmatter_map ? JSON.stringify(p.nextjs_frontmatter_map, null, 2) : ""
+    );
+    setNextjsConnected(Boolean(p.nextjs_webhook_url));
   }, []);
 
   const fetchProfile = useCallback(async () => {
@@ -272,6 +286,11 @@ export default function ProfileDetailPage() {
         wp_default_status: wpDefaultStatus,
         wp_default_category_id: wpDefaultCategoryId,
         wp_default_author_id: wpDefaultAuthorId,
+        nextjs_webhook_url: nextjsWebhookUrl || null,
+        ...(nextjsWebhookSecret ? { nextjs_webhook_secret: nextjsWebhookSecret } : {}),
+        nextjs_frontmatter_map: nextjsFrontmatterMap
+          ? (() => { try { return JSON.parse(nextjsFrontmatterMap); } catch { return null; } })()
+          : null,
       };
       const updated = await profiles.update(profileId, data);
       setProfile(updated);
@@ -331,6 +350,31 @@ export default function ProfileDetailPage() {
       toast.error("Failed to test connection");
     } finally {
       setWpTesting(false);
+    }
+  };
+
+  const handleNextjsTest = async () => {
+    setNextjsTesting(true);
+    try {
+      // Save webhook URL first so the backend can use it
+      const saveData: Record<string, unknown> = {
+        nextjs_webhook_url: nextjsWebhookUrl || null,
+      };
+      if (nextjsWebhookSecret) saveData.nextjs_webhook_secret = nextjsWebhookSecret;
+      await profiles.update(profileId, saveData);
+
+      const result = await profiles.nextjsTest(profileId);
+      if (result.connected) {
+        setNextjsConnected(true);
+        toast.success("Next.js webhook connected");
+      } else {
+        setNextjsConnected(false);
+        toast.error(result.error || "Connection failed");
+      }
+    } catch {
+      toast.error("Failed to test connection");
+    } finally {
+      setNextjsTesting(false);
     }
   };
 
@@ -763,6 +807,80 @@ export default function ProfileDetailPage() {
                   </div>
                 </>
               )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Next.js Integration */}
+        {(outputFormat === "nextjs" || nextjsConnected) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Next.js Integration</CardTitle>
+              <CardDescription>
+                Publish via webhook to a Next.js site after pipeline completes
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="nextjsWebhookUrl">Webhook URL</Label>
+                <Input
+                  id="nextjsWebhookUrl"
+                  value={nextjsWebhookUrl}
+                  onChange={(e) => setNextjsWebhookUrl(e.target.value)}
+                  placeholder="https://yoursite.com/api/jena-webhook"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="nextjsWebhookSecret">Webhook Secret</Label>
+                  <Input
+                    id="nextjsWebhookSecret"
+                    type="password"
+                    value={nextjsWebhookSecret}
+                    onChange={(e) => setNextjsWebhookSecret(e.target.value)}
+                    placeholder={nextjsConnected ? "(unchanged)" : "Enter webhook secret"}
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Shared secret for HMAC signature verification
+                  </p>
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleNextjsTest}
+                    disabled={nextjsTesting || !nextjsWebhookUrl}
+                  >
+                    {nextjsTesting ? (
+                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                    )}
+                    Test Connection
+                  </Button>
+                  {nextjsConnected && (
+                    <Badge variant="outline" className="ml-2 text-green-600 border-green-600">
+                      Connected
+                    </Badge>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="nextjsFrontmatterMap">Frontmatter Mapping</Label>
+                <Textarea
+                  id="nextjsFrontmatterMap"
+                  value={nextjsFrontmatterMap}
+                  onChange={(e) => setNextjsFrontmatterMap(e.target.value)}
+                  placeholder='{"category": "blog", "author": "Jena AI"}'
+                  rows={4}
+                  className="font-mono text-sm"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  JSON object of extra frontmatter fields to include in published posts.
+                  These are merged with the default frontmatter (title, slug, date, etc.).
+                </p>
+              </div>
             </CardContent>
           </Card>
         )}
