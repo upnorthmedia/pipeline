@@ -31,6 +31,12 @@
   "engines": {
     "node": ">=18"
   },
-  "keywords": ["nextjs", "blog", "mdx", "scaffold", "cli"],
-  "license": "MIT"
+  "keywords": ["nextjs", "blog", "mdx", "scaffold", "cli", "ssg", "seo", "react", "markdown"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jena-ai/create-mdx-blog"
+  },
+  "homepage": "https://jena.ai",
+  "author": "Jena AI"
 }
