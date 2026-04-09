@@ -72,9 +72,14 @@ async def test_nextjs_connection(
             )
         if response.status_code == 200:
             return {"connected": True}
+        # Include the response body so the user can see why it failed
+        try:
+            detail = response.json().get("error", response.text[:200])
+        except Exception:
+            detail = response.text[:200]
         return {
             "connected": False,
-            "error": f"Webhook returned {response.status_code}",
+            "error": f"Webhook returned {response.status_code}: {detail}",
         }
     except httpx.RequestError as exc:
         return {"connected": False, "error": str(exc)}

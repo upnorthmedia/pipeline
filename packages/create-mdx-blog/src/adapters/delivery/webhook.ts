@@ -93,6 +93,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Request expired" }, { status: 401 });
   }
 
+  // Handle test events (connection verification from Jena AI dashboard)
+  if (payload.event === "test") {
+    return NextResponse.json({ received: true, test: true });
+  }
+
   // Sanitize and validate slug
   const slug = sanitizeSlug(payload.slug || "");
   if (!slug) {
