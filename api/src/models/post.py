@@ -76,6 +76,12 @@ class Post(UUIDMixin, TimestampMixin, Base):
     wp_post_url: Mapped[str | None] = mapped_column(Text)
     wp_publish_status: Mapped[str | None] = mapped_column(String(20))
 
+    # Next.js publishing
+    nextjs_publish_status: Mapped[str | None] = mapped_column(String(20))
+    nextjs_published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
     # Execution logs
     stage_logs: Mapped[dict] = mapped_column(JSONB, server_default="{}", default=dict)
     execution_logs: Mapped[list] = mapped_column(

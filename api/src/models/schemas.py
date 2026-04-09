@@ -39,6 +39,9 @@ class ProfileCreate(ProfileBase):
     wp_default_author_id: int | None = None
     wp_default_category_id: int | None = None
     wp_default_status: str | None = "publish"
+    nextjs_webhook_url: str | None = None
+    nextjs_webhook_secret: str | None = None
+    nextjs_frontmatter_map: dict | None = None
 
 
 class ProfileUpdate(BaseModel):
@@ -64,6 +67,9 @@ class ProfileUpdate(BaseModel):
     wp_default_author_id: int | None = None
     wp_default_category_id: int | None = None
     wp_default_status: str | None = None
+    nextjs_webhook_url: str | None = None
+    nextjs_webhook_secret: str | None = None
+    nextjs_frontmatter_map: dict | None = None
 
 
 class ProfileRead(ProfileBase):
@@ -78,6 +84,8 @@ class ProfileRead(ProfileBase):
     wp_default_author_id: int | None = None
     wp_default_category_id: int | None = None
     wp_default_status: str | None = "publish"
+    nextjs_webhook_url: str | None = None
+    nextjs_frontmatter_map: dict | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -177,6 +185,8 @@ class PostRead(PostBase):
     wp_post_id: int | None = None
     wp_post_url: str | None = None
     wp_publish_status: str | None = None
+    nextjs_publish_status: str | None = None
+    nextjs_published_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
