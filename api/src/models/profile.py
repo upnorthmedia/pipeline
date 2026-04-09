@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -77,6 +77,11 @@ class WebsiteProfile(UUIDMixin, TimestampMixin, Base):
     wp_default_status: Mapped[str | None] = mapped_column(
         String(20), server_default="publish", default="publish"
     )
+
+    # Next.js webhook integration
+    nextjs_webhook_url: Mapped[str | None] = mapped_column(Text)
+    nextjs_webhook_secret: Mapped[str | None] = mapped_column(Text)
+    nextjs_frontmatter_map: Mapped[dict | None] = mapped_column(JSON)
 
     # Sitemap crawl status
     last_crawled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

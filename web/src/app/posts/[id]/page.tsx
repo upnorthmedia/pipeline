@@ -200,11 +200,18 @@ export default function PostDetailPage() {
         toast.error(`${event.stage || "Pipeline"} failed`);
       }
       if (event.event === "publish_start") {
-        toast.info("Publishing to WordPress...");
-        setPost((prev) => prev ? { ...prev, wp_publish_status: "publishing" } : prev);
+        const target = (event as Record<string, unknown>).target;
+        if (target === "nextjs") {
+          toast.info("Publishing to Next.js...");
+          setPost((prev) => prev ? { ...prev, nextjs_publish_status: "publishing" } : prev);
+        } else {
+          toast.info("Publishing to WordPress...");
+          setPost((prev) => prev ? { ...prev, wp_publish_status: "publishing" } : prev);
+        }
       }
       if (event.event === "publish_complete") {
-        toast.success("Published to WordPress!");
+        const target = (event as Record<string, unknown>).target;
+        toast.success(target === "nextjs" ? "Published to Next.js!" : "Published to WordPress!");
         fetchPost();
       }
       if (event.event === "publish_error") {
@@ -271,8 +278,13 @@ export default function PostDetailPage() {
   const handlePublish = async () => {
     try {
       await posts.publish(postId);
-      toast.info("Publishing to WordPress...");
-      setPost((prev) => prev ? { ...prev, wp_publish_status: "publishing" } : prev);
+      if (post?.output_format === "nextjs") {
+        toast.info("Publishing to Next.js...");
+        setPost((prev) => prev ? { ...prev, nextjs_publish_status: "publishing" } : prev);
+      } else {
+        toast.info("Publishing to WordPress...");
+        setPost((prev) => prev ? { ...prev, wp_publish_status: "publishing" } : prev);
+      }
     } catch {
       toast.error("Failed to publish");
     }
@@ -339,6 +351,30 @@ export default function PostDetailPage() {
               {post.wp_publish_status === "failed" && (
                 <Badge variant="destructive">Publish failed</Badge>
               )}
+              {post.nextjs_publish_status === "published" && (
+                <Badge variant="outline" className="text-green-600 border-green-600">
+                  Published to Next.js
+                  {post.nextjs_published_at && (
+                    <span className="ml-1 text-[10px] opacity-70">
+                      {new Date(post.nextjs_published_at).toLocaleString()}
+                    </span>
+                  )}
+                </Badge>
+              )}
+              {post.nextjs_publish_status === "pending" && (
+                <Badge variant="outline" className="text-amber-600 border-amber-600">
+                  Publish pending
+                </Badge>
+              )}
+              {post.nextjs_publish_status === "publishing" && (
+                <Badge variant="outline">
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  Publishing to Next.js...
+                </Badge>
+              )}
+              {post.nextjs_publish_status === "failed" && (
+                <Badge variant="destructive">Next.js publish failed</Badge>
+              )}
               {saving && (
                 <span className="text-xs text-muted-foreground animate-pulse">
                   Saving...
@@ -373,6 +409,21 @@ export default function PostDetailPage() {
             )}
           {post.output_format === "wordpress" &&
             post.wp_publish_status === "failed" && (
+              <Button size="sm" variant="outline" onClick={handlePublish}>
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                Retry Publish
+              </Button>
+            )}
+          {post.output_format === "nextjs" &&
+            isComplete &&
+            (!post.nextjs_publish_status || post.nextjs_publish_status === "pending") && (
+              <Button size="sm" onClick={handlePublish}>
+                <Upload className="h-3.5 w-3.5 mr-1.5" />
+                Publish to Next.js
+              </Button>
+            )}
+          {post.output_format === "nextjs" &&
+            post.nextjs_publish_status === "failed" && (
               <Button size="sm" variant="outline" onClick={handlePublish}>
                 <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
                 Retry Publish

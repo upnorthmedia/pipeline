@@ -55,6 +55,10 @@ async def create_profile(
         from src.services.crypto import encrypt
 
         dump["wp_app_password"] = encrypt(dump["wp_app_password"])
+    if dump.get("nextjs_webhook_secret"):
+        from src.services.crypto import encrypt
+
+        dump["nextjs_webhook_secret"] = encrypt(dump["nextjs_webhook_secret"])
     profile = WebsiteProfile(user_id=user.id, **dump)
     session.add(profile)
     await session.commit()
@@ -95,6 +99,10 @@ async def update_profile(
         from src.services.crypto import encrypt
 
         updates["wp_app_password"] = encrypt(updates["wp_app_password"])
+    if "nextjs_webhook_secret" in updates and updates["nextjs_webhook_secret"]:
+        from src.services.crypto import encrypt
+
+        updates["nextjs_webhook_secret"] = encrypt(updates["nextjs_webhook_secret"])
 
     for field, value in updates.items():
         setattr(profile, field, value)

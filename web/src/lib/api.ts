@@ -38,6 +38,8 @@ export interface Profile {
   wp_default_author_id: number | null;
   wp_default_category_id: number | null;
   wp_default_status: string | null;
+  nextjs_webhook_url: string | null;
+  nextjs_frontmatter_map: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -65,6 +67,9 @@ export interface ProfileCreate {
   wp_default_author_id?: number | null;
   wp_default_category_id?: number | null;
   wp_default_status?: string | null;
+  nextjs_webhook_url?: string | null;
+  nextjs_webhook_secret?: string | null;
+  nextjs_frontmatter_map?: Record<string, unknown> | null;
 }
 
 export interface WPCategory {
@@ -126,6 +131,8 @@ export interface Post {
   wp_post_id: number | null;
   wp_post_url: string | null;
   wp_publish_status: string | null;
+  nextjs_publish_status: string | null;
+  nextjs_published_at: string | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -393,6 +400,11 @@ export const profiles = {
   wpTest: (id: string) => request<WPConnectionTest>(`/api/profiles/${id}/wordpress/test`),
   wpCategories: (id: string) => request<WPCategory[]>(`/api/profiles/${id}/wordpress/categories`),
   wpAuthors: (id: string) => request<WPAuthor[]>(`/api/profiles/${id}/wordpress/authors`),
+
+  nextjsTest: (id: string) =>
+    request<{ connected: boolean; error?: string }>(`/api/profiles/${id}/nextjs/test`, {
+      method: "POST",
+    }),
 };
 
 // --- Posts ---

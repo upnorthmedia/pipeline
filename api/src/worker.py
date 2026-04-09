@@ -24,6 +24,7 @@ from src.pipeline.helpers import (
     set_event_context,
 )
 from src.pipeline.publish import publish_to_wordpress
+from src.services.nextjs_publish import publish_to_nextjs
 from src.pipeline.stages.edit import edit_node
 from src.pipeline.stages.images import images_node
 from src.pipeline.stages.outline import outline_node
@@ -276,14 +277,16 @@ async def _run_pipeline(
         # Full pipeline completion
         if is_full_pipeline:
             should_publish_wp = False
+            should_publish_nextjs = False
             async with session_factory() as session:
                 post = await session.get(Post, uuid.UUID(post_id))
                 if post:
                     state = state_from_post(post, internal_links)
                     await _post_completion_hook(session, post_id, state)
-                    # Check if WP publish was queued
+                    # Check if WP or Next.js publish was queued
                     await session.refresh(post)
                     should_publish_wp = post.wp_publish_status == "pending"
+                    should_publish_nextjs = post.nextjs_publish_status == "pending"
 
                 await append_execution_log(
                     session,
@@ -303,6 +306,9 @@ async def _run_pipeline(
 
             if should_publish_wp:
                 await redis.enqueue_job("publish_to_wordpress", post_id)
+
+            if should_publish_nextjs:
+                await redis.enqueue_job("publish_to_nextjs", post_id)
 
         await _record_job_completed(redis)
 
@@ -446,6 +452,18 @@ async def _post_completion_hook(
             # Import redis from the session's bind context — we pass it via caller
             # The caller (_run_pipeline) will enqueue the job after this returns
 
+    # Auto-publish to Next.js if configured
+    if post.output_format == "nextjs" and post.profile_id:
+        profile = await session.get(WebsiteProfile, post.profile_id)
+        nextjs_configured = (
+            profile
+            and profile.nextjs_webhook_url
+            and profile.nextjs_webhook_secret
+        )
+        if nextjs_configured:
+            post.nextjs_publish_status = "pending"
+            await session.commit()
+
 
 async def _record_job_completed(redis) -> None:
     """Record the timestamp of the last completed job in Redis."""
@@ -582,7 +600,7 @@ async def shutdown(ctx):
 
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    functions = [run_pipeline_stage, crawl_profile_sitemap, publish_to_wordpress]
+    functions = [run_pipeline_stage, crawl_profile_sitemap, publish_to_wordpress, publish_to_nextjs]
     cron_jobs = [cron(check_recrawl_schedules, hour=0, minute=0)]
     on_startup = startup
     on_shutdown = shutdown
