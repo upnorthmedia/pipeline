@@ -1,0 +1,13 @@
+export interface PostMeta {
+  title: string;
+  description: string;
+  date: string;
+  category: string;
+  author?: string;
+  image?: string;
+  slug: string;
+}
+
+export interface Post extends PostMeta {
+  content: string;
+}
