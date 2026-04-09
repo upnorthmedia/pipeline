@@ -105,7 +105,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid path" }, { status: 400 });
   }
 
-  let content: string = payload.content;
+  ${imageStorage === "local" ? "let" : "const"} content: string = payload.content;
   const images: Array<{
     filename: string;
     url: string;${imageStorage === "local" ? "\n    download_url?: string;" : ""}
