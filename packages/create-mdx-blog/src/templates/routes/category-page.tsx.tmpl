@@ -1,0 +1,58 @@
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { getCategories, getPostsByCategory, getPaginatedPosts } from "{{LIB_PATH}}/blog/content";
+import { PostCard } from "{{COMPONENTS_PATH}}/blog/post-card";
+import { Pagination } from "{{COMPONENTS_PATH}}/blog/pagination";
+import { CategoryNav } from "{{COMPONENTS_PATH}}/blog/category-nav";
+
+interface Props {
+  params: Promise<{ category: string }>;
+  searchParams: Promise<{ page?: string }>;
+}
+
+export async function generateStaticParams() {
+  return getCategories().map((cat) => ({
+    category: encodeURIComponent(cat.toLowerCase()),
+  }));
+}
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { category: rawCategory } = await params;
+  const category = decodeURIComponent(rawCategory);
+  return {
+    title: `${category} | Blog | {{SITE_NAME}}`,
+  };
+}
+
+export default async function CategoryPage({ params, searchParams }: Props) {
+  const { category: rawCategory } = await params;
+  const { page: pageParam } = await searchParams;
+  const category = decodeURIComponent(rawCategory);
+  const allCategories = getCategories();
+
+  const matchedCategory = allCategories.find(
+    (c) => c.toLowerCase() === category.toLowerCase(),
+  );
+  if (!matchedCategory) notFound();
+
+  const categoryPosts = getPostsByCategory(matchedCategory);
+  const page = Math.max(1, parseInt(pageParam ?? "1", 10));
+  const { posts, totalPages } = getPaginatedPosts(page, categoryPosts);
+
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-12">
+      <h1 className="mb-8 text-4xl font-bold">{matchedCategory}</h1>
+      <CategoryNav categories={allCategories} activeCategory={matchedCategory} />
+      <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
+        {posts.map((post) => (
+          <PostCard key={post.slug} post={post} />
+        ))}
+      </div>
+      <Pagination
+        currentPage={page}
+        totalPages={totalPages}
+        basePath={`/blog/category/${encodeURIComponent(matchedCategory.toLowerCase())}`}
+      />
+    </div>
+  );
+}

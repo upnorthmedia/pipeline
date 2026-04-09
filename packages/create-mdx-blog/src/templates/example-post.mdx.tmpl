@@ -1,0 +1,47 @@
+---
+title: "Welcome to Your New Blog"
+description: "This is your first blog post. Edit or delete this file to get started."
+date: "{{TODAY_DATE}}"
+category: "Getting Started"
+author: "{{SITE_NAME}}"
+image: ""
+---
+
+Welcome to your new blog! This post was scaffolded by `create-mdx-blog`.
+
+## Getting Started
+
+Your blog posts live in `{{CONTENT_DIR}}/`. Each `.mdx` file becomes a blog post.
+
+### Frontmatter
+
+Every post needs frontmatter at the top:
+
+```yaml
+---
+title: "Your Post Title"
+description: "A brief description for SEO"
+date: "2026-04-09"
+category: "Category Name"
+author: "Your Name"
+image: "/blog/images/your-post/hero.webp"
+---
+```
+
+### Adding Images
+
+Place images in `public/blog/images/your-post-slug/` and reference them in your post:
+
+```markdown
+![Alt text](/blog/images/your-post-slug/image.webp)
+```
+
+### Categories
+
+Posts are grouped by the `category` field. Category pages are generated automatically.
+
+## What's Next?
+
+- Edit this post or delete it
+- Create a new `.mdx` file in `{{CONTENT_DIR}}/`
+- Run `git push` to deploy

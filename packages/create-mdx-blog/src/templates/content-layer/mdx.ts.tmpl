@@ -1,0 +1,15 @@
+import { compileMDX } from "next-mdx-remote/rsc";
+import type { ReactElement } from "react";
+
+const components: Record<string, React.ComponentType<Record<string, unknown>>> = {
+  // Register custom MDX components here
+  // Example: Callout: (props) => <div className="callout" {...props} />,
+};
+
+export async function renderMDX(source: string): Promise<ReactElement> {
+  const { content } = await compileMDX({
+    source,
+    components,
+  });
+  return content;
+}
