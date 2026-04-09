@@ -1,0 +1,45 @@
+import Link from "next/link";
+import type { PostMeta } from "{{LIB_PATH}}/blog/types";
+
+export function PostLayout({
+  meta,
+  children,
+}: {
+  meta: PostMeta;
+  children: React.ReactNode;
+}) {
+  return (
+    <article className="mx-auto max-w-3xl px-4 py-12">
+      <header className="mb-8">
+        <Link
+          href="/blog"
+          className="mb-4 inline-block text-sm text-gray-500 hover:text-gray-700"
+        >
+          &larr; Back to blog
+        </Link>
+        {meta.category && (
+          <Link
+            href={`/blog/category/${encodeURIComponent(meta.category.toLowerCase())}`}
+            className="mb-2 block text-sm font-medium text-indigo-600"
+          >
+            {meta.category}
+          </Link>
+        )}
+        <h1 className="text-4xl font-bold tracking-tight">{meta.title}</h1>
+        <p className="mt-2 text-lg text-gray-600">{meta.description}</p>
+        <div className="mt-4 flex items-center gap-4 text-sm text-gray-400">
+          <time>{meta.date}</time>
+          {meta.author && <span>by {meta.author}</span>}
+        </div>
+      </header>
+      {meta.image && (
+        <img
+          src={meta.image}
+          alt={meta.title}
+          className="mb-8 w-full rounded-lg"
+        />
+      )}
+      <div className="prose prose-lg max-w-none">{children}</div>
+    </article>
+  );
+}

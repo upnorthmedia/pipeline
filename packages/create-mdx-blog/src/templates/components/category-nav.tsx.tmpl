@@ -1,0 +1,37 @@
+import Link from "next/link";
+
+export function CategoryNav({
+  categories,
+  activeCategory,
+}: {
+  categories: string[];
+  activeCategory?: string;
+}) {
+  return (
+    <nav className="mb-8 flex flex-wrap gap-2">
+      <Link
+        href="/blog"
+        className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+          !activeCategory
+            ? "bg-indigo-600 text-white"
+            : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+        }`}
+      >
+        All
+      </Link>
+      {categories.map((cat) => (
+        <Link
+          key={cat}
+          href={`/blog/category/${encodeURIComponent(cat.toLowerCase())}`}
+          className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+            activeCategory?.toLowerCase() === cat.toLowerCase()
+              ? "bg-indigo-600 text-white"
+              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+          }`}
+        >
+          {cat}
+        </Link>
+      ))}
+    </nav>
+  );
+}

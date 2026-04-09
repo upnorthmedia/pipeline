@@ -1,0 +1,35 @@
+import Link from "next/link";
+import type { PostMeta } from "{{LIB_PATH}}/blog/types";
+
+export function PostCard({ post }: { post: PostMeta }) {
+  return (
+    <article className="group">
+      {post.image && (
+        <Link href={`/blog/${post.slug}`}>
+          <img
+            src={post.image}
+            alt={post.title}
+            className="aspect-video w-full rounded-lg object-cover"
+          />
+        </Link>
+      )}
+      <div className="mt-4">
+        {post.category && (
+          <Link
+            href={`/blog/category/${encodeURIComponent(post.category.toLowerCase())}`}
+            className="text-sm font-medium text-indigo-600"
+          >
+            {post.category}
+          </Link>
+        )}
+        <h2 className="mt-1 text-xl font-semibold">
+          <Link href={`/blog/${post.slug}`} className="hover:underline">
+            {post.title}
+          </Link>
+        </h2>
+        <p className="mt-2 text-gray-600 line-clamp-2">{post.description}</p>
+        <time className="mt-3 block text-sm text-gray-400">{post.date}</time>
+      </div>
+    </article>
+  );
+}

@@ -1,0 +1,47 @@
+import Link from "next/link";
+
+export function Pagination({
+  currentPage,
+  totalPages,
+  basePath = "/blog",
+}: {
+  currentPage: number;
+  totalPages: number;
+  basePath?: string;
+}) {
+  if (totalPages <= 1) return null;
+
+  return (
+    <nav className="mt-12 flex items-center justify-center gap-2">
+      {currentPage > 1 && (
+        <Link
+          href={currentPage === 2 ? basePath : `${basePath}?page=${currentPage - 1}`}
+          className="rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-100"
+        >
+          Previous
+        </Link>
+      )}
+      {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+        <Link
+          key={page}
+          href={page === 1 ? basePath : `${basePath}?page=${page}`}
+          className={`rounded-md px-3 py-2 text-sm font-medium ${
+            page === currentPage
+              ? "bg-indigo-600 text-white"
+              : "hover:bg-gray-100"
+          }`}
+        >
+          {page}
+        </Link>
+      ))}
+      {currentPage < totalPages && (
+        <Link
+          href={`${basePath}?page=${currentPage + 1}`}
+          className="rounded-md px-4 py-2 text-sm font-medium hover:bg-gray-100"
+        >
+          Next
+        </Link>
+      )}
+    </nav>
+  );
+}
