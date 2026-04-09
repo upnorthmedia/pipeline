@@ -14,6 +14,7 @@ from src.api.profiles import router as profiles_router
 from src.api.queue import router as queue_router
 from src.api.rules import router as rules_router
 from src.api.settings import router as settings_router
+from src.api.nextjs import router as nextjs_router
 from src.api.wordpress import router as wordpress_router
 from src.config import settings
 from src.database import engine
@@ -52,6 +53,7 @@ app.include_router(settings_router)
 app.include_router(queue_router)
 app.include_router(rules_router)
 app.include_router(wordpress_router)
+app.include_router(nextjs_router)
 app.include_router(analytics_router)
 
 # Serve generated images
