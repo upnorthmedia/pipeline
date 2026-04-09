@@ -1,0 +1,36 @@
+{
+  "name": "create-mdx-blog",
+  "version": "0.1.0",
+  "description": "Scaffold a production-ready MDX blog into your Next.js app",
+  "type": "module",
+  "bin": {
+    "create-mdx-blog": "./dist/cli.js"
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "chalk": "^5.4.0",
+    "glob": "^11.0.0",
+    "gray-matter": "^4.0.3",
+    "ora": "^8.1.0",
+    "prompts": "^2.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/prompts": "^2.4.9",
+    "memfs": "^4.17.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": ["nextjs", "blog", "mdx", "scaffold", "cli"],
+  "license": "MIT"
+}
