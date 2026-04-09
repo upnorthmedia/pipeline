@@ -613,8 +613,6 @@ class WorkerSettings:
 
 # Allow running directly: python -m src.worker
 if __name__ == "__main__":
-    import asyncio
-
     from arq import run_worker
 
     # Configure logging
@@ -623,4 +621,4 @@ if __name__ == "__main__":
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
-    asyncio.run(run_worker(WorkerSettings))
+    run_worker(WorkerSettings)
