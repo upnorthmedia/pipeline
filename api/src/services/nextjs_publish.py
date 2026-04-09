@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 import httpx
 
+from src.api.events import publish_event
 from src.models.post import Post
 from src.models.profile import WebsiteProfile
 from src.services.crypto import decrypt
@@ -36,11 +37,14 @@ async def publish_to_nextjs(ctx: dict, post_id: str) -> None:
             else None
         )
         if not profile:
-            await _fail(session, redis, post, "No profile linked to post")
+            await _fail(session, redis, post, "No profile linked to this post. Assign a profile first.")
             return
 
         if not profile.nextjs_webhook_url or not profile.nextjs_webhook_secret:
-            await _fail(session, redis, post, "Next.js webhook not configured")
+            await _fail(
+                session, redis, post,
+                "Next.js webhook not configured. Go to Profiles, select this post's profile, and add a Webhook URL and Secret in the Next.js Integration section.",
+            )
             return
 
         try:
@@ -52,6 +56,9 @@ async def publish_to_nextjs(ctx: dict, post_id: str) -> None:
         # Mark as publishing
         post.nextjs_publish_status = "publishing"
         await session.commit()
+        await publish_event(
+            redis, str(post.id), "publish_start", {"target": "nextjs"}
+        )
 
         # Build payload
         content = post.ready_content or post.final_md_content or ""
@@ -108,6 +115,9 @@ async def publish_to_nextjs(ctx: dict, post_id: str) -> None:
                 post.nextjs_publish_status = "published"
                 post.nextjs_published_at = datetime.now(UTC)
                 await session.commit()
+                await publish_event(
+                    redis, post_id, "publish_complete", {"target": "nextjs"}
+                )
                 logger.info(
                     "Published post %s to Next.js at %s",
                     post_id,
@@ -143,7 +153,15 @@ def _apply_mapping_to_content(content: str, mapping: dict) -> str:
 
 
 async def _fail(session, redis, post: Post, message: str) -> None:
-    """Mark post as failed and log the error."""
+    """Mark post as failed, send SSE event, and log the error."""
     logger.error("Next.js publish failed for post %s: %s", post.id, message)
     post.nextjs_publish_status = "failed"
     await session.commit()
+
+    post_id = str(post.id)
+    await publish_event(
+        redis,
+        post_id,
+        "publish_error",
+        {"error": message, "target": "nextjs"},
+    )

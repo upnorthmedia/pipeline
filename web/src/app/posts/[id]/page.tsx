@@ -215,7 +215,8 @@ export default function PostDetailPage() {
         fetchPost();
       }
       if (event.event === "publish_error") {
-        toast.error(`Publish failed: ${event.error || "Unknown error"}`);
+        const error = (event as Record<string, unknown>).error as string || "Unknown error";
+        toast.error(error, { duration: 8000 });
         fetchPost();
       }
     },
@@ -373,7 +374,9 @@ export default function PostDetailPage() {
                 </Badge>
               )}
               {post.nextjs_publish_status === "failed" && (
-                <Badge variant="destructive">Next.js publish failed</Badge>
+                <Badge variant="destructive" title="Check the profile's Next.js Integration settings">
+                  Next.js publish failed
+                </Badge>
               )}
               {saving && (
                 <span className="text-xs text-muted-foreground animate-pulse">
