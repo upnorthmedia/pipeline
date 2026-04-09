@@ -1,0 +1,33 @@
+/**
+ * Blog configuration for create-mdx-blog.
+ * Edit this file to customize your blog settings.
+ */
+
+interface JenaConfig {
+  blog: {
+    contentDir: string;
+    postsPerPage: number;
+    rss: boolean;
+    categories: boolean;
+    siteName: string;
+    siteDescription: string;
+    siteUrl: string;
+  };
+  jena?: {
+    apiKey: string | undefined;
+    webhookSecret: string | undefined;
+  };
+  frontmatter: Record<
+    string,
+    string | { key: string; transform?: string; default?: string }
+  >;
+  images: {
+    storage: "local" | "jena-cdn";
+    localDir?: string;
+    publicPath?: string;
+  };
+}
+
+const config: JenaConfig = {{CONFIG_JSON}};
+
+export default config;
