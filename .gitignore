@@ -47,3 +47,12 @@ docker-compose.override.yml
 plan.md
 CLAUDE.md
 repomix*
+
+# Worktrees
+.worktrees/
+
+# Superpowers
+.superpowers/
+
+# Docs (local only)
+docs/
