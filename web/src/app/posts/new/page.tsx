@@ -36,6 +36,7 @@ import { toast } from "sonner";
 const OUTPUT_FORMATS = [
   { value: "markdown", label: "Markdown" },
   { value: "wordpress", label: "WordPress (Direct Publish)" },
+  { value: "nextjs", label: "Next.js (Webhook)" },
 ];
 
 const ARTICLE_TYPES = [
