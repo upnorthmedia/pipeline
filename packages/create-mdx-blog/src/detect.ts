@@ -74,8 +74,20 @@ async function detectExistingBlog(rootDir: string): Promise<ExistingBlog | null>
     });
 
     if (matches.length > 0) {
-      const firstMatch = matches[0];
-      const contentDir = path.dirname(firstMatch).split("/").slice(0, 2).join("/");
+      // Find the deepest common directory that contains all posts
+      const dirs = matches.map((m) => path.dirname(m));
+      const contentDir = dirs.reduce((common, dir) => {
+        if (common === dir) return common;
+        // Find common prefix
+        const commonParts = common.split("/");
+        const dirParts = dir.split("/");
+        const shared: string[] = [];
+        for (let i = 0; i < Math.min(commonParts.length, dirParts.length); i++) {
+          if (commonParts[i] === dirParts[i]) shared.push(commonParts[i]);
+          else break;
+        }
+        return shared.join("/");
+      });
 
       return {
         contentDir,

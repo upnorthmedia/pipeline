@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 import httpx
 
 from src.api.events import publish_event
+from src.config import settings
 from src.models.post import Post
 from src.models.profile import WebsiteProfile
 from src.services.crypto import decrypt
@@ -70,18 +73,31 @@ async def publish_to_nextjs(ctx: dict, post_id: str) -> None:
                 content, profile.nextjs_frontmatter_map
             )
 
-        # Build image list with CDN URLs
+        # Read image files and encode as base64
+        # Images stay at /media/{post_id}/filename.webp — committed to public/media/ in the repo
         images = []
+        media_dir = Path(settings.media_dir) / post_id
+
         for img in manifest.get("images", []):
-            if not img.get("url"):
+            filename = img.get("filename", "")
+            if not filename:
                 continue
+
+            img_path = media_dir / filename
+            img_data = None
+
+            if img_path.is_file():
+                img_data = base64.b64encode(img_path.read_bytes()).decode()
+            else:
+                logger.warning("Image file not found: %s", img_path)
+
             images.append(
                 {
-                    "filename": img.get("filename", ""),
-                    "url": img["url"],
-                    "download_url": img["url"],
+                    "filename": filename,
+                    "public_path": f"/media/{post_id}/{filename}",
                     "alt": img.get("alt_text", ""),
                     "placement": img.get("placement", "inline"),
+                    "data": img_data,
                 }
             )
 
@@ -101,7 +117,7 @@ async def publish_to_nextjs(ctx: dict, post_id: str) -> None:
 
         # Send webhook
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
                     profile.nextjs_webhook_url,
                     content=payload,
