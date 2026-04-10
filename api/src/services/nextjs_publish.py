@@ -79,11 +79,16 @@ async def publish_to_nextjs(ctx: dict, post_id: str) -> None:
         media_dir = Path(settings.media_dir) / post_id
 
         for img in manifest.get("images", []):
-            filename = img.get("filename", "")
-            if not filename:
+            url = img.get("url", "")
+            if not url:
                 continue
 
-            img_path = media_dir / filename
+            # Derive actual filename from URL (e.g., /media/{id}/featured.webp -> featured.webp)
+            actual_filename = url.rsplit("/", 1)[-1] if "/" in url else ""
+            if not actual_filename:
+                continue
+
+            img_path = media_dir / actual_filename
             img_data = None
 
             if img_path.is_file():
@@ -93,8 +98,8 @@ async def publish_to_nextjs(ctx: dict, post_id: str) -> None:
 
             images.append(
                 {
-                    "filename": filename,
-                    "public_path": f"/media/{post_id}/{filename}",
+                    "filename": actual_filename,
+                    "public_path": url,
                     "alt": img.get("alt_text", ""),
                     "placement": img.get("placement", "inline"),
                     "data": img_data,
