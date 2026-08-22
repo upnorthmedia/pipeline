@@ -10315,13 +10315,134 @@ three pieces are separately verifiable, so they are separate items.
     # api/scripts/ in 5.3d-i and 5.3d-iii; the 9 would-reformat files are unchanged.
     ```
 
-  - [ ] 5.4b `POST /api/queue/pause-all` and `POST /api/queue/resume-all`.
+  - [x] 5.4b `POST /api/queue/pause-all` and `POST /api/queue/resume-all`.
 
-    `pause_all()` is the per-post pause from 5.3c-iii-a applied in bulk but with a stage
-    guard the per-post endpoint does not have (`current_stage in ["pending", *STAGES]`).
-    `resume_all()` recovers the next stage from `stage_status` per post, because pause
-    overwrote `current_stage`, and enqueues one run each; that enqueue becomes a
-    `startPipeline()` per post, the same substitution 5.3c-i made.
+    Ported to `web/src/app/api/queue/pause-all/route.ts` and
+    `web/src/app/api/queue/resume-all/route.ts`. Both keep the shape
+    `web/src/lib/api.ts` declares for them, `{ status: string; count: number }` at 200.
+
+    **`pause_all()` is not the per-post pause in a loop.** It carries a stage guard the
+    per-post endpoint does not have, `current_stage in ["pending", *STAGES]`, so a post
+    that is complete, failed, already paused or carrying an unrecognised or null stage
+    is left alone and is not counted. `POST /api/posts/{post_id}/pause` (5.3c-iii-a) has
+    no such guard and will pause a finished post. Two endpoints with the same verb are
+    not the same predicate, and the port keeps both.
+
+    **`resume_all()` enqueues the single-stage form.** Python called
+    `enqueue_job("run_pipeline_stage", str(post.id), next_stage)` with the stage
+    argument, and `run_pipeline_stage(ctx, post_id, stage=None)` documents what that
+    means:
+
+    ```
+    $ sed -n '54,59p' api/src/worker.py
+    async def run_pipeline_stage(ctx, post_id: str, stage: str | None = None):
+        """Execute the pipeline for a post.
+
+        If `stage` is specified, runs only that stage (no gate checks).
+        Otherwise, runs all remaining stages sequentially (with gate checks).
+    ```
+
+    So "resume all" advances each post by exactly one stage and does not stop for review
+    on that stage, which is narrower than the endpoint's name suggests. The port keeps
+    it: `startPipeline(id, [stage])`, the same substitution 5.3c-i made for ARQ's
+    positional `stage`.
+
+    **`count` is the number of posts that were paused, not the number of runs started.**
+    A post whose six stages are all complete has no next stage, so Python wrote
+    `current_stage = "complete"`, enqueued nothing, and still incremented `count`.
+
+    **The next stage comes from `stage_status`, never from `current_stage`,** because
+    `pause_all()` overwrote `current_stage` with `"paused"` and remembered nothing. That
+    is the same first-non-complete scan `_next_stage()` does, so the handler reuses
+    `nextStage()` from `web/src/app/api/posts/run-control.ts` rather than restating it.
+    The consequence is real and is pinned by a test: a post paused at `ready` with an
+    empty `stage_status` resumes at `research`.
+
+    Deviations, both argued rather than silent:
+
+    - **Write order.** Python enqueued inside the loop, *before* `session.commit()`, so
+      a worker could read a post whose new `current_stage` was not yet visible. The port
+      commits the whole batch in one `db.transaction()` and starts the runs afterwards.
+      Nothing observable changes: the workflow derives the stages it runs from
+      `stage_status`, not from `current_stage`.
+    - **`updated_at`.** Drizzle has no SQLAlchemy `onupdate`, so both handlers set
+      `updatedAt` explicitly, as every ported write in 5.3 does.
+
+    `pause_all()`'s select-then-write is kept as a select-then-write rather than folded
+    into one `UPDATE ... WHERE`, because Drizzle's `update()` takes no join and the
+    ownership restriction lives on the join.
+
+    No pytest file covers either endpoint (`grep -rln "pause-all\|resume-all" api/tests`
+    returns nothing), so there was no Python coverage to port; the 20 tests below are new.
+
+    ```
+    $ pnpm -C web exec vitest run src/app/api/queue/queue-control.test.ts --reporter=verbose
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/pause-all > rejects an unauthenticated request 3ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/pause-all > reports zero when the caller has no posts 16ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/pause-all > pauses a post sitting at 'pending' 5ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/pause-all > pauses a post sitting at any of the six stage names 16ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/pause-all > leaves complete, failed, already-paused and null-stage posts alone 7ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/pause-all > does not pause another user's post 5ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/pause-all > does not pause a post with no profile, because the join is inner 3ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/pause-all > starts nothing 3ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/resume-all > rejects an unauthenticated request 1ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/resume-all > reports zero and starts nothing when nothing is paused 3ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/resume-all > recovers the next stage from stage_status, not from current_stage 4ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/resume-all > treats an empty stage_status as 'start from research' 4ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/resume-all > marks an all-complete post 'complete' and starts nothing for it 4ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/resume-all > enqueues the single-stage form, so the resumed stage skips its review gate 3ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/resume-all > resumes several posts in one call, each at its own next stage 7ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/resume-all > does not resume another user's paused post 3ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/resume-all > does not resume a paused post with no profile, because the join is inner 4ms
+     ✓ src/app/api/queue/queue-control.test.ts > POST /api/queue/resume-all > puts a real single-stage workflow.start on the Redis Streams bus 66ms
+     ✓ src/app/api/queue/queue-control.test.ts > pause-all followed by resume-all > round-trips a running post back to the stage it was on 6ms
+     ✓ src/app/api/queue/queue-control.test.ts > pause-all followed by resume-all > loses the stage a post was on when stage_status does not agree with it 5ms
+     Test Files  1 passed (1)
+          Tests  20 passed (20)
+    ```
+
+    Negative controls, each applied to the handler and reverted:
+
+    | Change | Result |
+    | --- | --- |
+    | `pause-all` drops the `["pending", *STAGES]` guard | 1 failed ("leaves complete, failed, already-paused and null-stage posts alone") |
+    | `pause-all` drops the `website_profiles.user_id` predicate | 1 failed ("does not pause another user's post") |
+    | `resume-all` calls `startPipeline(id)` instead of `startPipeline(id, [stage])` | 3 failed (the three that assert the named stage) |
+    | `resume-all` returns `count: resumed.length` instead of `rows.length` | 2 failed (the all-complete post and the three-post batch) |
+    | `resume-all` scans `nextStage(null)` instead of `nextStage(row.stageStatus)` | 5 failed |
+
+    Gates:
+
+    ```
+    $ pnpm -C web exec tsc --noEmit
+    # exit 0, no output
+
+    $ pnpm -C web exec eslint
+    # exit 0, no output
+
+    $ pnpm -C web exec vitest run
+     Test Files  2 failed | 77 passed (79)
+          Tests  9 failed | 1409 passed | 7 skipped (1425)
+    # 9 failed is the recorded baseline: 6 in image-preview.test.tsx and 3 in
+    # PostDetail.test.tsx. 1389 -> 1409 passed is exactly this iteration's 20.
+
+    $ pnpm -C web exec next build
+    # exit 0
+    ✓ Compiled successfully in 3.7s
+    ├ ƒ /api/queue
+    ├ ƒ /api/queue/pause-all
+    ├ ƒ /api/queue/resume-all
+
+    $ cd api && uv run pytest -q
+    125 failed, 236 passed, 25 errors in 13.48s
+    # the recorded baseline, unchanged. Requires `set -a; . ./.env; set +a` first.
+
+    $ cd api && uv run ruff check .
+    Found 32 errors.
+
+    $ cd api && uv run ruff format --check .
+    9 files would be reformatted, 131 files already formatted
+    ```
 
   - [ ] 5.4c `GET /api/queue/worker-status`.
 
