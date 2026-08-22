@@ -1,0 +1,47 @@
+/**
+ * The `outline` stage as a Mastra step, ported from `outline_node` in
+ * `api/src/pipeline/stages/outline.py`.
+ *
+ * Unlike `research`, this stage has no validator and no retry loop: Python
+ * calls Claude once and keeps whatever comes back. So the step's whole job is
+ * the state contract, reading the run's state from the posts table, rendering
+ * `rules/blog-outline.md` against it, and committing the result to
+ * `posts.outline_content` before it returns.
+ */
+import { createStep } from "@mastra/core/workflows/evented"
+
+import { loadPipelineState, saveStageOutput } from "../post-state"
+import { buildStagePrompt, loadRules } from "../prompts"
+import { STATUS_COMPLETE } from "../state"
+import { stageStepInputSchema, stageStepOutputSchema } from "./stage-io"
+
+export const outlineStep = createStep({
+  id: "outline",
+  inputSchema: stageStepInputSchema,
+  outputSchema: stageStepOutputSchema,
+  execute: async ({ inputData, mastra }) => {
+    const { postId } = inputData
+    const state = await loadPipelineState(postId)
+    const prompt = buildStagePrompt("outline", loadRules("outline"), state)
+
+    const startedAt = Date.now()
+    const result = await mastra.getAgent("outline").generate(prompt)
+    const durationMs = Date.now() - startedAt
+
+    await saveStageOutput(postId, "outline", result.text, {
+      ...state.stageStatus,
+      outline: STATUS_COMPLETE,
+    })
+
+    return {
+      postId,
+      stage: "outline" as const,
+      // The provider's own reported model id, not the one requested, so a
+      // silent server-side alias shows up in the run trace.
+      model: result.response?.modelId ?? "",
+      tokensIn: result.usage?.inputTokens ?? 0,
+      tokensOut: result.usage?.outputTokens ?? 0,
+      durationS: durationMs / 1000,
+    }
+  },
+})

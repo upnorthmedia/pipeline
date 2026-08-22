@@ -2549,7 +2549,124 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   dashboard is item 5.5, and Phase 8 reads step progress from Mastra's own stream
   events rather than from hand-published log lines, so wiring a second channel here
   would be building something Phase 8 replaces.
-- [ ] 3.2 `outline`
+- [x] 3.2 `outline`
+
+  Ported as an agent (`web/src/mastra/agents/outline.ts`, registered on the Mastra
+  instance) plus a step (`web/src/mastra/steps/outline.ts`) reusing the item-3.1a
+  prompt assembly and the item-3.1c-i posts-table bridge. Unlike `research` this
+  stage has no validator and no retry loop, so the step is one provider call
+  wrapped in the state contract.
+
+  The shared Claude call settings live in `web/src/mastra/agents/claude.ts`, which
+  the remaining three Anthropic stages (`write`, `edit`, `ready`) will reuse: they
+  all go through the same `ClaudeClient.chat()` with nothing but `max_tokens` and
+  the system message differing.
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm vitest run src/mastra/steps/outline.test.ts src/mastra/agents/outline.test.ts
+   RUN  v4.0.18 /Users/cody/.../web
+
+   OK src/mastra/steps/outline.test.ts (5 tests) 58ms
+   OK src/mastra/agents/outline.test.ts (8 tests | 1 skipped) 74ms
+
+   Test Files  2 passed (2)
+        Tests  12 passed | 1 skipped (13)
+     Duration  945ms
+  ```
+
+  The skipped test is the live Anthropic smoke test, gated on `ANTHROPIC_API_KEY`
+  so the default `pnpm test` needs no credentials. Run with the real key:
+
+  ```
+  $ cd web && ANTHROPIC_API_KEY=<redacted> NO_COLOR=1 pnpm vitest run \
+      src/mastra/agents/outline.test.ts -t "live smoke"
+   OK src/mastra/agents/outline.test.ts (8 tests | 7 skipped) 2082ms
+       OK reaches Anthropic and reports back the configured model id  2063ms
+
+   Test Files  1 passed (1)
+        Tests  1 passed | 7 skipped (8)
+  ```
+
+  That asserts `response.modelId === "claude-opus-4-6"`, so `anthropic/claude-opus-4-6`
+  resolves through Mastra's model router against the live API. The model choice
+  itself is still the incumbent; item 6.1 owns picking and justifying a better one.
+
+  **Provider request parity, and the token-budget divergence it exposed.**
+  `outline` is the first stage whose provider request carries more than a model and
+  a system message. Python enables extended thinking
+  (`thinking={"type": "enabled", "budget_tokens": 10000}`) and computes
+  `max_tokens = max(8000, 10000 + 1024) = 11024`, treating `max_tokens` as the
+  total budget the way Anthropic's API does. The AI SDK provider inside
+  `@mastra/core` instead treats `maxOutputTokens` as the **text** budget and puts
+  `max_tokens = maxOutputTokens + budget_tokens` on the wire
+  (`node_modules/@mastra/core/dist/dist-BcUqNSEb.js`:
+  `baseArgs.max_tokens = maxTokens + (thinkingBudget != null ? thinkingBudget : 0)`).
+  Passing Python's 11024 straight through would have sent 21024. `claudeStageOptions`
+  subtracts the thinking budget so both stacks send 11024.
+
+  `agents/outline.test.ts` proves that on the real serialized request rather than on
+  the agent's configuration: it swaps `globalThis.fetch`, runs `agent.generate()`,
+  and compares the captured body against the request recorded in the golden fixture.
+
+  Negative control, dropping the subtraction in `claudeStageOptions`:
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm vitest run src/mastra/agents/outline.test.ts
+       x puts Python's model, max_tokens and thinking budget on the wire 60ms
+    AssertionError: expected 21024 to be 11024 // Object.is equality
+        Tests  1 failed | 6 passed | 1 skipped (8)
+  ```
+
+  Negative control, not seeding the chain input (`researchContent: null`) so the
+  step renders without the research document the previous stage committed:
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm vitest run src/mastra/steps/outline.test.ts
+       x sends the prompt the Python stage sent for how-to-choose-a-crm-for-a-small-team
+       x sends the prompt the Python stage sent for best-time-tracking-tools-for-agencies
+       x carries the research document the previous stage committed
+       x commits the outline to its column and reports Python's stage meta
+       OK fails loudly on a post that does not exist rather than billing a call
+        Tests  4 failed | 1 passed (5)
+  ```
+
+  Frontend gates:
+
+  ```
+  $ cd web && pnpm tsc --noEmit
+  tsc exit=0
+
+  $ cd web && NO_COLOR=1 pnpm lint
+  lint exit=0
+
+  $ cd web && NO_COLOR=1 pnpm test
+   Test Files  2 failed | 28 passed (30)
+        Tests  9 failed | 297 passed | 2 skipped (308)
+
+  $ cd web && pnpm build
+  build exit=0
+  ```
+
+  Failures held at the established baseline of 9, still the same two files
+  (`image-preview.test.tsx` 6, `PostDetail.test.tsx` 3); passes moved 285 -> 297,
+  which is the 12 new tests, and skips moved 1 -> 2, which is the live smoke test.
+  No `api/` file was touched, so the pytest and ruff baselines are unchanged by
+  construction.
+
+  **Discrepancies noted.**
+  1. Python's Anthropic SDK sends `system` as a bare string; the AI SDK sends the
+     same text as `[{"type": "text", "text": ...}]`. Anthropic accepts both, so the
+     test compares the text and not the shape.
+  2. A `url` override on the model config is **not** a way to capture an Anthropic
+     request: it routes the agent through Mastra's OpenAI-compatible client, which
+     POSTs to `/chat/completions` and passes `budgetTokens` through unconverted.
+     Only `globalThis.fetch` capture exercises the native provider.
+  3. `outline_node` publishes three SSE progress lines through `publish_stage_log`;
+     the step publishes none, for the same reason recorded under item 3.1c-ii (the
+     event bus is item 5.5 and Phase 8 reads progress from Mastra's stream events).
+  4. The step test seeds no internal links. `buildStagePrompt` offers them to `edit`
+     only, so they cannot affect this stage's prompt; `edit`'s parity test (item 3.4)
+     is where the link inventory has to be seeded for real.
 - [ ] 3.3 `write`
 - [ ] 3.4 `edit`
 - [ ] 3.5 `images` (identical `image_manifest` JSONB shape; `.foreach()` for per-image generation)
