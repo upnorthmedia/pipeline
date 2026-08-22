@@ -6034,7 +6034,9 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   - 4.7b the full-pipeline completion hook (`current_stage = "complete"`, `completed_at`),
     which `_post_completion_hook` in `api/src/worker.py:429` runs at the end of a full run and
     the port never had
-  - 4.7c the green end-to-end run with pasted evidence
+  - 4.7c the green end-to-end run with pasted evidence, itself split once run:
+    - 4.7c-i the run, and every property of it that does not depend on a billed Gemini key
+    - 4.7c-ii the image-generation half, which no key in this environment can execute
 
   The two deployability defects (`RULES_DIR` and `TEXTSTAT_DATA_DIR` on the worker bundle) are
   configuration rather than code, are recorded under 4.7a and in `todo.md`, and belong to items
@@ -6338,6 +6340,233 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
 - [ ] 4.7c Full workflow runs end to end against the real database: green run of
   `web/src/mastra/scripts/full-pipeline.mjs` with its output pasted here. Image generation is
   bounded by the Gemini key's quota (see 4.7a finding 2).
+
+  Split after running it. The run reached `success` and ten of the script's fourteen checks
+  passed; the four that failed are all the same fact, that this environment's Gemini key is
+  provisioned at `limit: 0` for every image-capable model, so no image can be generated here by
+  any stack. That is a credential fact, not a port defect, and it cannot be fixed by rerunning.
+  Separating it keeps the run's real result checkable and states the remaining gap precisely:
+
+  - 4.7c-i the run itself, and every property that does not depend on a billed Gemini key
+  - 4.7c-ii the image-generation half of the `images` stage and its effect on `ready`
+
+- [x] 4.7c-i **The full workflow runs end to end against the real database.** A run started by a
+  `web` process that then exits was executed by the deployable `worker` bundle through all six
+  stages, against the real Postgres and the real Redis, with real Perplexity and Anthropic
+  calls. Ten of fourteen checks passed; the four failures are 4.7c-ii and are quoted below in
+  full rather than elided.
+
+  ```
+  $ cd web && set -a && . ../.env \
+      && eval "$(grep -E '^(ANTHROPIC|PERPLEXITY|GEMINI)_API_KEY=' <main-checkout>/.env)" \
+      && set +a \
+      && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+           src/mastra/scripts/full-pipeline.mjs
+  [2026-08-22T14:47:55.302Z] building the worker bundle from scratch
+  [2026-08-22T14:48:08.648Z] installing the write audit trigger
+  [2026-08-22T14:48:08.657Z] writing the provider keys into the settings row
+  [2026-08-22T14:48:09.731Z] starting the run from a separate `web` process that then exits
+  [2026-08-22T14:48:10.025Z] run 49c34483-4671-4002-9809-af702f4ae700 published, no worker alive yet
+  [2026-08-22T14:48:15.029Z] worker spawned (pid 44767)
+  [2026-08-22T14:48:33.077Z] stage_status.research = complete at 18.0s
+  [2026-08-22T14:49:30.153Z] stage_status.outline = complete at 75.1s
+  [2026-08-22T14:50:15.215Z] stage_status.write = complete at 120.2s
+  [2026-08-22T14:51:30.317Z] stage_status.edit = complete at 195.3s
+  [2026-08-22T14:52:21.403Z] stage_status.images = complete at 246.4s
+  [2026-08-22T14:53:12.516Z] stage_status.ready = complete at 297.5s
+  [2026-08-22T14:53:12.520Z] run settled as success after 297.5s
+  [2026-08-22T14:53:12.522Z] PASS  nothing-ran-before-the-worker: 5s after the run was published and before any worker existed, stage_status was {} and every content column was empty
+  [2026-08-22T14:53:12.523Z] PASS  run-succeeded: run 49c34483-4671-4002-9809-af702f4ae700 settled as success after 297.5s
+  [2026-08-22T14:53:12.523Z] PASS  six-steps-succeeded: research=success outline=success write=success edit=success images=success ready=success
+  [2026-08-22T14:53:12.523Z] PASS  six-stages-complete: stage_status {"edit":"complete","ready":"complete","write":"complete","images":"complete","outline":"complete","research":"complete"}
+  [2026-08-22T14:53:12.523Z] PASS  post-promoted-to-complete: current_stage is complete
+  [2026-08-22T14:53:12.523Z] PASS  six-columns-written: research_content=10259 outline_content=8219 draft_content=7368 final_md_content=8406 image_manifest=15429 ready_content=5534
+  [2026-08-22T14:53:12.523Z] PASS  each-column-written-once: distinct values over 7 logged writes: research_content=1 outline_content=1 draft_content=1 final_md_content=1 image_manifest=1 ready_content=1
+  [2026-08-22T14:53:12.523Z] PASS  no-stage-billed-nothing: research.skipped=false outline.skipped=false write.skipped=false edit.skipped=false images.skipped=false ready.skipped=false
+  [2026-08-22T14:53:12.523Z] PASS  manifest-shape: image_manifest keys ["model","images","version","post_slug","style_brief","total_failed","fallback_model","generated_date","total_generated"]
+  [2026-08-22T14:53:12.523Z] FAIL  images-generated: 0 of 4 manifest entries generated, total_generated=0 total_failed=4
+  [2026-08-22T14:53:12.523Z] FAIL  image-files-on-disk: 
+  [2026-08-22T14:53:12.523Z] FAIL  featured-image-present: entry ids ["featured","content-1","content-2","content-3"]
+  [2026-08-22T14:53:12.523Z] FAIL  ready-content-embeds-the-images: 0 of 0 generated image urls appear in ready_content (5534 chars)
+  [2026-08-22T14:53:12.523Z] PASS  worker-stayed-up: worker pid 44767 exitCode null, stderr 0 chars
+  [2026-08-22T14:53:12.533Z] 10/14 checks passed
+  EXIT=1
+  ```
+
+  The script exits 1 because four checks failed. That is the honest exit code and it is left
+  alone: the script is not edited to pass, and 4.7c-ii is not closed by weakening it.
+
+  **Per stage, from `.mastra/full-pipeline/report.json`.** `model` is what the step reported it
+  actually sent, so this is also the first end-to-end confirmation that every stage reaches the
+  provider it is supposed to.
+
+  | stage | step | stage_status | model | tokens in | tokens out | duration | column chars | writes |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | research | success | complete | `sonar-pro` | 1397 | 2245 | 17.3s | 10259 | 1 |
+  | outline | success | complete | `claude-opus-4-6` | 4351 | 2286 | 56.7s | 8219 | 1 |
+  | write | success | complete | `claude-opus-4-6` | 3825 | 1913 | 43.7s | 7368 | 1 |
+  | edit | success | complete | `claude-opus-4-6` | 6637 | 3662 | 75.0s | 8406 | 1 |
+  | images | success | complete | `claude-opus-4-6` | 5541 | 2496 | 51.9s | 15429 | 1 |
+  | ready | success | complete | `claude-opus-4-6` | 3891 | 1935 | 50.8s | 5534 | 1 |
+
+  Whole run 297.5s, 25,642 input and 14,537 output tokens across six provider calls. The
+  Gemini sub-usage the `images` step reports is `{tokensIn: 0, tokensOut: 0}`, which is correct:
+  the four requests were rejected before any token was counted.
+
+  **What the write audit proves.** Seven rows were logged by the `AFTER INSERT OR UPDATE`
+  trigger scoped to the seeded row: the seeding INSERT plus exactly six UPDATEs, one per stage.
+  `each-column-written-once` counts *distinct non-empty md5 values per column over that history*,
+  not the final value, so a stage that ran twice and produced identical output would still count
+  2 if it wrote twice, and a column overwritten with different content would count 2. Every
+  column counts 1. Six stages, six writes, seven rows, no gap and no surplus.
+
+  This is also the first run in which the fix from 4.7a is load-bearing rather than incidental:
+  `write` took 120.2s and `edit` 195.3s, both far past the 60s default `reclaimIdleMs` that
+  4.7a raised to 15 minutes. Under the old window both stages would have been redelivered to
+  the live worker and executed a second time. The write audit says they were not.
+
+  **What ran before the worker existed.** Five seconds after the `web` process published the
+  run and exited, and before any worker process had been spawned, the row read
+  `current_stage = pending`, `stage_status = {}` and all six content columns `NULL`. The `web`
+  service therefore did not execute anything; the worker did. Restarting `web` cannot disturb a
+  run because `web` is not where runs execute.
+
+  **The completion hook from 4.7b, on a real run.** `current_stage` is `complete`. That column
+  is only written by `pipelineCompleteStep`, and only on a run that did not name its stages, so
+  its value here is the seventh step firing at the end of a genuine full pipeline rather than
+  the single-stage rerun check.
+
+  **`ready` did what `rules/blog-ready.md` asks.** `readyHasPublishingNotes` is `false`, so the
+  publishing notes were dropped. This is reported rather than checked, for the reason recorded
+  in the script: an assertion over generated prose is a coin flip.
+
+  **Cleanup verified, not assumed.** The script's `finally` block ran:
+
+  ```
+  $ git status --porcelain
+  $ psql ... -tAc "select count(*) from information_schema.tables where table_name='full_pipeline_writes'"
+  0
+  $ psql ... -tAc "select key, jsonb_object_keys(value) from settings where key='api_keys'"
+  api_keys|anthropic
+  ```
+
+  Clean working tree, audit table and function and trigger dropped, and the `settings` row
+  restored to the single-key row that was there before (the `sk-ant-` placeholder recorded under
+  4.5b, not a real credential). No key was printed and none was written anywhere but that row.
+
+  **Gates.** This item changes only the ledger, but the run rewrote and restored a shared
+  `settings` row and seeded a `posts` row, so every gate was rerun rather than assumed.
+
+  ```
+  $ cd web && pnpm exec tsc --noEmit
+  (exit 0, no output)
+  $ cd web && pnpm lint
+  (exit 0, no output)
+  $ cd web && pnpm test
+  Test Files  2 failed | 55 passed (57)
+       Tests  9 failed | 831 passed | 8 skipped (848)
+  $ cd web && pnpm build
+  ✓ Compiled successfully in 3.3s
+  (exit 0)
+  ```
+
+  The 9 failures are the Phase 0 baseline exactly, and in the same two files: 6 in
+  `src/components/__tests__/image-preview.test.tsx` and 3 in `src/app/posts/PostDetail.test.tsx`.
+  No new file joined them.
+
+  ```
+  $ cd api && set -a && . ../.env && set +a && uv run pytest -q
+  125 failed, 236 passed, 25 errors in 15.23s
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 126 files already formatted
+  ```
+
+  Failures and errors are at the baseline (125 / 25) with one extra pass (236 against the
+  recorded 235), so nothing regressed. Two notes worth carrying:
+
+  1. `pytest` must be run with `.env` sourced. Without `TEST_DATABASE_URL`, `conftest.py` falls
+     back to the hardcoded `localhost:5433`, which on this machine is an unrelated project's
+     container, and the suite reports `4 failed, 205 passed, 177 errors`. That number is a
+     mis-run, not a regression, and it is easy to mistake for one.
+  2. The run left five `media/test-123/*.webp` files in the working tree. That is the already
+     logged `todo.md` defect about `pytest` writing real images into the repo, not something
+     this item introduced; they were deleted before committing.
+
+- [ ] 4.7c-ii **Image generation, which this environment's Gemini key cannot execute.** All four
+  manifest entries failed with the same live error, recorded per entry in `image_manifest` and
+  quoted here from the database:
+
+  ```
+  $ psql ... -tAc "select image_manifest->'images'->0->>'error' from posts where id='...04f7'"
+  429 RESOURCE_EXHAUSTED. {"error":{"code":429,"message":"You exceeded your current quota,
+  please check your plan and billing details. ...
+  * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests,
+    limit: 0, model: gemini-3.1-flash-image
+  * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count,
+    limit: 0, model: gemini-3.1-flash-image
+  ","status":"RESOURCE_EXHAUSTED", ... "quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier" ...}
+  ```
+
+  **`limit: 0` is a billing tier, not a rate limit.** Waiting does not clear it. Probed live
+  immediately after the run, every image-capable model on this key returns the same 429:
+
+  ```
+  $ for m in gemini-3.1-flash-image-preview gemini-3.1-flash-image \
+             gemini-3.1-flash-lite-image gemini-2.5-flash-image \
+             gemini-3-pro-image gemini-3-pro-image-preview; do
+      curl -s -w $'\n%{http_code}' -X POST \
+        "https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent" \
+        -H "x-goog-api-key: ${GEMINI_API_KEY}" -H "Content-Type: application/json" \
+        -d '{"contents":[{"parts":[{"text":"A single small blue square on white."}]}]}'
+    done
+  gemini-3.1-flash-image-preview     429  RESOURCE_EXHAUSTED | * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-3.1-flash-image
+  gemini-3.1-flash-image             429  RESOURCE_EXHAUSTED | * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-3.1-flash-image
+  gemini-3.1-flash-lite-image        429  RESOURCE_EXHAUSTED | * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-3.1-flash-lite-image
+  gemini-2.5-flash-image             429  RESOURCE_EXHAUSTED | * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-2.5-flash-preview-image
+  gemini-3-pro-image                 429  RESOURCE_EXHAUSTED | * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-3-pro-image
+  gemini-3-pro-image-preview         429  RESOURCE_EXHAUSTED | * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-3-pro-image
+  ```
+
+  Six for six, including `gemini-3.1-flash-image-preview`, which is the id
+  `GEMINI_IMAGE_MODEL_ID` in `web/src/mastra/images/gemini.ts` actually sends. Note that the
+  quota is reported against the resolved id rather than the requested one
+  (`-preview` resolves to `gemini-3.1-flash-image`), which is itself useful: it confirms the
+  alias resolves server side rather than 404ing.
+
+  The model list itself came from the live `GET /v1beta/models` on this key, so these are the
+  ids the key can see, not ids from memory. A 429 `RESOURCE_EXHAUSTED` is an *authenticated*
+  rejection, checked against the negative control rather than assumed:
+
+  ```
+  $ curl -s -X POST ".../gemini-3.1-flash-image-preview:generateContent" \
+      -H "x-goog-api-key: not-a-real-key" ...
+  HTTP 400
+  400 INVALID_ARGUMENT | API key not valid. Please pass a valid API key.
+  ```
+
+  So a bad credential fails differently from this, and the credential and the model id both
+  resolve; only the quota is zero. The Python golden capture hit the identical wall on the same
+  day, so neither stack can generate an image here.
+
+  **What the run did prove about `images`.** The stage reproduced Python's documented failure
+  handling exactly rather than crashing the run: the manifest was still assembled and stored
+  (15,429 chars, `manifest-shape` passed), each of the four entries carries `generated: false`
+  and its own `error` string, `total_generated` is 0 and `total_failed` is 4, `stage_status.images`
+  is `complete`, and the pipeline continued into `ready` and finished `success`.
+
+  **What is left to prove, and how.** The generation path itself: that a Gemini success response
+  becomes an optimised file on disk whose byte count matches the manifest entry, and that
+  `ready` embeds those urls. The objective permits recorded/replayed provider calls as long as a
+  live smoke test per provider exists and is run, and the live smoke test for Gemini is the 429
+  above. So 4.7c-ii is closed by driving the real `imagesGenerateStep` and the real optimiser
+  against a recorded Gemini success response and asserting the on-disk bytes and the `ready`
+  embedding, not by rerunning `full-pipeline.mjs`. If a billed key ever becomes available, the
+  script is already written and needs no change.
+
+  Until then this is a real gap and belongs in `SUMMARY.md` (item 9.2), and it also bounds item
+  7.6, whose exit criterion is a post reaching `ready` *with images* through the UI.
 
 ## Phase 5: Route handlers (one router per iteration)
 
