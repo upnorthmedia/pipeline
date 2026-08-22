@@ -68,6 +68,10 @@ describe("mastra entry point", () => {
     expect(packages).toEqual([
       "@mastra/core",
       "@mastra/core/agent",
+      // `recordRunFailure` is registered as the `workflows-finish` listener
+      // (ledger 5.4d-i) and takes the topic's `Event` type. Type-only, but the
+      // scan is textual, so it belongs on the list either way.
+      "@mastra/core/events",
       "@mastra/core/workflows/evented",
       "@mastra/loggers",
       "@mastra/pg",

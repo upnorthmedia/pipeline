@@ -63,6 +63,16 @@ export const STAGE_OUTPUT_KEY: Record<Stage, keyof PipelineContext> = {
 export const CURRENT_STAGE_COMPLETE = "complete"
 
 /**
+ * The value `current_stage` carries once a run has failed for good.
+ *
+ * Written by `markPipelineFailed()`, read by the queue status route's `failed`
+ * bucket. Same string as `STATUS_FAILED` and, like the pair above, a different
+ * column's vocabulary: `stage_status[stage] = "failed"` says one stage did not
+ * produce, `current_stage = "failed"` says the whole run stopped.
+ */
+export const CURRENT_STAGE_FAILED = "failed"
+
+/**
  * The value `stage_status[stage]` carries while a run is parked at that
  * stage's review gate.
  *

@@ -28,6 +28,7 @@ import { outlineAgent } from "./agents/outline"
 import { readyAgent } from "./agents/ready"
 import { researchAgent } from "./agents/research"
 import { writeAgent } from "./agents/write"
+import { recordRunFailure } from "./failure-recorder"
 import { imagesWorkflow } from "./workflows/images"
 import { pipelineWorkflow } from "./workflows/pipeline"
 import { recrawlCheckWorkflow } from "./workflows/recrawl-check"
@@ -103,6 +104,20 @@ export const pubsub = new RedisStreamsPubSub({
   logger: { debug: sink("debug"), warn: sink("warn") },
 })
 
+/**
+ * Topic listeners, subscribed by `startWorkers()` and so live in the `worker`
+ * service and not in `web`. `workflows-finish` carries every run's terminal
+ * event; `recordRunFailure` is the port of the post-writing half of Python's
+ * `_move_to_dlq()` (see `failure-recorder.ts`).
+ *
+ * Exported so a test can run the same map on its own instance rather than
+ * restating it: `Mastra` keeps its `events` config private, so this is the
+ * subscribed shape and the checkable one at once.
+ */
+export const workerEvents = {
+  "workflows-finish": recordRunFailure,
+}
+
 export const mastra = new Mastra({
   storage,
   pubsub,
@@ -133,6 +148,7 @@ export const mastra = new Mastra({
     sitemapCrawl: sitemapCrawlWorkflow,
     recrawlCheck: recrawlCheckWorkflow,
   },
+  events: workerEvents,
   agents: {
     research: researchAgent,
     outline: outlineAgent,

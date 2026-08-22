@@ -16,6 +16,7 @@ import { eq, getTableColumns, sql } from "drizzle-orm"
 import { getDb, internalLinks, posts } from "../db"
 import {
   CURRENT_STAGE_COMPLETE,
+  CURRENT_STAGE_FAILED,
   STAGE_CONTENT_MAP,
   STAGES,
   STATUS_COMPLETE,
@@ -248,6 +249,38 @@ export async function markPipelineComplete(postId: string): Promise<void> {
   await getDb()
     .update(posts)
     .set({ currentStage: CURRENT_STAGE_COMPLETE, completedAt: now, updatedAt: now })
+    .where(eq(posts.id, postId))
+}
+
+/**
+ * Stamp a post as failed for good, ported from the post-writing half of
+ * `_move_to_dlq()` in `api/src/worker.py:389`: `current_stage = "failed"` and
+ * an `_error` entry merged into `stage_logs`.
+ *
+ * The three keys and their names are Python's, so a row written by either stack
+ * reads the same: `message` is the exception text, `attempts` how many times the
+ * run was executed before it was given up on, `failed_at` when that happened.
+ * `_error` is a reserved key in that map rather than a stage name, which is why
+ * the analytics cost query filters it out with `sl.key NOT LIKE '\_%'`.
+ *
+ * The merge is `||` against `coalesce(stage_logs, '{}')` for the same reason
+ * `mergeStageStatus` is: the column is nullable, and every stage's own log
+ * entry has to survive the write.
+ */
+export async function markPipelineFailed(
+  postId: string,
+  message: string,
+  attempts: number,
+): Promise<void> {
+  const now = new Date()
+  const error = { message, attempts, failed_at: now.toISOString() }
+  await getDb()
+    .update(posts)
+    .set({
+      currentStage: CURRENT_STAGE_FAILED,
+      stageLogs: sql`coalesce(${posts.stageLogs}, '{}'::jsonb) || ${JSON.stringify({ _error: error })}::jsonb`,
+      updatedAt: now,
+    })
     .where(eq(posts.id, postId))
 }
 

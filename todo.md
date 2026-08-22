@@ -252,3 +252,12 @@
   there too. The port should close the other three the way 5.3b-iii closed the batch profile
   lookup, which means the DLQ needs a user dimension it does not currently have, so it is a
   design decision rather than a one-line predicate.
+- [investigate] 2026-08-22 Mastra's engine logs step failures to a logger the app cannot
+  configure. `MastraBase`'s constructor gives every primitive its own `ConsoleLogger`
+  (`base-BeUQ6mLP.js:12`) and only adopts the Mastra instance's logger in
+  `__registerMastra`, which the workflow event processor never calls on its `StepExecutor`.
+  So `Error executing step <id>: <stack>` goes to `console.error` and never reaches the
+  configured `PinoLogger`, which in the `worker` service means step failures are outside
+  the app's structured logs. Found in item 5.4d-i, where capturing that line in a test
+  needed a `console.error` spy. Worth checking whether a later `@mastra/core` wires it, or
+  whether the worker entry should install a console bridge.

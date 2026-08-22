@@ -10809,12 +10809,187 @@ three pieces are separately verifiable, so they are separate items.
     and `DELETE /api/queue/dead-letter`.
 
     All three read `DLQ_KEY`, a Redis list `api/src/worker.py` pushes onto when a job
-    exhausts its retries. The TypeScript worker has no such list yet, so the item is
-    blocked on deciding where a permanently failed Mastra run is recorded. Two defects
-    to carry over knowingly or fix deliberately: `retry_dead_letter()` looks the post up
-    with an unscoped `session.get(Post, post_id)`, so any authenticated user can retry
-    any post, and the three endpoints do not scope the DLQ by user at all. The scoping
-    hole should be closed the way 5.3b-iii closed the batch profile lookup.
+    exhausts its retries. The TypeScript worker had no such list, so the item was blocked
+    on deciding where a permanently failed Mastra run is recorded. It is decided, and the
+    answer is that the Redis list is not ported:
+
+    - a failed run is already recorded, durably and with its error, by Mastra itself.
+      `processWorkflowFail` in `@mastra/core`'s workflow event processor calls
+      `workflowsStore.updateWorkflowState({... opts: { status: "failed", error:
+      prevResult.error ... }})` before it publishes anything, and that store is the
+      Postgres adapter pointed at `content_pipeline`. A second list in Redis would be a
+      parallel copy of the same fact with nothing keeping the two in step.
+    - the half of `_move_to_dlq()` that Mastra does *not* cover is the post row:
+      `current_stage = "failed"` and the `_error` entry in `stage_logs` the dashboard
+      reads. That is a writer, not an endpoint, and nothing in the port wrote it.
+
+    Split accordingly: 5.4d-i the writer, 5.4d-ii the list endpoint, 5.4d-iii the retry
+    and clear endpoints. Two defects to carry over knowingly or fix deliberately in the
+    last two: `retry_dead_letter()` looks the post up with an unscoped
+    `session.get(Post, post_id)`, so any authenticated user can retry any post, and the
+    three endpoints do not scope the DLQ by user at all. The scoping hole should be
+    closed the way 5.3b-iii closed the batch profile lookup.
+
+    - [x] 5.4d-i A permanently failed pipeline run is recorded on its post.
+
+      `web/src/mastra/failure-recorder.ts` ports the post-writing half of `_move_to_dlq()`
+      (`api/src/worker.py:389`): `recordRunFailure()` stamps `current_stage = "failed"`
+      and merges `_error = {message, attempts, failed_at}` into `stage_logs`, through the
+      new `markPipelineFailed()` in `post-state.ts`. Before this, a run that died left the
+      row parked on the stage it was executing and the `failed` bucket 5.4a reports was
+      unreachable.
+
+      **Where the hook lives.** `Mastra`'s config takes `events: { [topic]: listener }`
+      and `startWorkers()` is what subscribes them
+      (`mastra/index.d.ts:2223`: "starts all registered workers and subscribes
+      user-defined event listeners"). That puts the listener inside a registered Mastra
+      primitive and in the right process for free: only the `worker` service calls
+      `startWorkers()`, so `web` never records a failure it did not execute. The listener
+      map is exported as `workerEvents` from `src/mastra/index.ts` and the test instance
+      subscribes that same object rather than a restatement of it.
+
+      **Two measured properties of the topic**, both of which say the write must be safe
+      to repeat:
+
+      ```
+      $ # a temporary process.stdout.write in the duplicate-delivery test
+      $ pnpm exec vitest run src/mastra/failure-recorder.test.ts | grep FAIL_EVENTS
+      FAIL_EVENTS=2
+      ```
+
+      One failed run publishes `workflow.fail` twice (two distinct event ids, both
+      `deliveryAttempt: 1`, ~5ms apart). And `addTopicListener` subscribes with no
+      `group`, which `events/types.d.ts` documents as fan-out ("When not set, behaves as
+      fan-out (all subscribers get every message)"), so every worker process receives
+      every event as well. The write is derived entirely from the event, so a repeat
+      rewrites the same values; the idempotency test pins that.
+
+      **`attempts` is derived, not guessed.** Python passed ARQ's `job_try`, always
+      `MAX_ATTEMPTS` by the time it reached the DLQ. The evented engine republishes
+      `workflow.step.run` while `retryCount >= (getEntryRetries(leaf) ??
+      workflow.retryConfig.attempts ?? 0)` is false and only fails the run once that is
+      exhausted, so a run that reaches `workflow.fail` ran the failing step
+      `attempts + 1` times. The workflow sets no `retryConfig`, and the engine's default
+      was read off the instance rather than assumed:
+
+      ```
+      $ # temporary test: console.log(JSON.stringify(pipelineWorkflow.retryConfig))
+      RETRY {"attempts":0,"delay":0}
+      ```
+
+      so `_error.attempts` is 1 today and follows a later retry policy without another
+      edit here.
+
+      **Deviations from Python, recorded rather than smoothed over:**
+
+      1. No Redis dead-letter list is written. The run's own row in Mastra's Postgres
+         storage carries `status: "failed"` and the error, and is what 5.4d-ii will read.
+      2. `failed_at` is `new Date().toISOString()`: millisecond precision with a `Z`
+         suffix, where Python's `datetime.now(UTC).isoformat()` gave microseconds and
+         `+00:00`. Both ISO 8601; nothing parses the field.
+      3. Python only reached `_move_to_dlq()` after three ARQ attempts and, on the way,
+         published a `stage_error` SSE event and appended an execution log. Those two
+         belong to item 5.5, which owns the transport and the `events` router, and are
+         still not written. This item writes the post row only.
+      4. Python's `failed_stage` is `target_stages[0] if len(target_stages) == 1 else ""`,
+         so a full pipeline recorded no stage at all. The stage is not part of `_error`,
+         so nothing was lost here; 5.4d-ii can do better from `stepResults`.
+
+      **Tests.** `web/src/mastra/failure-recorder.test.ts`, 15 of them. The first suite is
+      a real run of the real workflow on a real evented engine, real Redis Streams and the
+      real database, with the two provider calls it reaches stubbed: `research` and
+      `outline` return text and `write` throws, which is the shape of every real failure
+      and bills nothing. The second drives `recordRunFailure` with hand-built events for
+      the branches a happy run never produces.
+
+      ```
+      $ pnpm -C web exec vitest run src/mastra/failure-recorder.test.ts --reporter=verbose
+       ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > fails the run rather than swallowing the stage error 0ms
+       ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > stamps current_stage failed, which is the queue route's failed bucket 0ms
+       ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > records the stage's error text as _error.message, Python's str(e) 0ms
+       ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > records how many times the run was executed, Python's job_try 0ms
+       ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > records failed_at as a timestamp, close to the run 0ms
+       ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > merges _error in rather than replacing stage_logs 0ms
+       ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > leaves the stages before the failure committed 0ms
+       ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > leaves the failing stage's column unwritten 0ms
+       ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > is published a terminal failure event more than once for one run 0ms
+       ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > reports the failing step and its error 0ms
+       ✓ src/mastra/failure-recorder.test.ts > recordRunFailure > ignores a failure from another workflow 1ms
+       ✓ src/mastra/failure-recorder.test.ts > recordRunFailure > ignores a terminal event that is not a failure 1ms
+       ✓ src/mastra/failure-recorder.test.ts > recordRunFailure > ignores a run whose input carries no post id 0ms
+       ✓ src/mastra/failure-recorder.test.ts > recordRunFailure > records a thrown non-Error, which the engine passes through as it was 1ms
+       ✓ src/mastra/failure-recorder.test.ts > recordRunFailure > is safe to repeat: a second delivery rewrites the same values 2ms
+
+       Test Files  1 passed (1)
+            Tests  15 passed (15)
+         Duration  2.90s
+      ```
+
+      The expected stage error is captured off `console.error` rather than off the
+      instance logger, because `MastraBase`'s constructor gives every primitive its own
+      `ConsoleLogger` and only adopts the Mastra instance's logger in `__registerMastra`,
+      which the engine never calls on its `StepExecutor`. Spying on
+      `testMastra.getLogger()` therefore misses the failing step's line and leaves it on
+      stderr, which the no-new-warnings rule forbids.
+
+      **Negative controls**, each applied and reverted:
+
+      - dropped `events: workerEvents` from the test instance: the row is never stamped,
+        `beforeAll` throws `post 00000000-0000-4000-8000-0000000005d1 was never marked
+        failed` and all 15 tests skip. Weaker than a failure (a throwing hook skips rather
+        than fails), but it is what proves the subscription and not something else does
+        the work.
+      - dropped the `data?.workflowId !== PIPELINE_WORKFLOW_ID` guard: `3 failed | 12
+        passed`, the three "ignores ..." tests.
+      - replaced the `coalesce(stage_logs,'{}') || ...` merge with a plain
+        `stageLogs: { _error: error }` assignment: `2 failed | 13 passed`, the merge test
+        and the idempotency test.
+      - hardcoded `attempts` to Python's `MAX_ATTEMPTS = 3`: `1 failed | 14 passed`, the
+        `job_try` test.
+
+      **Gates.**
+
+      ```
+      $ pnpm -C web exec tsc --noEmit
+      tsc exit=0
+
+      $ pnpm -C web lint
+      (no output) lint exit=0
+
+      $ pnpm -C web test
+       Test Files  2 failed | 80 passed (82)
+            Tests  9 failed | 1451 passed | 7 skipped (1467)
+      ```
+
+      9 failed is the recorded baseline: the 6 `image-preview` failures and the 3
+      `PostDetail` failures. An earlier run of the same command in this iteration also
+      failed `scaffold-check.test.ts`'s stream-event assertion for 10 failed; that is the
+      flake already logged in `todo.md` and reproduced at HEAD, and it did not recur.
+
+      ```
+      $ pnpm -C web build
+      ✓ Compiled successfully in 3.3s
+      (15 pre-existing BetterAuth default-secret lines, one per page-data worker)
+
+      $ (set -a; . ./.env; set +a; cd api && uv run pytest -q)
+      125 failed, 236 passed, 25 errors in 12.98s
+
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 131 files already formatted
+      ```
+
+    - [ ] 5.4d-ii `GET /api/queue/dead-letter`: the caller's permanently failed runs,
+      read from Mastra's run rows (`status: "failed"`) joined to their posts, in the
+      `{entries, count}` shape with `post_id`, `stage`, `error`, `attempts` and
+      `failed_at` per entry. The `stage` Python could not record for a full pipeline is
+      available from the run's `stepResults`.
+    - [ ] 5.4d-iii `POST /api/queue/dead-letter/{post_id}/retry` and
+      `DELETE /api/queue/dead-letter`: the retry resets `current_stage`, pops `_error`
+      and starts a run; the clear needs a decision about what "cleared" means when the
+      record is Mastra's own run row rather than a list this app owns.
 - [ ] 5.5 `events` (SSE keeps `web/src/hooks/use-sse.ts`'s existing message shape; sourced from
   the Redis Streams pub/sub topic, not an in-process stream; uses Mastra resumable-stream
   replay; test disconnects and reconnects mid-run and asserts no gap in the event sequence)
