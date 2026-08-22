@@ -9697,14 +9697,202 @@ three pieces are separately verifiable, so they are separate items.
       $ uv run ruff format --check .
       9 files would be reformatted, 130 files already formatted
       ```
-    - [ ] 5.3d-ii `GET /{post_id}/export/all` (the zip). Needs a zip writer:
-      `web/` has no zip dependency and Node has no zip API, so the iteration that
-      picks this up has to either add a small library (`fflate`, `jszip`) or write
-      the archive format by hand, and should argue the choice. It also has to
-      decide what replaces `StreamingResponse` over a `BytesIO`. The content
-      transformations it needs (`stripLeadingH1`, `rewriteMediaUrls`) and the media
-      directory path (`postMediaDir()` in `web/src/mastra/images/media-dir.ts`) are
-      already in place from 5.3d-i and 5.3b-ii.
+    - [x] 5.3d-ii `GET /{post_id}/export/all` (the zip).
+
+      Ported to `web/src/app/api/posts/[id]/export/all/route.ts`. The content half
+      is the same three steps `/export/markdown` runs (`ready_content or
+      final_md_content`, `stripLeadingH1`, `rewriteMediaUrls`), reused from
+      `export-content.ts`; the 404 detail is a different string
+      (`"No content available to export"`, not `"No markdown content available"`)
+      so it stays in the handler. The archive half is new.
+
+      **The zip writer is `fflate` (0.8.3), added as a direct dependency of
+      `web/`.** Node has no zip API. Of the three candidates the item named:
+
+      - `archiver` is a stream pipeline with a large dependency tree, and is
+        present in this repo only as a transitive dependency of the `mastra` CLI
+        devDependency, so using it would mean either promoting it to a direct
+        production dependency or importing a devDependency's transitive package
+        from production code.
+      - `jszip` is several times the size and its API is promise-based, which buys
+        nothing here: Python did not stream either (see below).
+      - `fflate` has zero dependencies and a synchronous `zipSync(entries)` that
+        returns the finished bytes, which is the exact shape of what Python was
+        doing. Its default `level` is 6 deflate, the same method
+        `zipfile.ZIP_DEFLATED` selects.
+
+      **`StreamingResponse` is replaced by a plain `Response`, and that is not a
+      downgrade.** Python built the entire archive into a `BytesIO`, called
+      `buf.seek(0)`, and handed the finished buffer to `StreamingResponse`.
+      Nothing was ever produced lazily, so the streaming wrapper only changed
+      whether a `content-length` was sent. A `Response` over the `Uint8Array`
+      `zipSync` returns is the same archive delivered the same way.
+
+      Python's own zip semantics, probed rather than assumed:
+
+      ```
+      $ cd api && uv run python /tmp/probe_zip_5_3d_ii.py
+      IS_FILE: [('.hidden', True), ('broken.webp', False), ('link-to-file.webp', True),
+       ('real.webp', True), ('subdir', False)]
+      METHODS: [('a.mdx', 8), ('real.webp', 8)]
+      ZIP_DEFLATED = 8
+      SIG: 504b0304 method field: 8
+      DUP WARNINGS: ["Duplicate name: 'dup.mdx'"]
+      DUP NAMELIST: ['dup.mdx', 'dup.mdx']
+      HEADERS: {'content-disposition': 'attachment; filename="s.zip"',
+       'content-type': 'application/zip'}
+      ```
+
+      Three things that fixes in place. `Path.is_file()` follows symlinks and
+      answers `False` on a broken one rather than raising, so `Dirent.isFile()`
+      from `readdir(dir, { withFileTypes: true })` is **not** a valid port: it
+      reports on the directory entry, so a symlink pointing at an image would be
+      dropped. The handler `stat`s each entry and treats a throwing `stat` as the
+      broken-symlink case. `.hidden` is included, because `iterdir()` filters on
+      nothing but `is_file()`. And `StreamingResponse` does not append a charset to
+      `application/zip`, only to `text/*`, so the content type is bare.
+
+      **Interop check: Python's own `zipfile` reads the archive `fflate` writes.**
+      A throwaway test drove the real handler against the real database with a
+      real media file and wrote the response bytes to disk; `zipfile` read them
+      back with CRCs intact.
+
+      ```
+      $ uv run python -c "import zipfile; z = zipfile.ZipFile('/tmp/zip-interop.zip'); ..."
+      TESTZIP (None means no corruption): None
+      zip-interop-cd7eedd7-4b21-4c53-b192-a46f3078e9b9.mdx method= 8 size= 600 compressed= 13
+      img.webp method= 8 size= 4 compressed= 6
+      mdx head: b'hello hello hello hello hello '
+      img bytes: ffd80080
+      ```
+
+      Deviations, both consequences of `zipSync` taking an object rather than an
+      ordered list of entries, and neither changing any file's contents:
+
+      1. An image whose name is exactly `<slug>.mdx` replaces the markdown entry
+         instead of producing the duplicate-name archive Python emits with a
+         `UserWarning` (`DUP NAMELIST: ['dup.mdx', 'dup.mdx']` above). A zip with
+         two entries under one name is not something a reader can resolve
+         sensibly, so the object-keyed API's behaviour is the better of the two.
+      2. An image named with a canonical integer string (`"42"`, no extension)
+         would be moved to the front of the archive by JavaScript's own object key
+         ordering. Python emits entries in `iterdir()` order, which is itself
+         arbitrary readdir order, so neither implementation promises an order.
+
+      One faithfulness detail kept: `zf.write()` copies the source file's mtime
+      into its archive entry while `writestr` stamps the current time, so the
+      media entries carry their `stat` mtime and the `.mdx` entry does not.
+
+      `web/src/lib/api.ts` needs no change: `posts.exportAll(id)` already builds
+      `/api/posts/{id}/export/all`, which is the path this handler answers on.
+
+      21 tests in `web/src/app/api/posts/export-all.test.ts`, against the real
+      database, real BetterAuth sessions and a real temporary `MEDIA_DIR` holding
+      real files, symlinks and a subdirectory. The archive is read back two ways
+      on purpose: `unzipSync` for the entry map, and a hand-parsed local file
+      header inflated with `node:zlib` so the deflate claim does not rest on the
+      same library that wrote it.
+
+      ```
+      $ set -a && . ./.env && set +a && cd web \
+        && npx vitest run src/app/api/posts/export-all.test.ts --reporter=verbose
+      ✓ GET /api/posts/{post_id}/export/all: access > 401s without a session 7ms
+      ✓ GET /api/posts/{post_id}/export/all: access > 422s on a malformed uuid 13ms
+      ✓ GET /api/posts/{post_id}/export/all: access > 404s on a post that does not exist 4ms
+      ✓ GET /api/posts/{post_id}/export/all: access > 404s on another user's post, with the same body as a missing one 5ms
+      ✓ GET /api/posts/{post_id}/export/all: access > 404s on a post with no profile, because the ownership join is inner 3ms
+      ✓ GET /api/posts/{post_id}/export/all: content selection > 404s with a detail of its own, not the markdown export's 5ms
+      ✓ GET /api/posts/{post_id}/export/all: content selection > 404s even when images exist, because the check is on content alone 5ms
+      ✓ GET /api/posts/{post_id}/export/all: content selection > prefers ready_content over final_md_content 5ms
+      ✓ GET /api/posts/{post_id}/export/all: content selection > falls through to final_md_content when ready_content is empty, matching `or` 4ms
+      ✓ GET /api/posts/{post_id}/export/all: content selection > strips the duplicated H1 and rewrites every media URL in the .mdx entry 5ms
+      ✓ GET /api/posts/{post_id}/export/all: the archive > serves application/zip with no charset, as a .zip attachment named after the slug 4ms
+      ✓ GET /api/posts/{post_id}/export/all: the archive > holds only the .mdx when the post has no media directory 3ms
+      ✓ GET /api/posts/{post_id}/export/all: the archive > holds only the .mdx when the media directory is empty 4ms
+      ✓ GET /api/posts/{post_id}/export/all: the archive > adds every media file at the archive root, under its own bare name 4ms
+      ✓ GET /api/posts/{post_id}/export/all: the archive > copies image bytes through unchanged, including bytes that are not valid utf-8 4ms
+      ✓ GET /api/posts/{post_id}/export/all: the archive > skips subdirectories, which is what `is_file()` excludes 3ms
+      ✓ GET /api/posts/{post_id}/export/all: the archive > includes dotfiles, because iterdir() filters on nothing but is_file() 4ms
+      ✓ GET /api/posts/{post_id}/export/all: the archive > follows a symlink to a file, which Dirent.isFile() would have skipped 3ms
+      ✓ GET /api/posts/{post_id}/export/all: the archive > skips a broken symlink instead of failing the export 3ms
+      ✓ GET /api/posts/{post_id}/export/all: the archive > lowercases the id for both the media directory and the URL rewrite 4ms
+      ✓ GET /api/posts/{post_id}/export/all: the archive > is a deflate-compressed zip, read straight out of the local file header 3ms
+      Test Files  1 passed (1)
+           Tests  21 passed (21)
+      ```
+
+      Negative controls, each applied to the handler alone with the tests
+      unchanged:
+
+      ```
+      NC1  postMediaDir(id) instead of postMediaDir(id.toLowerCase())
+           Tests  21 passed (21)          <- does NOT fail, see below
+      NC2  post.readyContent ?? post.finalMdContent instead of ||
+           x falls through to final_md_content when ready_content is empty, matching `or`
+           Tests  1 failed | 20 passed (21)
+      NC3  readdir({withFileTypes:true}).filter(d => d.isFile()) instead of stat()
+           x follows a symlink to a file, which Dirent.isFile() would have skipped
+           Tests  1 failed | 20 passed (21)
+      NC4  skip the media directory entirely (mdx-only archive)
+           x adds every media file at the archive root, under its own bare name
+           x copies image bytes through unchanged, including bytes that are not valid utf-8
+           x includes dotfiles, because iterdir() filters on nothing but is_file()
+           x follows a symlink to a file, which Dirent.isFile() would have skipped
+           x skips a broken symlink instead of failing the export
+           x lowercases the id for both the media directory and the URL rewrite
+           Tests  6 failed | 15 passed (21)
+      NC5  zipSync(entries, { level: 0 }) (store) instead of the default deflate
+           x is a deflate-compressed zip, read straight out of the local file header
+           Tests  1 failed | 20 passed (21)
+      ```
+
+      **NC1 did not fail, and that is a real limitation rather than a passing
+      control.** macOS's default APFS is case-insensitive, so the uppercase media
+      directory path resolves to the lowercase directory the test created. The
+      `toLowerCase()` in the handler is still required on a case-sensitive
+      filesystem (Linux, which is what both Railway services run on), and the URL
+      rewrite half of the same test is a plain string comparison that fails on
+      either platform. The test carries this caveat in a comment above it.
+
+      Frontend gates:
+
+      ```
+      $ cd web && npx tsc --noEmit
+      TSC_EXIT=0
+
+      $ cd web && npx eslint
+      LINT_EXIT=0
+
+      $ set -a && . ./.env && set +a && cd web && npx vitest run
+       Test Files  2 failed | 74 passed (76)
+            Tests  9 failed | 1326 passed | 7 skipped (1342)
+      # 9 failed is the recorded baseline: 6 in image-preview.test.tsx and 3 in
+      # PostDetail.test.tsx. Passing count is 1305 -> 1326, the 21 added here.
+
+      $ cd web && npx next build
+      BUILD_EXIT=0
+      Route (app)
+      ...
+      ├ f /api/posts/[id]/duplicate
+      ├ f /api/posts/[id]/export/all
+      ├ f /api/posts/[id]/export/html
+      ├ f /api/posts/[id]/export/markdown
+      ├ f /api/posts/[id]/pause
+      ...
+      ```
+
+      `api/` gates, unchanged by this iteration and still on their baseline:
+
+      ```
+      $ set -a && . ./.env && set +a && cd api && uv run pytest -q
+      125 failed, 236 passed, 25 errors in 13.30s
+
+      $ uv run ruff check .
+      Found 32 errors.
+
+      $ uv run ruff format --check .
+      9 files would be reformatted, 130 files already formatted
+      ```
     - [ ] 5.3d-iii `GET /{post_id}/logs` and `GET /{post_id}/analytics`. `/logs` is
       three in-memory filters over the `execution_logs` jsonb column, with `level`
       as a repeated query parameter (`list[str]`, so `getAll()` here, not the
