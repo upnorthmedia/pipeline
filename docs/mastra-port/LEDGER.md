@@ -6686,7 +6686,247 @@ caller change in the same iteration. Every handler scopes by the authenticated u
 file until the TypeScript equivalent passes. Exit per router: TS tests pass and the dashboard
 pages that use it work with the Python API stopped.
 
-- [ ] 5.1 `settings`
+- [x] 5.1a `settings`: the shared route-handler authentication step plus
+  `GET /api/settings` and `PATCH /api/settings`
+
+  Item 5.1 is split, because the router is two unrelated halves: the settings
+  collection, and the API-key endpoints with their live per-provider validation
+  calls. The first half also carries the foundation every later router needs, so
+  it is done first and on its own.
+
+  **The blocker found first: the BetterAuth tables did not exist.** Alembic 010
+  adds the `user_id` columns and says in a comment that BetterAuth creates its own
+  tables separately; nothing in this repo ever ran that step.
+
+  ```
+  $ docker compose exec -T db psql -U pipeline -d content_pipeline -c "\dt" | grep auth_
+  (no output)
+  ```
+
+  So every authenticated handler would have 401d against a missing table, which is
+  also one root of the Phase 0 pytest baseline's `assert 401 == 201` cluster.
+  `@better-auth/cli` is not the fix: its newest published version is 1.4.22 while
+  the installed core is 1.5.4.
+
+  ```
+  $ npx -y @better-auth/cli@1.5.4 generate --config src/lib/auth.ts -y
+  npm error notarget No matching version found for @better-auth/cli@1.5.4.
+  ```
+
+  `web/scripts/auth-migrate.mts` uses `getMigrations()` from the installed
+  package instead, so the DDL always matches `node_modules` and the field
+  mappings in `src/lib/auth.ts`:
+
+  ```
+  $ cd web && node --env-file=../.env scripts/auth-migrate.mts
+  tables to create: auth_users, auth_sessions, auth_accounts, auth_verifications
+  columns to add:   (none)
+
+  create table "auth_users" ("id" text not null primary key, "name" text not null, "email" text not null unique, "email_verified" boolean not null, "image" text, "created_at" timestamptz default CURRENT_TIMESTAMP not null, "updated_at" timestamptz default CURRENT_TIMESTAMP not null, "stripeCustomerId" text);
+
+  create table "auth_sessions" ("id" text not null primary key, "expires_at" timestamptz not null, "token" text not null unique, "created_at" timestamptz default CURRENT_TIMESTAMP not null, "updated_at" timestamptz not null, "ip_address" text, "user_agent" text, "user_id" text not null references "auth_users" ("id") on delete cascade);
+
+  create table "auth_accounts" ("id" text not null primary key, "account_id" text not null, "provider_id" text not null, "user_id" text not null references "auth_users" ("id") on delete cascade, "access_token" text, "refresh_token" text, "idToken" text, "accessTokenExpiresAt" timestamptz, "refreshTokenExpiresAt" timestamptz, "scope" text, "password" text, "created_at" timestamptz default CURRENT_TIMESTAMP not null, "updated_at" timestamptz not null);
+
+  create table "auth_verifications" ("id" text not null primary key, "identifier" text not null, "value" text not null, "expires_at" timestamptz not null, "created_at" timestamptz default CURRENT_TIMESTAMP not null, "updated_at" timestamptz default CURRENT_TIMESTAMP not null);
+
+  create index "auth_sessions_user_id_idx" on "auth_sessions" ("user_id");
+
+  create index "auth_accounts_user_id_idx" on "auth_accounts" ("user_id");
+
+  create index "auth_verifications_identifier_idx" on "auth_verifications" ("identifier");
+  re-run with --apply to execute
+
+  $ cd web && node --env-file=../.env scripts/auth-migrate.mts --apply
+  tables to create: auth_users, auth_sessions, auth_accounts, auth_verifications
+  columns to add:   (none)
+  applied
+
+  $ docker compose exec -T db psql -U pipeline -d content_pipeline -c "\dt" | grep auth_
+   public | auth_accounts                     | table | pipeline
+   public | auth_sessions                     | table | pipeline
+   public | auth_users                        | table | pipeline
+   public | auth_verifications                | table | pipeline
+  ```
+
+  This is not a schema change the port invented: the column set matches the
+  read-only models in `api/src/models/auth.py`, which pytest already creates
+  through `Base.metadata.create_all`, and the parity check in
+  `src/db/schema-parity.ts` already excludes `auth_*` from Alembic ownership.
+
+  **What was built**
+
+  | File | Role |
+  | --- | --- |
+  | `web/scripts/auth-migrate.mts` | creates the BetterAuth tables from the installed package's own migration planner; `pnpm auth:migrate` prints, `--apply` runs |
+  | `web/src/lib/request-auth.ts` | `getRequestUser()` and `unauthorized()`, replacing `get_current_user()` for every Phase 5 handler |
+  | `web/src/app/api/settings/route.ts` | `GET` and `PATCH /api/settings` |
+  | `web/src/test/session.ts` | mints real `auth_users` + `auth_sessions` rows and a correctly signed cookie for handler tests |
+
+  Four decisions worth recording:
+
+  1. **`auth.api.getSession()`, not a hand-rolled session lookup.** Python read the
+     cookie, split the signature off and queried `auth_sessions` itself. BetterAuth
+     owns the session format here, so the port asks it: it verifies the signature,
+     knows the `__Secure-` prefix, and refreshes `expires_at`. The negative-control
+     table below shows the signature check is real, which the Python version never had.
+  2. **Handlers take a Web `Request` and return a Web `Response`, not `next/server`
+     types.** That is what lets the tests call `GET`/`PATCH` directly with no server
+     running, and it keeps the handlers importable from the worker side later.
+  3. **Sessions in tests are inserted, not signed up for.** `auth.api.signUpEmail()`
+     would fire the Stripe plugin's `createCustomerOnSignUp` on every test user, an
+     outbound call to Stripe per test. The rows written are the same rows BetterAuth
+     writes, and the cookie is signed with the live instance's own secret via
+     `makeSignature()` from `better-auth/crypto`, so `getSession()` validates it
+     exactly as it would a browser's.
+  4. **`PATCH` stores the request value verbatim.** `settings.update()` in `api.ts`
+     sends `{"<key>": {"value": {...}}}` and Python persisted the wrapper object as
+     the row value. Unwrapping it would be a nicer API and would silently change the
+     meaning of every row already stored.
+
+  **The one behaviour deliberately kept broken:** `settings.key` is the entire
+  primary key (010 indexed `user_id` but left it out of the key), so two users
+  cannot both hold one key. Patching a key another user owns raises a unique
+  violation in both stacks. Fixing it needs a primary-key change, which section 8
+  forbids as part of the port. Logged in `todo.md` and asserted as-is, because the
+  alternative failure (dropping the `user_id` filter) is a silent cross-tenant
+  overwrite.
+
+  **Two environment defects this item had to fix to work at all**
+
+  `next dev` never loaded the repo-root `.env`, because Next only reads `.env*`
+  inside `web/`. Until now that did not matter: the dashboard got all its data from
+  the Python API over HTTP. The first real request proved it:
+
+  ```
+  ERROR [Better Auth]: INTERNAL_SERVER_ERROR error: database "cody" does not exist
+      at async getRequestUser (src/lib/request-auth.ts:29:19)
+   GET /api/settings 500 in 37ms
+  ```
+
+  `next.config.ts` now loads `../.env` the way `vitest.config.ts` already did,
+  without overriding anything already in the environment.
+
+  `src/middleware.ts` matched `/api/settings` and redirected unauthenticated
+  requests to the sign-in page, so an expired session would have reached
+  `request()` in `api.ts` as a 307 to an HTML page and thrown a JSON parse error
+  instead of `ApiError(401)`. The matcher now excludes `api` as a whole. It only
+  ever checked that a cookie was present, so it was not what protected these
+  routes; `getRequestUser()` is.
+
+  **Live HTTP smoke test**, against `next dev` with a real signed cookie, proving
+  route registration, the middleware fix and both handlers end to end:
+
+  ```
+  $ curl -s -o /dev/stdout -w "%{http_code}\n" http://localhost:3000/api/settings
+  {"detail":"Not authenticated"}
+  401
+  $ curl -s -X PATCH -H "content-type: application/json" -H "cookie: better-auth.session_token=$C" \
+      -d '{"http_smoke":{"value":{"ok":true}}}' http://localhost:3000/api/settings
+  [{"key":"http_smoke","value":{"value":{"ok":true}},"updated_at":"2026-08-22T15:29:03.651Z"}]
+  200
+  $ curl -s -H "cookie: better-auth.session_token=$C" http://localhost:3000/api/settings
+  [{"key":"http_smoke","value":{"value":{"ok":true}},"updated_at":"2026-08-22T15:29:03.651Z"}]
+  200
+  $ curl -s -o /dev/null -w "%{http_code} %{redirect_url}\n" http://localhost:3000/settings
+  307 http://localhost:3000/auth/sign-in
+  ```
+
+  The smoke user and its row were deleted afterwards (`leftover_settings 0`,
+  `leftover_users 0`).
+
+  **Tests**
+
+  ```
+  $ cd web && pnpm exec vitest run src/lib/request-auth.test.ts src/app/api/settings/route.test.ts
+   ✓ src/lib/request-auth.test.ts (6 tests) 36ms
+   ✓ src/app/api/settings/route.test.ts (12 tests) 70ms
+
+   Test Files  2 passed (2)
+        Tests  18 passed (18)
+  ```
+
+  `route.test.ts` is the TypeScript replacement for `api/tests/phase4/test_settings.py`.
+  All four of its cases are carried over (`lists nothing`, `creates rows`, `updates an
+  existing row`, `lists a row it just wrote`), plus the four multi-tenancy and three
+  malformed-body cases that suite never had. The pytest file is left in place until
+  Phase 7 deletes `api/`; its four cases fail there today with 401, since its fixtures
+  never build a session, and that is part of the Phase 0 baseline.
+
+  **Negative controls.** Each mutation was applied, the suite run, then reverted:
+
+  | Mutation | Result |
+  | --- | --- |
+  | drop `where user_id = $1` from the `GET` query | 6 failed, 6 passed |
+  | drop `user_id` from the `PATCH` existence lookup | 1 failed (`refuses to write over a key another user already owns`) |
+
+  The second control is the point of that test: without the filter, one user's
+  `PATCH` silently overwrites another user's row instead of failing.
+
+  **Gates**
+
+  ```
+  $ cd web && pnpm exec tsc --noEmit
+  tsc exit=0
+  $ cd web && pnpm lint
+  lint exit=0
+  $ cd web && pnpm build
+  ✓ Compiled successfully in 3.5s
+  Route (app)
+  ├ ƒ /api/settings
+  $ cd web && pnpm test
+  Test Files  2 failed | 58 passed (60)
+       Tests  9 failed | 858 passed | 7 skipped (874)
+  ```
+
+  The 9 failures are the Phase 0 baseline, in the same two files. Totals moved by
+  exactly this item's 18 tests. Two corrections to the recorded baseline, both
+  measured with this iteration's test files moved aside:
+
+  ```
+  $ cd web && pnpm test          # with src/lib/request-auth.test.ts and
+                                 # src/app/api/settings/route.test.ts moved out
+  Test Files  3 failed | 55 passed (58)
+       Tests  10 failed | 839 passed | 7 skipped (856)
+  ```
+
+  1. The skip count is **7**, not the 8 every earlier entry recorded. The eighth was
+     `gemini.test.ts > live smoke > the configured model id resolves against the live
+     API`, gated on `GEMINI_API_KEY`, which is now present in `.env` and passes. It
+     unskips with or without this iteration's changes.
+  2. The suite is **flaky between 9 and 10 failures**. The tenth is
+     `images.test.ts > resolves its model from the encrypted key in the settings
+     table`, which fails with `anthropic API key not configured` when it races another
+     agent test file over the single shared global `api_keys` settings row. It passes
+     alone. Pre-existing and logged in `todo.md`; not caused by this item.
+
+  `api/` was not touched. Its gates are unchanged from 4.7c-i:
+
+  ```
+  $ cd api && TEST_DATABASE_URL=... uv run pytest -q
+  125 failed, 236 passed, 25 errors in 12.89s
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 126 files already formatted
+  ```
+
+  **Not covered by this item**, carried into 5.1b: the three API-key endpoints
+  (`GET /api/settings/api-keys`, `GET /api/settings/api-keys/{provider}/reveal`,
+  `PUT /api/settings/api-keys`), the write half of `api_keys.py`
+  (`save_api_keys`, `save_validation_results`, `get_masked_keys`, `reveal_api_key`)
+  and the live provider validation in `api_key_validator.py`. `/settings` is the
+  page that consumes those, and it consumes nothing from 5.1a: no dashboard code
+  calls `settings.list()` or `settings.update()` today.
+
+  `NEXT_PUBLIC_API_URL` still points the dashboard at the Python API on :8055. It
+  flips to same-origin once Phase 5 finishes, not per router, since one base URL
+  serves every namespace in `api.ts`.
+
+- [ ] 5.1b `settings`: the API-key endpoints (`GET /api/settings/api-keys`,
+  `GET /api/settings/api-keys/{provider}/reveal`, `PUT /api/settings/api-keys`),
+  the write half of `api/src/services/api_keys.py`, and the live per-provider
+  validation in `api/src/services/api_key_validator.py`
 - [ ] 5.2 `profiles`
 - [ ] 5.3 `posts`
 - [ ] 5.4 `queue`
