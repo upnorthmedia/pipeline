@@ -18,9 +18,15 @@
  * also means it lives in the persisted workflow snapshot, so a run resumed in
  * another process after a crash still knows which stages it was asked to run.
  */
+import type { PubSub } from "@mastra/core/events"
 import { z } from "zod"
 
-import { markCompleteIfAllStagesComplete, markStageForReview } from "../post-state"
+import { publishPipelineEvent } from "../pipeline-events"
+import {
+  markCompleteIfAllStagesComplete,
+  markStageForReview,
+  markStageRunning,
+} from "../post-state"
 import { STAGES, STATUS_COMPLETE } from "../state"
 import type { Stage } from "../state"
 
@@ -187,6 +193,41 @@ export async function reviewGate(
     mode: gateModeFor(stage, stageSettings) as ReviewMode,
     message: `Stage ${stage} paused for review`,
   }
+}
+
+/**
+ * Announce that a stage is starting, ported from the two statements Python ran
+ * between its skip check and its node call: commit `"running"` to the row, then
+ * publish `stage_start`.
+ *
+ * The order is the port's, not an accident of writing. Python's own comment on
+ * that block reads "SSE after DB is committed", because a browser that reacts
+ * to the event by refetching the post must not read a row that still says the
+ * previous stage. Publishing first would make that race routine rather than
+ * rare, since the fetch is a round trip and the publish is not.
+ *
+ * Called after the gate rather than before it, in the same position Python's
+ * block occupied relative to its `continue`: a stage that is skipped, and a
+ * stage parked in front of a reviewer, are neither of them running, and neither
+ * should announce that they are. `markStageForReview` already moves the row for
+ * the gate case.
+ *
+ * Takes the transport off the `mastra` handed to `execute` rather than
+ * importing the instance: `index.ts` imports the workflows, so a step that
+ * imported it back would close the cycle and, worse, would publish onto a
+ * different transport than the one the run is executing on whenever a test
+ * builds its own instance.
+ */
+export async function announceStageStart(
+  mastra: { pubsub: PubSub },
+  stage: Stage,
+  input: StageStepInput,
+): Promise<void> {
+  await markStageRunning(input.postId, stage)
+  await publishPipelineEvent(mastra.pubsub, input.postId, "stage_start", {
+    stage,
+    message: `Starting ${stage}...`,
+  })
 }
 
 /** The output of a stage that was skipped: the chain's fields and nothing else. */

@@ -102,7 +102,19 @@ type Replay = ReturnType<typeof replayOf>
 /** Records the prompts the step sends and replies with the queued response. */
 function replayMastra(reply: Replay) {
   const prompts: string[] = []
+  const announced: unknown[] = []
   const mastra = {
+    /**
+     * The step announces itself on the event bus before it calls its provider
+     * (item 5.5a). Stubbed here because this file is about prompt parity;
+     * `pipeline-events.test.ts` makes the same call against a real Redis
+     * Streams topic and asserts the payload it carries.
+     */
+    pubsub: {
+      publish: async (_topic: string, event: { data: unknown }) => {
+        announced.push(event.data)
+      },
+    },
     getAgent: () => ({
       generate: async (prompt: string) => {
         prompts.push(prompt)
@@ -111,7 +123,7 @@ function replayMastra(reply: Replay) {
     }),
     getLogger: () => undefined,
   }
-  return { mastra, prompts }
+  return { mastra, prompts, announced }
 }
 
 type ExecuteParams = Parameters<typeof writeStep.execute>[0]
@@ -288,5 +300,20 @@ describe("write step persistence and output", () => {
       } as unknown as ExecuteParams),
     ).rejects.toThrow("not found")
     expect(harness.prompts).toEqual([])
+  })
+})
+
+describe("write step announcement", () => {
+  it("announces the stage on the event bus, in Python's payload shape", async () => {
+    const { announced } = await runStep(fixtureIds[0], replayOf(fixtures[0]))
+
+    expect(announced).toEqual([
+      {
+        event: "stage_start",
+        post_id: fixtureIds[0],
+        stage: "write",
+        message: "Starting write...",
+      },
+    ])
   })
 })

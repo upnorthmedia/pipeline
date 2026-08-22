@@ -124,7 +124,19 @@ function replayMastra(reply: Replay) {
   const prompts: string[] = []
   const logs: LogLine[] = []
   const record = (level: string) => (message: string) => logs.push({ level, message })
+  const announced: unknown[] = []
   const mastra = {
+    /**
+     * The step announces itself on the event bus before it calls its provider
+     * (item 5.5a). Stubbed here because this file is about prompt parity;
+     * `pipeline-events.test.ts` makes the same call against a real Redis
+     * Streams topic and asserts the payload it carries.
+     */
+    pubsub: {
+      publish: async (_topic: string, event: { data: unknown }) => {
+        announced.push(event.data)
+      },
+    },
     getAgent: () => ({
       generate: async (prompt: string) => {
         prompts.push(prompt)
@@ -133,7 +145,7 @@ function replayMastra(reply: Replay) {
     }),
     getLogger: () => ({ warn: record("warn"), error: record("error") }),
   }
-  return { mastra, prompts, logs }
+  return { mastra, prompts, announced, logs }
 }
 
 type ExecuteParams = Parameters<typeof editStep.execute>[0]
@@ -423,5 +435,20 @@ describe("buildAnalyticsSection", () => {
   it("returns the empty string for a post with no draft", () => {
     const state = { draft: "", relatedKeywords: [], topic: "", websiteUrl: "", wordCount: 2000 }
     expect(buildAnalyticsSection(state as unknown as Parameters<typeof buildAnalyticsSection>[0])).toBe("")
+  })
+})
+
+describe("edit step announcement", () => {
+  it("announces the stage on the event bus, in Python's payload shape", async () => {
+    const { announced } = await runStep(fixtureIds[0], replayOf(fixtures[0]))
+
+    expect(announced).toEqual([
+      {
+        event: "stage_start",
+        post_id: fixtureIds[0],
+        stage: "edit",
+        message: "Starting edit...",
+      },
+    ])
   })
 })

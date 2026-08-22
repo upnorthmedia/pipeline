@@ -11487,6 +11487,233 @@ three pieces are separately verifiable, so they are separate items.
 - [ ] 5.5 `events` (SSE keeps `web/src/hooks/use-sse.ts`'s existing message shape; sourced from
   the Redis Streams pub/sub topic, not an in-process stream; uses Mastra resumable-stream
   replay; test disconnects and reconnects mid-run and asserts no gap in the event sequence)
+
+  Split, because this router is two halves and only one of them is a router. Python's
+  `api/src/api/events.py` is 67 lines of SSE plumbing over a `publish_event()` helper that
+  every other module calls, and **nothing in the TypeScript port published anything yet**:
+
+  ```
+  $ git grep -ln "stage_start" HEAD -- web/src
+  HEAD:web/src/app/monitor/_components/overview-tab.tsx
+  HEAD:web/src/app/posts/[id]/page.tsx
+  HEAD:web/src/hooks/use-sse.ts
+  ```
+
+  Three readers and no writer. So the producers have to exist before the endpoints can
+  serve them. Split into 5.5a the bus plus `stage_start`, 5.5b `stage_complete`,
+  `pipeline_complete` and `stage_error`, 5.5c `execution_logs` and the `log` event,
+  5.5d the two SSE route handlers, 5.5e resumable replay across a reconnect.
+
+  **The finding that decided the design, recorded here because it is not obvious and it
+  cost a search to establish.** The tempting port is no producer at all: the evented
+  engine already publishes per-step lifecycle events, so `web` could subscribe and
+  translate them into `use-sse.ts`'s shape. That is not available. Those events go to
+  `workflow.events.v2.<runId>`, which `@mastra/core`'s own topic policy calls run-local:
+
+  ```
+  $ grep -n "RUN_LOCAL_TOPIC_PREFIXES: readonly" web/node_modules/@mastra/core/dist/events/topics.d.ts
+  9:export declare const RUN_LOCAL_TOPIC_PREFIXES: readonly ["workflow.events.v2."];
+
+  $ grep -n "isRunLocalTopic(topic)" web/node_modules/@mastra/core/dist/mastra-Bn5mWcPE.js
+  577:					} else if (isRunLocalTopic(topic)) return target.publish(topic, event, { localOnly: true });
+
+  $ sed -n '108,118p' web/node_modules/@mastra/redis-streams/dist/index.js
+  	async publish(topic, event, options) {
+  		if (this.#closed) throw new Error("RedisStreamsPubSub: cannot publish on closed client");
+  		if (options?.localOnly) {
+  			const localEvent = {
+  				...event,
+  				id: randomUUID(),
+  				createdAt: /* @__PURE__ */ new Date(),
+  				deliveryAttempt: event.deliveryAttempt ?? 1
+  			};
+  			this.#deliverLocal(topic, localEvent);
+  			return;
+  ```
+
+  `mastra.pubsub` tags those publishes `localOnly`, and `RedisStreamsPubSub.publish`
+  short-circuits that flag to an in-process delivery and never writes to Redis. A run
+  executing in the `worker` service therefore emits step events that the `web` service
+  cannot see by any subscription. The comment in `topics.d.ts` gives the reason: the
+  payloads accumulate step results and "routinely run to megabytes", so relaying them
+  would be expensive as well as unavailable. An explicit, small publish from inside the
+  step is the port. **This also constrains item 8.1**: the run-trace view cannot be fed
+  by subscribing to Mastra's stream from `web` either.
+  - [x] 5.5a The pipeline event bus, and the stage-start row write plus its `stage_start`
+    event.
+
+    `web/src/mastra/pipeline-events.ts` is the port of `publish_event()`:
+    `publishPipelineEvent(pubsub, postId, event, data)` flattens the call site's fields
+    alongside `event` and `post_id`, which is the object `use-sse.ts` parses. It goes into
+    the `Event` envelope's `data`, so a subscriber forwards `event.data` untouched, and
+    the envelope's `runId` carries the post id because this bus is keyed by post, as
+    Python's channel name was.
+
+    **Deviation 1: one topic, not one per post.** Python published each payload to
+    `pipeline:post:<id>` and `pipeline:global`, two Redis PUBSUB channels that retain
+    nothing. `RedisStreamsPubSub` maps a topic to a retained Redis stream, so a topic per
+    post would create a stream on the first event of every run and, with
+    `streamIdleTtlMs` disabled in `index.ts`, leave it there after the post was deleted.
+    `TOPIC_PIPELINE_EVENTS = "pipeline-events"` is trimmed by the transport's own
+    `MAXLEN ~ 10000` and gives one ordered sequence, which is also what 5.5e needs to
+    replay a reconnect without a gap. Both Python channels collapse into it: the global
+    feed is the topic unfiltered, a post's feed is the topic filtered on `post_id`.
+
+    **The write this item restored.** Python's stage loop ran two statements between its
+    skip check and its node call:
+
+    ```
+    $ sed -n '161,180p' api/src/worker.py
+                # Persist "running" to DB before SSE so fetchPost reads correct state
+                async with session_factory() as session:
+                    post_obj = await session.get(Post, uuid.UUID(post_id))
+                    if post_obj:
+                        ss = dict(post_obj.stage_status or {})
+                        ss[stage] = "running"
+                        post_obj.stage_status = ss
+                        post_obj.current_stage = stage
+                        await session.commit()
+                    await append_execution_log(
+                        session,
+                        post_id,
+                        stage,
+                        "info",
+                        "stage_start",
+                        f"Starting {stage}...",
+                    )
+
+                # SSE after DB is committed
+                await publish_event(
+    ```
+
+    (`append_execution_log` is item 5.5c; only the row write and the publish are this
+    item's.)
+
+    Nothing in the port wrote `"running"` at all. `STATUS_RUNNING` was declared in
+    `state.ts` and used by exactly one route (`POST /api/posts`, seeding the first stage)
+    and by no step:
+
+    ```
+    $ git grep -n "STATUS_RUNNING\|markStageRunning" HEAD -- web/src/mastra ':!*.test.ts'
+    HEAD:web/src/mastra/state.ts:85:export const STATUS_RUNNING = "running"
+    ```
+
+    So a post spent every provider call looking, to the dashboard, like it was still
+    parked on the stage before. `markStageRunning()` in `post-state.ts` is the missing
+    write and `announceStageStart()` in `steps/stage-io.ts` is the pair, in Python's
+    order: row first, event second, because a browser that reacts to `stage_start` by
+    refetching the post must not read a row that still names the previous stage.
+
+    Placed after the gate rather than before it, in the position Python's block held
+    relative to its `continue`: a skipped stage and a stage parked in front of a reviewer
+    are both "not running", and `markStageForReview` already moves the row for the gate
+    case. The transport comes off the `mastra` handed to `execute` rather than from
+    `index.ts`, which would close an import cycle and would publish onto the production
+    transport even when a test is running the workflow on its own.
+
+    **Deviation 2: `images-manifest` now writes the row, where it wrote nothing.** The
+    `images` stage is two steps: the manifest call and the assembling step that commits
+    `image_manifest`. The announcement belongs to the stage's start, so it is in the
+    manifest step, which means that step now stamps `current_stage` and
+    `stage_status.images = "running"`. Its test
+    ("writes nothing to the post row, because the assembling step is the only writer")
+    asserted the old behaviour and was rewritten to assert the new one exactly: the
+    running marker and the `updatedAt` that comes with it, and every other column
+    unchanged. That is a deliberate behaviour change, not a test relaxed to pass.
+
+    **Deviation 3: the six per-stage parity harnesses gained a `pubsub`.** They call
+    `step.execute` directly with a hand-built `mastra`, which now needs the collaborator
+    the step uses. Each records what was published and asserts the payload, so the change
+    added coverage rather than silencing a call.
+
+    ```
+    $ pnpm exec vitest run src/mastra/pipeline-events.test.ts --reporter=verbose
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > announces each of the six stages exactly once, in pipeline order 1ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > carries Python's payload and nothing else 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > names the event on the envelope too, so a subscriber can filter without parsing 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > commits the row before the event goes out 1ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > leaves the post finished, so announcing changed no outcome 1ms
+     ✓ src/mastra/pipeline-events.test.ts > a stage the run skips > announces the five stages that ran and not the one that did not 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a stage the run skips > never calls the skipped stage running 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a stage parked at a review gate > announces nothing, because a stage waiting for a human is not running 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a stage parked at a review gate > leaves the row on the gate's own status rather than on running 1ms
+     ✓ src/mastra/pipeline-events.test.ts > publishPipelineEvent > flattens the caller's fields alongside the event name and post id 102ms
+     ✓ src/mastra/pipeline-events.test.ts > publishPipelineEvent > publishes an event with no payload as the two fields Python always sent 1ms
+     ✓ src/mastra/pipeline-events.test.ts > publishPipelineEvent > lets a caller's field override nothing it should not: post_id stays the argument 101ms
+     ✓ src/mastra/pipeline-events.test.ts > the run's own quality warnings > are the stubbed draft's, not a new one from announcing 0ms
+     Test Files  1 passed (1)
+          Tests  13 passed (13)
+       Duration  5.29s
+    ```
+
+    Three of those suites are real runs of the real workflow on a real evented engine,
+    real Redis Streams and the real database, with only the six agent calls stubbed. The
+    fourth publishes through the same real transport.
+
+    **A trap this file hit and now guards against.** The topic is a retained stream and an
+    ungrouped subscription reads it from the beginning, so the first version of the file
+    replayed every previous run of itself into its assertions. The first negative control
+    below passed on the events of the run before it. `pubsub.clearTopic()` in `beforeAll`
+    is the fix, and the controls were only meaningful after it.
+
+    Negative controls, each reverted after measuring:
+
+    | change | result |
+    | --- | --- |
+    | `research` does not call `announceStageStart` | 3 failed: order, payload, row-before-event |
+    | publish before `markStageRunning` instead of after | 1 failed: commits the row before the event goes out |
+    | drop `markStageRunning`, keep the publish | 1 failed: commits the row before the event goes out |
+    | announce before the skip check and the gate | 3 failed: skip x2, gate x1 |
+
+    `beforeAll` waits for the expected events with a non-throwing helper on purpose: the
+    first control, written against a throwing wait, reported 13 skips instead of the 3
+    failures that name the missing event.
+
+    Gates:
+
+    ```
+    $ pnpm -C web exec tsc --noEmit
+    TSC EXIT=0
+    (no output)
+
+    $ cd web && pnpm run lint
+    LINT EXIT=0
+    (no output)
+
+    $ cd web && pnpm test
+     Test Files  2 failed | 84 passed (86)
+          Tests  9 failed | 1527 passed | 7 skipped (1543)
+    # 9 failed is the recorded baseline: 6 in image-preview.test.tsx and 3 in
+    # PostDetail.test.tsx, both pre-existing. Passing count 1508 -> 1527 (+19):
+    # 13 in pipeline-events.test.ts and one announcement test in each of the six
+    # per-stage parity files.
+
+    $ cd web && pnpm build
+    BUILD EXIT=0
+    ✓ Compiled successfully in 3.5s
+
+    $ cd api && uv run pytest -q
+    125 failed, 236 passed, 25 errors in 12.56s
+
+    $ cd api && uv run ruff check .
+    Found 32 errors.
+
+    $ cd api && uv run ruff format --check .
+    9 files would be reformatted, 131 files already formatted
+    ```
+
+    The three Python numbers are the recorded baseline, unchanged. Requires
+    `set -a; . ./.env; set +a` first.
+  - [ ] 5.5b `stage_complete`, `pipeline_complete` and `stage_error`, from the same
+    positions Python published them: after each stage's `saveStageOutput` with the
+    stage's model and duration, from the completion step, and from the failure path.
+  - [ ] 5.5c `execution_logs` and the `log` event: Python's `append_execution_log()` and
+    `publish_stage_log()`, which write the same entry to the column and the bus.
+  - [ ] 5.5d `GET /api/events/{post_id}` and `GET /api/events`, as Next.js route handlers
+    serving `text/event-stream` in `use-sse.ts`'s named-event shape, subscribed to the
+    topic rather than to an in-process stream.
+  - [ ] 5.5e Resumable replay: a browser that reconnects mid-run recovers the events it
+    missed. Test disconnects and reconnects mid-run and asserts no gap in the sequence.
 - [ ] 5.6 `rules`
 - [ ] 5.7 `links`
 - [ ] 5.8 `analytics`

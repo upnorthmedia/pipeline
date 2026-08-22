@@ -120,7 +120,19 @@ type Warning = { message: string; meta: unknown }
 function replayMastra(reply: Replay) {
   const prompts: string[] = []
   const warnings: Warning[] = []
+  const announced: unknown[] = []
   const mastra = {
+    /**
+     * The step announces itself on the event bus before it calls its provider
+     * (item 5.5a). Stubbed here because this file is about prompt parity;
+     * `pipeline-events.test.ts` makes the same call against a real Redis
+     * Streams topic and asserts the payload it carries.
+     */
+    pubsub: {
+      publish: async (_topic: string, event: { data: unknown }) => {
+        announced.push(event.data)
+      },
+    },
     getAgent: () => ({
       generate: async (prompt: string) => {
         prompts.push(prompt)
@@ -131,7 +143,7 @@ function replayMastra(reply: Replay) {
       warn: (message: string, meta: unknown) => warnings.push({ message, meta }),
     }),
   }
-  return { mastra, prompts, warnings }
+  return { mastra, prompts, announced, warnings }
 }
 
 type ExecuteParams = Parameters<typeof imagesManifestStep.execute>[0]
@@ -282,7 +294,7 @@ describe("images manifest step output", () => {
     expect(output).not.toHaveProperty("durationS")
   })
 
-  it("writes nothing to the post row, because the assembling step is the only writer", async () => {
+  it("writes only the running marker, leaving every content column to the assembling step", async () => {
     const fixture = fixtures[0]
     vi.setSystemTime(new Date(fixture.captured_at))
     const [before] = await db.select().from(posts).where(inArray(posts.id, [fixtureIds[0]]))
@@ -290,7 +302,16 @@ describe("images manifest step output", () => {
     await runStep(fixtureIds[0], replayOf(fixture))
 
     const [after] = await db.select().from(posts).where(inArray(posts.id, [fixtureIds[0]]))
-    expect(after).toEqual(before)
+    // This step used to write nothing at all. Item 5.5a gave it Python's
+    // "persist running before the SSE" write, which is the one thing about the
+    // row a stage settles on the way in; the manifest itself is still written
+    // by `images-assemble` and by nothing else.
+    expect(after).toEqual({
+      ...before,
+      currentStage: "images",
+      stageStatus: { ...(before.stageStatus as Record<string, string>), images: "running" },
+      updatedAt: new Date(fixture.captured_at),
+    })
   })
 
   it("fails loudly on a post that does not exist rather than billing a call", async () => {
@@ -441,5 +462,20 @@ describe("the JSON manifest schema", () => {
     // A value repeated without a cycle is not a cycle.
     const shared = { k: 1 }
     expect(imageManifestSchema.safeParse({ a: shared, b: shared }).success).toBe(true)
+  })
+})
+
+describe("images step announcement", () => {
+  it("announces the stage on the event bus, in Python's payload shape", async () => {
+    const { announced } = await runStep(fixtureIds[0], replayOf(fixtures[0]))
+
+    expect(announced).toEqual([
+      {
+        event: "stage_start",
+        post_id: fixtureIds[0],
+        stage: "images",
+        message: "Starting images...",
+      },
+    ])
   })
 })

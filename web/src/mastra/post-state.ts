@@ -21,6 +21,7 @@ import {
   STAGES,
   STATUS_COMPLETE,
   STATUS_REVIEW,
+  STATUS_RUNNING,
   pipelineContextSchema,
 } from "./state"
 import type { InternalLink, Stage } from "./state"
@@ -181,6 +182,33 @@ export async function saveStageOutput(
   if (stageStatusPatch !== undefined) values.stageStatus = mergeStageStatus(stageStatusPatch)
 
   await getDb().update(posts).set(values).where(eq(posts.id, postId))
+}
+
+/**
+ * Move the row onto a stage that is about to execute, ported from the
+ * "Persist running to DB before SSE so fetchPost reads correct state" block in
+ * `_run_pipeline()`: `stage_status[stage] = "running"` and `current_stage` set
+ * to the stage now in flight.
+ *
+ * Until this landed, nothing in the port wrote `"running"` at all: the row went
+ * straight from the previous stage's `"complete"` to this stage's, so a post
+ * spent every provider call looking, to the dashboard, like it was still parked
+ * on the stage before. `saveStageOutput` advances `current_stage` on the way
+ * out; this is the matching write on the way in.
+ *
+ * The two writes are separate statements rather than one merged patch because
+ * they happen either side of the provider call, which is the whole point of the
+ * value: `"running"` means "started, not finished".
+ */
+export async function markStageRunning(postId: string, stage: Stage): Promise<void> {
+  await getDb()
+    .update(posts)
+    .set({
+      stageStatus: mergeStageStatus({ [stage]: STATUS_RUNNING }),
+      currentStage: stage,
+      updatedAt: new Date(),
+    })
+    .where(eq(posts.id, postId))
 }
 
 /**

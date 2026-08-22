@@ -20,6 +20,7 @@ import { loadPipelineState, saveStageOutput } from "../post-state"
 import { buildStagePrompt, loadRules } from "../prompts"
 import { STATUS_COMPLETE } from "../state"
 import {
+  announceStageStart,
   gateResumeSchema,
   gateSuspendSchema,
   markRerunComplete,
@@ -94,6 +95,7 @@ export const researchStep = createStep({
     // stage spends, which is where Python put it: a paused stage bills nothing.
     const gate = await reviewGate("research", inputData, state.stageSettings, resumeData)
     if (gate) return suspend(gate)
+    await announceStageStart(mastra, "research", inputData)
     const prompt = buildStagePrompt("research", loadRules("research"), state)
     const agent = mastra.getAgent("research")
 

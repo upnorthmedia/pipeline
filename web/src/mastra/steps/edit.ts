@@ -28,6 +28,7 @@ import type { PipelineState } from "../post-state"
 import { buildStagePrompt, loadRules } from "../prompts"
 import { STATUS_COMPLETE } from "../state"
 import {
+  announceStageStart,
   gateResumeSchema,
   gateSuspendSchema,
   markRerunComplete,
@@ -224,6 +225,7 @@ export const editStep = createStep({
     // stage spends, which is where Python put it: a paused stage bills nothing.
     const gate = await reviewGate("edit", inputData, state.stageSettings, resumeData)
     if (gate) return suspend(gate)
+    await announceStageStart(mastra, "edit", inputData)
     const rulesPrompt = buildStagePrompt("edit", loadRules("edit"), state)
     const analyticsSection = buildAnalyticsSection(state)
     const prompt = analyticsSection

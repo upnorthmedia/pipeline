@@ -22,6 +22,7 @@ import { STATUS_COMPLETE } from "../state"
 import { pythonTruthy } from "./images-manifest"
 import type { JsonValue } from "./images-manifest"
 import {
+  announceStageStart,
   gateResumeSchema,
   gateSuspendSchema,
   markRerunComplete,
@@ -131,6 +132,7 @@ export const readyStep = createStep({
     // stage spends, which is where Python put it: a paused stage bills nothing.
     const gate = await reviewGate("ready", inputData, state.stageSettings, resumeData)
     if (gate) return suspend(gate)
+    await announceStageStart(mastra, "ready", inputData)
     const prompt = buildReadyPrompt(loadRules("ready"), state)
 
     const startedAt = Date.now()

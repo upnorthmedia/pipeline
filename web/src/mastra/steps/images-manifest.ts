@@ -35,6 +35,7 @@ import { parseManifest } from "../images/manifest"
 import { loadPipelineState } from "../post-state"
 import { buildStagePrompt, loadRules } from "../prompts"
 import {
+  announceStageStart,
   gateResumeSchema,
   gateSuspendSchema,
   reviewGate,
@@ -194,6 +195,7 @@ export const imagesManifestStep = createStep({
     // stage spends, which is where Python put it: a paused stage bills nothing.
     const gate = await reviewGate("images", inputData, state.stageSettings, resumeData)
     if (gate) return suspend(gate)
+    await announceStageStart(mastra, "images", inputData)
     const prompt = buildStagePrompt("images", loadRules("images"), state)
 
     const result = await mastra.getAgent("images").generate(prompt)
