@@ -4962,8 +4962,132 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   $ cd api && uv run ruff format --check .
   9 files would be reformatted, 126 files already formatted
   ```
-- [ ] 4.2 Support running a single stage in isolation and running all remaining stages from the
-  current one, matching `_run_pipeline()`'s `stages` and `check_gates` behavior.
+- [x] 4.2a Stage selection: run only the named stages, and on a full run skip the stages
+  `stage_status` already calls complete. (Split from 4.2 this iteration; 4.2b below is the
+  rest of it.)
+
+  `check_gates` in the item's original wording does not exist in the Python being ported.
+  `_run_pipeline()` (`api/src/worker.py:94`) takes `ctx, post_id, redis, session_factory,
+  job_try, stages=None` and nothing else; gate checking was removed with LangGraph in the
+  reliability work, so 4.3 owns gates outright and this item is only about `stages`.
+
+  The two rules Python spells out, both reproduced:
+
+  - `stages=[x]` runs exactly `x` and deliberately does *not* consult `stage_status`, which
+    is what makes the dashboard's per-stage rerun button work on a completed stage.
+  - `stages=None` runs `STAGES` minus whatever `stage_status` already calls complete
+    (`worker.py:151`, `if ss.get(stage) == "complete": continue`).
+
+  The chain is fixed, so the decision moved into the steps: `stages` is declared on both
+  `stageStepInputSchema` and `stageStepOutputSchema` and threaded through every step, and
+  each step asks `shouldRunStage()` right after it loads its state. It is threaded through
+  the data flow rather than carried in a runtime context so it lands in the persisted
+  workflow snapshot, which is what a run resumed in another process reads. A skipped stage
+  returns `skipped: true` with zeroed meta and touches no column, no provider and no
+  credential. `images` decides one step earlier than the rest, in `images-manifest`, because
+  the fan-out sits between that step and the one that writes.
+
+  **Defect found and fixed while doing this: the second `images` run in a process failed.**
+  `jsonValueSchema` was `z.lazy(() => z.union([..., z.array(jsonValueSchema), ...]))`. The
+  first parse populates the lazy's `_cachedInner` and closes a reference cycle through the
+  union's array member. Mastra's evented engine publishes a nested workflow's
+  `parentWorkflow.stepGraph`, schemas included, onto the pub/sub topic as JSON, so from the
+  second `images` start onward `JSON.stringify` threw `Converting circular structure to JSON`
+  and the step failed terminally after three redeliveries. One run per process hid it;
+  a worker serving a queue would have hit it on the second post. Probed directly:
+
+  ```
+  $ cd web && pnpm vitest run src/mastra/workflows/cycle-probe.test.ts   # scratch, not committed
+  stdout | step graph serializability before and after the lazy schema is used
+    before: 'ok',
+    after: 'TypeError: Converting circular structure to JSON\n    --> sta'
+  ```
+
+  Fixed by moving the recursion out of the schema and into a predicate
+  (`z.custom<JsonValue>(isJsonValue)`), which keeps the schema object a flat leaf while
+  admitting and rejecting the same documents. `NaN` is still rejected as `z.number()`
+  rejected it; `Infinity` is still admitted as `z.number()` admitted it, since tightening
+  that is a separate decision.
+
+  The stage-selection suite, two real runs against live Postgres and Redis on the evented
+  engine with only the six agents and the Gemini call stubbed:
+
+  ```
+  $ cd web && pnpm vitest run src/mastra/workflows/stage-selection.test.ts
+   ✓ src/mastra/workflows/stage-selection.test.ts (11 tests) 3330ms
+   Test Files  1 passed (1)
+        Tests  11 passed (11)
+  ```
+
+  And the schema regression tests added next to the manifest step:
+
+  ```
+  $ cd web && pnpm vitest run src/mastra/steps/images-manifest.test.ts
+   ✓ src/mastra/steps/images-manifest.test.ts (21 tests)
+   Test Files  1 passed (1)
+        Tests  21 passed (21)
+  ```
+
+  Negative controls. Each mutation applied alone, suite rerun, then reverted:
+
+  | Mutation | Result |
+  | --- | --- |
+  | `shouldRunStage` always returns true | Tests 8 failed \| 2 passed (10)* |
+  | full-run branch ignores `stage_status` | Tests 3 failed \| 7 passed (10)* |
+  | single-stage branch also consults `stage_status` | Tests 2 failed \| 8 passed (10)* |
+  | `images-manifest` ignores the skip | Tests 5 failed \| 6 passed (11) |
+  | `images-assemble` ignores the skip | Tests 2 failed \| 9 passed (11) |
+  | `.foreach()` map ignores the skip | Tests 1 failed \| 10 passed (11) |
+  | `jsonValueSchema` back to `z.lazy` | Tests 3 failed \| 7 passed (10)* and, in `images-manifest.test.ts`, Tests 2 failed \| 1 passed \| 18 skipped (21) |
+  | restored | Tests 11 passed (11) |
+
+  \* Run before the eleventh test (the Gemini-credential assertion) was added, hence 10.
+  The `.foreach()` map mutation passed 10/10 at that point, which is what prompted the
+  eleventh test: with `requireApiKey` stubbed and `images` empty the guard was unobservable,
+  so the spy's call count now stands in for the credential a passed-through stage must not
+  demand.
+
+  Frontend gates:
+
+  ```
+  $ cd web && pnpm tsc --noEmit
+  (no output, exit 0)
+  $ cd web && pnpm lint
+  (no output, exit 0)
+  $ cd web && pnpm test
+   Test Files  3 failed | 46 passed (49)
+        Tests  11 failed | 756 passed | 8 skipped (775)
+  ...rerun:
+   Test Files  2 failed | 47 passed (49)
+        Tests  9 failed | 757 passed | 8 skipped (775)
+  $ cd web && pnpm build
+  ✓ Compiled successfully in 3.2s
+  ```
+
+  Totals moved 761 -> 775, which is this iteration's 11 + 3 tests. The clean rerun is the
+  9-test deterministic baseline exactly (6 in `image-preview.test.tsx`, 3 in
+  `PostDetail.test.tsx`). The extra failures across runs were 1 in `agents/edit.test.ts` +
+  1 in `agents/ready.test.ts` + 1 in `api-keys.test.ts`, then 1 in `agents/outline.test.ts`,
+  then 0: the known intermittent shared-`settings.api_keys` contention already logged in
+  `todo.md` as `[investigate]`, not new. The build's BetterAuth base-URL warning is the one
+  recorded in Phase 0.
+
+  Backend gates, unchanged at the Phase 0 baseline (no Python touched):
+
+  ```
+  $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test NO_COLOR=1 uv run pytest -q
+  125 failed, 236 passed, 25 errors in 15.08s
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 126 files already formatted
+  ```
+- [ ] 4.2b Single-stage rerun completion check: after a run with an explicit `stages`
+  selection, if `stage_status` now calls every stage complete, set `current_stage` to
+  `"complete"` (`api/src/worker.py:234`). Deliberately left out of 4.2a: the full-pipeline
+  path reaches the same end state through `_post_completion_hook`, which also stamps
+  `completed_at` and queues publishing, so the two want deciding together rather than
+  bolting the single-stage half onto every step.
 - [ ] 4.3 Review gates via `suspend()` / `resume()` with typed `suspendSchema` / `resumeSchema`.
   Suspend/resume test passes.
 - [ ] 4.4 Execution moves to the `worker` process: `web` starts a run and returns immediately,

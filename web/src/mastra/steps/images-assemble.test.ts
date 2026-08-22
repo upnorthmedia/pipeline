@@ -96,6 +96,7 @@ function manifestOutputOf(fixture: Fixture, postId: string): ImagesManifestOutpu
   manifest.images = stored.images.map(specOf)
   return {
     postId,
+    skipped: false,
     stageStartedAtMs: STAGE_START_MS,
     model: fixture.stage_output._stage_meta.model,
     tokensIn: fixture.stage_output._stage_meta.tokens_in,

@@ -19,7 +19,12 @@ import { createStep } from "@mastra/core/workflows/evented"
 import { loadPipelineState, saveStageOutput } from "../post-state"
 import { buildStagePrompt, loadRules } from "../prompts"
 import { STATUS_COMPLETE } from "../state"
-import { stageStepInputSchema, stageStepOutputSchema } from "./stage-io"
+import {
+  skippedStageOutput,
+  shouldRunStage,
+  stageStepInputSchema,
+  stageStepOutputSchema,
+} from "./stage-io"
 
 /** Python's `MAX_RESEARCH_ATTEMPTS`. */
 export const MAX_RESEARCH_ATTEMPTS = 3
@@ -75,6 +80,9 @@ export const researchStep = createStep({
   execute: async ({ inputData, mastra }) => {
     const { postId } = inputData
     const state = await loadPipelineState(postId)
+    if (!shouldRunStage("research", inputData, state.stageStatus)) {
+      return skippedStageOutput(inputData, "research")
+    }
     const prompt = buildStagePrompt("research", loadRules("research"), state)
     const agent = mastra.getAgent("research")
 
@@ -121,7 +129,9 @@ export const researchStep = createStep({
 
     return {
       postId,
+      stages: inputData.stages,
       stage: "research" as const,
+      skipped: false,
       model,
       tokensIn,
       tokensOut,

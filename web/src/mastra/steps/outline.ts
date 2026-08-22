@@ -13,7 +13,12 @@ import { createStep } from "@mastra/core/workflows/evented"
 import { loadPipelineState, saveStageOutput } from "../post-state"
 import { buildStagePrompt, loadRules } from "../prompts"
 import { STATUS_COMPLETE } from "../state"
-import { stageStepInputSchema, stageStepOutputSchema } from "./stage-io"
+import {
+  skippedStageOutput,
+  shouldRunStage,
+  stageStepInputSchema,
+  stageStepOutputSchema,
+} from "./stage-io"
 
 export const outlineStep = createStep({
   id: "outline",
@@ -22,6 +27,9 @@ export const outlineStep = createStep({
   execute: async ({ inputData, mastra }) => {
     const { postId } = inputData
     const state = await loadPipelineState(postId)
+    if (!shouldRunStage("outline", inputData, state.stageStatus)) {
+      return skippedStageOutput(inputData, "outline")
+    }
     const prompt = buildStagePrompt("outline", loadRules("outline"), state)
 
     const startedAt = Date.now()
@@ -35,7 +43,9 @@ export const outlineStep = createStep({
 
     return {
       postId,
+      stages: inputData.stages,
       stage: "outline" as const,
+      skipped: false,
       // The provider's own reported model id, not the one requested, so a
       // silent server-side alias shows up in the run trace.
       model: result.response?.modelId ?? "",

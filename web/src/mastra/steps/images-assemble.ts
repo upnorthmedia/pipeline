@@ -22,7 +22,7 @@ import { loadPipelineState, saveStageOutput } from "../post-state"
 import { STATUS_COMPLETE, STATUS_FAILED } from "../state"
 import { generatedImageSchema } from "./images-generate"
 import { imageManifestSchema, imagesManifestStep } from "./images-manifest"
-import { stageStepOutputSchema } from "./stage-io"
+import { skippedStageOutput, stageStepOutputSchema } from "./stage-io"
 
 /** `_stage_meta_gemini`: the image spend, reported separately from Claude's. */
 export const geminiStageMetaSchema = z.object({
@@ -88,14 +88,29 @@ export const imagesAssembleStep = createStep({
   outputSchema: imagesStageOutputSchema,
   execute: async ({ inputData, getStepResult }) => {
     const manifestResult = getStepResult(imagesManifestStep)
-    const { postId, stageStartedAtMs, parseFailed } = manifestResult
+    const { postId, stages, stageStartedAtMs, parseFailed, skipped } = manifestResult
+
+    if (skipped) {
+      // Nothing ran, so there is nothing to fold, write or bill. Returned from
+      // here rather than from the manifest step because the fan-out sits
+      // between them and this is the step whose output leaves the workflow.
+      return {
+        ...skippedStageOutput({ postId, stages }, "images"),
+        totalGenerated: 0,
+        totalFailed: 0,
+        parseFailed: false,
+        gemini: null,
+      }
+    }
     // One timer over the whole stage, read once so both meta records carry the
     // same value the way Python's single `timer.duration` did.
     const durationS = (Date.now() - stageStartedAtMs) / 1000
 
     const claudeMeta = {
       postId,
+      stages,
       stage: "images" as const,
+      skipped: false,
       model: manifestResult.model,
       tokensIn: manifestResult.tokensIn,
       tokensOut: manifestResult.tokensOut,

@@ -51,6 +51,10 @@
   2026-08-22: `src/mastra/api-keys.test.ts` joins the list (2 extra failures in one run of
   iteration 32, then 0 on the rerun), which points at the shared `settings.api_keys` row
   rather than at the agent suites specifically.
+  2026-08-22: seen again in iteration 38 across three consecutive full runs (edit + ready +
+  api-keys, then outline, then none), with `agents/outline.test.ts` new to the list. Still
+  only ever 1-2 extra failures and always in the suites that swap `globalThis.fetch` or read
+  `settings.api_keys`.
 
 - [confirmed] 2026-08-21 The agent test files' `beforeAll`/`afterAll` key save-and-restore
   makes the placeholder key permanent: a run captures whatever is in `settings.api_keys`,
@@ -83,3 +87,10 @@
   `pytest` run leaves new untracked `.webp` files in the working tree. 39 of them were already
   committed by accident in 5f31ca4. Deleted when `api/` goes in Phase 7, so worth fixing only
   if pytest stays around longer than expected.
+
+- [confirmed] 2026-08-22 A `pnpm test` run writes generated images into the repo's own
+  `media/test-123/` rather than a temp directory, and 41 of them are already committed. The
+  filenames carry a random suffix, so every run leaves new untracked files behind for the
+  next commit to sweep up. `MEDIA_DIR` already exists and the workflow suites set it to a
+  `mkdtemp`; the `images-generate` unit tests do not.
+

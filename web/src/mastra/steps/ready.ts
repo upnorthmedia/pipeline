@@ -21,7 +21,12 @@ import { loadRules, pythonJsonDumps } from "../prompts"
 import { STATUS_COMPLETE } from "../state"
 import { pythonTruthy } from "./images-manifest"
 import type { JsonValue } from "./images-manifest"
-import { stageStepInputSchema, stageStepOutputSchema } from "./stage-io"
+import {
+  skippedStageOutput,
+  shouldRunStage,
+  stageStepInputSchema,
+  stageStepOutputSchema,
+} from "./stage-io"
 
 /** The separator `_build_ready_prompt` joins its sections with. */
 const SECTION_SEPARATOR = "\n\n---\n\n"
@@ -112,6 +117,9 @@ export const readyStep = createStep({
   execute: async ({ inputData, mastra }) => {
     const { postId } = inputData
     const state = await loadPipelineState(postId)
+    if (!shouldRunStage("ready", inputData, state.stageStatus)) {
+      return skippedStageOutput(inputData, "ready")
+    }
     const prompt = buildReadyPrompt(loadRules("ready"), state)
 
     const startedAt = Date.now()
@@ -125,7 +133,9 @@ export const readyStep = createStep({
 
     return {
       postId,
+      stages: inputData.stages,
       stage: "ready" as const,
+      skipped: false,
       // The provider's own reported model id, not the one requested, so a
       // silent server-side alias shows up in the run trace.
       model: result.response?.modelId ?? "",

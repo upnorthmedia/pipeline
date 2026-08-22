@@ -27,6 +27,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 
 import { closeDb, getDb, posts } from "../../db"
 import {
+  imageManifestSchema,
   imagesManifestOutputSchema,
   imagesManifestStep,
   pythonTruthy,
@@ -406,5 +407,39 @@ describe("python primitives", () => {
     expect(pythonTruthy(null)).toBe(false)
     expect(pythonTruthy(undefined)).toBe(false)
     expect(pythonTruthy("no")).toBe(true)
+  })
+})
+
+/**
+ * The manifest schema has to survive being serialised, because Mastra publishes
+ * a nested workflow's step graph, schemas included, onto the pub/sub topic as
+ * JSON when the workflow starts. The recursive `z.lazy` spelling this schema
+ * used to have only closed its reference cycle on first use, so the failure
+ * appeared on the *second* `images` run in a process and not the first.
+ */
+describe("the JSON manifest schema", () => {
+  it("stays JSON-serialisable after it has been used to parse", () => {
+    expect(() => JSON.stringify(imageManifestSchema)).not.toThrow()
+    imageManifestSchema.parse({ images: [{ id: "hero", n: 1, ok: true, x: null }] })
+    expect(() => JSON.stringify(imageManifestSchema)).not.toThrow()
+  })
+
+  it("still admits any document JSON.parse can produce", () => {
+    const document = { a: "s", b: 1, c: true, d: null, e: [1, [2, { f: {} }]], g: {} }
+    expect(imageManifestSchema.parse(document)).toEqual(document)
+  })
+
+  it("still rejects what would corrupt the column", () => {
+    expect(imageManifestSchema.safeParse({ a: undefined }).success).toBe(false)
+    expect(imageManifestSchema.safeParse({ a: () => 1 }).success).toBe(false)
+    expect(imageManifestSchema.safeParse({ a: NaN }).success).toBe(false)
+    expect(imageManifestSchema.safeParse({ a: Symbol("s") }).success).toBe(false)
+
+    const cyclic: Record<string, unknown> = {}
+    cyclic.self = cyclic
+    expect(imageManifestSchema.safeParse(cyclic).success).toBe(false)
+    // A value repeated without a cycle is not a cycle.
+    const shared = { k: 1 }
+    expect(imageManifestSchema.safeParse({ a: shared, b: shared }).success).toBe(true)
   })
 })

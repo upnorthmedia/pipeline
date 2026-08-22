@@ -59,9 +59,13 @@ export const imagesWorkflow = createWorkflow({
    * so a missing key fails the stage before any image is attempted, and a job
    * is serialised into the workflow snapshot and the Redis event, where a
    * credential must never appear.
+   *
+   * A skipped stage takes the same empty path as a failed parse, so neither the
+   * media directory nor the Gemini key is touched on a run that is only passing
+   * through this stage.
    */
   .map(async ({ inputData }) => {
-    if (inputData.parseFailed) return []
+    if (inputData.skipped || inputData.parseFailed) return []
     await requireApiKey("gemini")
     const mediaDir = await ensureMediaDir(mediaRoot(), inputData.postId)
     return inputData.images.map((spec, index) =>

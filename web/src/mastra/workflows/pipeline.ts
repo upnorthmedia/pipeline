@@ -21,11 +21,18 @@
  * rebuilds its inputs from committed rows rather than from a snapshot of what a
  * dead process was holding.
  *
- * Deliberately not here yet, each with its own ledger item: skipping stages
- * already marked complete and running a single stage in isolation (4.2), review
- * gates (4.3), and the per-stage `running` status, execution logs and SSE
- * events the Python runner published around each call (Phase 5's `events`
- * router owns the transport those need).
+ * Which of the six actually run is decided per step from the run's input, not
+ * by rebuilding the chain: `stages` on the input names the stages to run, and
+ * its absence means Python's full pipeline, every stage `stage_status` does not
+ * already call complete. A stage that is not selected returns immediately with
+ * `skipped: true` and bills nothing, which is the `continue` in Python's stage
+ * loop. See `steps/stage-io.ts`.
+ *
+ * Deliberately not here yet, each with its own ledger item: the single-stage
+ * rerun's `current_stage = "complete"` check (4.2b), review gates (4.3), and the
+ * per-stage `running` status, execution logs and SSE events the Python runner
+ * published around each call (Phase 5's `events` router owns the transport
+ * those need).
  */
 import { createWorkflow } from "@mastra/core/workflows/evented"
 

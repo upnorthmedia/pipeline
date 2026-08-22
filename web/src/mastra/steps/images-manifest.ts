@@ -34,28 +34,64 @@ import { z } from "zod"
 import { parseManifest } from "../images/manifest"
 import { loadPipelineState } from "../post-state"
 import { buildStagePrompt, loadRules } from "../prompts"
-import { stageStepInputSchema } from "./stage-io"
+import { shouldRunStage, stageStepInputSchema } from "./stage-io"
 
 /**
  * Anything `JSON.parse` can return.
  *
  * The `image_manifest` column is JSONB written from whatever Claude answered
  * with, and the port's contract is that its shape survives byte for byte, so
- * the schema has to admit an arbitrary JSON document. This is that, spelled
- * out recursively rather than as `z.any()`: it still rejects `undefined`,
- * functions and cycles, which is what would silently corrupt the column.
+ * the schema has to admit an arbitrary JSON document. This is that, validated
+ * rather than left as `z.any()`: it still rejects `undefined`, functions and
+ * cycles, which is what would silently corrupt the column.
  */
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
 
-export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
-  z.union([
-    z.string(),
-    z.number(),
-    z.boolean(),
-    z.null(),
-    z.array(jsonValueSchema),
-    z.record(z.string(), jsonValueSchema),
-  ]),
+/**
+ * The recursion lives in this predicate rather than in the schema, and that is
+ * load bearing.
+ *
+ * The obvious spelling is `z.lazy(() => z.union([..., z.array(jsonValueSchema),
+ * ...]))`, and it works right up until the schema is used twice. The first
+ * parse populates the lazy's `_cachedInner`, which closes a reference cycle
+ * through the union's array member. Mastra's evented engine publishes a nested
+ * workflow's `parentWorkflow.stepGraph` onto the pub/sub topic as JSON, and
+ * that graph carries the step schemas, so from the second `images` run onward
+ * in a single process `JSON.stringify` threw `Converting circular structure to
+ * JSON` and the stage failed after three redeliveries. One run per process hid
+ * it; a worker serving a queue would have hit it immediately.
+ *
+ * A predicate keeps the schema object a flat leaf while validating the same
+ * documents. `NaN` is rejected as `z.number()` rejected it; `Infinity` is
+ * admitted as `z.number()` admitted it, even though `JSON.stringify` writes it
+ * as `null`, because tightening that is a separate decision from this fix.
+ */
+function isJsonValue(value: unknown, seen: Set<object>): boolean {
+  if (value === null) return true
+  switch (typeof value) {
+    case "string":
+    case "boolean":
+      return true
+    case "number":
+      return !Number.isNaN(value)
+    case "object":
+      break
+    default:
+      return false
+  }
+  const container = value as object
+  // A cycle would serialise to nothing useful and cannot have come from JSON.
+  if (seen.has(container)) return false
+  seen.add(container)
+  const children = Array.isArray(container) ? container : Object.values(container)
+  const valid = children.every((child) => isJsonValue(child, seen))
+  seen.delete(container)
+  return valid
+}
+
+export const jsonValueSchema: z.ZodType<JsonValue> = z.custom<JsonValue>(
+  (value) => isJsonValue(value, new Set()),
+  { message: "not a JSON value" },
 )
 
 /** One manifest entry. Every key is the model's; none of them is required. */
@@ -66,6 +102,16 @@ export const imageManifestSchema = z.record(z.string(), jsonValueSchema)
 
 export const imagesManifestOutputSchema = z.object({
   postId: z.uuid(),
+  /**
+   * The run's stage selection, carried across the fan-out so the assembling
+   * step can report the skip without re-deriving it. See `stage-io.ts`.
+   */
+  stages: stageStepInputSchema.shape.stages,
+  /**
+   * True when the `images` stage was skipped, which short-circuits the whole
+   * nested workflow: no manifest call, no fan-out, no write.
+   */
+  skipped: z.boolean(),
   /**
    * `Date.now()` at the top of the stage, standing in for `StageTimer`'s
    * `time.monotonic()`. Carried through the fan-out so the assembling step can
@@ -118,12 +164,31 @@ export const imagesManifestStep = createStep({
     const stageStartedAtMs = Date.now()
 
     const state = await loadPipelineState(postId)
+    if (!shouldRunStage("images", inputData, state.stageStatus)) {
+      // The `continue` in Python's stage loop, expressed one step earlier than
+      // the other stages express it: the skip has to be decided before the
+      // manifest call, and the two steps behind the fan-out read it from here.
+      return {
+        postId,
+        stages: inputData.stages,
+        skipped: true,
+        stageStartedAtMs,
+        model: "",
+        tokensIn: 0,
+        tokensOut: 0,
+        parseFailed: false,
+        manifest: {},
+        images: [],
+      }
+    }
     const prompt = buildStagePrompt("images", loadRules("images"), state)
 
     const result = await mastra.getAgent("images").generate(prompt)
 
     const meta = {
       postId,
+      stages: inputData.stages,
+      skipped: false,
       stageStartedAtMs,
       model: result.response?.modelId ?? "",
       tokensIn: result.usage?.inputTokens ?? 0,

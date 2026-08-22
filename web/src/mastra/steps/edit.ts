@@ -27,7 +27,12 @@ import { loadPipelineState, saveStageOutput } from "../post-state"
 import type { PipelineState } from "../post-state"
 import { buildStagePrompt, loadRules } from "../prompts"
 import { STATUS_COMPLETE } from "../state"
-import { stageStepInputSchema, stageStepOutputSchema } from "./stage-io"
+import {
+  skippedStageOutput,
+  shouldRunStage,
+  stageStepInputSchema,
+  stageStepOutputSchema,
+} from "./stage-io"
 
 /** The separator `edit_node` joins the rules prompt and the analytics section with. */
 const ANALYTICS_SEPARATOR = "\n\n---\n\n"
@@ -205,6 +210,9 @@ export const editStep = createStep({
   execute: async ({ inputData, mastra }) => {
     const { postId } = inputData
     const state = await loadPipelineState(postId)
+    if (!shouldRunStage("edit", inputData, state.stageStatus)) {
+      return skippedStageOutput(inputData, "edit")
+    }
     const rulesPrompt = buildStagePrompt("edit", loadRules("edit"), state)
     const analyticsSection = buildAnalyticsSection(state)
     const prompt = analyticsSection
@@ -245,7 +253,9 @@ export const editStep = createStep({
 
     return {
       postId,
+      stages: inputData.stages,
       stage: "edit" as const,
+      skipped: false,
       // The provider's own reported model id, not the one requested, so a
       // silent server-side alias shows up in the run trace.
       model: result.response?.modelId ?? "",
