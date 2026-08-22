@@ -67,12 +67,14 @@ describe("mastra entry point", () => {
     const { packages } = importGraph(ENTRY)
     expect(packages).toEqual([
       "@mastra/core",
+      "@mastra/core/workflows",
       "@mastra/loggers",
       "@mastra/pg",
       "@mastra/redis-streams",
       "drizzle-orm/node-postgres",
       "drizzle-orm/pg-core",
       "pg",
+      "zod",
     ])
   })
 

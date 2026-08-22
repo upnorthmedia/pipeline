@@ -1623,9 +1623,126 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
   Failures held at the established baseline of 9 (6 in `image-preview.test.tsx` plus the 3 others
   recorded in 0.1); passes went 221 -> 229, which is exactly the 8 new tests. No `api/` file was
   touched, so the pytest and ruff baselines are unchanged by construction.
-- [ ] 2.3 Define one trivial two-step workflow. Test executes it, asserts
+- [x] 2.3 Define one trivial two-step workflow. Test executes it, asserts
   `stream.status === 'success'`, asserts the emitted event types, and asserts the run row is
   present in Postgres storage.
+
+  `web/src/mastra/workflows/scaffold-check.ts` defines `scaffold-check`: two `createStep`s
+  (`scaffold-first`, `scaffold-second`) chained with `.then()` and terminated with `.commit()`,
+  both carrying Zod input/output schemas. The second step reads the first's output and appends
+  to `seenBy`, so chaining is observable rather than assumed. It is registered on the Mastra
+  instance as `workflows: { scaffoldCheck: scaffoldCheckWorkflow }` and stays registered after
+  Phase 3: it is the only regression test for storage, streaming, Redis transport and Studio
+  discovery that costs no provider call.
+
+  `web/src/mastra/workflows/scaffold-check.test.ts` runs it once in `beforeAll` against the
+  real Postgres and Redis and asserts across five tests.
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm exec vitest run src/mastra/workflows/scaffold-check.test.ts
+
+   RUN  v4.0.18 /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+
+   ✓ src/mastra/workflows/scaffold-check.test.ts (5 tests) 42ms
+
+   Test Files  1 passed (1)
+        Tests  5 passed (5)
+     Start at  20:53:25
+     Duration  671ms (transform 41ms, setup 88ms, import 471ms, tests 42ms, environment 0ms)
+  ```
+
+  What each assertion covers:
+
+  1. registration: `mastra.getWorkflow('scaffoldCheck')` is the same object, `listWorkflows()`
+     lists the key, and the workflow id is `scaffold-check`.
+  2. `stream.status === 'success'` after the stream is drained, plus `result.status` and the
+     final output `{ message, seenBy: ['scaffold-first', 'scaffold-second'] }`.
+  3. event types: first event `workflow-start`, last `workflow-finish` with
+     `payload.workflowStatus === 'success'`, and exactly two `workflow-step-start` /
+     `workflow-step-result` pairs in step order with `status: 'success'`.
+  4. persistence: an independent `pg.Pool` selects `mastra_workflow_snapshot` by `run_id` and
+     finds one row with `workflow_name = 'scaffold-check'`, `snapshot->>'status' = 'success'`
+     and both step ids in `snapshot.context`.
+  5. `workflow.getWorkflowRunById(runId)` returns the same run with status `success`.
+
+  The run rows are really in the Alembic-owned database:
+
+  ```
+  $ docker compose exec -T db psql -U pipeline -d content_pipeline -c \
+      "select workflow_name, run_id, snapshot->>'status' as status \
+       from mastra_workflow_snapshot order by \"createdAt\" desc limit 3;"
+   workflow_name  |                run_id                | status
+  ----------------+--------------------------------------+---------
+   scaffold-check | 60a72f96-886b-4f74-87bb-cb410d446eec | success
+   scaffold-check | 04a05648-d4f7-4c5d-a6fc-c715ffb26149 | success
+   scaffold-check | a2371e42-3c6e-4570-8011-71224d216804 | success
+  (3 rows)
+  ```
+
+  **Negative control 1, chaining and event payloads.** `scaffold-second` changed to return
+  `seenBy: [...inputData.seenBy]` (no append), which is a plausible-looking no-op:
+
+  ```
+   FAIL  scaffold-check workflow > runs both steps in order ...
+   FAIL  scaffold-check workflow > emits the workflow lifecycle events ...
+  AssertionError: expected { message: 'phase-2 scaffold', …(1) } to deeply equal { …(1) }
+    {
+      "message": "phase-2 scaffold",
+      "seenBy": [
+        "scaffold-first",
+  -     "scaffold-second",
+      ],
+    }
+   Test Files  1 failed (1)
+        Tests  2 failed | 3 passed (5)
+  ```
+
+  Reverted; the file is back to the committed version.
+
+  **Negative control 2, Postgres storage.** `storage` removed from the `new Mastra({...})`
+  config, so Mastra substitutes its default store:
+
+  ```
+   FAIL  scaffold-check workflow > persists the run into the Postgres storage adapter
+  AssertionError: expected [] to have a length of 1 but got +0
+   Test Files  1 failed (1)
+        Tests  1 failed | 4 passed (5)
+  ```
+
+  Reverted. Note which test did **not** fail: `getWorkflowRunById` still returned a successful
+  run from the default in-memory store, so only the direct SQL probe distinguishes "persisted
+  to Postgres" from "persisted somewhere". Later items that claim Postgres durability must
+  probe SQL, not the workflow API.
+
+  **Intentional test update.** `src/mastra/no-next-imports.test.ts` pins the exact external
+  package list reachable from the entry point. Registering the workflow legitimately adds
+  `@mastra/core/workflows` and `zod` to that list, so the expected array was extended by those
+  two entries. The `next/*` and `server-only` assertion and its negative control are untouched.
+  This is a behavior change to the entry point's import graph, not a test edited to pass.
+
+  Frontend gates after the change:
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm exec tsc --noEmit ; echo exit=$?
+  exit=0
+
+  $ cd web && NO_COLOR=1 pnpm lint ; echo exit=$?
+  > content-pipeline-dashboard@0.1.0 lint
+  > eslint
+  exit=0
+
+  $ cd web && NO_COLOR=1 pnpm test ; echo exit=$?
+   Test Files  2 failed | 20 passed (22)
+        Tests  9 failed | 234 passed (243)
+  exit=1
+
+  $ cd web && NO_COLOR=1 pnpm build ; echo exit=$?
+  exit=0
+  ```
+
+  Failures held at the established baseline of 9; passes went 229 -> 234, exactly the 5 new
+  tests. No `api/` file was touched, so the pytest and ruff baselines are unchanged by
+  construction.
 - [ ] 2.4 A second process subscribed to the Redis Streams topic receives the same events.
 - [ ] 2.5 Mastra Studio connects to the dev server and lists the trivial workflow. Paste the
   command and a committed screenshot path.
