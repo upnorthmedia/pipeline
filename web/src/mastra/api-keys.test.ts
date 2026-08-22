@@ -16,14 +16,25 @@ import { eq } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, settings } from "../db"
+import { lockApiKeysRow, unlockApiKeysRow } from "../test/api-keys-row"
 import { encryptWithKey } from "../lib/crypto"
-import { API_KEYS_SETTING_KEY, PROVIDERS, getApiKeys, requireApiKey } from "./api-keys"
+import {
+  API_KEYS_SETTING_KEY,
+  API_KEYS_VALIDATION_SETTING_KEY,
+  PROVIDERS,
+  getApiKeys,
+  getMaskedKeys,
+  getValidationResults,
+  requireApiKey,
+  revealApiKey,
+} from "./api-keys"
 
 /** A throwaway Fernet key: 32 random bytes, url-safe base64, exactly as Python generates. */
 const TEST_KEY = randomBytes(32).toString("base64url")
 
 /** Whatever the developer's database already held, restored on the way out. */
 let savedRow: { value: unknown } | undefined
+let savedValidationRow: { value: unknown } | undefined
 let savedEncryptionKey: string | undefined
 
 async function writeKeys(value: Record<string, string>) {
@@ -33,7 +44,15 @@ async function writeKeys(value: Record<string, string>) {
     .onConflictDoUpdate({ target: settings.key, set: { value } })
 }
 
+async function writeValidation(value: Record<string, unknown>) {
+  await getDb()
+    .insert(settings)
+    .values({ key: API_KEYS_VALIDATION_SETTING_KEY, value })
+    .onConflictDoUpdate({ target: settings.key, set: { value } })
+}
+
 beforeAll(async () => {
+  await lockApiKeysRow()
   savedEncryptionKey = process.env.WP_ENCRYPTION_KEY
   process.env.WP_ENCRYPTION_KEY = TEST_KEY
   const rows = await getDb()
@@ -42,16 +61,25 @@ beforeAll(async () => {
     .where(eq(settings.key, API_KEYS_SETTING_KEY))
     .limit(1)
   savedRow = rows[0]
+  const validationRows = await getDb()
+    .select({ value: settings.value })
+    .from(settings)
+    .where(eq(settings.key, API_KEYS_VALIDATION_SETTING_KEY))
+    .limit(1)
+  savedValidationRow = validationRows[0]
 }, 30_000)
 
 afterEach(async () => {
   await getDb().delete(settings).where(eq(settings.key, API_KEYS_SETTING_KEY))
+  await getDb().delete(settings).where(eq(settings.key, API_KEYS_VALIDATION_SETTING_KEY))
 })
 
 afterAll(async () => {
   if (savedRow) await writeKeys(savedRow.value as Record<string, string>)
+  if (savedValidationRow) await writeValidation(savedValidationRow.value as Record<string, unknown>)
   if (savedEncryptionKey === undefined) delete process.env.WP_ENCRYPTION_KEY
   else process.env.WP_ENCRYPTION_KEY = savedEncryptionKey
+  await unlockApiKeysRow()
   await closeDb()
 })
 
@@ -110,5 +138,107 @@ describe("requireApiKey", () => {
     await expect(requireApiKey("perplexity")).rejects.toThrow(
       /perplexity API key not configured/,
     )
+  })
+})
+
+/**
+ * Item 5.1b-i: the masking and reveal half of `api/src/services/api_keys.py`.
+ * Ported from `api/tests/phase11/test_api_keys_service.py`
+ * (`test_get_masked_keys_configured`, `test_get_masked_keys_never_returns_actual_key`)
+ * plus the reveal cases that suite never had.
+ *
+ * These live in this file rather than beside the route handlers because
+ * `settings.api_keys` is a single global row with no `user_id` to isolate on,
+ * and every extra test file that rewrites it widens the known cross-file race
+ * logged in `todo.md`.
+ */
+describe("getValidationResults", () => {
+  it("returns nothing when no validation row exists", async () => {
+    await expect(getValidationResults()).resolves.toEqual({})
+  })
+
+  it("returns only known providers, coerced to booleans", async () => {
+    await writeValidation({ anthropic: true, perplexity: 0, openai: true })
+
+    await expect(getValidationResults()).resolves.toEqual({
+      anthropic: true,
+      perplexity: false,
+    })
+  })
+})
+
+describe("getMaskedKeys", () => {
+  it("reports every provider unconfigured when no row exists", async () => {
+    const masked = await getMaskedKeys()
+
+    expect(Object.keys(masked).sort()).toEqual([...PROVIDERS].sort())
+    for (const provider of PROVIDERS) {
+      expect(masked[provider]).toEqual({
+        provider,
+        configured: false,
+        source: "none",
+        hint: "",
+        valid: null,
+      })
+    }
+  })
+
+  it("masks a configured key down to its last four characters", async () => {
+    await writeKeys({ anthropic: encryptWithKey("sk-ant-secret-abcd", TEST_KEY) })
+
+    const masked = await getMaskedKeys()
+    expect(masked.anthropic).toEqual({
+      provider: "anthropic",
+      configured: true,
+      source: "db",
+      hint: "...abcd",
+      valid: null,
+    })
+    expect(masked.gemini.configured).toBe(false)
+  })
+
+  it("masks a key shorter than four characters without leaking it", async () => {
+    await writeKeys({ gemini: encryptWithKey("ab", TEST_KEY) })
+
+    expect((await getMaskedKeys()).gemini.hint).toBe("...***")
+  })
+
+  it("never returns the plaintext key anywhere in the payload", async () => {
+    const plaintext = "pplx-do-not-leak-me-wxyz"
+    await writeKeys({ perplexity: encryptWithKey(plaintext, TEST_KEY) })
+
+    const serialised = JSON.stringify(await getMaskedKeys())
+    expect(serialised).not.toContain(plaintext)
+    expect(serialised).not.toContain("pplx-do-not-leak-me")
+    expect(serialised).toContain("...wxyz")
+  })
+
+  it("carries the persisted validation result onto a configured provider", async () => {
+    await writeKeys({ anthropic: encryptWithKey("sk-ant-1234", TEST_KEY) })
+    await writeValidation({ anthropic: false, gemini: true })
+
+    const masked = await getMaskedKeys()
+    expect(masked.anthropic.valid).toBe(false)
+    // A stored result for a provider with no key stays null: Python reported
+    // `valid` only off the configured branch.
+    expect(masked.gemini.valid).toBeNull()
+  })
+})
+
+describe("revealApiKey", () => {
+  it("returns the decrypted key for a configured provider", async () => {
+    await writeKeys({ gemini: encryptWithKey("AIza-revealed", TEST_KEY) })
+
+    await expect(revealApiKey("gemini")).resolves.toBe("AIza-revealed")
+  })
+
+  it("returns null for a provider with no key stored", async () => {
+    await expect(revealApiKey("gemini")).resolves.toBeNull()
+  })
+
+  it("returns null for a provider name it does not know", async () => {
+    await writeKeys({ anthropic: encryptWithKey("sk-ant-1234", TEST_KEY) })
+
+    await expect(revealApiKey("openai")).resolves.toBeNull()
   })
 })

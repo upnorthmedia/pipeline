@@ -175,13 +175,13 @@
   IntegrityError from the same INSERT). Alembic 010 added `user_id` as an index only. The fix is
   a composite `(key, user_id)` primary key, which section 8 of the port objective forbids as part
   of the port. Asserted as-is in `web/src/app/api/settings/route.test.ts`.
-- [confirmed] 2026-08-22 The six agent test files each rewrite and delete the single global
+- [fixed] 2026-08-22 The six agent test files each rewrote and deleted the single global
   `api_keys` settings row (`writeAnthropicKey` / `clearKeys` in
-  `web/src/mastra/agents/*.test.ts`), so `pnpm -C web test` flakes between 9 and 10 failures:
-  `images.test.ts > resolves its model from the encrypted key in the settings table` fails with
-  `anthropic API key not configured` when it races a sibling file. Each file passes alone. The
-  row has no `user_id`, so per-file isolation needs either a per-file settings key or serialising
-  those files.
+  `web/src/mastra/agents/*.test.ts`), so `pnpm -C web test` flaked between 9 and 10 failures with
+  `anthropic API key not configured` when one file raced a sibling. Fixed in item 5.1b-i by
+  serialising the eight files that touch that row on a Postgres session advisory lock
+  (`web/src/test/api-keys-row.ts`); the suite now sits at a deterministic 9 failures with no
+  change in wall clock. Clear this entry once the fix is merged.
 - [investigate] 2026-08-22 BetterAuth has no `BETTER_AUTH_SECRET` in `.env` or `.env.example`, so
   it falls back to its built-in default secret and every session cookie in this deployment is
   signed with a publicly known key. Setting one invalidates existing sessions, which is free now

@@ -42,6 +42,8 @@ import {
   outlineAgent,
 } from "./outline"
 
+import { lockApiKeysRow, unlockApiKeysRow } from "@/test/api-keys-row"
+
 const GOLDEN_DIR = path.resolve(process.cwd(), "..", "docs", "mastra-port", "golden")
 const GOLDEN_SLUGS = ["how-to-choose-a-crm-for-a-small-team", "best-time-tracking-tools-for-agencies"]
 
@@ -84,6 +86,7 @@ async function clearKeys() {
 }
 
 beforeAll(async () => {
+  await lockApiKeysRow()
   savedEncryptionKey = process.env.WP_ENCRYPTION_KEY
   process.env.WP_ENCRYPTION_KEY = TEST_KEY
   const rows = await getDb()
@@ -104,6 +107,7 @@ afterAll(async () => {
   if (savedEncryptionKey === undefined) delete process.env.WP_ENCRYPTION_KEY
   else process.env.WP_ENCRYPTION_KEY = savedEncryptionKey
   await pubsub.close()
+  await unlockApiKeysRow()
   await closeDb()
 })
 

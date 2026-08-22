@@ -65,3 +65,77 @@ export async function requireApiKey(provider: Provider): Promise<string> {
   }
   return key
 }
+
+/** The `settings.key` the persisted per-provider validation results live under. */
+export const API_KEYS_VALIDATION_SETTING_KEY = "api_keys_validation"
+
+/**
+ * One provider's row in `GET /api/settings/api-keys`, matching `ApiKeyStatus`
+ * in `api/src/models/schemas.py` and in `web/src/lib/api.ts`.
+ */
+export interface ApiKeyStatus {
+  provider: Provider
+  configured: boolean
+  source: "db" | "env" | "none"
+  hint: string
+  valid: boolean | null
+}
+
+/**
+ * Persisted validation results, ported from `_load_validation()`. Missing row,
+ * missing provider and a non-boolean stored value all collapse the same way
+ * Python's `bool(v)` did.
+ */
+export async function getValidationResults(): Promise<Partial<Record<Provider, boolean>>> {
+  const rows = await getDb()
+    .select({ value: settings.value })
+    .from(settings)
+    .where(eq(settings.key, API_KEYS_VALIDATION_SETTING_KEY))
+    .limit(1)
+
+  const stored = (rows[0]?.value ?? {}) as Record<string, unknown>
+  const out: Partial<Record<Provider, boolean>> = {}
+  for (const provider of PROVIDERS) {
+    if (provider in stored) out[provider] = Boolean(stored[provider])
+  }
+  return out
+}
+
+/**
+ * Masked status per provider, ported from `get_masked_keys()`. Never returns a
+ * key: the only thing derived from the plaintext is the last four characters.
+ *
+ * `source` is only ever `"db"` or `"none"` here. `"env"` stays in the union
+ * because `ApiKeyStatus` in `web/src/lib/api.ts` declares it, and Python's
+ * schema typed it as a bare `str` with the same three values in a comment; no
+ * code path in either stack produces it, since keys moved out of the
+ * environment and into the `api_keys` row.
+ */
+export async function getMaskedKeys(): Promise<Record<Provider, ApiKeyStatus>> {
+  const keys = await getApiKeys()
+  const validation = await getValidationResults()
+
+  const out = {} as Record<Provider, ApiKeyStatus>
+  for (const provider of PROVIDERS) {
+    const value = keys[provider]
+    out[provider] = value
+      ? {
+          provider,
+          configured: true,
+          source: "db",
+          hint: value.length >= 4 ? `...${value.slice(-4)}` : "...***",
+          valid: validation[provider] ?? null,
+        }
+      : { provider, configured: false, source: "none", hint: "", valid: null }
+  }
+  return out
+}
+
+/**
+ * The plaintext key for one provider, or `null` when the provider is unknown
+ * or has no key stored. Ported from `reveal_api_key()`.
+ */
+export async function revealApiKey(provider: string): Promise<string | null> {
+  if (!(PROVIDERS as readonly string[]).includes(provider)) return null
+  return (await getApiKeys())[provider as Provider] || null
+}

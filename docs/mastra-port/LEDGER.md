@@ -6923,10 +6923,153 @@ pages that use it work with the Python API stopped.
   flips to same-origin once Phase 5 finishes, not per router, since one base URL
   serves every namespace in `api.ts`.
 
-- [ ] 5.1b `settings`: the API-key endpoints (`GET /api/settings/api-keys`,
-  `GET /api/settings/api-keys/{provider}/reveal`, `PUT /api/settings/api-keys`),
-  the write half of `api/src/services/api_keys.py`, and the live per-provider
-  validation in `api/src/services/api_key_validator.py`
+- [x] 5.1b-i `settings`: the two read endpoints (`GET /api/settings/api-keys`,
+  `GET /api/settings/api-keys/{provider}/reveal`) and the masking and reveal half
+  of `api/src/services/api_keys.py` (`get_masked_keys`, `reveal_api_key`)
+
+  `web/src/mastra/api-keys.ts` already owned the `api_keys` settings row for the
+  agents (item 3.1b), so the masking and reveal half went there rather than into a
+  second module with a second copy of `PROVIDERS` and `API_KEYS_SETTING_KEY`. It
+  gained `getValidationResults()` (Python's `_load_validation`), `getMaskedKeys()`
+  and `revealApiKey()`. The two handlers are thin: auth, the loopback gate, and
+  `Response.json`.
+
+  Contract, unchanged: `GET /api/settings/api-keys` returns
+  `Record<string, ApiKeyStatus>` and the reveal returns `{provider, key}`, both as
+  declared for `apiKeys.get()` and `apiKeys.reveal()` in `web/src/lib/api.ts`.
+
+  **Deviation, deliberate, on the reveal endpoint's loopback gate.** Python gated
+  it on `request.client.host in ("127.0.0.1", "::1", "localhost")`, the raw TCP
+  peer address uvicorn saw. A Next.js route handler has no access to the socket
+  (`NextRequest.ip` was removed in Next 15), so the peer address is not
+  recoverable. Rebuilding the check on `x-forwarded-for` would be strictly weaker
+  than what it replaces, because that header is attacker-controlled, so the port
+  fails closed instead: the request must name a loopback `Host` **and** carry no
+  `forwarded`, `x-forwarded-for`, `x-forwarded-host` or `x-real-ip` header at all.
+  Behind any proxy, including Railway's edge, a forwarding header is present and
+  the reveal 403s; against `next dev` on the developer's own machine the browser
+  sends `Host: localhost:3000` and no forwarding header, which is exactly the case
+  Python allowed. An attacker cannot strip a header a trusted proxy adds.
+
+  Two further behaviours differ from Python and are intentional:
+
+  1. `get_masked_keys()` swallowed a decrypt failure with a warning and reported
+     the provider as unconfigured. The TS path throws, matching the reasoning
+     already recorded for `getApiKeys()` in item 3.1b: a rotated
+     `WP_ENCRYPTION_KEY` must not masquerade as "no key configured" on the very
+     page whose job is to tell you whether the key is there.
+  2. `source` can only ever be `"db"` or `"none"`. `"env"` stays in the union
+     because `ApiKeyStatus` in `web/src/lib/api.ts` declares it, but no code path
+     in either stack produces it; keys moved out of the environment into the
+     `api_keys` row before this port started.
+
+  The `api_keys` row is global (`settings.key` is the primary key and
+  `save_api_keys()` never set `user_id`), so unlike the collection endpoints in
+  5.1a there is nothing to scope by user. The session is still required. Making
+  the row per user would be a schema change, which section 8 forbids.
+
+  **Fixed on the way through:** the `todo.md` entry about `pnpm -C web test`
+  flaking between 9 and 10 failures. Eight test files swap that one global row for
+  a fixture encrypted under their own throwaway `WP_ENCRYPTION_KEY`, and vitest
+  runs them in parallel processes against one database, so a restore landed while
+  a sibling was mid-assertion. This item's own route test hit it on its first full
+  run (11 failures, two of them mine). `web/src/test/api-keys-row.ts` serialises
+  exactly those eight files on a Postgres session advisory lock. Turning off file
+  parallelism suite-wide would have been the blunt alternative; the lock costs
+  nothing measurable (79.43s with, 79.58s without).
+
+  New tests, both against the real database and, for the handlers, a real
+  BetterAuth session:
+
+  ```
+  $ pnpm -C web exec vitest run --reporter=verbose src/app/api/settings/api-keys/route.test.ts
+   ✓ src/app/api/settings/api-keys/route.test.ts > GET /api/settings/api-keys > 401s without a session 3ms
+   ✓ src/app/api/settings/api-keys/route.test.ts > GET /api/settings/api-keys > returns one ApiKeyStatus per provider, keyed by provider 10ms
+   ✓ src/app/api/settings/api-keys/route.test.ts > GET /api/settings/api-keys > never returns a plaintext key 2ms
+   ✓ src/app/api/settings/api-keys/route.test.ts > GET /api/settings/api-keys/{provider}/reveal > 401s without a session, before the loopback gate 0ms
+   ✓ src/app/api/settings/api-keys/route.test.ts > GET /api/settings/api-keys/{provider}/reveal > 403s a request that carries a proxy forwarding header 5ms
+   ✓ src/app/api/settings/api-keys/route.test.ts > GET /api/settings/api-keys/{provider}/reveal > 403s a request whose Host is not loopback 1ms
+   ✓ src/app/api/settings/api-keys/route.test.ts > GET /api/settings/api-keys/{provider}/reveal > allows 127.0.0.1 and [::1] as well as localhost 4ms
+   ✓ src/app/api/settings/api-keys/route.test.ts > GET /api/settings/api-keys/{provider}/reveal > 404s a provider name it does not know 1ms
+   ✓ src/app/api/settings/api-keys/route.test.ts > GET /api/settings/api-keys/{provider}/reveal > returns the plaintext key for a loopback request, or 404 when unset 4ms
+
+   Test Files  1 passed (1)
+        Tests  9 passed (9)
+  ```
+
+  ```
+  $ pnpm -C web exec vitest run src/app/api/settings/api-keys/route.test.ts src/mastra/api-keys.test.ts
+   ✓ src/mastra/api-keys.test.ts (16 tests) 48ms
+   ✓ src/app/api/settings/api-keys/route.test.ts (9 tests) 70ms
+
+   Test Files  2 passed (2)
+        Tests  25 passed (25)
+  ```
+
+  `src/mastra/api-keys.test.ts` went from 6 tests to 16. The ten new ones cover
+  `getValidationResults` (missing row, boolean coercion, unknown providers
+  dropped), `getMaskedKeys` (no row, last-four hint, the sub-four-character
+  `...***` branch, no plaintext anywhere in the payload, the validation result
+  carried onto a configured provider and withheld from an unconfigured one) and
+  `revealApiKey` (configured, unset, unknown provider). They live there rather
+  than beside the handlers because that file already owns the shared row.
+  `test_get_masked_keys_configured` and
+  `test_get_masked_keys_never_returns_actual_key` from
+  `api/tests/phase11/test_api_keys_service.py` are both covered; so are
+  `test_get_api_keys_empty` and `test_get_api_keys_never_returns_plaintext` from
+  `api/tests/phase11/test_api_keys.py`. No pytest file was deleted.
+
+  Frontend gates:
+
+  ```
+  $ pnpm -C web tsc --noEmit
+  (no output, exit 0)
+  $ pnpm -C web lint
+  (no output, exit 0)
+  $ pnpm -C web build
+  ✓ Compiled successfully in 2.8s
+  Route (app)
+  ├ ƒ /api/settings
+  ├ ƒ /api/settings/api-keys
+  ├ ƒ /api/settings/api-keys/[provider]/reveal
+  $ pnpm -C web test
+       Tests  9 failed | 877 passed | 7 skipped (893)
+   Duration  79.43s
+  ```
+
+  The failure count is **9**, down from the 10 recorded at 5.1a, and it is now
+  deterministic: three consecutive full runs all reported `9 failed | 877 passed |
+  7 skipped (893)`. The nine are the six pre-existing `image-preview.test.tsx`
+  failures and three pre-existing `PostDetail.test.tsx` failures. The tenth was
+  the `api_keys` row race, which the advisory lock removes.
+
+  `api/` was not touched (`git status --short` lists nothing under `api/`). Its
+  gates, run with the repo `.env` rather than a hand-typed connection string:
+
+  ```
+  $ cd api && set -a && . ../.env && set +a && uv run pytest -q
+  125 failed, 236 passed, 25 errors in 13.38s
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 126 files already formatted
+  ```
+
+  Unchanged from the 4.7c-i baseline. Note for later iterations: the Python test
+  database is on **port 5435** with the password from `.env`, not the 5433 the
+  memory file records; sourcing `.env` is the only reliable way to run pytest here,
+  and a wrong connection string produces 177 collection errors that look like a
+  regression but are `InvalidPasswordError`.
+
+  **Not covered by this item**, carried into 5.1b-ii: `PUT /api/settings/api-keys`,
+  `save_api_keys()`, `save_validation_results()` and the live per-provider
+  validation in `api_key_validator.py`. Until that lands, nothing writes
+  `api_keys_validation`, so `valid` is `null` for every provider on the ported
+  endpoint.
+
+- [ ] 5.1b-ii `settings`: `PUT /api/settings/api-keys`, the write half of
+  `api/src/services/api_keys.py` (`save_api_keys`, `save_validation_results`) and
+  the live per-provider validation in `api/src/services/api_key_validator.py`
 - [ ] 5.2 `profiles`
 - [ ] 5.3 `posts`
 - [ ] 5.4 `queue`
