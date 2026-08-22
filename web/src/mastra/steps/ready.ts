@@ -22,9 +22,12 @@ import { STATUS_COMPLETE } from "../state"
 import { pythonTruthy } from "./images-manifest"
 import type { JsonValue } from "./images-manifest"
 import {
+  gateResumeSchema,
+  gateSuspendSchema,
   markRerunComplete,
-  skippedStageOutput,
+  reviewGate,
   shouldRunStage,
+  skippedStageOutput,
   stageStepInputSchema,
   stageStepOutputSchema,
 } from "./stage-io"
@@ -115,12 +118,25 @@ export const readyStep = createStep({
   id: "ready",
   inputSchema: stageStepInputSchema,
   outputSchema: stageStepOutputSchema,
-  execute: async ({ inputData, mastra }) => {
+  resumeSchema: gateResumeSchema,
+  suspendSchema: gateSuspendSchema,
+  execute: async ({ inputData, mastra, resumeData, suspend }) => {
     const { postId } = inputData
     const state = await loadPipelineState(postId)
     if (!shouldRunStage("ready", inputData, state.stageStatus)) {
       return skippedStageOutput(inputData, "ready")
     }
+
+    // The gate sits immediately after the skip check and before anything the
+    // stage spends, which is where Python put it: a paused stage bills nothing.
+    const gate = await reviewGate(
+      "ready",
+      inputData,
+      state.stageSettings,
+      state.stageStatus,
+      resumeData,
+    )
+    if (gate) return suspend(gate)
     const prompt = buildReadyPrompt(loadRules("ready"), state)
 
     const startedAt = Date.now()

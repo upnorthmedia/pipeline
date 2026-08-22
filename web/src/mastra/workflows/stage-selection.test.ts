@@ -138,6 +138,19 @@ function seedValues(postId: string, complete: readonly string[]) {
     slug: `stage-selection-${postId.slice(-3)}`,
     topic: "composable pipelines",
     currentStage: "pending",
+    // Explicit, because the `stage_settings` column's database default predates
+    // the gate removal and still reads five stages as `"review"`, while
+    // SQLAlchemy sent all-auto on every insert. A row that inherits the column
+    // default parks at the first review gate; a post created by the app does
+    // not, and this run is the app's case.
+    stageSettings: {
+      research: "auto",
+      outline: "auto",
+      write: "auto",
+      edit: "auto",
+      images: "auto",
+      ready: "auto",
+    },
     stageStatus: Object.fromEntries(complete.map((stage) => [stage, STATUS_COMPLETE])),
     researchContent: SEEDED.research,
     outlineContent: SEEDED.outline,

@@ -19,6 +19,7 @@ import {
   STAGE_CONTENT_MAP,
   STAGES,
   STATUS_COMPLETE,
+  STATUS_REVIEW,
   pipelineContextSchema,
 } from "./state"
 import type { InternalLink, Stage } from "./state"
@@ -159,6 +160,30 @@ export async function saveStageOutput(
   if (stageStatus !== undefined) values.stageStatus = stageStatus
 
   await getDb().update(posts).set(values).where(eq(posts.id, postId))
+}
+
+/**
+ * Park the row at a stage's review gate, ported from the pause branch of
+ * `_run_pipeline()`: `stage_status[stage] = "review"` and `current_stage` set
+ * to the stage the run stopped in front of.
+ *
+ * Deliberately not `saveStageOutput`: the gate fires before the stage runs, so
+ * there is no content to commit, and writing the content column here would let
+ * a resumed run mistake an empty string for a stage that produced nothing.
+ */
+export async function markStageForReview(
+  postId: string,
+  stage: Stage,
+  stageStatus: Record<string, string>,
+): Promise<void> {
+  await getDb()
+    .update(posts)
+    .set({
+      stageStatus: { ...stageStatus, [stage]: STATUS_REVIEW },
+      currentStage: stage,
+      updatedAt: new Date(),
+    })
+    .where(eq(posts.id, postId))
 }
 
 /**

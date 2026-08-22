@@ -62,6 +62,15 @@ export const STAGE_OUTPUT_KEY: Record<Stage, keyof PipelineContext> = {
  */
 export const CURRENT_STAGE_COMPLETE = "complete"
 
+/**
+ * The value `stage_status[stage]` carries while a run is parked at that
+ * stage's review gate.
+ *
+ * Python spelled it inline in `_run_pipeline()` rather than beside the other
+ * four status constants, which is why `state.py` has no counterpart to this.
+ */
+export const STATUS_REVIEW = "review"
+
 export const STATUS_PENDING = "pending"
 export const STATUS_RUNNING = "running"
 export const STATUS_COMPLETE = "complete"

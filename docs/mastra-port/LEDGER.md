@@ -5167,8 +5167,146 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   $ cd api && uv run ruff format --check .
   9 files would be reformatted, 126 files already formatted
   ```
-- [ ] 4.3 Review gates via `suspend()` / `resume()` with typed `suspendSchema` / `resumeSchema`.
+- [x] 4.3 Review gates via `suspend()` / `resume()` with typed `suspendSchema` / `resumeSchema`.
   Suspend/resume test passes.
+
+  **What was ported.** Gate checking left the Python worker with LangGraph, so the spec is the
+  version that ran before that: `_run_pipeline()` read `post.stage_settings[stage]` before
+  executing a stage, and for the modes `review` and `approve_only` wrote
+  `stage_status[stage] = "review"`, set `current_stage` to that stage, committed, and returned.
+  A single-stage rerun passed `check_gates=False` and never looked. The three rules that carries
+  (the two pausing modes, the `.get(stage, "review")` fail-safe default, and no gates on a named
+  selection) now live in `stageNeedsReview` / `gateModeFor` / `reviewGate` in
+  `web/src/mastra/steps/stage-io.ts`, and all six steps call the gate in the same place: right
+  after the skip check and before anything the stage spends.
+
+  Python's `return` becomes `suspend()`, which is the difference worth having: the parked run
+  keeps its place in the chain, so approving it continues into the remaining stages rather than
+  needing a second run to work out where the first stopped.
+
+  Schemas, both typed, no `z.any()`:
+
+  ```
+  suspendSchema: { stage: enum(STAGES), mode: enum("review" | "approve_only"), message: string }
+  resumeSchema:  { approved: literal(true) }
+  ```
+
+  `approved` is a literal rather than a boolean because Python had no reject branch at all: its
+  pause was a bare `return`. A reviewer who says no cancels the run (`EventedRun.cancel()`),
+  which releases it instead of leaving a declined run parked forever, and the literal turns
+  "resume without approving" into a schema error rather than a silent run.
+
+  **Recorded divergences.**
+
+  1. Python read the raw `stage_settings` column, this port reads it through `stateFromPost`,
+     which substitutes all-auto when the column is NULL. The two therefore disagree on exactly
+     one input: a NULL column pauses at `research` in Python and runs unattended here. Closing
+     it would mean either a second read of the row per stage or breaking `stateFromPost`'s
+     parity with Python's `state_from_post`, and the column is NULL only via raw SQL.
+  2. A missing *key* is not that case and does match Python: `gateModeFor` falls back to
+     `"review"`, so a partially populated settings map fails safe towards the human.
+  3. Python also appended an execution log and published an SSE `stage_review` event when it
+     paused. Neither helper is ported yet; the suspend is already on Mastra's own event stream
+     (`step-suspended`), which is where item 5.5 sources the SSE feed, so the pause is visible
+     there rather than through a second channel.
+
+  **The database default is a live hazard, logged in `todo.md`.** The column default in the real
+  database still reads
+  `{"edit":"review","write":"review","images":"review","outline":"review","research":"review"}`,
+  from before the gates were removed, and never mentioned `ready`:
+
+  ```
+  $ docker compose exec -T db psql -U pipeline -d content_pipeline -c "select column_default from information_schema.columns where table_name='posts' and column_name='stage_settings';"
+                                                  column_default
+  ---------------------------------------------------------------------------------------------------------------
+   '{"edit": "review", "write": "review", "images": "review", "outline": "review", "research": "review"}'::jsonb
+  (1 row)
+  ```
+
+  SQLAlchemy sent its own all-auto default on every insert, so no post created through FastAPI
+  inherited it. A Drizzle insert that omits the column does, and with gates back such a post
+  parks at `research` on its first run. That is why the four existing workflow suites now seed
+  `stageSettings` explicitly: their rows were inheriting the column default, and the change to
+  those files is the seed, not an assertion.
+
+  **Failing first.** The test was written before the implementation and failed for the expected
+  reason, nothing suspending:
+
+  ```
+  $ cd web && npx vitest run src/mastra/workflows/review-gates.test.ts
+   FAIL  src/mastra/workflows/review-gates.test.ts [ src/mastra/workflows/review-gates.test.ts ]
+  Error: This workflow run was not suspended
+   ❯ EventedRun.resume node_modules/.pnpm/@mastra+core@1.61.0.../dist/agent-DSxJoGjY.js:8482:46
+   ❯ src/mastra/workflows/review-gates.test.ts:207:14
+   Test Files  1 failed (1)
+        Tests  13 skipped (13)
+  ```
+
+  **Passing.** Three real evented runs against live Postgres and Redis, every provider boundary
+  stubbed and nothing else: gated at the first stage, gated inside the nested `images` workflow
+  behind the `.foreach()` fan-out, and a named selection that must not pause.
+
+  ```
+  $ cd web && npx vitest run src/mastra/workflows/review-gates.test.ts
+   ✓ src/mastra/workflows/review-gates.test.ts (13 tests) 4786ms
+
+   Test Files  1 passed (1)
+        Tests  13 passed (13)
+  ```
+
+  **Two engine behaviours the test had to be built around**, both recorded in `todo.md` because
+  Phase 5 has to live with them:
+
+  - `EventedRun.resume()` resolves with a *stale* snapshot. It subscribes to the shared
+    `workflows-finish` topic and the Redis stream still holds this run's earlier
+    `workflow.suspend` event, so the promise resolves with that event the moment it subscribes
+    while the resumed run carries on executing behind it. `resumeStream()`'s `.result` has the
+    same problem and its `fullStream` replays the pre-suspend events. Only
+    `workflow.getWorkflowRunById(runId)` reports the truth, and that is what the test polls.
+  - The suspend event and the snapshot write race, so a resume issued immediately after `start()`
+    returns can be told the run was never suspended. The test waits for the persisted status
+    first.
+
+  **Negative controls**, each applied to the implementation, run, and reverted:
+
+  | Mutation | Result |
+  | --- | --- |
+  | `reviewGate` ignores `resumeData` | Suite failed in `beforeAll`: `Error: run a777211c-... never left the suspended state` |
+  | `stageNeedsReview` drops `if (input.stages) return false` | Tests 2 failed \| 11 passed (13) |
+  | `DEFAULT_GATE_MODE` is `"auto"` instead of `"review"` | Tests 1 failed \| 12 passed (13) |
+  | `REVIEW_MODES` drops `"approve_only"` | Suite failed in `beforeAll`: `Error: This workflow run was not suspended` |
+  | `reviewGate` does not call `markStageForReview` | Tests 2 failed \| 11 passed (13) |
+  | `markStageForReview` writes `STATUS_PENDING` | Tests 2 failed \| 11 passed (13) |
+  | the gate removed from `images-manifest` | Suite failed in `beforeAll`: `Error: This workflow run was not suspended` |
+
+  Frontend gates:
+
+  ```
+  $ cd web && npx tsc --noEmit
+  (no output, exit 0)
+  $ cd web && pnpm lint
+  (no output, exit 0)
+  $ cd web && pnpm test
+   Test Files  2 failed | 49 passed (51)
+        Tests  9 failed | 781 passed | 8 skipped (798)
+  $ cd web && pnpm build
+  ✓ Compiled successfully in 3.1s
+  ```
+
+  The 9 failures are the recorded baseline: 6 in `image-preview.test.tsx` and 3 in
+  `PostDetail.test.tsx`, the same set and count as item 4.2b's rerun. 768 passing became 781,
+  the 13 tests added here.
+
+  Backend gates, unchanged at the Phase 0 baseline (no Python touched):
+
+  ```
+  $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test NO_COLOR=1 uv run pytest -q
+  125 failed, 236 passed, 25 errors in 15.08s
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 126 files already formatted
+  ```
 - [ ] 4.4 Execution moves to the `worker` process: `web` starts a run and returns immediately,
   the worker consumes the event off Redis Streams and executes the steps. Prove restarting
   `web` does not disturb an in-flight pipeline.

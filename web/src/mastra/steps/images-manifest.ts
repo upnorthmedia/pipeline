@@ -34,7 +34,13 @@ import { z } from "zod"
 import { parseManifest } from "../images/manifest"
 import { loadPipelineState } from "../post-state"
 import { buildStagePrompt, loadRules } from "../prompts"
-import { shouldRunStage, stageStepInputSchema } from "./stage-io"
+import {
+  gateResumeSchema,
+  gateSuspendSchema,
+  reviewGate,
+  shouldRunStage,
+  stageStepInputSchema,
+} from "./stage-io"
 
 /**
  * Anything `JSON.parse` can return.
@@ -159,7 +165,9 @@ export const imagesManifestStep = createStep({
   id: "images-manifest",
   inputSchema: stageStepInputSchema,
   outputSchema: imagesManifestOutputSchema,
-  execute: async ({ inputData, mastra }) => {
+  resumeSchema: gateResumeSchema,
+  suspendSchema: gateSuspendSchema,
+  execute: async ({ inputData, mastra, resumeData, suspend }) => {
     const { postId } = inputData
     const stageStartedAtMs = Date.now()
 
@@ -181,6 +189,17 @@ export const imagesManifestStep = createStep({
         images: [],
       }
     }
+
+    // The gate sits immediately after the skip check and before anything the
+    // stage spends, which is where Python put it: a paused stage bills nothing.
+    const gate = await reviewGate(
+      "images",
+      inputData,
+      state.stageSettings,
+      state.stageStatus,
+      resumeData,
+    )
+    if (gate) return suspend(gate)
     const prompt = buildStagePrompt("images", loadRules("images"), state)
 
     const result = await mastra.getAgent("images").generate(prompt)

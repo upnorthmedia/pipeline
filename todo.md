@@ -94,3 +94,22 @@
   next commit to sweep up. `MEDIA_DIR` already exists and the workflow suites set it to a
   `mkdtemp`; the `images-generate` unit tests do not.
 
+
+- [confirmed] 2026-08-22 The `posts.stage_settings` column default in the live database is
+  `{"edit":"review","write":"review","images":"review","outline":"review","research":"review"}`,
+  which predates the gate removal and does not mention `ready` at all. SQLAlchemy sent its own
+  all-auto default on every insert, so no post created through FastAPI ever inherited it, but a
+  TypeScript insert that omits the column does: with review gates back (item 4.3) such a post
+  parks at the `research` gate on its first run. The Phase 5.3 `posts` route handler must send
+  `stage_settings` explicitly, the way `api/src/models/post.py` did.
+- [confirmed] 2026-08-22 `EventedRun.resume()` resolves with a stale snapshot. It subscribes to
+  the shared `workflows-finish` topic and the Redis stream still holds the run's earlier
+  `workflow.suspend` event, so the promise resolves with that event the moment it subscribes
+  while the resumed run carries on executing behind it. `resumeStream()`'s `.result` has the
+  same problem and its `fullStream` replays the pre-suspend events too. Only
+  `workflow.getWorkflowRunById(runId)` reports the truth. Anything in Phase 5 that awaits a
+  resume (a gate-approval route, the SSE trace) has to poll the persisted state instead.
+- [confirmed] 2026-08-22 `web/src/lib/api.ts` types `StageMode` as `"auto"` and `StageStatus`
+  without `"review"`, so the dashboard cannot express a gated stage. Item 4.3 writes
+  `stage_status[stage] = "review"` when a run parks. Phase 5.3 / Phase 8 must widen both unions
+  (and the stage badge) or a parked post renders as an unknown status.

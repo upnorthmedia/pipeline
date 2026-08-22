@@ -28,9 +28,12 @@ import type { PipelineState } from "../post-state"
 import { buildStagePrompt, loadRules } from "../prompts"
 import { STATUS_COMPLETE } from "../state"
 import {
+  gateResumeSchema,
+  gateSuspendSchema,
   markRerunComplete,
-  skippedStageOutput,
+  reviewGate,
   shouldRunStage,
+  skippedStageOutput,
   stageStepInputSchema,
   stageStepOutputSchema,
 } from "./stage-io"
@@ -208,12 +211,25 @@ export const editStep = createStep({
   id: "edit",
   inputSchema: stageStepInputSchema,
   outputSchema: stageStepOutputSchema,
-  execute: async ({ inputData, mastra }) => {
+  resumeSchema: gateResumeSchema,
+  suspendSchema: gateSuspendSchema,
+  execute: async ({ inputData, mastra, resumeData, suspend }) => {
     const { postId } = inputData
     const state = await loadPipelineState(postId)
     if (!shouldRunStage("edit", inputData, state.stageStatus)) {
       return skippedStageOutput(inputData, "edit")
     }
+
+    // The gate sits immediately after the skip check and before anything the
+    // stage spends, which is where Python put it: a paused stage bills nothing.
+    const gate = await reviewGate(
+      "edit",
+      inputData,
+      state.stageSettings,
+      state.stageStatus,
+      resumeData,
+    )
+    if (gate) return suspend(gate)
     const rulesPrompt = buildStagePrompt("edit", loadRules("edit"), state)
     const analyticsSection = buildAnalyticsSection(state)
     const prompt = analyticsSection

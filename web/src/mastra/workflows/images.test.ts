@@ -140,6 +140,18 @@ beforeAll(async () => {
     write: "complete",
     edit: "complete",
   } as const
+  // Explicit, because the `stage_settings` column's database default predates
+  // the gate removal and still reads five stages as `"review"`, while
+  // SQLAlchemy sent all-auto on every insert. A row that inherits the column
+  // default parks at the first review gate; a post created by the app does not.
+  const stageSettings = {
+    research: "auto",
+    outline: "auto",
+    write: "auto",
+    edit: "auto",
+    images: "auto",
+    ready: "auto",
+  } as const
   await db.delete(posts).where(inArray(posts.id, [POST_ID, UNPARSEABLE_POST_ID]))
   await db.insert(posts).values({
     id: POST_ID,
@@ -147,6 +159,7 @@ beforeAll(async () => {
     topic: "images workflow run",
     currentStage: "edit",
     stageStatus,
+    stageSettings,
   })
   await db.insert(posts).values({
     id: UNPARSEABLE_POST_ID,
@@ -154,6 +167,7 @@ beforeAll(async () => {
     topic: "images workflow unparseable",
     currentStage: "edit",
     stageStatus,
+    stageSettings,
   })
 
   await storage.init()

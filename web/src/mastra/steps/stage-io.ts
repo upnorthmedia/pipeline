@@ -20,7 +20,7 @@
  */
 import { z } from "zod"
 
-import { markCompleteIfAllStagesComplete } from "../post-state"
+import { markCompleteIfAllStagesComplete, markStageForReview } from "../post-state"
 import { STAGES, STATUS_COMPLETE } from "../state"
 import type { Stage } from "../state"
 
@@ -97,6 +97,97 @@ export function shouldRunStage(
 export async function markRerunComplete(input: StageStepInput): Promise<boolean> {
   if (!input.stages) return false
   return await markCompleteIfAllStagesComplete(input.postId)
+}
+
+/**
+ * The two `stage_settings` values that park a run in front of a stage, from the
+ * gate branch of Python's `_run_pipeline()`. Everything else, `"auto"`
+ * included, runs unattended.
+ */
+export const REVIEW_MODES = ["review", "approve_only"] as const
+
+export type ReviewMode = (typeof REVIEW_MODES)[number]
+
+/**
+ * The mode a stage with no entry in `stage_settings` is treated as having.
+ *
+ * Python read the column with `.get(stage, "review")`, so an unconfigured stage
+ * fails safe towards the human rather than towards the provider's bill.
+ */
+export const DEFAULT_GATE_MODE: ReviewMode = "review"
+
+/** What the reviewer is shown while the run waits. */
+export const gateSuspendSchema = z.object({
+  stage: z.enum(STAGES),
+  /** The configured mode that paused the run, so the two are distinguishable. */
+  mode: z.enum(REVIEW_MODES),
+  /** Python's pause message, the same string its SSE event carried. */
+  message: z.string(),
+})
+
+export type GateSuspendPayload = z.infer<typeof gateSuspendSchema>
+
+/**
+ * What resuming a gate says.
+ *
+ * A literal rather than a boolean: the only thing a gate can be told is that it
+ * passed. Python had no reject branch at all (its pause was a bare `return`),
+ * and a run whose reviewer says no is cancelled with `run.cancel()`, which
+ * releases the run rather than leaving a declined one parked forever.
+ */
+export const gateResumeSchema = z.object({ approved: z.literal(true) })
+
+export type GateResume = z.infer<typeof gateResumeSchema>
+
+/** The mode configured for a stage, with Python's fail-safe default. */
+export function gateModeFor(stage: Stage, stageSettings: Record<string, string>): string {
+  return stageSettings[stage] ?? DEFAULT_GATE_MODE
+}
+
+/**
+ * Whether a stage must wait for a human before it runs.
+ *
+ * A run that names its stages never waits: that is Python's `check_gates=False`
+ * on the single-stage path, and it is what makes the dashboard's rerun button
+ * an approval in itself rather than a request for one.
+ */
+export function stageNeedsReview(
+  stage: Stage,
+  input: StageStepInput,
+  stageSettings: Record<string, string>,
+): boolean {
+  if (input.stages) return false
+  return (REVIEW_MODES as readonly string[]).includes(gateModeFor(stage, stageSettings))
+}
+
+/**
+ * Park the run at this stage's gate, or let it through.
+ *
+ * Returns the payload the step should hand to `suspend()`, or `null` when the
+ * stage may run. The row is parked here rather than in the step because every
+ * one of the six pauses identically, and because the write has to land before
+ * the suspend: the dashboard reads the row, not the workflow snapshot.
+ *
+ * `resumeData` short-circuits it. The step re-runs from the top when a run is
+ * resumed, so without that check an approved gate would immediately re-suspend
+ * itself on the same settings that paused it in the first place.
+ */
+export async function reviewGate(
+  stage: Stage,
+  input: StageStepInput,
+  stageSettings: Record<string, string>,
+  stageStatus: Record<string, string>,
+  resumeData?: GateResume,
+): Promise<GateSuspendPayload | null> {
+  if (resumeData?.approved) return null
+  if (!stageNeedsReview(stage, input, stageSettings)) return null
+
+  await markStageForReview(input.postId, stage, stageStatus)
+  return {
+    stage,
+    mode: gateModeFor(stage, stageSettings) as ReviewMode,
+    message: `Stage ${stage} paused for review`,
+  }
 }
 
 /** The output of a stage that was skipped: the chain's fields and nothing else. */
