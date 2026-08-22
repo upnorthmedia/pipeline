@@ -368,6 +368,173 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
   `docs/mastra-port/golden/<post-slug>/<stage>.json`. Redact API keys. Exit: >= 12 fixture
   files committed.
 
+  **Split.** 0.4 needs a capture harness, then two live provider runs that cost real money
+  and take real time, so it is split into 0.4a (harness, no provider spend), 0.4b (live run
+  for post 1) and 0.4c (live run for post 2). 0.4 is checked only when 0.4a-0.4c are all
+  checked and >= 12 fixture files are committed.
+
+- [x] 0.4a Build the golden-fixture capture harness (`api/scripts/capture_golden.py`) and
+  verify it end to end with `--dry-run`, which stubs only the network call and leaves prompt
+  assembly, the client wrappers, retries, manifest parsing and image optimisation intact.
+
+  **Design decision: capture at the provider SDK boundary, not at `build_stage_prompt()`.**
+  Two stages mutate the prompt after `build_stage_prompt()` returns, so its return value is
+  not what the provider receives:
+
+  - `edit_node` appends an analytics section (`src/pipeline/stages/edit.py:39-42`).
+  - `research_node` wraps the prompt in `_reinforced_prompt()` on retry attempts 2 and 3
+    (`src/pipeline/stages/research.py:80-84`).
+
+  The recorders therefore wrap `httpx.AsyncClient.post` (filtered to `api.perplexity.ai`),
+  `anthropic.resources.messages.AsyncMessages.create`, and
+  `google.genai.models.Models.generate_content`, so the fixture holds the exact outbound
+  payload. Verified patch points against the installed SDKs:
+
+  ```
+  $ cd api && uv run python -c "
+  import anthropic
+  from anthropic.resources.messages import AsyncMessages
+  from google.genai.models import Models
+  import google.genai as g
+  print('anthropic', anthropic.__version__); print(AsyncMessages.create)
+  print('genai', g.__version__); print(Models.generate_content)"
+  anthropic 0.84.0
+  <function AsyncMessages.create at 0x10c19e840>
+  genai 1.65.0
+  <function Models.generate_content at 0x10d16a7a0>
+  ```
+
+  ### Dry run -> **exit 0**, 12 fixture files
+
+  ```
+  $ cd api && uv run python scripts/capture_golden.py --dry-run --out /tmp/golden-dryrun
+  [how-to-choose-a-crm-for-a-small-team] research: running
+  [how-to-choose-a-crm-for-a-small-team] research: wrote /private/tmp/golden-dryrun/how-to-choose-a-crm-for-a-small-team/research.json (17968 bytes)
+  [how-to-choose-a-crm-for-a-small-team] outline: running
+  [how-to-choose-a-crm-for-a-small-team] outline: wrote /private/tmp/golden-dryrun/how-to-choose-a-crm-for-a-small-team/outline.json (20655 bytes)
+  [how-to-choose-a-crm-for-a-small-team] write: running
+  [how-to-choose-a-crm-for-a-small-team] write: wrote /private/tmp/golden-dryrun/how-to-choose-a-crm-for-a-small-team/write.json (20358 bytes)
+  [how-to-choose-a-crm-for-a-small-team] edit: running
+  [how-to-choose-a-crm-for-a-small-team] edit: wrote /private/tmp/golden-dryrun/how-to-choose-a-crm-for-a-small-team/edit.json (43202 bytes)
+  [how-to-choose-a-crm-for-a-small-team] images: running
+  [how-to-choose-a-crm-for-a-small-team] images: wrote /private/tmp/golden-dryrun/how-to-choose-a-crm-for-a-small-team/images.json (38186 bytes)
+  [how-to-choose-a-crm-for-a-small-team] ready: running
+  [how-to-choose-a-crm-for-a-small-team] ready: wrote /private/tmp/golden-dryrun/how-to-choose-a-crm-for-a-small-team/ready.json (19186 bytes)
+  [best-time-tracking-tools-for-agencies] research: running
+  [best-time-tracking-tools-for-agencies] research: wrote /private/tmp/golden-dryrun/best-time-tracking-tools-for-agencies/research.json (16834 bytes)
+  [best-time-tracking-tools-for-agencies] outline: running
+  [best-time-tracking-tools-for-agencies] outline: wrote /private/tmp/golden-dryrun/best-time-tracking-tools-for-agencies/outline.json (19520 bytes)
+  [best-time-tracking-tools-for-agencies] write: running
+  [best-time-tracking-tools-for-agencies] write: wrote /private/tmp/golden-dryrun/best-time-tracking-tools-for-agencies/write.json (19223 bytes)
+  [best-time-tracking-tools-for-agencies] edit: running
+  [best-time-tracking-tools-for-agencies] edit: wrote /private/tmp/golden-dryrun/best-time-tracking-tools-for-agencies/edit.json (41081 bytes)
+  [best-time-tracking-tools-for-agencies] images: running
+  [best-time-tracking-tools-for-agencies] images: wrote /private/tmp/golden-dryrun/best-time-tracking-tools-for-agencies/images.json (37054 bytes)
+  [best-time-tracking-tools-for-agencies] ready: running
+  [best-time-tracking-tools-for-agencies] ready: wrote /private/tmp/golden-dryrun/best-time-tracking-tools-for-agencies/ready.json (18260 bytes)
+
+  Wrote 12 fixture file(s) under /private/tmp/golden-dryrun
+  exit=0
+  ```
+
+  Fixture shape actually produced (inspected, not asserted from memory):
+
+  ```
+  $ cd api && uv run python - <<'EOF'
+  import json, pathlib
+  for f in ["research", "outline", "edit", "images"]:
+      d = json.loads(pathlib.Path(f"/tmp/golden-dryrun/how-to-choose-a-crm-for-a-small-team/{f}.json").read_text())
+      print("=====", f, "| keys:", list(d))
+      print(" calls:", [(c["provider"], sorted(k for k in c["request"] if k != "messages")) for c in d["provider_calls"]])
+      print(" rendered_prompt[0] len:", len(d["rendered_prompts"][0] or ""))
+      print(" state_input.api_keys:", d["state_input"].get("api_keys"))
+      print(" stage_output keys:", list(d["stage_output"]))
+  EOF
+  ===== research | keys: ['schema_version', 'generated_by', 'mode', 'captured_at', 'post_slug', 'stage', 'post_spec', 'state_input', 'rendered_prompts', 'provider_calls', 'stage_output']
+   calls: [('perplexity', ['model', 'url'])]
+   rendered_prompt[0] len: 6111
+   state_input.api_keys: [REDACTED]
+   stage_output keys: ['research', 'current_stage', 'stage_status', '_stage_meta']
+  ===== outline
+   calls: [('anthropic', ['max_tokens', 'model', 'system', 'thinking'])]
+   rendered_prompt[0] len: 7348
+  ===== edit
+   calls: [('anthropic', ['max_tokens', 'model', 'system', 'thinking'])]
+   rendered_prompt[0] len: 17709
+  ===== images
+   calls: [('anthropic', [...]), ('gemini', ['config', 'contents', 'model']), ('gemini', ['config', 'contents', 'model'])]
+   stage_output keys: ['image_manifest', 'current_stage', 'stage_status', '_stage_meta', '_stage_meta_gemini']
+
+  ```
+
+  Trimmed for readability: the identical `keys:` line printed for all four stages is shown
+  once. The two lines below came from a second inspection of the same fixtures, reading
+  `provider_calls[0]["request"]` of `images.json` and `rendered_prompts[0]` of `edit.json`:
+
+  ```
+  anthropic thinking: {'type': 'enabled', 'budget_tokens': 10000} max_tokens: 11024 model: claude-opus-4-6
+  edit prompt mentions Analytics: True
+  ```
+
+  ### Gates the harness could break
+
+  ```
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  exit=1
+  ```
+
+  ```
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 118 files already formatted
+  exit=1
+  ```
+
+  Both hold the 0.1 baseline exactly (32 ruff errors, 9 unformatted files; the "already
+  formatted" count rises 117 -> 118 because `scripts/capture_golden.py` is the new file).
+  `pytest` is unaffected: the script is a standalone entry point, lives outside
+  `testpaths = ["tests"]`, and nothing under `src/` or `tests/` imports it
+  (`grep -rn capture_golden src tests` returns nothing).
+
+  ### Facts discovered that Phase 3 parity tests must account for
+
+  1. `_build_config_context()` injects `- **TODAY_DATE**: <today>` into every stage prompt
+     (`src/pipeline/helpers.py:203`). Prompt equality across Python and TypeScript can only
+     hold with the date pinned or normalised.
+  2. `ClaudeClient.chat()` computes `effective_max = max(max_tokens, thinking_budget + 1024)`
+     and always sends `thinking={"type": "enabled", "budget_tokens": 10000}`. The images
+     stage asks for `max_tokens=8000` and therefore actually sends **11024**. Port the
+     resolved value, not the call-site value.
+  3. The images stage rewrites the featured image filename to
+     `featured-<MMDDYY>-<2 random digits>.webp` and forces `image_size="2K"` (and `16:9`
+     unless the manifest set `aspect_ratio`). The filename is nondeterministic, so the
+     manifest parity assertion must exclude it.
+  4. `ready_node` is missing from `src/pipeline/stages/__init__.py`'s imports and `__all__`
+     even though the other five nodes are exported. `src/worker.py` sidesteps this by
+     importing every node from its module. All six stages exist; only the package re-export
+     is incomplete.
+
+  ### Posts chosen
+
+  Two specs are pinned in the script, both using values verified against
+  `web/src/app/posts/new/page.tsx:37-49`:
+
+  | slug | article_type | output_format | internal links |
+  | --- | --- | --- | --- |
+  | `how-to-choose-a-crm-for-a-small-team` | `how-to` | `markdown` | 3 (exercises the edit-stage links block) |
+  | `best-time-tracking-tools-for-agencies` | `listicle` | `nextjs` | 0 |
+
+  State is built by passing a transient (never-flushed) `Post` ORM instance through the real
+  `state_from_post()`, so no rows are written and no `user_id` / BetterAuth fixture is
+  needed. `settings.media_dir` is redirected under the output directory, so a capture run
+  never dirties the repo's `media/`.
+
+- [ ] 0.4b Live capture for `how-to-choose-a-crm-for-a-small-team` (all six stages) with real
+  provider keys. Commit `docs/mastra-port/golden/how-to-choose-a-crm-for-a-small-team/*.json`
+  and the generated images. Record the run's token usage and cost in this ledger.
+- [ ] 0.4c Live capture for `best-time-tracking-tools-for-agencies` (all six stages). Commit
+  its fixtures, then check 0.4.
+
 ## Phase 1: TypeScript data layer
 
 - [ ] 1.1 Introspect the live database and define the full schema in TypeScript (Drizzle
