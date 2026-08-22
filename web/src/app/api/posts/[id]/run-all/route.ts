@@ -10,7 +10,7 @@
  * The run itself is a plain full pipeline with no stage selection, so it skips
  * the completed stages the settings pass just left alone.
  */
-import { and, eq, exists, sql } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import type { StageSettingsJson } from "@/db"
@@ -18,7 +18,7 @@ import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import { startPipeline } from "@/mastra/start-pipeline"
 import { STAGES, STATUS_COMPLETE } from "@/mastra/state"
 
-import { isUuid, postNotFound, unprocessableUuid } from "../../params"
+import { isUuid, ownedByCaller, postNotFound, unprocessableUuid } from "../../params"
 
 export async function POST(
   request: Request,
@@ -53,19 +53,7 @@ export async function POST(
   await db
     .update(posts)
     .set({ stageSettings, updatedAt: new Date() })
-    .where(
-      and(
-        eq(posts.id, id),
-        exists(
-          db
-            .select({ one: sql`1` })
-            .from(websiteProfiles)
-            .where(
-              and(eq(websiteProfiles.id, posts.profileId), eq(websiteProfiles.userId, user.id)),
-            ),
-        ),
-      ),
-    )
+    .where(ownedByCaller(id, user.id))
 
   await startPipeline(rows[0].id)
 

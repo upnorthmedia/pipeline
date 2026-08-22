@@ -14,7 +14,7 @@
  * pipeline that skips whatever is already complete rather than a single-stage
  * run pinned to the stage this handler happened to name in its response.
  */
-import { and, eq, exists, sql } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
@@ -22,7 +22,7 @@ import { startPipeline } from "@/mastra/start-pipeline"
 import { STATUS_RUNNING } from "@/mastra/state"
 import type { Stage } from "@/mastra/state"
 
-import { isUuid, postNotFound, unprocessableUuid } from "../../params"
+import { isUuid, ownedByCaller, postNotFound, unprocessableUuid } from "../../params"
 import { badRequest, isStage, nextStage } from "../../run-control"
 
 export async function POST(
@@ -68,19 +68,7 @@ export async function POST(
       stageStatus: { ...(rows[0].stageStatus ?? {}), [targetStage]: STATUS_RUNNING },
       updatedAt: new Date(),
     })
-    .where(
-      and(
-        eq(posts.id, id),
-        exists(
-          db
-            .select({ one: sql`1` })
-            .from(websiteProfiles)
-            .where(
-              and(eq(websiteProfiles.id, posts.profileId), eq(websiteProfiles.userId, user.id)),
-            ),
-        ),
-      ),
-    )
+    .where(ownedByCaller(id, user.id))
 
   await startPipeline(id, stage ? [stage] : undefined)
 

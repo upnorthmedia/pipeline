@@ -33,10 +33,14 @@ import { eq, like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, posts, websiteProfiles } from "@/db"
+import { STAGE_CONTENT_MAP } from "@/mastra/state"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
+import { POST as restartPipeline } from "./[id]/restart/route"
+import { POST as rerunStage } from "./[id]/rerun/route"
 import { POST as runStage } from "./[id]/run/route"
 import { POST as runAll } from "./[id]/run-all/route"
+import { STAGE_CONTENT_COLUMN } from "./run-control"
 
 const start = vi.hoisted(() => ({
   mode: "skip" as "real" | "skip",
@@ -128,6 +132,18 @@ function run(id: string, query = "", cookie?: string) {
 
 function all(id: string, cookie?: string) {
   return runAll(apiRequest(`${URL_BASE}/${id}/run-all`, { cookie, method: "POST" }), {
+    params: Promise.resolve({ id }),
+  })
+}
+
+function rerun(id: string, cookie?: string) {
+  return rerunStage(apiRequest(`${URL_BASE}/${id}/rerun`, { cookie, method: "POST" }), {
+    params: Promise.resolve({ id }),
+  })
+}
+
+function restart(id: string, cookie?: string) {
+  return restartPipeline(apiRequest(`${URL_BASE}/${id}/restart`, { cookie, method: "POST" }), {
     params: Promise.resolve({ id }),
   })
 }
@@ -430,6 +446,295 @@ describe("POST /api/posts/{post_id}/run-all", () => {
     const post = await insertPost(user.userId, { stageStatus: ALL_COMPLETE })
 
     const response = await all(post.id, user.cookie)
+    expect(response.status).toBe(202)
+
+    const event = await waitForStart(post.id)
+    expect(event.type).toBe("workflow.start")
+    expect((event.data?.prevResult?.output as { stages?: unknown }).stages).toBeUndefined()
+  })
+})
+
+// --- POST /api/posts/{post_id}/rerun ----------------------------------------
+
+/** Every content column populated, so a reset is visible wherever it lands. */
+const FULL_CONTENT = {
+  researchContent: "research",
+  outlineContent: "outline",
+  draftContent: "draft",
+  finalMdContent: "final md",
+  finalHtmlContent: "<p>final html</p>",
+  imageManifest: { images: [{ filename: "hero.webp" }] },
+  readyContent: "ready",
+}
+
+const ALL_PENDING = Object.fromEntries(ALL_STAGES.map((stage) => [stage, "pending"]))
+
+describe("STAGE_CONTENT_COLUMN", () => {
+  it("names the same columns STAGE_CONTENT_MAP does", async () => {
+    const { getTableColumns } = await import("drizzle-orm")
+    const columns = getTableColumns(posts)
+    for (const stage of ALL_STAGES) {
+      expect(columns[STAGE_CONTENT_COLUMN[stage]].name).toBe(STAGE_CONTENT_MAP[stage])
+    }
+  })
+})
+
+describe("POST /api/posts/{post_id}/rerun", () => {
+  it("rejects an unauthenticated request", async () => {
+    const response = await rerun(MISSING_ID)
+    expect(response.status).toBe(401)
+    expect(start.calls).toEqual([])
+  })
+
+  it("answers a malformed path uuid with FastAPI's 422", async () => {
+    const response = await rerun("not-a-uuid", user.cookie)
+    expect(response.status).toBe(422)
+    expect(await response.json()).toMatchObject({
+      detail: [{ type: "uuid_parsing", loc: ["path", "post_id"] }],
+    })
+  })
+
+  it("answers a post that does not exist with a 404", async () => {
+    const response = await rerun(MISSING_ID, user.cookie)
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ detail: "Post not found" })
+    expect(start.calls).toEqual([])
+  })
+
+  it("answers another user's post with the same 404, clearing nothing", async () => {
+    const post = await insertPost(other.userId, {
+      ...FULL_CONTENT,
+      stageStatus: ALL_COMPLETE,
+    })
+    const response = await rerun(post.id, user.cookie)
+
+    expect(response.status).toBe(404)
+    expect(start.calls).toEqual([])
+    const row = await readPost(post.id)
+    expect(row.readyContent).toBe("ready")
+    expect(row.stageStatus).toEqual(ALL_COMPLETE)
+  })
+
+  it("reruns from research on a post that has run nothing", async () => {
+    const post = await insertPost(user.userId, { ...FULL_CONTENT, completedAt: new Date() })
+    const response = await rerun(post.id, user.cookie)
+
+    expect(response.status).toBe(202)
+    expect(await response.json()).toEqual({
+      status: "queued",
+      mode: "rerun",
+      rerun_from: "research",
+      post_id: post.id,
+    })
+
+    const row = await readPost(post.id)
+    expect(row.stageStatus).toEqual(ALL_PENDING)
+    expect(row.currentStage).toBe("pending")
+    expect(row.completedAt).toBeNull()
+    expect(row.researchContent).toBeNull()
+    expect(row.imageManifest).toBeNull()
+    expect(row.readyContent).toBeNull()
+    // The run is a plain full pipeline: the stage to resume from is re-derived
+    // from the row the handler just committed.
+    expect(start.calls).toEqual([{ postId: post.id, stages: undefined }])
+  })
+
+  it("reruns from the first non-complete stage, leaving the completed ones alone", async () => {
+    const post = await insertPost(user.userId, {
+      ...FULL_CONTENT,
+      stageStatus: { research: "complete", outline: "complete", write: "running" },
+    })
+    const response = await rerun(post.id, user.cookie)
+
+    expect(await response.json()).toMatchObject({ rerun_from: "write" })
+
+    const row = await readPost(post.id)
+    expect(row.stageStatus).toEqual({
+      research: "complete",
+      outline: "complete",
+      write: "pending",
+      edit: "pending",
+      images: "pending",
+      ready: "pending",
+    })
+    expect(row.researchContent).toBe("research")
+    expect(row.outlineContent).toBe("outline")
+    expect(row.draftContent).toBeNull()
+    expect(row.finalMdContent).toBeNull()
+    expect(row.imageManifest).toBeNull()
+    expect(row.readyContent).toBeNull()
+  })
+
+  it("falls back to the last stage when every stage is complete", async () => {
+    // No stage is non-complete, so `rerun_from` is `STAGES[-1]`: rerun on a
+    // finished post re-runs `ready` alone rather than doing nothing.
+    const post = await insertPost(user.userId, {
+      ...FULL_CONTENT,
+      stageStatus: ALL_COMPLETE,
+    })
+    const response = await rerun(post.id, user.cookie)
+
+    expect(await response.json()).toMatchObject({ rerun_from: "ready" })
+
+    const row = await readPost(post.id)
+    expect(row.stageStatus).toEqual({ ...ALL_COMPLETE, ready: "pending" })
+    expect(row.readyContent).toBeNull()
+    expect(row.finalMdContent).toBe("final md")
+    expect(row.imageManifest).toEqual(FULL_CONTENT.imageManifest)
+  })
+
+  it("leaves final_html_content alone, since no stage owns that column", async () => {
+    // `content_map` in `rerun_stage()` has six entries and none of them is
+    // `final_html_content`, unlike `restart_pipeline()`, which clears it.
+    const post = await insertPost(user.userId, FULL_CONTENT)
+    await rerun(post.id, user.cookie)
+
+    expect((await readPost(post.id)).finalHtmlContent).toBe("<p>final html</p>")
+  })
+
+  it("preserves stage_status keys that are not stage names", async () => {
+    // `dict(post.stage_status or {})` copied the whole map and only wrote the
+    // slice from `rerun_from` back.
+    const post = await insertPost(user.userId, {
+      stageStatus: { legacy_key: "kept", research: "complete" } as never,
+    })
+    await rerun(post.id, user.cookie)
+
+    expect((await readPost(post.id)).stageStatus).toEqual({
+      legacy_key: "kept",
+      research: "complete",
+      outline: "pending",
+      write: "pending",
+      edit: "pending",
+      images: "pending",
+      ready: "pending",
+    })
+  })
+
+  it("leaves stage_settings untouched", async () => {
+    const post = await insertPost(user.userId)
+    await rerun(post.id, user.cookie)
+
+    expect((await readPost(post.id)).stageSettings).toEqual(GATED_STAGE_SETTINGS)
+  })
+
+  it("publishes a real workflow.start that parks at the gated first stage", async () => {
+    start.mode = "real"
+    const post = await insertPost(user.userId, { stageStatus: { research: "failed" } })
+
+    const response = await rerun(post.id, user.cookie)
+    expect(response.status).toBe(202)
+
+    const event = await waitForStart(post.id)
+    expect(event.type).toBe("workflow.start")
+    expect((event.data?.prevResult?.output as { stages?: unknown }).stages).toBeUndefined()
+  })
+})
+
+// --- POST /api/posts/{post_id}/restart --------------------------------------
+
+describe("POST /api/posts/{post_id}/restart", () => {
+  it("rejects an unauthenticated request", async () => {
+    const response = await restart(MISSING_ID)
+    expect(response.status).toBe(401)
+    expect(start.calls).toEqual([])
+  })
+
+  it("answers a malformed path uuid with FastAPI's 422", async () => {
+    const response = await restart("not-a-uuid", user.cookie)
+    expect(response.status).toBe(422)
+    expect(await response.json()).toMatchObject({
+      detail: [{ type: "uuid_parsing", loc: ["path", "post_id"] }],
+    })
+  })
+
+  it("answers a post that does not exist with a 404", async () => {
+    const response = await restart(MISSING_ID, user.cookie)
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ detail: "Post not found" })
+    expect(start.calls).toEqual([])
+  })
+
+  it("answers another user's post with the same 404, clearing nothing", async () => {
+    const post = await insertPost(other.userId, {
+      ...FULL_CONTENT,
+      stageStatus: ALL_COMPLETE,
+    })
+    const response = await restart(post.id, user.cookie)
+
+    expect(response.status).toBe(404)
+    expect(start.calls).toEqual([])
+    expect((await readPost(post.id)).researchContent).toBe("research")
+  })
+
+  it("clears every content column, every stage status and the logs", async () => {
+    const post = await insertPost(user.userId, {
+      ...FULL_CONTENT,
+      stageStatus: ALL_COMPLETE,
+      currentStage: "complete",
+      completedAt: new Date(),
+      stageLogs: { research: ["done"] },
+    })
+    const response = await restart(post.id, user.cookie)
+
+    expect(response.status).toBe(202)
+    expect(await response.json()).toEqual({
+      status: "queued",
+      mode: "restart",
+      post_id: post.id,
+    })
+
+    const row = await readPost(post.id)
+    expect(row.stageStatus).toEqual(ALL_PENDING)
+    expect(row.currentStage).toBe("pending")
+    expect(row.completedAt).toBeNull()
+    expect(row.stageLogs).toEqual({})
+    expect({
+      researchContent: row.researchContent,
+      outlineContent: row.outlineContent,
+      draftContent: row.draftContent,
+      finalMdContent: row.finalMdContent,
+      finalHtmlContent: row.finalHtmlContent,
+      imageManifest: row.imageManifest,
+      readyContent: row.readyContent,
+    }).toEqual({
+      researchContent: null,
+      outlineContent: null,
+      draftContent: null,
+      finalMdContent: null,
+      finalHtmlContent: null,
+      imageManifest: null,
+      readyContent: null,
+    })
+    expect(start.calls).toEqual([{ postId: post.id, stages: undefined }])
+  })
+
+  it("replaces stage_status rather than updating it, dropping other keys", async () => {
+    // `{s: "pending" for s in STAGES}` is a fresh dict, unlike `/rerun`'s copy,
+    // so a key outside the six stage names does not survive a restart.
+    const post = await insertPost(user.userId, {
+      stageStatus: { legacy_key: "dropped", research: "complete" } as never,
+    })
+    await restart(post.id, user.cookie)
+
+    expect((await readPost(post.id)).stageStatus).toEqual(ALL_PENDING)
+  })
+
+  it("leaves stage_settings untouched, so the configured gates still apply", async () => {
+    const post = await insertPost(user.userId, { stageStatus: ALL_COMPLETE })
+    await restart(post.id, user.cookie)
+
+    expect((await readPost(post.id)).stageSettings).toEqual(GATED_STAGE_SETTINGS)
+  })
+
+  it("publishes a real workflow.start that parks at the gated first stage", async () => {
+    start.mode = "real"
+    const post = await insertPost(user.userId, {
+      ...FULL_CONTENT,
+      stageStatus: ALL_COMPLETE,
+    })
+
+    const response = await restart(post.id, user.cookie)
     expect(response.status).toBe(202)
 
     const event = await waitForStart(post.id)

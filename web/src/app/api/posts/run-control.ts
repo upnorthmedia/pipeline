@@ -10,6 +10,7 @@
  * own skip rule (`shouldRunStage()` in `mastra/steps/stage-io.ts`) re-derives
  * the same first-incomplete stage from the committed row.
  */
+import { posts } from "@/db"
 import type { StageStatusJson } from "@/db"
 import { STAGES, STATUS_COMPLETE } from "@/mastra/state"
 import type { Stage } from "@/mastra/state"
@@ -34,3 +35,22 @@ export function isStage(value: string): value is Stage {
 export function badRequest(detail: string): Response {
   return Response.json({ detail }, { status: 400 })
 }
+
+/**
+ * Stage -> the Drizzle property for the column `STAGE_CONTENT_MAP` names.
+ *
+ * `rerun_stage()` carried its own copy of the stage-to-column map rather than
+ * importing `STAGE_CONTENT_MAP`, and the two agreed. This map is keyed by
+ * `Stage` and valued by a real column property, so neither a new stage nor a
+ * renamed column can leave it silently stale, and a test in
+ * `run-control.test.ts` checks it still names the same columns
+ * `STAGE_CONTENT_MAP` does.
+ */
+export const STAGE_CONTENT_COLUMN = {
+  research: "researchContent",
+  outline: "outlineContent",
+  write: "draftContent",
+  edit: "finalMdContent",
+  images: "imageManifest",
+  ready: "readyContent",
+} as const satisfies Record<Stage, keyof typeof posts.$inferInsert>

@@ -9,13 +9,13 @@
  */
 import { rm } from "node:fs/promises"
 
-import { and, eq, exists, sql } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import { postMediaDir } from "@/mastra/images/media-dir"
 
-import { isUuid, postNotFound, unprocessableUuid } from "../params"
+import { isUuid, ownedByCaller, postNotFound, unprocessableUuid } from "../params"
 import { serializePost } from "../serialize"
 import {
   invalidJsonBody,
@@ -82,20 +82,7 @@ export async function PATCH(
   const parsed = postUpdateSchema.safeParse(body)
   if (!parsed.success) return unprocessableBody(parsed.error.issues, body)
 
-  // `_get_user_post()` matched the id and the owner together through the join,
-  // and the update has to carry the same restriction. Drizzle's `update` takes
-  // no join, so ownership rides along as a correlated `EXISTS`.
-  const owned = and(
-    eq(posts.id, id),
-    exists(
-      getDb()
-        .select({ one: sql`1` })
-        .from(websiteProfiles)
-        .where(
-          and(eq(websiteProfiles.id, posts.profileId), eq(websiteProfiles.userId, user.id)),
-        ),
-    ),
-  )
+  const owned = ownedByCaller(id, user.id)
 
   const columns = updateToColumns(parsed.data)
 
@@ -146,19 +133,7 @@ export async function DELETE(
 
   const deleted = await getDb()
     .delete(posts)
-    .where(
-      and(
-        eq(posts.id, id),
-        exists(
-          getDb()
-            .select({ one: sql`1` })
-            .from(websiteProfiles)
-            .where(
-              and(eq(websiteProfiles.id, posts.profileId), eq(websiteProfiles.userId, user.id)),
-            ),
-        ),
-      ),
-    )
+    .where(ownedByCaller(id, user.id))
     .returning({ id: posts.id })
 
   if (deleted.length === 0) return postNotFound()

@@ -13,6 +13,10 @@
  * exist, and a post whose `profile_id` is null is invisible to every handler,
  * because the join is inner.
  */
+import { and, eq, exists, sql } from "drizzle-orm"
+
+import { getDb, posts, websiteProfiles } from "@/db"
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function isUuid(value: string): boolean {
@@ -42,4 +46,23 @@ export function unprocessableUuid(input: string): Response {
 
 export function postNotFound(): Response {
   return Response.json({ detail: "Post not found" }, { status: 404 })
+}
+
+/**
+ * The same restriction as a `WHERE` clause, for the statements that cannot
+ * join. `_get_user_post()` matched the id and the owner together through the
+ * join, and an `UPDATE` or `DELETE` has to carry that restriction too, but
+ * Drizzle's `update()` and `delete()` take no join, so ownership rides along
+ * as a correlated `EXISTS` over `website_profiles`.
+ */
+export function ownedByCaller(postId: string, userId: string) {
+  return and(
+    eq(posts.id, postId),
+    exists(
+      getDb()
+        .select({ one: sql`1` })
+        .from(websiteProfiles)
+        .where(and(eq(websiteProfiles.id, posts.profileId), eq(websiteProfiles.userId, userId))),
+    ),
+  )
 }

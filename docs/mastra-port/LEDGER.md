@@ -9206,7 +9206,152 @@ three pieces are separately verifiable, so they are separate items.
       $ cd api && uv run ruff format --check .
       9 files would be reformatted, 129 files already formatted
       ```
-    - [ ] 5.3c-ii `POST /{post_id}/rerun` and `POST /{post_id}/restart`.
+    - [x] 5.3c-ii `POST /{post_id}/rerun` and `POST /{post_id}/restart`.
+
+      Ported to `web/src/app/api/posts/[id]/rerun/route.ts` and
+      `web/src/app/api/posts/[id]/restart/route.ts`. Both are reset-then-start:
+      they rewrite `stage_status`, clear content columns and start a plain full
+      pipeline with no stage selection, so the run re-derives where to resume
+      from the row the handler just committed.
+
+      The two differ in three ways that are Python's, not incidental, and each
+      has a test:
+
+      - `/rerun` copies `stage_status` and rewrites only the slice from
+        `rerun_from` onward, so upstream statuses and any non-stage key survive.
+        `/restart` *replaces* it with a fresh six-key map, dropping other keys.
+      - `/rerun` clears the six columns in its own stage-to-column map, which
+        has no entry for `final_html_content`. `/restart` clears that column too.
+      - `/rerun` falls back to `STAGES[-1]` when nothing is non-complete, so
+        rerunning a finished post re-runs `ready` alone rather than doing
+        nothing.
+
+      Neither endpoint touches `stage_settings`, so the post's configured review
+      gates still apply to the run they start. That is what makes the two live
+      bus tests below safe: the fixture profile gates `research` at `"review"`,
+      so the real run each starts suspends at its first stage without reaching a
+      provider.
+
+      **`STAGE_CONTENT_COLUMN`** (`run-control.ts`) is the Drizzle-property form
+      of `STAGE_CONTENT_MAP`. `rerun_stage()` carried its own inline copy of the
+      stage-to-column map rather than importing `STAGE_CONTENT_MAP`; the two
+      agreed, and a test asserts the TypeScript pair still do, reading the real
+      column names off the table:
+
+      ```
+      for (const stage of ALL_STAGES) {
+        expect(columns[STAGE_CONTENT_COLUMN[stage]].name).toBe(STAGE_CONTENT_MAP[stage])
+      }
+      ```
+
+      **Deviation 1: `updated_at` is stamped on every request.** Same tradeoff
+      already argued under 5.3b-ii. SQLAlchemy's `onupdate` only fires when a
+      flush actually emits an `UPDATE`, and it compares values, so a rerun of a
+      post that was already fully pending with null content emitted nothing and
+      left `updated_at` alone. The port always writes, so that one case now
+      bumps `updated_at`. Nothing in `web/src/lib/api.ts` branches on it.
+
+      **Deviation 2: ownership is a correlated `EXISTS`, extracted.** Drizzle's
+      `update()` takes no join, so the `_get_user_post()` restriction rides along
+      as a subquery. That predicate now existed in four handlers verbatim, so it
+      moved into `params.ts` as `ownedByCaller()` and `PATCH`, `DELETE`, `/run`
+      and `/run-all` were repointed at it. Their 78 existing tests are unchanged
+      and still pass, which is the check that the extraction is behaviour-neutral.
+
+      ```
+      $ pnpm -C web vitest run src/app/api/posts/run-control.test.ts --reporter=verbose
+       ✓ src/app/api/posts/run-control.test.ts > STAGE_CONTENT_COLUMN > names the same columns STAGE_CONTENT_MAP does 1ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/rerun > rejects an unauthenticated request 1ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/rerun > answers a malformed path uuid with FastAPI's 422 2ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/rerun > answers a post that does not exist with a 404 2ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/rerun > answers another user's post with the same 404, clearing nothing 4ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/rerun > reruns from research on a post that has run nothing 5ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/rerun > reruns from the first non-complete stage, leaving the completed ones alone 5ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/rerun > falls back to the last stage when every stage is complete 5ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/rerun > leaves final_html_content alone, since no stage owns that column 5ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/rerun > preserves stage_status keys that are not stage names 4ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/rerun > leaves stage_settings untouched 4ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/rerun > publishes a real workflow.start that parks at the gated first stage 37ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/restart > rejects an unauthenticated request 1ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/restart > answers a malformed path uuid with FastAPI's 422 2ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/restart > answers a post that does not exist with a 404 2ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/restart > answers another user's post with the same 404, clearing nothing 4ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/restart > clears every content column, every stage status and the logs 5ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/restart > replaces stage_status rather than updating it, dropping other keys 5ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/restart > leaves stage_settings untouched, so the configured gates still apply 4ms
+       ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/restart > publishes a real workflow.start that parks at the gated first stage 33ms
+
+       Test Files  1 passed (1)
+            Tests  43 passed (43)
+         Start at  13:59:06
+         Duration  2.41s (transform 144ms, setup 116ms, import 822ms, tests 1.34s, environment 0ms)
+      ```
+
+      Negative controls, each reverted after measuring:
+
+      ```
+      # 1. clear final_html_content in /rerun as well
+      Tests  1 failed | 42 passed (43)
+        x leaves final_html_content alone, since no stage owns that column
+
+      # 2. fall back to STAGES[0] instead of STAGES[-1] when all stages complete
+      Tests  1 failed | 42 passed (43)
+        x falls back to the last stage when every stage is complete
+
+      # 3. merge into the existing stage_status in /restart instead of replacing
+      Tests  1 failed | 42 passed (43)
+        x replaces stage_status rather than updating it, dropping other keys
+      ```
+
+      The refactored handlers plus the whole posts router:
+
+      ```
+      $ pnpm -C web vitest run src/app/api/posts/
+       v src/app/api/posts/update-delete.test.ts (28 tests) 188ms
+       v src/app/api/posts/route.test.ts (27 tests) 148ms
+       v src/app/api/posts/create.test.ts (25 tests) 173ms
+       v src/app/api/posts/run-control.test.ts (43 tests) 684ms
+       v src/app/api/posts/duplicate-batch.test.ts (26 tests) 1769ms
+
+       Test Files  5 passed (5)
+            Tests  149 passed (149)
+      ```
+
+      Gates:
+
+      ```
+      $ pnpm -C web tsc --noEmit
+      (exit 0, no output)
+
+      $ pnpm -C web lint
+      (exit 0, no output)
+
+      $ pnpm -C web test
+       Test Files  2 failed | 72 passed (74)
+            Tests  9 failed | 1243 passed | 7 skipped (1259)
+      # 9 failed is the recorded baseline: 6 in image-preview.test.tsx and 3 in
+      # PostDetail.test.tsx, both pre-existing. Confirmed again this iteration by
+      # running PostDetail.test.tsx with this work stashed:
+      #   $ git stash push -u -m iter65-rerun-restart
+      #   $ pnpm -C web vitest run src/app/posts/PostDetail.test.tsx
+      #        Tests  3 failed | 12 passed (15)
+      # Passing count 1223 -> 1243 (+20).
+
+      $ pnpm -C web build
+      BUILD EXIT=0
+      v Compiled successfully in 3.4s
+      |- f /api/posts/[id]/rerun
+      |- f /api/posts/[id]/restart
+
+      $ cd api && uv run pytest -q
+      125 failed, 236 passed, 25 errors in 13.19s
+
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 129 files already formatted
+      ```
     - [ ] 5.3c-iii `POST /{post_id}/pause` and `POST /{post_id}/publish`.
   - [ ] 5.3d `GET /{post_id}/export/markdown`, `/export/html`, `/export/all`,
     `/{post_id}/logs` and `/{post_id}/analytics`.
