@@ -2799,7 +2799,7 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   3. The `system`-as-block-list and `url`-override discrepancies recorded under item
      3.2 apply unchanged here; they are properties of the shared Anthropic path, not
      of this stage.
-- [ ] 3.4 `edit`. Split, because `edit_node` is the only stage that computes prompt content
+- [x] 3.4 `edit`. Split, because `edit_node` is the only stage that computes prompt content
   from two services the port does not yet have: `compute_analytics` (which reaches into
   `textstat` for sentence counts and Flesch reading ease) and `validate_links`. Both feed
   numbers straight into the rendered prompt, so byte-exact prompt parity for this stage
@@ -3433,9 +3433,156 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
     `TEST_DATABASE_URL` is unset, which points at a different Postgres and turns
     the baseline into `4 failed, 205 passed, 177 errors` with
     `InvalidPasswordError` rather than a real regression.
-  - [ ] 3.4e `edit` **step**: `createStep`, the analytics section appended to the prompt,
+  - [x] 3.4e `edit` **step**: `createStep`, the analytics section appended to the prompt,
     the post-edit validation warnings, persistence to `final_md`, and the prompt-parity
     test against both golden fixtures.
+
+    **What was built**
+
+    - `web/src/mastra/steps/edit.ts`: `editStep`, plus the two pure functions it
+      is built from. `buildAnalyticsSection` is `_build_analytics_section` and
+      `editOutputWarnings` is `_validate_edit_output`, the latter returning its
+      warnings rather than publishing them so they are assertable without a
+      logger spy. The step's own body is Python's ordering exactly: load state,
+      render the rules prompt, append the analytics section behind
+      `\n\n---\n\n`, call the agent, warn on the output, validate links, commit
+      to `final_md`, return `_stage_meta`.
+    - `web/src/mastra/analytics/python-float.ts`: `pythonFloat`, the production
+      `str(float)` shim item 3.4b said this item would need. Three of
+      `compute_analytics`'s numbers are interpolated into the prompt with an
+      f-string, and Python's float repr always carries a decimal point where
+      JavaScript's does not.
+    - `web/src/mastra/steps/edit.test.ts`: 14 tests, all credential-free, all
+      against the real Alembic-owned database.
+
+    **Why this stage's prompt test proves more than the three before it**
+
+    `research`, `outline` and `write` render prompts assembled entirely from
+    columns and `rules/*.md`. Roughly a kilobyte of the `edit` prompt is
+    *computed*: the analytics section is `compute_analytics` over the draft the
+    `write` stage committed, so a byte-exact prompt match here is simultaneously
+    an end-to-end check of the item 3.4a textstat port, the item 3.4b analytics
+    port and Python's float formatting. Both fixtures are load-bearing and in
+    different ways: `how-to-choose-a-crm-for-a-small-team` has three internal
+    links (which `edit` alone is offered) and a keyword density of exactly zero,
+    which is the `str(float)` case; `best-time-tracking-tools-for-agencies` has
+    a Flesch score of 47.8, the only fixture that reaches the `SIMPLIFY` branch
+    of the `ACTION REQUIRED` block.
+
+    **Two Python primitives that do not survive a naive translation**
+
+    1. `check.replace("_", " ")` replaces *every* underscore in Python and only
+       the *first* in JavaScript, so `keyword_in_title` would render as
+       `Keyword In_Title`. Written as `replaceAll`.
+    2. `str.title()` is not `capitalize each word`: it uppercases the first
+       cased character of each run of cased characters and lowercases the rest,
+       which is what turns `keyword_in_first_100_words` into
+       `Keyword In First 100 Words`. `pythonTitleAscii` spells that rule out; it
+       is ASCII-only because every key `_seo_checklist` produces is ASCII
+       snake_case, and the comment says so rather than implying full Unicode
+       coverage.
+
+    **Divergences recorded, not fixed**
+
+    1. `edit_node` publishes its warnings (em-dashes, low Flesch, remaining SEO
+       failures, stripped dead links) through `publish_stage_log(level=
+       "warning")`. The step logs them through `mastra.getLogger()` and
+       publishes no SSE, for the reason recorded under item 3.1c-ii: the event
+       bus is item 5.5 and Phase 8 reads step progress from Mastra's own stream
+       events.
+    2. `pythonFloat` deliberately does not implement Python's exponent form.
+       Python switches to scientific notation below `1e-4` and writes a
+       two-digit exponent (`1e-05`) where JavaScript switches below `1e-7` and
+       writes one (`1e-7`), but every value that reaches it has been through
+       `pythonRound(x, 1)` or `pythonRound(x, 2)`, so the smallest non-zero
+       magnitude reachable is `0.01`. Not guessed at rather than guessed at.
+    3. `ACTION REQUIRED — Fix These Failures` carries a literal U+2014, as
+       `EDIT_SYSTEM_MESSAGE` does, and for the same reason: it is the bytes the
+       provider sees.
+
+    **Evidence**
+
+    ```
+    $ docker compose up -d db redis
+    $ cd web && NO_COLOR=1 pnpm vitest run src/mastra/steps/edit.test.ts
+     OK src/mastra/steps/edit.test.ts (14 tests) 226ms
+       OK sends the prompt the Python stage sent for how-to-choose-a-crm-for-a-small-team 51ms
+       OK sends the prompt the Python stage sent for best-time-tracking-tools-for-agencies 19ms
+       OK offers the internal-link inventory that the earlier stages were denied 14ms
+       OK renders a keyword density of exactly zero the way Python's str(float) does 6ms
+       OK reaches the SIMPLIFY branch only on the fixture whose Flesch score is under 55 7ms
+       OK appends nothing at all when the draft column is empty 14ms
+       OK matches the section Python appended, character for character 12ms
+       OK warns about em-dashes, readability and the SEO checks the edit left failing 16ms
+       OK counts em-dashes in the output the way Python's str.count does 6ms
+       OK strips a dead link over real sockets and keeps the live one 19ms
+       OK commits the model's own output when link validation throws 14ms
+       OK commits the final markdown to its column and reports Python's stage meta 13ms
+       OK fails loudly on a post that does not exist rather than billing a call 8ms
+       OK returns the empty string for a post with no draft 6ms
+
+     Test Files  1 passed (1)
+          Tests  14 passed (14)
+    ```
+
+    `validateLinks` reaches the public internet and both fixtures' outputs cite
+    real domains, so the module is wrapped rather than replaced: the prompt tests
+    hand it a pass-through, and one test clears the stub and drives the real
+    implementation over real sockets against a local `node:http` server that
+    answers `/gone` with a 404, asserting both that the dead link is stripped
+    from the committed column and that the live one survives.
+
+    **Negative controls**, each applied and reverted; every one turned the suite
+    red:
+
+    | mutation | result |
+    | --- | --- |
+    | `pythonFloat` drops the trailing `.0` | 1 failed / 13 passed |
+    | `replaceAll("_", " ")` -> `replace("_", " ")` | 3 failed / 11 passed |
+    | checklist labels not title-cased | 3 failed / 11 passed |
+    | SIMPLIFY threshold 55 -> 45 | 2 failed / 12 passed |
+    | analytics separator `\n\n---\n\n` -> `\n\n` | 3 failed / 11 passed |
+    | ACTION REQUIRED lines reordered | 3 failed / 11 passed |
+    | that heading's em-dash replaced with a hyphen | 3 failed / 11 passed |
+    | link counts no longer filtered out of the checklist | 3 failed / 11 passed |
+    | raw model output committed instead of the link-stripped content | 1 failed / 13 passed |
+    | earlier stages' `stage_status` not merged in | 1 failed / 13 passed |
+    | analytics computed over the outline instead of the draft | 3 failed / 11 passed |
+    | word-count target hardcoded to 2000 | 3 failed / 11 passed |
+    | `validateLinks` failure allowed to propagate | 1 failed / 13 passed |
+
+    One further mutation, computing the analytics over `state.finalMd || draft`,
+    stayed green and is recorded here rather than dropped: both fixtures were
+    captured with `final_md` empty, so that expression is a no-op against them.
+    It is a gap in the fixtures, not in the port.
+
+    **Gates**
+
+    ```
+    $ cd web && pnpm tsc --noEmit
+    tsc exit=0
+    $ cd web && pnpm lint
+    lint exit=0
+    $ cd web && NO_COLOR=1 pnpm build
+    build exit=0
+    $ cd web && NO_COLOR=1 pnpm test
+     Test Files  2 failed | 35 passed (37)
+          Tests  9 failed | 488 passed | 4 skipped (501)
+    ```
+
+    `pnpm test` is 9 failed, the recorded failure baseline (6 in
+    `image-preview.test.tsx`, 3 in `PostDetail.test.tsx`) unchanged, with passes
+    moving 474 -> 488, which is the 14 new tests. Skips stay at 4.
+
+    ```
+    $ cd api && set -a && . ../.env && set +a && uv run pytest -q
+    125 failed, 236 passed, 25 errors in 15.16s
+    $ cd api && uv run ruff check .
+    Found 32 errors.
+    ```
+
+    Both at the Phase 0 baseline; no file under `api/` was touched this
+    iteration.
 - [ ] 3.5 `images` (identical `image_manifest` JSONB shape; `.foreach()` for per-image generation)
 - [ ] 3.6 `ready`
 
