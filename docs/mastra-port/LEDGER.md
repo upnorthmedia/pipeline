@@ -263,9 +263,105 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
   longer applies. `pnpm test` remains at most 9 failures, `pnpm lint` exit 0. The deprecation
   warning about the `middleware` file convention is pre-existing and unrelated to this port;
   it is the only warning `build` emits.
-- [ ] 0.3 Stand up a reachable dev database for this repo (resolve the host-port 5433
+- [x] 0.3 Stand up a reachable dev database for this repo (resolve the host-port 5433
   collision) and record the working local invocation, so later phases can run the Python
   pipeline and, later, the TypeScript data layer against a real database.
+
+  **Fix.** The host port is now a variable instead of a literal, so a collision is resolved
+  by editing `.env` rather than by container gymnastics. Three changes:
+  - `docker-compose.yml`: `"${POSTGRES_HOST_PORT:-5433}:5432"` and
+    `"${REDIS_HOST_PORT:-6379}:6379"`. Defaults are the previous literals, so an environment
+    with free ports behaves exactly as before.
+  - `api/tests/conftest.py`: `TEST_DATABASE_URL` now reads the env var of the same name and
+    falls back to the previous hardcoded `localhost:5433` URL.
+  - `.env.example` documents `POSTGRES_HOST_PORT`, `REDIS_HOST_PORT`, and `TEST_DATABASE_URL`;
+    `README.md` Quick Start explains the override.
+
+  `api/alembic.ini` needed no change: `api/alembic/env.py` already prefers `DATABASE_URL_SYNC`
+  over the ini value.
+
+  **Working local invocation** (this machine: 5432 taken by `cairo-pooler`, 5433 by
+  `ship-restrict-shopify-db-1`, 5434 by `petago-test-db`; 5435 and 6379 free). Local `.env`
+  (gitignored) sets `POSTGRES_HOST_PORT=5435` and the matching URLs.
+
+  ```
+  $ docker compose up -d db redis
+   Container objective-port-jena-46c1e6-1-db-1 Started
+   Container objective-port-jena-46c1e6-1-redis-1 Started
+
+  $ docker compose ps --format '{{.Service}}\t{{.State}}\t{{.Ports}}'
+  db	running	0.0.0.0:5435->5432/tcp, [::]:5435->5432/tcp
+  redis	running	0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp
+
+  $ PGPASSWORD=pipeline psql -h localhost -p 5435 -U pipeline -d content_pipeline -c "select version();"
+   PostgreSQL 17.8 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+  (1 row)
+  exit=0
+  ```
+
+  **Schema applied to the dev database** (this is the database Phase 1 introspects):
+
+  ```
+  $ cd api && DATABASE_URL_SYNC="postgresql://pipeline:pipeline@localhost:5435/content_pipeline" .venv/bin/alembic upgrade head
+  INFO  [alembic.runtime.migration] Running upgrade  -> 001, initial schema
+  ... (002 through 010 elided, all applied)
+  INFO  [alembic.runtime.migration] Running upgrade 010 -> 011, Add Next.js publishing fields to profiles and posts.
+
+  $ DATABASE_URL_SYNC="postgresql://pipeline:pipeline@localhost:5435/content_pipeline" .venv/bin/alembic current
+  011 (head)
+  exit=0
+
+  $ PGPASSWORD=pipeline psql -h localhost -p 5435 -U pipeline -d content_pipeline -c "\dt"
+   public | alembic_version  | table | pipeline
+   public | internal_links   | table | pipeline
+   public | posts            | table | pipeline
+   public | settings         | table | pipeline
+   public | website_profiles | table | pipeline
+  (5 rows)
+
+  $ PGPASSWORD=pipeline psql -h localhost -p 5435 -U pipeline -d postgres -c "CREATE DATABASE content_pipeline_test"
+  CREATE DATABASE
+  exit=0
+  ```
+
+  **Environment note 4.** The objective says "API keys live in the `api_settings` DB table".
+  There is no `api_settings` table. Alembic 001-011 produce five tables and the settings table
+  is named `settings`. Phase 1 and Phase 6 must target `settings`, not `api_settings`.
+  (`auth_users` and friends are BetterAuth-managed and excluded from Alembic autogenerate;
+  they are absent here because BetterAuth has not run against this fresh volume yet.)
+
+  **pytest now runs from the host, no container required, and matches the 0.1 baseline
+  exactly:**
+
+  ```
+  $ cd api && TEST_DATABASE_URL="postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test" .venv/bin/pytest -q
+  125 failed, 235 passed, 25 errors in 14.26s
+  exit=1
+  ```
+
+  Identical to the 0.1 baseline (125 failed / 235 passed / 25 errors), so the conftest change
+  is behavior-preserving. The containerized `--network container:` procedure recorded under
+  0.1 is superseded and should not be used again.
+
+  **`ruff` unchanged by the conftest edit:**
+
+  ```
+  $ cd api && .venv/bin/ruff check .
+  Found 32 errors.
+  exit=1
+
+  $ cd api && .venv/bin/ruff format --check .
+  9 files would be reformatted, 117 files already formatted
+  exit=1
+  ```
+
+  Both match the 0.1 baseline counts.
+
+  **State left behind for later iterations.** The containers are stopped at the end of the
+  iteration but the named volumes (`objective-port-jena-46c1e6-1_pgdata`,
+  `..._redisdata`) persist, so `docker compose up -d db redis` from the repo root restores the
+  migrated `content_pipeline` and empty `content_pipeline_test` databases immediately. The
+  local `.env` holding `POSTGRES_HOST_PORT=5435` is gitignored and stays in the worktree.
 - [ ] 0.4 Capture golden fixtures: run the existing Python pipeline end to end on at least 2
   representative posts with different `article_type` and `output_format`. For each stage
   save the fully rendered prompt, the provider request parameters, and the raw output to

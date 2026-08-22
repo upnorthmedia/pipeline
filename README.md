@@ -73,6 +73,11 @@ docker compose up
 
 The dashboard is available at `http://localhost:3000` and the API at `http://localhost:8055`.
 
+Postgres binds host port `5433` and Redis `6379` by default. If another project already owns
+either port, set `POSTGRES_HOST_PORT` / `REDIS_HOST_PORT` in `.env` and update
+`DATABASE_URL`, `DATABASE_URL_SYNC`, `TEST_DATABASE_URL`, and `REDIS_URL` to match. The
+container-internal ports (`db:5432`, `redis:6379`) never change.
+
 ## Development
 
 ### Backend (Python)

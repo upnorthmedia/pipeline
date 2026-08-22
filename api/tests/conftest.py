@@ -1,3 +1,4 @@
+import os
 import uuid
 from unittest.mock import AsyncMock
 
@@ -14,8 +15,9 @@ def anyio_backend():
     return "asyncio"
 
 
-TEST_DATABASE_URL = (
-    "postgresql+asyncpg://pipeline:pipeline@localhost:5433/content_pipeline_test"
+TEST_DATABASE_URL = os.environ.get(
+    "TEST_DATABASE_URL",
+    "postgresql+asyncpg://pipeline:pipeline@localhost:5433/content_pipeline_test",
 )
 
 
