@@ -4424,6 +4424,156 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   - [ ] 3.5f `images` **step**: `createStep` with Zod schemas, `.foreach()` for per-image
     generation, the `image_manifest` JSONB shape preserved byte for byte, both `_stage_meta`
     and `_stage_meta_gemini` returned, and the persistence contract via `saveStageOutput`.
+    Split, because `.foreach()` is a *workflow* operator, not something a step can call:
+    it consumes the previous step's array output, so the stage has to become three steps
+    inside one nested workflow rather than one step with a loop in it. The Claude half and
+    the fan-out half have different oracles and different failure modes.
+    - [x] 3.5f-i `images-manifest` **step**: the Claude call, prompt assembly from
+      `rules/blog-images.md`, `parseManifest`, and the parse-failure branch.
+
+      **Why `.foreach()` forces a three-step stage**
+
+      `Workflow.foreach(step, opts)` is declared on `Workflow`, typed
+      `TPrevIsArray extends true ? Step<...> : 'Previous step must return an array
+      type'`, and takes `ForeachOptions { concurrency: number | ForeachConcurrencyResolver }`
+      (`node_modules/@mastra/core/dist/workflows/workflow.d.ts:337`,
+      `types.d.ts:591`). `EventedWorkflow extends Workflow`, so the evented engine
+      this port runs on has it. There is no step-level equivalent, so honouring the
+      objective's "use `.foreach()` rather than a hand-rolled loop" means the stage is
+
+      ```
+      createWorkflow({ id: "images" })
+        .then(imagesManifestStep)   // this item
+        .map(...)                   // manifest entries -> per-image jobs
+        .foreach(generateImageStep, { concurrency: 3 })   // item 3.5f-ii
+        .then(imagesAssembleStep)                          // item 3.5f-ii
+        .commit()
+      ```
+
+      registered on the Mastra instance as a nested workflow. `.map()` is what lets
+      the manifest step keep a rich object output while still handing `.foreach()` an
+      array, and `getStepResult(step)` (`workflows/step.d.ts:34`) is what lets the
+      assembling step read the manifest back.
+
+      **What Python's single function guarantees that the split has to preserve**
+
+      1. *One write per stage.* `api/src/worker.py:223` saves
+         `STAGE_OUTPUT_KEY["images"]` exactly once, from whichever dict `images_node`
+         returned, including on the parse-failure path. So this step commits nothing
+         at all; the assembling step is the only writer. A test asserts the post row
+         is byte-identical before and after.
+      2. *One timer over the whole stage.* `StageTimer` wraps the manifest call and
+         every image (`stages/images.py:48`), so `duration_s` cannot be measured
+         here. The step returns `stageStartedAtMs` instead and 3.5f-ii subtracts it.
+      3. *The parse failure is a branch, not an exception.* A manifest Claude wrote as
+         prose is stored verbatim with `stage_status.images = "failed"` and no Gemini
+         call is billed. Signalled with `parseFailed`, because throwing would lose the
+         synthesised document Python stores.
+
+      **Found while reading the Python, and reproduced**
+
+      - `timer.duration` is `0` until `StageTimer.__exit__` runs
+        (`api/src/pipeline/helpers.py:376-388`), and the parse-failure branch returns
+        from *inside* the `with` block. So Python reports `duration_s: 0.0` for a
+        failed manifest, not the elapsed time. 3.5f-ii has to reproduce that.
+      - Python tests `manifest.get("error")` for *truthiness*, not for key presence,
+        so a manifest in which the model itself wrote `"error": "I cannot ..."`
+        short-circuits the stage exactly like a parse failure, while `"error": ""`
+        does not. `pythonTruthy` is here because the two engines disagree on empty
+        containers: `[]` and `{}` are falsy in Python and truthy in JavaScript, and
+        this is the branch that decides whether Gemini is billed at all.
+      - `response.content[:500]` slices by code point; `String.prototype.slice`
+        slices by UTF-16 unit. `rawSnippet` uses `[...content]`, so 600 emoji give
+        500 characters rather than 250.
+      - `manifest.get("images", [])` returns the default only for an *absent* key, so
+        the port tests `"images" in manifest` rather than using `??`. An explicit
+        `null` raises out of `len(None)` in Python and out of the output schema here.
+
+      **Recorded divergences**
+
+      - A manifest that parses to an array or a scalar reaches `manifest.get("error")`
+        in Python and raises `AttributeError`. `JSON.parse` admits both too, so this
+        port throws a `TypeError` with its own message. Same outcome (the stage
+        fails), different text.
+      - A present but non-array `images` value fails the output schema here, where
+        Python would `enumerate` whatever it is (a string yields its characters).
+        Neither golden fixture has one and no rule in `rules/blog-images.md` asks for
+        one, so the behaviour is not invented.
+      - The parse-failure log is a `mastra.getLogger().warn` rather than
+        `publish_stage_log(..., level="warning", data={error, raw_snippet})`. The
+        event bus is item 5.5; the payload is carried on the log's metadata so the
+        port to SSE is a change of sink, not of content.
+
+      **The oracle**
+
+      Prompt parity is byte equality against `rendered_prompts[0]` in both golden
+      fixtures (the other five recorded prompts are Gemini's and belong to 3.5f-ii).
+      The manifest entries have a second, independent oracle: Python stores
+      `{**image_spec, generated, index, ...}` per entry, so stripping those
+      bookkeeping keys off `stage_output.image_manifest.images` recovers the exact
+      specs Python parsed, and the step's `images` output is compared against *that*
+      rather than against a re-run of this port's own parser.
+
+      ```
+      $ NO_COLOR=1 pnpm -C web test --run src/mastra/steps/images-manifest.test.ts
+       ✓ src/mastra/steps/images-manifest.test.ts (18 tests) 157ms
+
+       Test Files  1 passed (1)
+            Tests  18 passed (18)
+         Duration  718ms
+      ```
+
+      **Negative controls.** Each mutation was applied to
+      `web/src/mastra/steps/images-manifest.ts`, the suite re-run, and the file
+      restored (`diff` against the pre-mutation copy confirms `restored identical`).
+
+      | mutation | result |
+      | --- | --- |
+      | `pythonTruthy` uses JS truthiness for containers | Tests 1 failed \| 17 passed (18) |
+      | `rawSnippet` slices UTF-16 units | Tests 1 failed \| 17 passed (18) |
+      | `"images" in manifest` becomes `manifest.images ?? []` | Tests 1 failed \| 17 passed (18) |
+      | parse failure still forwards the parsed images | Tests 1 failed \| 17 passed (18) |
+      | non-mapping manifest is not rejected | Tests 1 failed \| 17 passed (18) |
+      | rules file swapped to `blog-ready.md` | Tests 2 failed \| 16 passed (18) |
+      | stage start not recorded (`stageStartedAtMs = 0`) | Tests 1 failed \| 17 passed (18) |
+      | model reported as requested rather than as returned | Tests 1 failed \| 17 passed (18) |
+      | parse-failure warning dropped | Tests 1 failed \| 17 passed (18) |
+      | error truthiness replaced by key presence | Tests 1 failed \| 17 passed (18) |
+
+      **Gates.**
+
+      ```
+      $ cd web && npx tsc --noEmit
+      tsc exit=0
+      $ NO_COLOR=1 pnpm -C web lint
+      (no output, exit 0)
+      $ NO_COLOR=1 pnpm -C web test --run
+       Test Files  2 failed | 41 passed (43)
+            Tests  9 failed | 677 passed | 7 skipped (693)
+      $ NO_COLOR=1 pnpm -C web build
+      exit 0
+      ```
+
+      Failures stay at the 9-test baseline (`image-preview.test.tsx` plus the shared
+      `settings`-row flake logged in `todo.md`). Totals moved 675 -> 693, which is the
+      18 new tests; skips unchanged at 7.
+
+      ```
+      $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test NO_COLOR=1 uv run pytest -q
+      125 failed, 236 passed, 25 errors in 15.12s
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 125 files already formatted
+      ```
+
+      All three at the Phase 0 baseline; no Python file was touched this iteration.
+    - [ ] 3.5f-ii `images` **workflow**: the `.map()` that turns manifest entries into
+      per-image jobs, `.foreach(generateImageStep, { concurrency: 3 })` reproducing
+      Python's `asyncio.Semaphore(3)`, the assembling step that folds the results back
+      into the manifest (`total_generated` / `total_failed`, JSONB shape byte for byte),
+      both `_stage_meta` (with `duration_s: 0` on the parse-failure branch) and
+      `_stage_meta_gemini`, and the single `saveStageOutput` write.
 - [ ] 3.6 `ready`
 
 ## Phase 4: Workflow assembly, gates, durable execution
