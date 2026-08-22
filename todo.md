@@ -42,3 +42,9 @@
   `readFileSync` relative to `process.cwd()`. `rules/*.md` has the same shape of dependency
   through `rulesDir()`. Both need to be resolved before the Phase 7 Railway deploy, either by
   copying them into the standalone output or by moving them somewhere the tracer follows.
+
+- [investigate] 2026-08-21 `src/mastra/agents/{edit,research,write}.test.ts` fail
+  intermittently under a full `pnpm test` run (seen: 4 extra failures, then 1, then 0 across
+  three consecutive runs) while passing when run alone. Suspect shared state across suites:
+  they swap `globalThis.fetch` and read the same `settings` rows. Makes the failure baseline
+  unreliable, so it is worth pinning down before Phase 5 adds more DB-backed suites.

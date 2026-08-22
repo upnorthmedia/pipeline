@@ -3729,11 +3729,205 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
     unchanged at 9. The pytest run wrote three `media/test-123/featured-*.webp`
     files (the defect already logged in `todo.md`); they were deleted before
     committing and `git status` is clean of them.
-  - [ ] 3.5b `optimize_image` ported to TypeScript: resize to `max_width` with Lanczos and
+  - [x] 3.5b `optimize_image` ported to TypeScript: resize to `max_width` with Lanczos and
     encode WebP at quality 82, matching PIL's output closely enough that the manifest's
     recorded `size_bytes` and the stored file are usable. Needs a Node image library, which
     is a dependency decision, and needs a parity oracle built from real PNG input rather
     than from the golden fixtures, whose Gemini calls all 429'd.
+
+    **The dependency decision: sharp**
+
+    `sharp` 0.35.3 was added to `web/` as a runtime dependency. It is the only
+    mature Node image library with a native WebP encoder, it ships prebuilt
+    binaries for the platforms this app deploys to, and Next.js already treats it
+    as a first-class optional dependency for its own image optimizer, so it is
+    not a new class of dependency for this repo. The deciding fact came out of
+    the installed package rather than the docs:
+
+    ```
+    $ cd web && node -e "console.log(require('sharp').versions.webp, require('sharp').versions.vips)"
+    1.6.0 8.18.3
+    $ cd api && uv run python -c "from PIL import features; print(features.version('webp'))"
+    1.6.0
+    ```
+
+    sharp and Pillow drive the *same* libwebp 1.6.0. That turned out to matter
+    more than expected (see the byte-identity finding below).
+
+    Pure-JS alternatives (`jimp`, `@napi-rs/image`) were not evaluated further
+    once byte-identity with Pillow's encoder was demonstrated with sharp; nothing
+    else can match that without linking libwebp.
+
+    **The oracle**
+
+    `api/scripts/export_optimize_parity.py` builds 14 deterministic PNG inputs,
+    runs Python's `optimize_image` over each, and commits both the input and
+    Pillow's WebP output to
+    `web/src/mastra/images/data/optimize-parity/`. The golden fixtures cannot
+    serve here: every Gemini call recorded in them returned 429, so no real
+    generated image was ever optimized, and there is no captured PNG anywhere in
+    the repo to feed this function.
+
+    ```
+    $ cd api && uv run python scripts/export_optimize_parity.py
+    smooth-2400x1350-w1200: RGB 2400x1350 (115011B png) -> 1200x675 (49386B webp)
+    smooth-2400x1350-w1920: RGB 2400x1350 (115011B png) -> 1920x1080 (89594B webp)
+    odd-1600x901-w1200: RGB 1600x901 (78939B png) -> 1200x675 (53246B webp)
+    odd-1001x1000-w1000: RGB 1001x1000 (63543B png) -> 1000x999 (62002B webp)
+    exact-1200x800-w1200: RGB 1200x800 (59806B png) -> 1200x800 (57820B webp)
+    small-800x600-w1200: RGB 800x600 (40045B png) -> 800x600 (39616B webp)
+    tiny-3x2-w1200: RGB 3x2 (85B png) -> 3x2 (76B webp)
+    wide-3000x400-w1200: RGB 3000x400 (54829B png) -> 1200x160 (19802B webp)
+    tall-1500x2400-w1200: RGB 1500x2400 (113777B png) -> 1200x1920 (95546B webp)
+    detailed-1600x900-w1200: RGB 1600x900 (132493B png) -> 1200x675 (128306B webp)
+    detailed-1200x675-w1200: RGB 1200x675 (99434B png) -> 1200x675 (142386B webp)
+    alpha-1600x900-w1200: RGBA 1600x900 (151796B png) -> 1200x675 (136100B webp)
+    grayscale-1600x900-w1200: L 1600x900 (115120B png) -> 1200x675 (89486B webp)
+    palette-1600x900-w1200: P 1600x900 (81063B png) -> 1200x675 (136662B webp)
+
+    14 cases -> web/src/mastra/images/data/optimize-parity
+    ```
+
+    Regeneration is byte-stable, which is what makes committing the outputs
+    worth the 2.4 MB the directory costs:
+
+    ```
+    $ md5 -q web/src/mastra/images/data/optimize-parity/*.webp | md5   # before
+    f0ddaff4a101962cdd93ade20bbace36
+    $ cd api && uv run python scripts/export_optimize_parity.py && cd ..
+    $ md5 -q web/src/mastra/images/data/optimize-parity/*.webp | md5   # after
+    f0ddaff4a101962cdd93ade20bbace36
+    ```
+
+    The generated inputs are posterized to 3 bits per channel purely to keep that
+    directory small: an un-posterized bicubic gradient costs about 1 MB per case
+    as PNG and the corpus came out at 8.4 MB. Posterizing does not weaken the
+    oracle, since banding adds edges for the resampler to disagree about rather
+    than removing them.
+
+    **What was built**
+
+    - `web/src/mastra/images/optimize.ts`: `optimizeImage`, plus
+      `OPTIMIZE_QUALITY`. The two Python decisions that are observable
+      downstream are reproduced exactly: an image at or under `max_width` is
+      never touched (and never upscaled), and the resized height is
+      `Math.trunc(height * maxWidth / width)`.
+    - `web/src/mastra/images/optimize.test.ts`: 51 tests.
+
+    **The finding that changed the shape of the test: the encoder halves are equal**
+
+    For all four cases where no resize happens, sharp's output is not merely
+    close to Pillow's, it is **byte-identical**, at 57820, 39616, 76 and 142386
+    bytes. Same libwebp, same quality 82, same method/effort 4, same alpha
+    quality 100, and Pillow passes no ICC or EXIF through `save()` while sharp
+    strips metadata by default. So the encoder is an equality, not an
+    approximation, and only the resampler is approximate. The test asserts
+    `Buffer.compare(...) === 0` for those four cases rather than a tolerance,
+    which is a far sharper guard: negative control 3 (quality 82 -> 80) failed 8
+    tests.
+
+    **Three divergences found, all recorded rather than papered over**
+
+    1. **Pillow ignores LANCZOS for palette images.** `Image.resize` contains
+       `if self.mode in ("1", "P"): resample = Resampling.NEAREST`, so Python's
+       palette output is nearest-neighbour while sharp's is lanczos3 (MAE 3.97,
+       max channel difference 189). sharp produces the better image here. This
+       is accepted, not reproduced, and the case carries its own tolerance and a
+       comment naming the cause. It is close to unreachable in production
+       anyway: Gemini returns RGB PNG.
+    2. **Near-transparent pixels.** Pillow converts RGBA to the premultiplied
+       RGBa mode before resizing, and libvips premultiplies too, so the
+       algorithms agree, but unpremultiplying a pixel with alpha near zero
+       amplifies any difference by up to 255x. Measured on the alpha case: MAE
+       3.36 and max difference 255 over all pixels, but MAE 2.29 and max
+       difference 63 once pixels below alpha 8 are excluded.
+    3. **Everything else stays under MAE 1.6.** The remaining eight resized
+       cases measured 0.61 to 1.56 MAE with a max channel difference of 43, so
+       the default tolerance is pinned at MAE 1.7 / max 48.
+
+    **Why lanczos3 rather than a kernel picked by name**
+
+    Pillow's LANCZOS has no exact libvips equivalent, so the kernel was chosen by
+    measuring all four sharp offers against Pillow's output. Summed over the ten
+    resized cases: lanczos3 15.66, lanczos2 16.61, cubic 16.79, mitchell 18.66.
+    lanczos2 actually beats lanczos3 on two individual smooth cases, so the test
+    asserts the total rather than a per-case win, and it drives the shipped
+    number through `optimizeImage` so switching the kernel fails the test instead
+    of quietly costing image fidelity.
+
+    **Verification**
+
+    ```
+    $ cd web && NO_COLOR=1 pnpm vitest run src/mastra/images/optimize.test.ts
+     ✓ src/mastra/images/optimize.test.ts (51 tests) 5987ms
+
+     Test Files  1 passed (1)
+          Tests  51 passed (51)
+    ```
+
+    **Negative controls** (each applied to `optimize.ts`, run, reverted)
+
+    | mutation | result |
+    | --- | --- |
+    | `Math.trunc` -> `Math.round` on the scaled height | 3 failed / 48 passed |
+    | quality 82 -> 80 | 8 failed / 43 passed |
+    | kernel `lanczos3` -> `cubic` | 2 failed / 49 passed |
+    | effort 4 -> 6 | 5 failed / 46 passed |
+    | default `maxWidth` 1200 -> 1920 | 1 failed / 50 passed |
+    | `fit: "fill"` -> `fit: "inside"` | 3 failed / 48 passed |
+
+    One control stayed green and is recorded rather than dropped: changing
+    `width > maxWidth` to `width >= maxWidth` kept all 51 tests passing. That is
+    not a hole in the corpus, it is unobservable in both stacks, because a
+    scale-1 resize is a no-op on both sides:
+
+    ```
+    sharp scale-1 resize is a no-op: true 57820 57820
+    pillow scale-1 resize is a no-op: True 57820 57820
+    ```
+
+    The first control is only a control because the corpus was fixed for it. The
+    case originally shipped as 1601x901, where `901 * 1200 / 1601` is 675.32 and
+    `round` and `int` both give 675, so `Math.round` passed. It was regenerated
+    at 1600x901, where the value is 675.75 and the two disagree.
+
+    **Gates**
+
+    ```
+    $ cd web && pnpm tsc --noEmit
+    tsc exit=0
+    $ cd web && pnpm lint
+    lint exit=0
+    $ cd web && NO_COLOR=1 pnpm build
+    build exit=0
+    $ cd web && NO_COLOR=1 pnpm test
+     Test Files  2 failed | 37 passed (39)
+          Tests  9 failed | 582 passed | 4 skipped (595)
+    ```
+
+    `pnpm test` is 9 failed, the recorded failure baseline (6 in
+    `image-preview.test.tsx`, 3 in `PostDetail.test.tsx`) unchanged, with passes
+    moving 531 -> 582, which is the 51 new tests. Skips stay at 4.
+
+    Two earlier full-suite runs in this iteration reported 13 and 10 failures,
+    the extras being `src/mastra/agents/{edit,research,write}.test.ts` wire-payload
+    and credential-resolution tests. Each passes on its own and the third full run
+    came back at the baseline, so they are flaky under parallel load rather than
+    regressed. Logged in `todo.md` as `[investigate]`; not chased here.
+
+    ```
+    $ cd api && set -a && . ../.env && set +a && uv run pytest -q
+    125 failed, 236 passed, 25 errors in 15.06s
+    $ cd api && uv run ruff check .
+    Found 32 errors.
+    $ cd api && uv run ruff format --check .
+    9 files would be reformatted, 123 files already formatted
+    ```
+
+    All three at the Phase 0 baseline. `ruff format --check` counts one more
+    formatted file than the last recorded run because
+    `export_optimize_parity.py` is new and formatted; the would-reformat count is
+    unchanged at 9.
   - [ ] 3.5c `images` **agent**: the Claude half of the stage (model id, system message,
     `max_tokens`, the resolved `thinking` budget) with system-message and prompt parity
     against both golden fixtures and a live call confirming the model id resolves.
