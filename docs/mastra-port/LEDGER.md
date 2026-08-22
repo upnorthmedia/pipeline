@@ -7273,7 +7273,126 @@ pages that use it work with the Python API stopped.
   With this, item 5.1 (`settings`) is complete: `GET`/`PATCH /api/settings`
   (5.1a), the two API-key read endpoints (5.1b-i) and the API-key write endpoint
   with live validation (5.1b-ii) are all ported.
-- [ ] 5.2 `profiles`
+
+Item 5.2 (`profiles`) was split into 5.2a, 5.2b and 5.2c, because the router is
+six endpoints across three distinct concerns: two plain reads, three writes that
+have to encrypt `wp_app_password` and `nextjs_webhook_secret` before they touch
+the row, and a crawl trigger whose only real content is
+enqueuing `crawl_profile_sitemap`, an ARQ job with no TypeScript equivalent yet.
+
+- [x] 5.2a `profiles`: the two read endpoints (`GET /api/profiles`,
+  `GET /api/profiles/{profile_id}`)
+
+  `web/src/app/api/profiles/serialize.ts` holds the one thing both handlers and
+  all three write handlers in 5.2b will share: `ProfileRead` as a wire shape.
+  Two columns on the row are deliberately not in it, `wp_app_password` and
+  `nextjs_webhook_secret`, both ciphertext. FastAPI dropped them because
+  `ProfileRead` in `api/src/models/schemas.py` never declared them, and a test
+  asserts the exact key set so the port cannot start returning them by
+  accident.
+
+  Null handling follows Pydantic rather than the column defaults, which is a
+  real difference in one place. `ProfileBase.default_stage_settings` defaults to
+  a six-key all-`"auto"` map, but Alembic's server default for the column is a
+  five-key all-`"review"` map, so a null column reached the dashboard as the
+  six-key map and that is what is reproduced. Non-optional fields (`tone`,
+  `word_count`, `output_format`, the three JSONB string lists, `sitemap_urls`,
+  `crawl_status`) take their Pydantic default when null; optional ones keep the
+  null, which is why `wp_default_status` stays null rather than becoming
+  `"publish"`.
+
+  `GET /api/profiles/{profile_id}` also rebuilds the path-parameter validation
+  FastAPI got for free from `profile_id: uuid.UUID`: a malformed id is a 422
+  with `type`/`loc`/`msg`/`input`, not a 500 from Postgres refusing the
+  comparison. `ctx` and `url` are not reproduced and nothing in
+  `web/src/lib/api.ts` reads them.
+
+  Scoping matches `_get_user_profile()`: the id and `user_id` are matched
+  together and a miss on either is the same 404, so another user's profile is
+  indistinguishable from one that does not exist.
+
+  ```
+  $ cd web && pnpm vitest run src/app/api/profiles/route.test.ts --reporter=verbose
+   ✓ src/app/api/profiles/route.test.ts > GET /api/profiles > 401s without a session 3ms
+   ✓ src/app/api/profiles/route.test.ts > GET /api/profiles > lists nothing for a user with no profiles 12ms
+   ✓ src/app/api/profiles/route.test.ts > GET /api/profiles > orders newest first, matching created_at desc 5ms
+   ✓ src/app/api/profiles/route.test.ts > GET /api/profiles > never returns another user's profile 3ms
+   ✓ src/app/api/profiles/route.test.ts > GET /api/profiles > returns exactly the ProfileRead fields, without the two ciphertext columns 3ms
+   ✓ src/app/api/profiles/route.test.ts > GET /api/profiles > substitutes the ProfileRead defaults for null columns 3ms
+   ✓ src/app/api/profiles/route.test.ts > GET /api/profiles/[id] > 401s without a session 1ms
+   ✓ src/app/api/profiles/route.test.ts > GET /api/profiles/[id] > returns the profile by id 2ms
+   ✓ src/app/api/profiles/route.test.ts > GET /api/profiles/[id] > 404s for an id that does not exist 2ms
+   ✓ src/app/api/profiles/route.test.ts > GET /api/profiles/[id] > 404s for another user's profile rather than revealing it exists 2ms
+   ✓ src/app/api/profiles/route.test.ts > GET /api/profiles/[id] > 422s on a malformed uuid instead of letting Postgres raise 2ms
+   Test Files  1 passed (1)
+        Tests  11 passed (11)
+     Duration  603ms
+  ```
+
+  Negative control, because a scoping test that passes on unscoped code proves
+  nothing. With `.where(eq(websiteProfiles.userId, user.id))` deleted from the
+  list handler and nothing else changed:
+
+  ```
+  $ cd web && pnpm vitest run src/app/api/profiles/route.test.ts
+       ✓ 401s without a session 3ms
+       ✓ lists nothing for a user with no profiles 14ms
+       ✓ orders newest first, matching created_at desc 6ms
+       × never returns another user's profile 7ms
+       ✓ returns exactly the ProfileRead fields, without the two ciphertext columns 3ms
+       ✓ substitutes the ProfileRead defaults for null columns 3ms
+       ✓ 401s without a session 1ms
+       ✓ returns the profile by id 3ms
+       ✓ 404s for an id that does not exist 3ms
+       ✓ 404s for another user's profile rather than revealing it exists 3ms
+       ✓ 422s on a malformed uuid instead of letting Postgres raise 2ms
+        Tests  1 failed | 10 passed (11)
+  ```
+
+  The filter was restored before the gates below were run.
+
+  Frontend gates:
+
+  ```
+  $ cd web && pnpm tsc --noEmit ; echo "TSC_EXIT=$?"
+  TSC_EXIT=0
+  $ cd web && pnpm lint ; echo "LINT_EXIT=$?"
+  LINT_EXIT=0
+  $ cd web && pnpm test
+   Test Files  2 failed | 61 passed (63)
+        Tests  9 failed | 926 passed | 7 skipped (942)
+     Duration  79.02s
+  $ cd web && pnpm build >/dev/null 2>&1 ; echo "BUILD_EXIT=$?"
+  BUILD_EXIT=0
+  ```
+
+  The 9 failures are the same Phase 0 baseline set (6 in `image-preview.test.tsx`
+  plus the 3 recorded alongside them); the suite went from 915 passing to 926,
+  which is the 11 added here. `next build` registers both handlers as dynamic:
+
+  ```
+  ├ ƒ /api/profiles
+  ├ ƒ /api/profiles/[id]
+  ```
+
+  `api/` was not touched (`git status --short api/` is empty), so its gates are
+  unchanged from the 5.1b-ii record.
+
+  **Not covered by this item**, carried into 5.2b and 5.2c: `POST /api/profiles`,
+  `PATCH /api/profiles/{profile_id}`, `DELETE /api/profiles/{profile_id}` (5.2b),
+  and `POST /api/profiles/{profile_id}/crawl` plus the `crawl_profile_sitemap`
+  job it enqueues (5.2c). `NEXT_PUBLIC_API_URL` still points the dashboard at the
+  Python API on :8055 and flips to same-origin once Phase 5 finishes, not per
+  router.
+
+- [ ] 5.2b `profiles`: the three write endpoints (`POST /api/profiles`,
+  `PATCH /api/profiles/{profile_id}`, `DELETE /api/profiles/{profile_id}`),
+  including encrypting `wp_app_password` and `nextjs_webhook_secret` with the
+  crypto port from item 1.3 and the `exclude_unset` semantics of `ProfileUpdate`
+- [ ] 5.2c `profiles`: `POST /api/profiles/{profile_id}/crawl` and the
+  `crawl_profile_sitemap` job it enqueues, which today is ARQ and has no
+  TypeScript equivalent; the auto-enqueue on create in 5.2b's `POST` depends on
+  the same mechanism and is wired up here
 - [ ] 5.3 `posts`
 - [ ] 5.4 `queue`
 - [ ] 5.5 `events` (SSE keeps `web/src/hooks/use-sse.ts`'s existing message shape; sourced from
