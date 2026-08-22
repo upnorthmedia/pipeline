@@ -5439,10 +5439,115 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   $ cd api && uv run ruff format --check .
   9 files would be reformatted, 126 files already formatted
   ```
-- [ ] 4.4b Prove restarting `web` does not disturb an in-flight pipeline: a `web` process that
+- [x] 4.4b Prove restarting `web` does not disturb an in-flight pipeline: a `web` process that
   starts a run and then dies must leave the worker executing it to completion. Split out of
   4.4 because 4.4a's harness (the real bundle, Redis database 9, the `NODE_PATH` strip) was a
   full iteration on its own; 4.4a proves `web` executes nothing, not that `web` can disappear.
+
+  `web/src/mastra/workflows/web-restart.test.ts` (8 tests) plus
+  `web/src/mastra/workflows/web-service.fixture.mjs`, the `web` side as a real separate
+  process. The fixture loads the built bundle's Mastra instance (the same
+  `src/mastra/index.ts` the worker runs) and does the only three things `web` does with
+  Mastra: `createRun()`, `startAsync()` and `getWorkflowRunById()`. It never calls
+  `startWorkers()`. It has to be a process rather than a helper inside the test, because the
+  item is about the starter dying and a function call cannot die.
+
+  **Three claims, one run each, none of them billing a provider:**
+
+  | Claim | Construction | Terminal state |
+  |---|---|---|
+  | A run outlives the process that started it | `web` A starts the run with no worker alive anywhere, exits 0, and only then is the worker spawned | `success`, six steps |
+  | A parked run survives a `web` restart | post gated at `outline` (`research` already complete), so the worker suspends it at the gate; `web` B then starts and reads it | `suspended`, unchanged |
+  | A hard-killed `web`'s run still completes | `web` B starts a run, is SIGKILLed with no chance to shut down | `success`, six steps |
+
+  Ordering for the first claim is guaranteed by construction, not by a sleep: with no consumer
+  in existence nothing can execute, so `web` A's observed exit provably precedes any step. The
+  assertion is `webAExitedAt < workerSpawnedAt` plus untouched rows three seconds later.
+
+  Provider spend is zero because the two `success` posts have every stage `complete` in
+  `stage_status` (all six steps run and return `skipped: true`) and the gated post stops at the
+  review gate before any agent call.
+
+  ```
+  $ cd web && pnpm exec vitest run src/mastra/workflows/web-restart.test.ts --reporter=verbose
+   ✓ ... > builds the deployable worker bundle from the shared Mastra entry point 1ms
+   ✓ ... > starts the runs from a web process that then exits, before anything executes 0ms
+   ✓ ... > runs the pipeline to completion in the worker although its starter is gone 1ms
+   ✓ ... > parks the gated run in flight, written by the worker 0ms
+   ✓ ... > lets a restarted web read the in-flight run exactly where the worker left it 0ms
+   ✓ ... > completes a run whose web process was killed without a shutdown 0ms
+   ✓ ... > leaves the parked run untouched across the restart 0ms
+   ✓ ... > never restarts the worker and reports nothing on its stderr 0ms
+   Test Files  1 passed (1)
+        Tests  8 passed (8)
+  ```
+
+  **Recorded decisions.**
+
+  1. The bundle is built to `.mastra/worker-restart`, not `.mastra/worker`. Vitest runs files in
+     parallel, so this suite and `worker-process.test.ts` would otherwise `rm -rf` and rebuild
+     the same directory concurrently. `mastra worker build -o <dir>` writes only inside `<dir>`
+     (`.mastra/.build`, `.mastra/bundler-config.mjs` and `.mastra/output` were untouched by a
+     build verified by mtime), so two output directories are enough isolation.
+  2. Redis database 10, for the same reason database 9 belongs to `worker-process.test.ts`: the
+     bundle uses the production pubsub config, so `keyPrefix` is not reachable from it and the
+     only isolation available is the database number.
+  3. The fixture finds the Mastra instance in the bundle by shape
+     (`typeof value === "object" && typeof value.getWorkflow === "function"`), because rollup
+     minifies the export to `m`. `Mastra` the class is also exported but is a function, and
+     carries `getWorkflow` on its prototype, so it is not matched.
+  4. "The restart did not disturb the parked run" is asserted on `updated_at` as well as on the
+     columns: an equal timestamp says no write happened at all, where equal columns alone would
+     also be satisfied by an idempotent rewrite.
+
+  **Negative controls.** Each mutation applied to a green tree, run, then reverted:
+
+  | # | Mutation | Result |
+  |---|---|---|
+  | 1 | Spawn the worker before `web` A instead of after its exit | FAIL, `starts the runs from a web process that then exits`: `expected 1787384429277 to be less than 1787384428157` |
+  | 2 | Worker reads Redis database 11 while `web` publishes to 10 | FAIL, `run 3005d501… never matched: last status running` |
+  | 3 | Fixture's `read` loop iterates `[]`, so the restarted `web` reads nothing | FAIL, `lets a restarted web read the in-flight run…`: `expected undefined to be 'suspended'` |
+  | 4 | SIGTERM instead of SIGKILL for `web` B | FAIL, `expected { code: null, signal: 'SIGTERM' } to deeply equal { code: null, signal: 'SIGKILL' }` |
+  | 5 | `update posts set current_stage = 'research'` on the parked post during the restart | FAIL, `leaves the parked run untouched across the restart`: `expected 'research' to be 'outline'` |
+  | 6 | Kill and respawn the worker between the two phases | FAIL, `never restarts the worker…`: `expected 64431 to be 64426` |
+  | 7 | Gated post seeded with `outline: auto` instead of `review` | FAIL, `run e5136c76… never matched: last status failed` (the run reached the agent and died on the absent key) |
+
+  Control 6 is the one that changed the test: the first version of it passed, because the
+  assertion read `worker.stdout()` off the rebound variable and the fresh process had printed
+  `Workers started` exactly once. Recording the pid at the first spawn and asserting identity
+  at the end is what made the claim real.
+
+  A first attempt at control 2 also passed vacuously: `deployEnv()` is shared by the `web`
+  fixture and the worker, so overriding `REDIS_URL` inside it moved both processes to the same
+  wrong database. The control only bites when the override is applied to the worker's spawn.
+
+  **Frontend gates:**
+
+  ```
+  $ cd web && pnpm exec tsc --noEmit
+  (no output, exit 0)
+  $ cd web && pnpm exec eslint
+  (no output, exit 0)
+  $ cd web && pnpm test
+   Test Files  2 failed | 51 passed (53)
+        Tests  9 failed | 797 passed | 8 skipped (814)
+  $ cd web && pnpm build
+  ✓ Compiled successfully in 3.1s
+  ```
+
+  The 9 failures are the recorded baseline: 6 in `image-preview.test.tsx` and 3 in
+  `PostDetail.test.tsx`. 789 passing became 797, the 8 tests added here.
+
+  Backend gates, unchanged at the Phase 0 baseline (no Python touched):
+
+  ```
+  $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test NO_COLOR=1 uv run pytest -q
+  125 failed, 236 passed, 25 errors in 15.08s
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 126 files already formatted
+  ```
 - [ ] 4.5 **Durability gate.** Kill the worker mid-`write`, restart it, and have the run resume
   from the last completed stage without re-running completed stages or duplicating writes.
   Record the outcome and the chosen workflow runner here. On failure: first add a worker
