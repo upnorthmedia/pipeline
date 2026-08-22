@@ -5854,8 +5854,167 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   9 files would be reformatted, 126 files already formatted
   ```
 
-- [ ] 4.6 Concurrency: two pipelines at once must not interleave writes to the same Post row or
+- [x] 4.6 Concurrency: two pipelines at once must not interleave writes to the same Post row or
   exhaust connections. Test passes.
+
+  **The defect this found.** Every stage committed its column with
+  `saveStageOutput(postId, stage, content, {...state.stageStatus, stage: "complete"})`: the
+  fourth argument was the whole `stage_status` map, read from the row when the step started.
+  That is a read-modify-write over a column two runs share. Two runs on one post that both read
+  the row before either finishes each hold a pre-image of the map, so whichever writes second
+  erases the other's entry. `stage_status` is what the dashboard reads to decide what has run,
+  so a lost entry reports a finished stage as never run and a subsequent full pipeline re-bills
+  it. Python had the same shape (`save_stage_output` in `api/src/pipeline/helpers.py:268`), so
+  this is a defect carried over by a faithful port rather than one introduced by it.
+
+  **Failing first**, before any fix, with the test's forced overlap in place:
+
+  ```
+  $ cd web && NO_COLOR=1 npx vitest run src/mastra/workflows/concurrency.test.ts
+   FAIL  src/mastra/workflows/concurrency.test.ts > two runs writing the same post row at once >
+     keeps both stages in stage_status rather than losing the earlier write
+  AssertionError: expected { outline: 'complete' } to deeply equal { research: 'complete', ...(1) }
+
+  - Expected
+  + Received
+
+    {
+      "outline": "complete",
+  -   "research": "complete",
+    }
+
+   Test Files  1 failed (1)
+        Tests  2 failed | 8 passed (10)
+  ```
+
+  (The second failure in that run was a fault in the test itself, not in the code: `ready` is the
+  one stage whose prompt is not built by `buildStagePrompt`, so it renders the slug rather than
+  the topic and never saw the per-post marker. The marker now rides in both columns.)
+
+  **The fix.** `mergeStageStatus()` in `web/src/mastra/post-state.ts` does the merge in SQL,
+  inside the same single `UPDATE` that writes the content column, where Postgres' row lock
+  serializes it:
+
+  ```
+  coalesce(posts.stage_status, '{}'::jsonb) || $patch::jsonb
+  ```
+
+  `saveStageOutput`'s fourth argument is now a patch (`{research: "complete"}`) rather than a
+  whole map, and `markStageForReview` takes no map at all. Every call site already computed a
+  pure merge (`{...state.stageStatus, [stage]: X}`), so single-run behaviour is unchanged. Two
+  reads that existed only to build the map are gone: `reviewGate` lost its `stageStatus`
+  parameter, and `images-assemble` lost a whole `loadPipelineState` call.
+
+  **Passing**, ten tests over six real evented runs against live Postgres and Redis:
+
+  ```
+  $ cd web && NO_COLOR=1 npx vitest run src/mastra/workflows/concurrency.test.ts
+
+   RUN  v4.0.18 /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+
+   ✓ src/mastra/workflows/concurrency.test.ts (10 tests) 3484ms
+
+   Test Files  1 passed (1)
+        Tests  10 passed (10)
+     Duration  4.45s
+  ```
+
+  **What the test actually runs.** Two groups, all six agents stubbed and nothing else; the
+  database, Redis and the evented engine are real.
+
+  1. *Same row.* One post, two concurrent named-stage runs (`["research"]` and `["outline"]`).
+     Both stubbed agents wait on a two-party barrier that sits downstream of
+     `loadPipelineState` and upstream of `saveStageOutput` in both steps, so by construction
+     both runs have read the row before either writes it. Asserts both runs succeed, that
+     `stage_status` ends with both entries, that both content columns are committed, and that
+     `current_stage` holds one of the two stages.
+  2. *Different rows, and the pool.* Four full six-stage pipelines at once on four posts, each
+     carrying a distinct marker in its topic and slug that every stubbed agent echoes. Asserts
+     all four succeed, that every post's six stages are complete, and that no row holds another
+     post's marker in any of its five prose columns. While they run the shared `pg` pool is
+     sampled every 20ms.
+
+  **`current_stage` is deliberately not serialized.** Both runs set it to their own stage and
+  the later write wins. There is no ordering to prefer between two runs a user started at the
+  same time, so the guarantee asserted is that it holds one of the two stages, not a
+  particular one. Same for the content columns: each stage owns a different column, so a single
+  `UPDATE` per stage means there is nothing to interleave.
+
+  **Connections.** The pool is shared with Mastra's `PostgresStore`, so the engine's own storage
+  traffic competes with the stage steps for the same ten connections. Measured peak across the
+  four concurrent pipelines, from a temporary log removed before commit:
+
+  ```
+  POOLPEAK {"max":10,"total":4,"waiting":0,"borrowed":4}
+  ```
+
+  Four of ten connections opened, none ever queued. The settled pool is then asserted to hold no
+  borrowed client, which is the leak that actually exhausts a pool over a long-lived worker's
+  life.
+
+  **Negative controls.** Every one was applied to a clean tree and reverted from a `/tmp` copy.
+
+  | # | Mutation | Expected | Observed |
+  | --- | --- | --- | --- |
+  | 1 | `mergeStageStatus` replaced by a plain assignment of the patch | same-row test fails | `Tests 2 failed \| 8 passed`; `expected { outline: 'complete' } to deeply equal { research: 'complete', ...(1) }`, and group two's status map collapsed to `{ ready: 'complete' }` because the call sites now send patches |
+  | 2 | Control 1 plus `research`/`outline` call sites reverted to spreading the whole map (the true pre-fix state), and the barrier disarmed | same-row test **passes**, proving the barrier is load-bearing | `✓ keeps both stages in stage_status...`; without the forced overlap the two runs did not race and the defect was invisible |
+  | 3 | `write` commits to a hardcoded post id instead of its own | cross-post test fails | `Tests 2 failed \| 8 passed`; `× never writes one post's output into another post's row` |
+  | 4 | A client borrowed from the pool and never released | leak test fails | `Tests 1 failed \| 9 passed`; `× returns every borrowed connection once the runs settle` |
+  | 5 | The pool sampler replaced by a no-op | pool-bound test fails rather than passing vacuously | `Tests 1 failed \| 9 passed`; `× never opened more connections than the pool allows` |
+
+  Control 2 is the one worth reading twice: it shows the pre-fix code passes this test when the
+  overlap is left to the scheduler. A concurrency test without a forced rendezvous would have
+  been green on broken code.
+
+  The `coalesce` in the merge is load-bearing rather than defensive; the column is nullable and
+  `||` propagates null, which would blank the map instead of seeding it:
+
+  ```
+  $ docker compose exec -T db psql -U pipeline -d content_pipeline -c "select (null::jsonb || '{\"research\":\"complete\"}'::jsonb) is null as without_coalesce_is_null, coalesce(null::jsonb,'{}'::jsonb) || '{\"research\":\"complete\"}'::jsonb as with_coalesce;"
+   without_coalesce_is_null |      with_coalesce
+  --------------------------+--------------------------
+   t                        | {"research": "complete"}
+  (1 row)
+  ```
+
+  Frontend gates:
+
+  ```
+  $ cd web && NO_COLOR=1 npx tsc --noEmit
+  (no output)
+  exit 0
+
+  $ cd web && NO_COLOR=1 npx eslint
+  (no output)
+  lint exit: 0
+
+  $ cd web && NO_COLOR=1 npx vitest run
+   Test Files  2 failed | 53 passed (55)
+        Tests  9 failed | 815 passed | 8 skipped (832)
+  ```
+
+  Nine failures, the recorded baseline for this worktree: 6 in `image-preview.test.tsx` and 3 in
+  `PostDetail.test.tsx`. An earlier run of the same suite reported 10, the extra one being
+  `scaffold-check.test.ts`'s stream-event race already logged in `todo.md`; it does not reproduce
+  on a second run.
+
+  ```
+  $ cd web && NO_COLOR=1 npx next build
+   ✓ Compiled successfully
+  build exit: 0
+  ```
+
+  Backend gates, unchanged at the Phase 0 baseline (no Python touched):
+
+  ```
+  $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test NO_COLOR=1 uv run pytest -q
+  125 failed, 236 passed, 25 errors in 15.45s
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 126 files already formatted
+  ```
+
 - [ ] 4.7 Full workflow runs end to end against the real database.
 
 ## Phase 5: Route handlers (one router per iteration)

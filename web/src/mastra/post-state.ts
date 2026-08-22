@@ -11,7 +11,7 @@
  * Kept out of `state.ts` so that module stays free of database imports: the
  * prompt assembly and the stage vocabulary are pure, this file is not.
  */
-import { eq, getTableColumns } from "drizzle-orm"
+import { eq, getTableColumns, sql } from "drizzle-orm"
 
 import { getDb, internalLinks, posts } from "../db"
 import {
@@ -136,8 +136,28 @@ const contentColumnByStage: Record<Stage, string> = (() => {
 })()
 
 /**
+ * A `stage_status` update that merges the caller's entries into whatever the
+ * column holds *at the moment the statement runs*, rather than into the copy
+ * the caller read earlier.
+ *
+ * Python passed the whole map, having read it at the start of the stage, and
+ * every call site in this port did the same. That is a read-modify-write over a
+ * column two runs share: start a run for `research` and a run for `outline` on
+ * one post and both steps read `stage_status` before either finishes, so the
+ * one that writes second erases the other's entry and the dashboard reports a
+ * finished stage as never run. Doing the merge in SQL keeps the whole operation
+ * inside the single `UPDATE`, where Postgres' row lock serializes it.
+ *
+ * `coalesce` because the column is nullable: `null || '{...}'` is null, which
+ * would blank the map rather than seed it.
+ */
+function mergeStageStatus(patch: Record<string, string>) {
+  return sql`coalesce(${posts.stageStatus}, '{}'::jsonb) || ${JSON.stringify(patch)}::jsonb`
+}
+
+/**
  * Commit a stage's output to its column, advance `current_stage`, and (when the
- * caller has one) replace the whole `stage_status` map so the dashboard's
+ * caller has one) merge its `stage_status` entries in so the dashboard's
  * progress view stays in step.
  *
  * `updatedAt` is stamped explicitly because SQLAlchemy's `onupdate` stamped it
@@ -148,7 +168,7 @@ export async function saveStageOutput(
   postId: string,
   stage: Stage,
   content: string | Record<string, unknown>,
-  stageStatus?: Record<string, string>,
+  stageStatusPatch?: Record<string, string>,
 ): Promise<void> {
   const values: Record<string, unknown> = {
     // Strings land in text columns, objects in the `image_manifest` JSONB
@@ -157,7 +177,7 @@ export async function saveStageOutput(
     currentStage: stage,
     updatedAt: new Date(),
   }
-  if (stageStatus !== undefined) values.stageStatus = stageStatus
+  if (stageStatusPatch !== undefined) values.stageStatus = mergeStageStatus(stageStatusPatch)
 
   await getDb().update(posts).set(values).where(eq(posts.id, postId))
 }
@@ -171,15 +191,11 @@ export async function saveStageOutput(
  * there is no content to commit, and writing the content column here would let
  * a resumed run mistake an empty string for a stage that produced nothing.
  */
-export async function markStageForReview(
-  postId: string,
-  stage: Stage,
-  stageStatus: Record<string, string>,
-): Promise<void> {
+export async function markStageForReview(postId: string, stage: Stage): Promise<void> {
   await getDb()
     .update(posts)
     .set({
-      stageStatus: { ...stageStatus, [stage]: STATUS_REVIEW },
+      stageStatus: mergeStageStatus({ [stage]: STATUS_REVIEW }),
       currentStage: stage,
       updatedAt: new Date(),
     })

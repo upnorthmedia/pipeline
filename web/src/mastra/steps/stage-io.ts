@@ -176,13 +176,12 @@ export async function reviewGate(
   stage: Stage,
   input: StageStepInput,
   stageSettings: Record<string, string>,
-  stageStatus: Record<string, string>,
   resumeData?: GateResume,
 ): Promise<GateSuspendPayload | null> {
   if (resumeData?.approved) return null
   if (!stageNeedsReview(stage, input, stageSettings)) return null
 
-  await markStageForReview(input.postId, stage, stageStatus)
+  await markStageForReview(input.postId, stage)
   return {
     stage,
     mode: gateModeFor(stage, stageSettings) as ReviewMode,

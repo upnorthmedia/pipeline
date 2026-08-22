@@ -18,7 +18,7 @@ import { createStep } from "@mastra/core/workflows/evented"
 import { z } from "zod"
 
 import { GEMINI_IMAGE_MODEL_ID } from "../images/gemini"
-import { loadPipelineState, saveStageOutput } from "../post-state"
+import { saveStageOutput } from "../post-state"
 import { STATUS_COMPLETE, STATUS_FAILED } from "../state"
 import { generatedImageSchema } from "./images-generate"
 import { imageManifestSchema, imagesManifestStep } from "./images-manifest"
@@ -116,15 +116,12 @@ export const imagesAssembleStep = createStep({
       tokensOut: manifestResult.tokensOut,
     }
 
-    const state = await loadPipelineState(postId)
-
     if (parseFailed) {
       // `timer.duration` is still 0 here: Python returns from *inside* the
       // `with` block, and `StageTimer` only computes the elapsed time in
       // `__exit__`. So a failed manifest is reported as taking no time, and
       // there is no Gemini record because no image was attempted.
       await saveStageOutput(postId, "images", manifestResult.manifest, {
-        ...state.stageStatus,
         images: STATUS_FAILED,
       })
       // No rerun completion check here: the stage just marked itself failed, so
@@ -143,10 +140,7 @@ export const imagesAssembleStep = createStep({
     const manifest = imageManifestSchema.parse(foldManifest(manifestResult.manifest, images))
     const totalGenerated = Number(manifest.total_generated)
 
-    await saveStageOutput(postId, "images", manifest, {
-      ...state.stageStatus,
-      images: STATUS_COMPLETE,
-    })
+    await saveStageOutput(postId, "images", manifest, { images: STATUS_COMPLETE })
     await markRerunComplete({ postId, stages })
 
     // Python seeds `gemini_model` with the requested id and overwrites it with

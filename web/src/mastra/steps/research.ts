@@ -92,13 +92,7 @@ export const researchStep = createStep({
 
     // The gate sits immediately after the skip check and before anything the
     // stage spends, which is where Python put it: a paused stage bills nothing.
-    const gate = await reviewGate(
-      "research",
-      inputData,
-      state.stageSettings,
-      state.stageStatus,
-      resumeData,
-    )
+    const gate = await reviewGate("research", inputData, state.stageSettings, resumeData)
     if (gate) return suspend(gate)
     const prompt = buildStagePrompt("research", loadRules("research"), state)
     const agent = mastra.getAgent("research")
@@ -139,10 +133,7 @@ export const researchStep = createStep({
       })
     }
 
-    await saveStageOutput(postId, "research", text, {
-      ...state.stageStatus,
-      research: STATUS_COMPLETE,
-    })
+    await saveStageOutput(postId, "research", text, { research: STATUS_COMPLETE })
     await markRerunComplete(inputData)
 
     return {

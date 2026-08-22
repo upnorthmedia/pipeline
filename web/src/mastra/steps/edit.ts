@@ -222,13 +222,7 @@ export const editStep = createStep({
 
     // The gate sits immediately after the skip check and before anything the
     // stage spends, which is where Python put it: a paused stage bills nothing.
-    const gate = await reviewGate(
-      "edit",
-      inputData,
-      state.stageSettings,
-      state.stageStatus,
-      resumeData,
-    )
+    const gate = await reviewGate("edit", inputData, state.stageSettings, resumeData)
     if (gate) return suspend(gate)
     const rulesPrompt = buildStagePrompt("edit", loadRules("edit"), state)
     const analyticsSection = buildAnalyticsSection(state)
@@ -263,10 +257,7 @@ export const editStep = createStep({
       )
     }
 
-    await saveStageOutput(postId, "edit", validation.content, {
-      ...state.stageStatus,
-      edit: STATUS_COMPLETE,
-    })
+    await saveStageOutput(postId, "edit", validation.content, { edit: STATUS_COMPLETE })
     await markRerunComplete(inputData)
 
     return {
