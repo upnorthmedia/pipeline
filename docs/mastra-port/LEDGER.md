@@ -5548,7 +5548,7 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   $ cd api && uv run ruff format --check .
   9 files would be reformatted, 126 files already formatted
   ```
-- [ ] 4.5 **Durability gate.** Kill the worker mid-`write`, restart it, and have the run resume
+- [x] 4.5 **Durability gate.** Kill the worker mid-`write`, restart it, and have the run resume
   from the last completed stage without re-running completed stages or duplicating writes.
   Record the outcome and the chosen workflow runner here. On failure: first add a worker
   startup sweep that resumes interrupted runs from storage; only if that still fails, adopt
@@ -5561,6 +5561,11 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   ("does a run killed mid-`write` resume from `outline`?") bills Anthropic twice for `write`
   and takes minutes, so it is a scripted procedure rather than a suite member. 4.5a answers the
   first and 4.5b applies it to the real bundle.
+
+  **Both passed. The port's workflow runner is Mastra's built-in evented engine over
+  `RedisStreamsPubSub`, with Postgres storage.** No worker startup sweep (4.5b finding 2 shows
+  storage carries no record of an interrupted step, so a sweep could not have found one),
+  no `@mastra/inngest`, no second queue. Evidence under 4.5a and 4.5b.
 
 - [x] 4.5a Engine guarantee: a step whose worker is `SIGKILL`ed mid-execution is redelivered to
   a restarted worker and completes, while the step that had already completed is neither
@@ -5686,11 +5691,169 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   9 files would be reformatted, 126 files already formatted
   ```
 
-- [ ] 4.5b Pipeline gate: start a full run against the real worker bundle, kill the worker
+- [x] 4.5b Pipeline gate: start a full run against the real worker bundle, kill the worker
   mid-`write`, restart it, and prove the run resumes without re-running `research` or `outline`
   and without duplicating their column writes. Bills Anthropic for two `write` calls, so it is
   a scripted procedure with pasted output rather than a suite member. Record the chosen
   workflow runner (expected: the built-in evented engine, per 4.5a).
+
+  **Outcome: passed on the built-in evented engine over Redis Streams. That is the port's
+  workflow runner.** No worker startup sweep, no `@mastra/inngest`, no second queue.
+
+  The procedure is `web/src/mastra/scripts/durability-gate.mjs`, run once, exit 0, 10/10
+  checks. It builds the real deployable bundle from scratch (`mastra worker build -o
+  .mastra/worker-durability`), starts the run from a separate `web` process
+  (`web-service.fixture.mjs`, which never calls `startWorkers()`), and spawns the bundle's own
+  `index.mjs` as worker A and later worker B. Isolated to Redis database 12, because 9, 10 and
+  11 belong to the three worker suites and all four share the `workflows` topic name.
+
+  Three things about how it is built, because each one is what makes a claim checkable:
+
+  - **The run parks itself.** The seeded post sets `research`/`outline`/`write` to `"auto"` and
+    `edit`/`images`/`ready` to `"review"`, so the moment `write` commits its column the run
+    suspends at the `edit` gate. That is ordinary production behaviour for a gated post and a
+    real terminal state, and it stops the procedure spending on image generation to prove
+    something about `write`.
+  - **"Not rewritten" is counted, not inferred.** For the duration of the run the script
+    installs an `AFTER INSERT OR UPDATE` trigger on `posts`, scoped to the one seeded row,
+    logging every write of the three content columns with its md5 into a temporary
+    `durability_gate_writes` table. Trigger, function and table are dropped in `finally`. This
+    is measurement scaffolding on a dev row, not a schema change to the port.
+  - **The providers' keys never touch the repo.** They are read from the environment,
+    encrypted under the same throwaway Fernet key `write.test.ts` uses via the app's own
+    `encryptWithKey`, written to the `settings` row the agents read, and the previous row is
+    restored in `finally` (verified afterwards: the restored ciphertext does not decrypt under
+    the throwaway key).
+
+  ```
+  $ cd web && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/mastra/scripts/durability-gate.mjs
+  [2026-08-22T13:17:02.142Z] building the worker bundle from scratch
+  [2026-08-22T13:17:15.381Z] seeding the post
+  [2026-08-22T13:17:15.387Z] installing the write audit trigger
+  [2026-08-22T13:17:15.403Z] writing the provider keys into the settings row
+  [2026-08-22T13:17:16.406Z] starting the run from a separate `web` process
+  [2026-08-22T13:17:16.683Z] run de13b1f1-9cac-4196-bed6-337b615599b6 published, no worker alive yet
+  [2026-08-22T13:17:16.683Z] worker A spawned (pid 85187)
+  [2026-08-22T13:17:16.683Z] waiting for `outline` to commit
+  [2026-08-22T13:18:34.769Z] outline committed after 78.086s
+  [2026-08-22T13:18:34.769Z] holding 30s so the kill lands inside the write agent call
+  [2026-08-22T13:19:04.772Z] worker A SIGKILLed mid-`write`
+  [2026-08-22T13:19:04.808Z] worker B spawned (pid 85885)
+  [2026-08-22T13:19:04.809Z] waiting for `write` to commit on worker B
+  [2026-08-22T13:20:42.919Z] waiting for the run to settle
+  [2026-08-22T13:20:42.932Z] PASS  research-step-record-unchanged: persisted step record for `research` is byte-identical across the crash
+  [2026-08-22T13:20:42.932Z] PASS  outline-step-record-unchanged: persisted step record for `outline` is byte-identical across the crash
+  [2026-08-22T13:20:42.932Z] PASS  killed-mid-write: at the kill: research 6179 chars, outline 12035 chars, draft null
+  [2026-08-22T13:20:42.932Z] PASS  write-completed-after-restart: draft_content is 13001 chars after the restart
+  [2026-08-22T13:20:42.932Z] PASS  research-not-rewritten: research_content md5 unchanged across the crash and only 1 distinct value in 4 logged writes (0 rewrites)
+  [2026-08-22T13:20:42.932Z] PASS  outline-not-rewritten: outline_content md5 unchanged across the crash and only 1 distinct value in 4 logged writes (0 rewrites)
+  [2026-08-22T13:20:42.932Z] PASS  draft-written-once: draft_content has 1 distinct value in the write log (0 rewrites)
+  [2026-08-22T13:20:42.932Z] PASS  resumed-through-reclaim: write committed 98.1s after the kill, which is past the 60s XAUTOCLAIM idle threshold: the message was pending under worker A, so worker A had genuinely started the step
+  [2026-08-22T13:20:42.932Z] PASS  parked-at-edit-gate: run status suspended, suspendedPaths {"edit":[3]}, stage_status.edit review
+  [2026-08-22T13:20:42.932Z] PASS  worker-b-is-a-different-process: worker A pid 85187, worker B pid 85885
+  [2026-08-22T13:20:42.943Z] 10/10 checks passed
+  $ echo $?
+  0
+  ```
+
+  The audit table, which is the whole "no duplicated writes" claim in four rows. Every content
+  column is written exactly once, and nothing that existed before the kill (13:19:04.772Z) is
+  touched after it:
+
+  ```
+  {"at": "13:17:25.810Z", "research": "6179 1b197cba", "outline": null,            "draft": null,             "stageStatus": {"research": "complete"}}
+  {"at": "13:18:33.982Z", "research": "6179 1b197cba", "outline": "12035 0840c369", "draft": null,             "stageStatus": {"outline": "complete", "research": "complete"}}
+  {"at": "13:20:42.291Z", "research": "6179 1b197cba", "outline": "12035 0840c369", "draft": "13001 f058f23b", "stageStatus": {"write": "complete", "outline": "complete", "research": "complete"}}
+  {"at": "13:20:42.299Z", "research": "6179 1b197cba", "outline": "12035 0840c369", "draft": "13001 f058f23b", "stageStatus": {"edit": "review", "write": "complete", "outline": "complete", "research": "complete"}}
+  ```
+
+  Run state either side of the kill, from `workflow.getWorkflowRunById()`:
+
+  ```
+  at the kill:    status "running",   steps ["outline","research"],                stage_status {"outline":"complete","research":"complete"}
+  after restart:  status "suspended", steps ["edit","write","outline","research"], stage_status {"edit":"review","write":"complete","outline":"complete","research":"complete"}
+                  suspendedPaths {"edit":[3]}, current_stage "edit"
+  ```
+
+  Timings and spend. `outline` committed 78.1s into the run; the kill landed 30s after that;
+  worker B was up 36ms later; `write` committed 98.1s after the kill and the run settled 11ms
+  after that. Providers reported: `research` `sonar-pro` 142 in / 1313 out, `outline`
+  `claude-opus-4-6` 1636 in / 2982 out, `write` `claude-opus-4-6` 3148 in / 3162 out (the
+  second, successful attempt; the first attempt's tokens died with worker A and are not
+  reported anywhere, which is itself worth knowing for Phase 8's cost display).
+
+  Three findings worth carrying forward:
+
+  1. **The 98.1s is the evidence, not an inconvenience.** Worker B was alive 36ms after the
+     kill, so had the `workflow.step.run` message for `write` still been unread in the stream
+     it would have been consumed immediately. It was not: it sat in worker A's pending-entries
+     list until `XAUTOCLAIM` reclaimed it. That both proves worker A had genuinely entered the
+     step body and confirms 4.5a's measured 60-90s reclaim window on the real pipeline. A
+     stage whose worker dies is parked for about a minute and a half before anything happens.
+  2. **The run snapshot has no record of the interrupted step.** At the kill, `steps` held
+     `research` and `outline` and no key at all for `write`, exactly as 4.5a found on the
+     probe. Nothing in storage identifies an interrupted step, so the ledger's stated fallback
+     (a worker startup sweep over storage) could not have been implemented even if it had been
+     needed.
+  3. **Recovery re-runs the whole step, so the provider is billed twice for `write`.** That is
+     the memoization boundary: completed steps are never re-executed, interrupted ones restart
+     from the top. At current volumes that is the right trade, but it is the cost model Phase 8
+     has to display honestly.
+
+  Negative controls. The system-level controls for this property were run in 4.5a on the
+  provider-free probe against the same engine, transport and consumer group: worker B on the
+  wrong Redis database (no recovery), `reclaimIntervalMs: 0` (no recovery), no kill at all
+  (redelivery claims fail), and a step body that records twice (exactly-once claim fails).
+  Re-running them here would re-bill `research` and `outline` to re-learn a property already
+  proven for free, so they were not repeated, and that is a deliberate choice rather than a
+  gap in the evidence. What is specific to this item is the audit instrument, so that is what
+  was controlled here: the `count(distinct md5) = 1` rule was replayed over the recorded log,
+  over a log in which `research_content` is rewritten once, and over an empty log standing for
+  a trigger that never fired.
+
+  ```
+  $ psql "$DATABASE_URL" -c "<the three scenarios over the recorded md5s>"
+                 scenario               | distinct_values | check_passes
+  --------------------------------------+-----------------+--------------
+   real log (trigger fired, no rewrite) |               1 | t
+   research rewritten once by a re-run  |               2 | f
+   audit trigger never fired            |               0 | f
+  ```
+
+  The third row is the one that matters: a dead instrument fails the check rather than
+  silently satisfying it, so a green result cannot be produced by a trigger that was not
+  recording.
+
+  Frontend gates:
+
+  ```
+  $ cd web && pnpm tsc --noEmit
+  (no output, exit 0)
+  $ cd web && pnpm lint
+  (no output, exit 0)
+  $ cd web && NO_COLOR=1 pnpm test
+   Test Files  2 failed | 52 passed (54)
+        Tests  9 failed | 805 passed | 8 skipped (822)
+     Duration  79.67s
+  $ cd web && NO_COLOR=1 pnpm build
+  ✓ Compiled successfully in 3.2s
+  (exit 0)
+  ```
+
+  The 9 failures are the recorded baseline for this worktree (6 `image-preview` +
+  3 `PostDetail`), unchanged: this item adds a script, not a test.
+
+  Backend gates, unchanged at the Phase 0 baseline (no Python touched):
+
+  ```
+  $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test NO_COLOR=1 uv run pytest -q
+  125 failed, 236 passed, 25 errors in 15.23s
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 126 files already formatted
+  ```
+
 - [ ] 4.6 Concurrency: two pipelines at once must not interleave writes to the same Post row or
   exhaust connections. Test passes.
 - [ ] 4.7 Full workflow runs end to end against the real database.
