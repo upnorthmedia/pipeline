@@ -10152,7 +10152,196 @@ three pieces are separately verifiable, so they are separate items.
       177 errors` because `POSTGRES_HOST_PORT` is 5435 in this checkout, not the 5433
       compose default. That is the trap recorded in the project memory, and it is easy to
       mistake for a regression.
-- [ ] 5.4 `queue`
+- [ ] 5.4 `queue` (split: seven endpoints, and four of them are about the ARQ worker
+  rather than about posts. `GET /worker-status` reads `arq:worker:*`, `arq:queue` and
+  `WORKER_LAST_COMPLETED_KEY`, and the three dead-letter endpoints read and write
+  `DLQ_KEY`, a Redis list `api/src/worker.py` writes. None of those four keys exists in
+  the Mastra/Redis Streams world, so each needs its equivalent designed rather than
+  transcribed. The three post-shaped endpoints do not. Split into 5.4a the status
+  counts, 5.4b pause-all and resume-all, 5.4c worker-status, 5.4d the dead-letter trio.)
+
+  Only three of the seven are reachable from the dashboard: `web/src/lib/api.ts`'s
+  `queue` namespace declares `status`, `pauseAll` and `resumeAll` and nothing else, and
+  `grep -rn "worker-status\|dead-letter\|worker_alive" web/src packages` returns nothing.
+  That is why the two ARQ-shaped items sort last.
+
+  - [x] 5.4a `GET /api/queue`.
+
+    `web/src/app/api/queue/route.ts` ports `queue_status()`. One grouped count over the
+    caller's posts, joined to `website_profiles` and filtered on `user_id`, folded into
+    the six numbers `QueueStatus` in `web/src/lib/api.ts` declares.
+
+    Two details of the Python arithmetic are load-bearing and preserved:
+
+    - `running` is the sum of the groups whose key is one of the six pipeline stages, so
+      a post parked at a review gate still counts as running. `api/src/worker.py:168`
+      sets `current_stage = stage` before the stage executes and nothing resets it while
+      the gate holds, so the stage name is what a gated post carries.
+    - `total` is `sum(counts.values())`, the sum of *every* group, not of the five
+      reported buckets. That difference is reachable, because `posts.current_stage` is
+      nullable in the live database with no check constraint:
+
+      ```
+      $ psql -c "select column_name, is_nullable, data_type, column_default from
+                 information_schema.columns where table_name='posts'
+                 and column_name in ('current_stage','profile_id');"
+        column_name  | is_nullable |     data_type     |        column_default
+      ---------------+-------------+-------------------+------------------------------
+       profile_id    | YES         | uuid              |
+       current_stage | YES         | character varying | 'pending'::character varying
+      ```
+
+      SQLAlchemy's `group_by` puts a null into its own group and `func.count(Post.id)`
+      counts it, confirmed against the same server rather than assumed:
+
+      ```
+      $ psql -tA -c "with t(id, stage) as (values (1,'pending'),(2,null),(3,'write'))
+                     select coalesce(stage,'<NULL>'), count(id) from t group by stage order by 1;"
+      <NULL>|1
+      pending|1
+      write|1
+      ```
+
+      So a row carrying null or an unrecognised stage lands in `total` and in no bucket,
+      and the five buckets do not have to add up to `total`. Nothing in the application
+      writes such a row, but the port reproduces the arithmetic rather than the
+      assumption behind it.
+
+    The join is kept inner to mirror the original, with the same honest note recorded
+    under 5.3a: it is the `user_id` predicate that excludes a post whose `profile_id` is
+    null, since an unowned row matches no user, so swapping the join for a left join
+    changes nothing. That is negative control 3 below, which does not fail, and the test
+    is named for the predicate rather than for the join.
+
+    No deviation from the Python for this endpoint: it is a pure read, writes nothing,
+    and enqueues nothing, so the `updated_at` deviation recorded under 5.2b, 5.3b-ii and
+    5.3c-iii-a does not arise.
+
+    Eleven tests in `web/src/app/api/queue/route.test.ts`, against the real database and
+    real BetterAuth sessions:
+
+    ```
+    $ pnpm -C web vitest run src/app/api/queue/route.test.ts --reporter=verbose
+     v src/app/api/queue/route.test.ts > GET /api/queue > rejects an unauthenticated request 3ms
+     v src/app/api/queue/route.test.ts > GET /api/queue > answers every bucket at zero when the caller has no posts 16ms
+     v src/app/api/queue/route.test.ts > GET /api/queue > counts pending, complete, failed and paused into their own buckets 8ms
+     v src/app/api/queue/route.test.ts > GET /api/queue > sums all six pipeline stages into running 8ms
+     v src/app/api/queue/route.test.ts > GET /api/queue > counts a post left on its stage at a review gate as running 3ms
+     v src/app/api/queue/route.test.ts > GET /api/queue > uses the column default when no stage is given, so a fresh post is pending 2ms
+     v src/app/api/queue/route.test.ts > GET /api/queue > counts only the caller's posts 6ms
+     v src/app/api/queue/route.test.ts > GET /api/queue > excludes a post with no profile, which matches no user 3ms
+     v src/app/api/queue/route.test.ts > GET /api/queue > counts a null stage in total and in no bucket 2ms
+     v src/app/api/queue/route.test.ts > GET /api/queue > counts an unrecognised stage in total and in no bucket 2ms
+     v src/app/api/queue/route.test.ts > GET /api/queue > returns numbers, not the bigint strings the driver reports counts as 2ms
+     Test Files  1 passed (1)
+          Tests  11 passed (11)
+       Start at  14:47:05
+       Duration  540ms (transform 43ms, setup 78ms, import 308ms, tests 89ms, environment 0ms)
+    ```
+
+    The file's two profiles are created once in `beforeAll` and only the posts are
+    cleared between tests, because a shared `clearFixtures()` that also dropped the
+    profiles left every later insert violating `posts_profile_id_fkey`.
+
+    Negative controls, each reverted after measuring:
+
+    ```
+    # 1. drop the .where(eq(websiteProfiles.userId, user.id)) predicate
+    Tests  1 failed | 10 passed (11)
+      x counts only the caller's posts
+
+    # 2. compute total as running + pending + complete + failed + paused
+    Tests  2 failed | 9 passed (11)
+      x counts a null stage in total and in no bucket
+      x counts an unrecognised stage in total and in no bucket
+
+    # 3. leftJoin instead of innerJoin
+    Tests  11 passed (11)
+    # Does not fail, and is recorded because it is the control that proves the note
+    # above: the user_id predicate, not the join strategy, is what hides an unowned
+    # post. Keeping the inner join is a faithfulness choice with no behavioural weight.
+
+    # 4. replace count(posts.id) with sql<number>`count(${posts.id})`, losing the
+    #    Number mapping
+    Tests  8 failed | 3 passed (11)
+      x counts pending, complete, failed and paused into their own buckets
+      x sums all six pipeline stages into running
+      x counts a post left on its stage at a review gate as running
+      x uses the column default when no stage is given, so a fresh post is pending
+      x counts only the caller's posts
+      x excludes a post with no profile, which matches no user
+      x counts a null stage in total and in no bucket
+      x counts an unrecognised stage in total and in no bucket
+    # node-postgres returns bigint as a string, so every bucket became a concatenation.
+    # Drizzle's count() helper carries .mapWith(Number); a raw sql`count(...)` does not.
+    ```
+
+    Gates:
+
+    ```
+    $ pnpm -C web tsc --noEmit
+    TSC EXIT=0
+    (no output)
+
+    $ pnpm -C web lint
+    LINT EXIT=0
+    (no output)
+
+    $ pnpm -C web test
+     Test Files  2 failed | 76 passed (78)
+          Tests  9 failed | 1389 passed | 7 skipped (1405)
+    # 9 failed is the recorded baseline, unchanged, and confirmed to be the same two
+    # files:
+    #   $ grep -E "FAIL |x " | grep -oE "src/[^ ]+\.tsx?" | sort | uniq -c
+    #      3 src/app/posts/PostDetail.test.tsx
+    #      6 src/components/__tests__/image-preview.test.tsx
+    # Passing count 1378 -> 1389 (+11).
+
+    $ pnpm -C web build
+    BUILD EXIT=0
+    v Compiled successfully in 3.8s
+    Route (app)
+    |- f /api/queue
+
+    $ cd api && set -a && . ../.env && set +a && uv run pytest -q
+    125 failed, 236 passed, 25 errors in 13.74s
+
+    $ cd api && uv run ruff check .
+    Found 32 errors.
+
+    $ cd api && uv run ruff format --check .
+    9 files would be reformatted, 131 files already formatted
+    # "already formatted" moved 129 -> 131 as parity scripts were added under
+    # api/scripts/ in 5.3d-i and 5.3d-iii; the 9 would-reformat files are unchanged.
+    ```
+
+  - [ ] 5.4b `POST /api/queue/pause-all` and `POST /api/queue/resume-all`.
+
+    `pause_all()` is the per-post pause from 5.3c-iii-a applied in bulk but with a stage
+    guard the per-post endpoint does not have (`current_stage in ["pending", *STAGES]`).
+    `resume_all()` recovers the next stage from `stage_status` per post, because pause
+    overwrote `current_stage`, and enqueues one run each; that enqueue becomes a
+    `startPipeline()` per post, the same substitution 5.3c-i made.
+
+  - [ ] 5.4c `GET /api/queue/worker-status`.
+
+    Reads three ARQ artefacts that do not exist under Mastra: the `arq:worker:*`
+    heartbeat keys, the `arq:queue` sorted set's cardinality, and
+    `WORKER_LAST_COMPLETED_KEY`. Each needs a Redis Streams equivalent designed and a
+    writer in the TypeScript worker before the endpoint can be ported honestly. Note
+    that Python's `active_jobs` count here is *not* user-scoped, unlike every other
+    query in this router.
+
+  - [ ] 5.4d `GET /api/queue/dead-letter`, `POST /api/queue/dead-letter/{post_id}/retry`
+    and `DELETE /api/queue/dead-letter`.
+
+    All three read `DLQ_KEY`, a Redis list `api/src/worker.py` pushes onto when a job
+    exhausts its retries. The TypeScript worker has no such list yet, so the item is
+    blocked on deciding where a permanently failed Mastra run is recorded. Two defects
+    to carry over knowingly or fix deliberately: `retry_dead_letter()` looks the post up
+    with an unscoped `session.get(Post, post_id)`, so any authenticated user can retry
+    any post, and the three endpoints do not scope the DLQ by user at all. The scoping
+    hole should be closed the way 5.3b-iii closed the batch profile lookup.
 - [ ] 5.5 `events` (SSE keeps `web/src/hooks/use-sse.ts`'s existing message shape; sourced from
   the Redis Streams pub/sub topic, not an in-process stream; uses Mastra resumable-stream
   replay; test disconnects and reconnects mid-run and asserts no gap in the event sequence)

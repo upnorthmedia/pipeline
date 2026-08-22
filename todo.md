@@ -241,3 +241,13 @@
   item 5.3d-iii, where a full test run produced eight more; those eight were deleted rather than
   committed. The fix is to point the tests at a temp directory or add `media/` to `.gitignore`
   and delete the 39, but that is a test-infrastructure change, not a route port.
+- [confirmed] 2026-08-22 `retry_dead_letter()` in `api/src/api/queue.py` looks the post up with
+  an unscoped `session.get(Post, post_id)`, so any authenticated user can reset another user's
+  post to `pending`, strip its `_error` log and re-enqueue it. The other two dead-letter
+  endpoints (`GET /api/queue/dead-letter`, `DELETE /api/queue/dead-letter`) take a `user`
+  dependency and then ignore it entirely, returning and clearing the whole shared list.
+  `GET /api/queue/worker-status` has a milder version: its `active_jobs` count queries every
+  post in the database rather than the caller's. Found while splitting item 5.4; recorded there
+  too. The port should close all four the way 5.3b-iii closed the batch profile lookup, which
+  means the DLQ needs a user dimension it does not currently have, so it is a design decision
+  rather than a one-line predicate.
