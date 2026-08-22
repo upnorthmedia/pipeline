@@ -1448,9 +1448,181 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
   The 9 failures are the established pre-existing baseline (6 in `image-preview.test.tsx` plus
   3 others recorded in 0.1); pass count held at 221, so the install added no failure. No `api/`
   file was touched, so the pytest and ruff baselines are unchanged by construction.
-- [ ] 2.2 Configure `web/src/mastra/index.ts`: Postgres storage against the existing
+- [x] 2.2 Configure `web/src/mastra/index.ts`: Postgres storage against the existing
   `content_pipeline` database, `RedisStreamsPubSub` against the existing Redis, and a logger.
   Keep it importable without `next/*`.
+
+  **What was built**
+
+  - `web/src/mastra/index.ts` exports `logger` (`PinoLogger`), `storage` (`PostgresStore`),
+    `pubsub` (`RedisStreamsPubSub`) and `mastra` (`new Mastra({ storage, pubsub, logger })`).
+    `workflows` and `agents` are registered empty; 2.3 adds the trivial workflow and Phase 3
+    registers the six stages.
+  - `storage` is constructed with `{ id: 'content-pipeline', pool: getPool() }`, reusing the one
+    `pg.Pool` from `web/src/db/index.ts` rather than opening a second one. Rationale: one
+    connection budget per process instead of two (Phase 4.6 has to reason about exactly this),
+    and `PostgresStore.close()` explicitly does not close a pool it did not create
+    (`@mastra/pg/dist/storage/index.d.ts:89-93`), so `closeDb()` stays the single teardown.
+  - `pubsub` is constructed with `{ url: process.env.REDIS_URL }`. No `keyPrefix` /
+    `maxStreamLength` / reclaim overrides: the defaults are what the package ships and nothing in
+    this item justifies deviating from them.
+  - `redisUrl()` throws a named error when `REDIS_URL` is unset rather than silently falling back,
+    matching how `web/src/db/index.ts` treats `DATABASE_URL_SYNC`.
+
+  **Storage adapter points at the existing database, verified through an independent connection**
+
+  ```
+  $ docker compose exec -T db psql -U pipeline -d content_pipeline \
+      -c "select count(*) as mastra_tables from information_schema.tables where table_schema='public' and table_name like 'mastra_%'" \
+      -c "select table_name from information_schema.tables where table_schema='public' and table_name not like 'mastra_%' order by 1"
+   mastra_tables
+  ---------------
+              43
+  (1 row)
+
+      table_name
+  ------------------
+   alembic_version
+   internal_links
+   posts
+   settings
+   website_profiles
+  (5 rows)
+  ```
+
+  The Mastra tables and the Alembic tables are in the same database and the same schema, which is
+  the "one datastore, one consistent backup" requirement from the objective's section 2.
+
+  **Tests** (`web/src/mastra/index.test.ts`, node environment, real Postgres + real Redis;
+  `web/src/mastra/no-next-imports.test.ts`, source-graph scan):
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm exec vitest run src/mastra
+   RUN  v4.0.18 /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+
+   ✓ src/mastra/no-next-imports.test.ts (3 tests) 5ms
+   ✓ src/mastra/index.test.ts (5 tests) 542ms
+       ✓ delivers a published event to a subscriber over the real Redis  503ms
+
+   Test Files  2 passed (2)
+        Tests  8 passed (8)
+     Duration  1.37s
+  ```
+
+  The five live tests assert, in order: the instance carries a `PostgresStore`, a
+  `RedisStreamsPubSub` and the configured `PinoLogger`; `storage.pool` is the same object
+  `getPool()` returns; the store's tables and `posts` are in the same database
+  (`current_database() = 'content_pipeline'`, `mastra_workflow_snapshot` present); a workflow
+  snapshot persists and loads back through `storage.getStore('workflows')`; and an event published
+  through `mastra.pubsub` is delivered to a subscriber over the real Redis.
+
+  **Negative controls** (each applied, run, then reverted):
+
+  A. `pubsub` removed from the `Mastra` config. Mastra falls back to `EventEmitterPubSub` and both
+  the wiring assertion and the Redis round-trip go red, so neither test would pass on an
+  in-process bus:
+
+  ```
+   FAIL  src/mastra/index.test.ts > mastra instance > is a Mastra instance carrying the configured storage, pubsub and logger
+  AssertionError: expected bound EventEmitterPubSub{ …(10) } to be an instance of RedisStreamsPubSub
+
+   FAIL  src/mastra/index.test.ts > redis streams pubsub > delivers a published event to a subscriber over the real Redis
+  Error: no event delivered within 10s
+
+   Test Files  1 failed (1)
+        Tests  2 failed | 3 passed (5)
+  ```
+
+  B. `storage` removed from the `Mastra` config. Mastra substitutes its own default store, so the
+  test fails rather than passing on the fallback:
+
+  ```
+   FAIL  src/mastra/index.test.ts > mastra instance > is a Mastra instance carrying the configured storage, pubsub and logger
+  AssertionError: expected <Anonymous Class>{ …(12) } to be an instance of PostgresStore
+
+   Test Files  1 failed (1)
+        Tests  1 failed | 4 skipped (5)
+  ```
+
+  C. `import { headers } from "next/headers"` added to `web/src/mastra/index.ts`:
+
+  ```
+   FAIL  src/mastra/no-next-imports.test.ts (2 failed | 1 passed)
+      "@mastra/redis-streams",
+      "drizzle-orm/node-postgres",
+      "drizzle-orm/pg-core",
+  +   "next/headers",
+      "pg",
+  ```
+
+  D. `import "next/headers"` added to `web/src/db/index.ts` instead, to prove the scan is
+  transitive and not just reading the entry file:
+
+  ```
+   FAIL  src/mastra/no-next-imports.test.ts > mastra entry point > reaches no next/* module through its first-party imports
+   ❯ src/mastra/no-next-imports.test.ts:63:21
+       expect(nextish).toEqual([])
+
+   Test Files  1 failed (1)
+        Tests  1 failed | 2 skipped (3)
+  ```
+
+  **Further API discrepancies found while wiring this up** (numbering continues from 2.1):
+
+  8. None of `mastra.getStorage()`, `mastra.pubsub` or `mastra.getLogger()` returns the object
+     passed to the constructor. Storage is wrapped in an init-ensuring `Proxy`
+     (`augmentWithInit`, `dist/agent-DSxJoGjY.js:16912`) that awaits `init()` before every method
+     call, pubsub in a publish-rewriting `Proxy` (`dist/mastra-Bn5mWcPE.js:552`), and the logger in
+     a `DualLogger` exposing the original as `.baseLogger`
+     (`dist/logger/index.js:72-86`). Identity assertions (`toBe`) fail; assert `instanceof`, or
+     `.pool` / `.baseLogger`. Because storage self-initialises, the explicit `storage.init()` in
+     the test's `beforeAll` is belt-and-braces rather than required.
+  9. **Relevant to 4.4.** The `mastra.pubsub` proxy rewrites `publish` for the internal
+     `workflows` and `workflows-finish` topics: when the run belongs to a workflow registered on
+     *this* instance, it publishes with `{ localOnly: true }`
+     (`dist/mastra-Bn5mWcPE.js:556-578`), which keeps the event off Redis entirely. Any run-local
+     topic (`isRunLocalTopic`) is treated the same way. So registering the workflow on the `web`
+     service's Mastra instance and starting a run there may execute it in-process rather than
+     handing it to the `worker`. 4.4 must check this branch before concluding that Redis Streams
+     is carrying the work.
+  10. `PostgresStore.init()` creates **43** `mastra_*` tables covering every Mastra domain
+     (knowledge, datasets, experiments, scorers, skills, MCP, channels, ...), not just workflow
+     state. They land in `public` alongside the five Alembic tables. `PostgresStoreConfig` accepts
+     a `schemaName` if they ever need namespacing, but `schema-parity.ts` already excludes the
+     `mastra_` prefix, so the default is kept and the parity check still passes.
+  11. `RedisStreamsPubSubConfig.logger` is typed `{ debug?: (...args: unknown[]) => void; warn?: ... }`,
+     which `MastraLogger`'s narrower `(message: string, args?: Record<string, any>)` signature is
+     not assignable to. Passing the `PinoLogger` straight through is a `tsc` error (TS2322); the
+     entry point adapts it with a small sink instead of widening.
+  12. Redis Streams subscriptions are pull-based consumer groups, so a `publish` issued before the
+     subscriber's first `XREADGROUP` is never delivered to it. The round-trip test waits 500ms
+     after `subscribe()` before publishing. Phase 4 and Phase 5's SSE work must not assume
+     subscribe/publish ordering is safe without that handshake.
+
+  **Gates** (`docker compose up -d db redis` first; `pnpm test` now needs Redis as well as
+  Postgres, because `src/mastra/index.test.ts` exercises the real bus):
+
+  ```
+  $ cd web && pnpm exec tsc --noEmit
+  tsc exit=0
+
+  $ cd web && pnpm lint
+  > content-pipeline-dashboard@0.1.0 lint
+  > eslint
+  lint exit=0
+
+  $ cd web && NO_COLOR=1 pnpm test
+   Test Files  2 failed | 19 passed (21)
+        Tests  9 failed | 229 passed (238)
+     Duration  5.73s
+
+  $ cd web && pnpm build
+  build exit=0
+  ```
+
+  Failures held at the established baseline of 9 (6 in `image-preview.test.tsx` plus the 3 others
+  recorded in 0.1); passes went 221 -> 229, which is exactly the 8 new tests. No `api/` file was
+  touched, so the pytest and ruff baselines are unchanged by construction.
 - [ ] 2.3 Define one trivial two-step workflow. Test executes it, asserts
   `stream.status === 'success'`, asserts the emitted event types, and asserts the run row is
   present in Postgres storage.
