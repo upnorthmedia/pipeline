@@ -5307,9 +5307,142 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   $ cd api && uv run ruff format --check .
   9 files would be reformatted, 126 files already formatted
   ```
-- [ ] 4.4 Execution moves to the `worker` process: `web` starts a run and returns immediately,
-  the worker consumes the event off Redis Streams and executes the steps. Prove restarting
-  `web` does not disturb an in-flight pipeline.
+- [x] 4.4a The `worker` service: a second process, built from the same
+  `src/mastra/index.ts`, consumes `workflow.start` off Redis Streams and executes the steps,
+  while the process that started the run never executes anything.
+
+  The worker under test is the real deployable artifact. `mastra worker build` bundles
+  `src/mastra/index.ts` behind the CLI's generated entry (`await mastra.startWorkers()` plus a
+  SIGINT/SIGTERM `stopWorkers()`), and `mastra worker start` boots it. Two `package.json`
+  scripts name them:
+
+  ```
+  "worker:build": "mastra worker build -o .mastra/worker",
+  "worker": "mastra worker start --dir .mastra/worker"
+  ```
+
+  `-o .mastra/worker` keeps the worker bundle out of `.mastra/output`, which `mastra dev`
+  already owns for Studio (item 2.5); the CLI overwrites one with the other otherwise.
+
+  **The build, from a clean `.mastra/worker`:**
+
+  ```
+  $ cd web && rm -rf .mastra/worker && pnpm run worker:build
+  INFO (Mastra CLI): Bundling Mastra application
+  INFO (Mastra CLI): Bundling Mastra done
+  INFO (Mastra CLI): Installing dependencies
+  INFO (Mastra CLI): Done installing dependencies
+  INFO (Mastra CLI): Generating package-lock.json for deploy
+  INFO (Mastra CLI): Worker build complete.
+  INFO (Mastra CLI): Run with: mastra worker start [name] --dir .mastra/worker
+  INFO (Mastra CLI):   or:     node /…/web/.mastra/worker/index.mjs
+  ```
+
+  **The start command:**
+
+  ```
+  $ cd web && env -u NODE_PATH timeout 15 pnpm exec mastra worker start --dir .mastra/worker --env ../.env
+  [mastra] Workers started
+  [mastra] Shutting down workers...
+  [mastra] Shutting down workers...
+  ```
+
+  (The shutdown line appears twice because `timeout` signals the whole process group, so the
+  CLI and the worker it spawned each handle their own SIGTERM. Not a defect; noted so the next
+  reader does not chase it.)
+
+  **Two repo changes the worker bundle forced**, neither of which `next build`, `vitest` or
+  `mastra dev` had exposed:
+
+  1. `@opentelemetry/api` added as a dependency. The first `mastra worker build` failed with
+     `We couldn't load "@opentelemetry/api" from "@mastra/redis-streams"`. The deployer
+     validates its output by importing each generated chunk, and that import is unresolvable
+     here: no package in the tree declares `@opentelemetry/api`, and pnpm's strict layout puts
+     nothing at `web/node_modules/@opentelemetry`. Installing it is the first remedy the error
+     itself suggests and the one that leaves the import working at runtime; the alternative it
+     offers (`bundler.externals`) would only move the failure from build time to boot time.
+  2. `bundler: { externals: ["sharp"] }` on the Mastra instance. `sharp` is native: its
+     JavaScript inlines into the bundle but the `.node` binary cannot, so the bundle threw
+     `Could not load the "sharp" module using the darwin-arm64 runtime` on boot. As an external
+     it stays out of the bundle and lands in the generated `package.json`, where the deploy
+     target installs it for its own platform.
+
+  **The test.** `web/src/mastra/workflows/worker-process.test.ts`, 8 tests, against live
+  Postgres and Redis. It builds the bundle from scratch, starts two runs with no worker alive,
+  waits five seconds, snapshots, then spawns the worker and watches both runs execute. Neither
+  run bills a provider, so the bundle is the untouched production one with no stubbing seam:
+  the first post has every stage `complete` in `stage_status` (an unnamed run executes all six
+  steps and each returns `skipped: true`), the second has `research: "review"` (the run reaches
+  the gate, writes its two columns and suspends). Between them, six steps run, a row is
+  written by the worker, and both terminal states a worker can reach are covered.
+
+  ```
+  $ cd web && pnpm exec vitest run src/mastra/workflows/worker-process.test.ts
+   ✓ src/mastra/workflows/worker-process.test.ts (8 tests) 19615ms
+
+   Test Files  1 passed (1)
+        Tests  8 passed (8)
+     Duration  20.41s
+  ```
+
+  **Two isolation decisions the suite depends on**, both learned the hard way:
+
+  - **Redis database 9.** The bundle uses the production pubsub config, so `keyPrefix` (the
+    lever the other workflow suites pull) is not reachable from it. A shared `workflows` topic
+    would let `crossprocess-events.test.ts`'s workers consume these runs, which would execute
+    them in the wrong process and destroy the ordering the whole proof rests on. The URL's
+    database index is the one isolation knob available without a test-only seam in production
+    code. `clearTopic` runs before and after, so an interrupted earlier run cannot replay
+    against the same seeded post ids.
+  - **`NODE_PATH` is deleted from the worker's environment.** Vitest sets it to pnpm's flat
+    virtual store, and inheriting it lets the bundle resolve any package installed anywhere in
+    this repo. The suite passed with the `sharp` external removed until this was fixed, while
+    the same bundle booted by hand crashed on `sharp` immediately. A deploy has no such path,
+    so inheriting it turns a bundle that cannot boot on Railway into a green test.
+
+  **Negative controls.** Each mutation applied to a green tree, run, then reverted:
+
+  | # | Mutation | Result |
+  |---|---|---|
+  | 1 | Spawn the worker before the five-second snapshot instead of after | FAIL, `executes nothing while no worker is running`: `expected true to be false` |
+  | 2 | Worker reads Redis database 8 while `web` publishes to 9 | FAIL, `run … never matched: last status running` after the 20s wait |
+  | 3 | Remove `bundler: { externals: ["sharp"] }` | FAIL, run never executed: the worker crashed on boot with `Could not load the "sharp" module` |
+  | 4 | `start()` instead of `startAsync()` | FAIL, `Hook timed out in 60000ms`: with no worker there is nothing to finish the run, which is exactly what `startAsync` exists to avoid |
+
+  Control 3 is the one that matters most: it passed before `NODE_PATH` was stripped, which is
+  how the leak was found.
+
+  **Frontend gates:**
+
+  ```
+  $ cd web && pnpm exec tsc --noEmit
+  (no output)
+  $ cd web && pnpm exec eslint
+  (no output)
+  $ cd web && pnpm test
+   Test Files  2 failed | 50 passed (52)
+        Tests  9 failed | 789 passed | 8 skipped (806)
+  $ cd web && pnpm build
+  ✓ Compiled successfully in 3.2s
+  ```
+
+  The 9 failures are the recorded baseline: 6 in `image-preview.test.tsx` and 3 in
+  `PostDetail.test.tsx`. 781 passing became 789, the 8 tests added here.
+
+  Backend gates, unchanged at the Phase 0 baseline (no Python touched):
+
+  ```
+  $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test NO_COLOR=1 uv run pytest -q
+  125 failed, 236 passed, 25 errors in 15.18s
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 126 files already formatted
+  ```
+- [ ] 4.4b Prove restarting `web` does not disturb an in-flight pipeline: a `web` process that
+  starts a run and then dies must leave the worker executing it to completion. Split out of
+  4.4 because 4.4a's harness (the real bundle, Redis database 9, the `NODE_PATH` strip) was a
+  full iteration on its own; 4.4a proves `web` executes nothing, not that `web` can disappear.
 - [ ] 4.5 **Durability gate.** Kill the worker mid-`write`, restart it, and have the run resume
   from the last completed stage without re-running completed stages or duplicating writes.
   Record the outcome and the chosen workflow runner here. On failure: first add a worker

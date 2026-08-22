@@ -76,6 +76,14 @@ export const mastra = new Mastra({
   storage,
   pubsub,
   logger,
+  /**
+   * `sharp` is a native module: its `.node` binary cannot be inlined into the
+   * worker bundle, so `mastra worker build` produced an artifact that threw
+   * "Could not load the sharp module" on boot. Listing it as an external keeps
+   * it out of the bundle and puts it into the generated `package.json`, where
+   * the deploy target installs it for its own platform.
+   */
+  bundler: { externals: ["sharp"] },
   // `pipeline` is the six stages composed in order and is what a run starts.
   // `images` stays registered in its own right because it is a workflow rather
   // than a step (its fan-out is `.foreach()`, which only exists at workflow
