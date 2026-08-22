@@ -7550,10 +7550,201 @@ enqueuing `crawl_profile_sitemap`, an ARQ job with no TypeScript equivalent yet.
   `except` so a dead queue still returned a 201, meaning the response is
   identical either way and only the follow-up crawl is missing until 5.2c wires
   up the mechanism.
-- [ ] 5.2c `profiles`: `POST /api/profiles/{profile_id}/crawl` and the
-  `crawl_profile_sitemap` job it enqueues, which today is ARQ and has no
-  TypeScript equivalent; the auto-enqueue on create in 5.2b's `POST` depends on
-  the same mechanism and is wired up here
+Item 5.2c was split into 5.2c-i, 5.2c-ii and 5.2c-iii. The route handler is
+eight lines of Python; everything behind it is not. `crawl_profile_sitemap`
+stands on `api/src/services/sitemap.py`, 225 lines of XML parsing, robots.txt
+discovery and recursive index following that has no TypeScript equivalent, and
+it then upserts into `internal_links` and moves the profile's crawl columns. The
+three pieces are separately verifiable, so they are separate items.
+
+- [x] 5.2c-i `profiles`: port `api/src/services/sitemap.py` to TypeScript with a
+  parity oracle over the real Python service
+
+  `web/src/mastra/sitemap/index.ts` ports `parse_sitemap_xml`,
+  `parse_robots_txt`, `discover_sitemaps`, `fetch_and_parse_sitemap` and
+  `crawl_sitemap`. It sits beside the other ported services in `src/mastra/`
+  (`links/`, `analytics/`, `textstat/`) and imports nothing from `next/*`, so
+  the worker can load it.
+
+  **The new dependency is `fast-xml-parser` 5.11.0.** Node has no XML parser and
+  the alternatives were hand-rolling one over a regex (fragile against CDATA,
+  entities and attributes) or pulling in a DOM. `fast-xml-parser` is zero-dep
+  and ships its own types. Two of its behaviours had to be worked around, both
+  recorded in the module header:
+
+  * It does not reject malformed XML the way `lxml` does. `<not valid xml at
+    all>>>` parses to `[{ not: [] }]` instead of raising, so the document goes
+    through `XMLValidator` first and a rejection is turned into the same
+    `SitemapParseError` that `etree.XMLSyntaxError` produced. The message text
+    after the `Malformed XML:` prefix is the XML library's own wording, so the
+    parity test pins the prefix and the error type, not lxml's sentence.
+  * It has no namespace support. `removeNSPrefix` erases prefixes without
+    looking at what they are bound to, but `root.findall("sm:url", SITEMAP_NS)`
+    matches only children actually bound to `http://www.sitemaps.org/schemas/
+    sitemap/0.9`. So the parse runs in `preserveOrder` mode and resolves the
+    xmlns declarations in scope itself. This is not academic: a `<urlset>` that
+    declares no namespace yields **zero** entries in Python, and the oracle
+    below confirms it.
+
+  **Three Python names are deliberately not ported**, all dead:
+  `fetch_page_title`, `crawl_sitemap`'s `fetch_titles` flag (the only caller,
+  `crawl_profile_sitemap`, passes `False`, and no pytest reaches either) and
+  `MAX_URLS_PER_SITEMAP`, which is declared and never read.
+
+  ```
+  $ grep -rn "fetch_page_title\|fetch_titles\|MAX_URLS_PER_SITEMAP" api/src api/tests rules web/src
+  api/src/worker.py:487:            entries = await crawl_sitemap(profile.website_url, fetch_titles=False)
+  api/src/services/sitemap.py:17:MAX_URLS_PER_SITEMAP = 50000
+  api/src/services/sitemap.py:169:async def fetch_page_title(url: str, client: httpx.AsyncClient) -> str | None:
+  api/src/services/sitemap.py:190:    fetch_titles: bool = False,
+  api/src/services/sitemap.py:217:        if fetch_titles:
+  api/src/services/sitemap.py:220:                    entry.title = await fetch_page_title(entry.url, client)
+  web/src/mastra/sitemap/index.ts:11: * `fetch_page_title` and `crawl_sitemap`'s `fetch_titles` flag (the one caller,
+  web/src/mastra/sitemap/index.ts:13: * `MAX_URLS_PER_SITEMAP`, which is declared and never read.
+  ```
+
+  `api/tests` is in that search and returns nothing: the only reference outside
+  `api/src` is this port's own header comment.
+
+  **The oracle.** `api/scripts/export_sitemap_parity.py` runs the real Python
+  service and writes `web/src/mastra/sitemap/data/sitemap-parity.json`. The
+  pytest suite for this service mocks `httpx.AsyncClient`; this export does not.
+  It stands up a local HTTP server, and each network case is a routing table
+  plus one call against it, with the table exported verbatim so the Node server
+  in the vitest file is driven by the same data rather than a hand-copied
+  translation of it. Every URL is templated back to `{BASE}` so the two runs can
+  use different ports. The seven XML fixtures are copied to
+  `web/src/mastra/sitemap/data/fixtures/` so the oracle outlives `api/`.
+
+  ```
+  $ cd api && uv run python scripts/export_sitemap_parity.py
+  local server on http://127.0.0.1:53360
+    discover-from-robots-txt: 2 sitemap(s)
+    discover-falls-back-to-sitemap-xml: 1 sitemap(s)
+    discover-falls-back-to-sitemap-index-xml: 1 sitemap(s)
+    discover-finds-nothing: 0 sitemap(s)
+    discover-survives-robots-hangup: 1 sitemap(s)
+    discover-from-path-keeps-origin: 1 sitemap(s)
+    fetch-simple-sitemap: 10 entr(ies)
+    fetch-index-recursively: 5 entr(ies)
+    fetch-index-stops-at-max-depth: 0 entr(ies)
+    fetch-missing-sitemap: 0 entr(ies)
+    fetch-server-error: 0 entr(ies)
+    fetch-malformed-sitemap: 0 entr(ies)
+    fetch-gzipped-sitemap: 10 entr(ies)
+    fetch-hangup: 0 entr(ies)
+    crawl-full: 10 entr(ies)
+    crawl-two-sitemaps-from-robots: 4 entr(ies)
+    crawl-no-sitemaps: 0 entr(ies)
+    crawl-empty-sitemap: 0 entr(ies)
+  wrote web/src/mastra/sitemap/data/sitemap-parity.json: 16 parse cases, 8 robots cases, 18 scenarios; copied 7 fixtures
+  ```
+
+  Re-running the export produces a byte-identical file, so the port cannot be
+  chasing a moving oracle:
+
+  ```
+  $ diff -q /tmp/parity-1.json web/src/mastra/sitemap/data/sitemap-parity.json && echo identical
+  identical
+  ```
+
+  Two of those eighteen scenarios cover behaviour the pytest mocks never could:
+  `discover-survives-robots-hangup` and `fetch-hangup` have the server close the
+  socket without answering, and `fetch-gzipped-sitemap` serves gzip over HTTP.
+
+  ```
+  $ cd web && pnpm vitest run src/mastra/sitemap
+   ✓ src/mastra/sitemap/sitemap.test.ts (42 tests) 41ms
+   Test Files  1 passed (1)
+        Tests  42 passed (42)
+  ```
+
+  **Negative controls.** Two mutations applied to the port and then reverted,
+  to prove the oracle discriminates rather than agreeing by construction:
+
+  | mutation | result |
+  | --- | --- |
+  | `inSitemapNs` always true (drop namespace resolution) | `no-namespace-urlset` and `wrong-namespace-urlset` fail |
+  | `gunzipSync(content)` replaced by `content` | `gzipped-simple` fails |
+
+  ```
+  $ cd web && pnpm vitest run src/mastra/sitemap   # with both mutations applied
+       × matches Python on gzipped-simple 2ms
+       × matches Python on no-namespace-urlset 2ms
+       × matches Python on wrong-namespace-urlset 0ms
+  ```
+
+  (the three failing lines out of the 42, the rest still passing.)
+
+  Gates:
+
+  ```
+  $ cd web && pnpm tsc --noEmit
+  (no output, exit 0)
+
+  $ pnpm -C web lint
+  > eslint
+  (no output, exit 0)
+
+  $ cd web && pnpm test
+   Test Files  2 failed | 62 passed (64)
+        Tests  9 failed | 999 passed | 7 skipped (1015)
+
+  $ cd web && pnpm build
+  ✓ Compiled successfully in 3.4s
+  (exit 0)
+  ```
+
+  Spelled `cd web && pnpm ...` for the same reason as every gate above, recorded
+  under item 0.1: `pnpm -C web tsc` fails with
+  `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "web" not found` on this pnpm.
+  `pnpm -C web lint` and `pnpm -C web build` were both re-confirmed working here
+  (exit 0), so the `-C` form does reach the `package.json` scripts; it is only
+  the bare binaries like `tsc` that it cannot.
+
+  The 9 failures are the same two files as the Phase 0 baseline
+  (`PostDetail.test.tsx` and `image-preview.test.tsx`), still 9, still the
+  ceiling. Passing went from 957 to 999, which is the 42 added here.
+
+  ```
+  $ cd api && uv run pytest -q     # .env sourced, TEST_DATABASE_URL on :5435
+  125 failed, 236 passed, 25 errors in 14.09s
+
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 127 files already formatted
+  ```
+
+  All three are the recorded Phase 0 baselines, with one number moved by one:
+  `ruff format --check` counts 127 formatted files rather than 126, because the
+  export script this item adds is the 127th. `export_sitemap_parity.py` is
+  the one file this item adds to `api/`, and it is clean on both:
+
+  ```
+  $ cd api && uv run ruff check scripts/export_sitemap_parity.py
+  All checks passed!
+
+  $ cd api && uv run ruff format --check scripts/export_sitemap_parity.py
+  1 file already formatted
+  ```
+
+  **Not covered by this item**, carried into 5.2c-ii: nothing persists yet. This
+  module only fetches and parses, and it logs nothing, where Python logged a
+  warning per unreachable sitemap and per parse failure. The crawl job is where
+  those log lines belong.
+
+- [ ] 5.2c-ii `profiles`: the `crawl_profile_sitemap` job itself, as a Mastra
+  primitive registered on the instance and executed in the `worker` process off
+  the Redis Streams bus, upserting `internal_links` by `(profile_id, url)` and
+  moving `crawl_status` / `last_crawled_at`. Also decide the home of
+  `check_recrawl_schedules`, the daily `cron(hour=0, minute=0)` job in
+  `WorkerSettings` that enqueues the same job per `recrawl_interval`, so Phase 7
+  does not drop it silently
+- [ ] 5.2c-iii `profiles`: `POST /api/profiles/{profile_id}/crawl`, plus the
+  auto-enqueue on create that 5.2b's `POST` left out because the mechanism did
+  not exist yet
 - [ ] 5.3 `posts`
 - [ ] 5.4 `queue`
 - [ ] 5.5 `events` (SSE keeps `web/src/hooks/use-sse.ts`'s existing message shape; sourced from
