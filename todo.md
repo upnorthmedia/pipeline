@@ -125,3 +125,16 @@
   twice under a process-group signal, because the CLI and the worker it spawns each handle
   their own SIGTERM and the CLI's handler forwards a second one. Cosmetic locally; worth
   checking that Railway's shutdown does not double-run `stopWorkers()` before Phase 7 ships.
+- [investigate] 2026-08-22 `src/mastra/workflows/scaffold-check.test.ts` intermittently drains
+  a `run.stream()` that is missing `workflow-step-start` / `workflow-step-result`: the stream
+  ends with `workflow-finish` but only 4 chunks. Seen in 3 of 5 full `pnpm test` runs while
+  item 4.5a's suite was present and 0 of 3 with it removed, though the two share no Redis
+  database (11 vs 0), no topic and no rows, so the link looks like scheduling pressure rather
+  than shared state. Either the stream subscribes after the worker has already published the
+  early chunks, or chunks are dropped under load. Phase 8's trace view reads exactly these
+  events, so this needs pinning down before it is built on.
+- [investigate] 2026-08-22 Item 4.5a only covers `SIGKILL`. A Railway redeploy sends `SIGTERM`,
+  which the `mastra worker` entry handles by calling `stopWorkers()`, and `stopWorkers()`
+  unsubscribes the transport while a step may still be executing. Whether the in-flight step's
+  message is left pending for reclaim, acked, or nacked decides whether a routine worker deploy
+  loses or duplicates a stage. Worth answering in 4.5b or Phase 7, not assumed.

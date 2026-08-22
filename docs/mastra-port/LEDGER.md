@@ -5554,6 +5554,143 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   startup sweep that resumes interrupted runs from storage; only if that still fails, adopt
   `@mastra/inngest` and record which guarantee failed. Never `@mastra/temporal`, never a
   second job queue.
+
+  Split, because the gate is two questions with very different costs. The engine question
+  ("does an in-flight step survive its worker dying?") is a property of the evented engine and
+  the Redis Streams transport, is free to answer, and decides the branch. The pipeline question
+  ("does a run killed mid-`write` resume from `outline`?") bills Anthropic twice for `write`
+  and takes minutes, so it is a scripted procedure rather than a suite member. 4.5a answers the
+  first and 4.5b applies it to the real bundle.
+
+- [x] 4.5a Engine guarantee: a step whose worker is `SIGKILL`ed mid-execution is redelivered to
+  a restarted worker and completes, while the step that had already completed is neither
+  re-executed nor rewritten. Provider-free, automated, stays in the suite.
+
+  **Outcome: the built-in evented engine on Redis Streams passes.** No startup sweep, no
+  `@mastra/inngest`. The mechanism, read out of the installed packages and then proven:
+
+  - `OrchestrationWorker` subscribes to the `workflows` topic with the fixed consumer group
+    `mastra-orchestration` (`@mastra/core/dist/worker-BeL6789j.js:113,150`), so a restarted
+    worker joins the group the dead one belonged to and inherits its pending entries.
+  - `WorkflowEventProcessor.handle` awaits `processWorkflowStepRun`
+    (`workflow-event-processor-Dp87-e6z.js:4390`) and the transport acks only on `{ok: true}`
+    (`worker-BeL6789j.js:175`), so a `workflow.step.run` message stays in the group's
+    pending-entries list for the whole of the step body. A `SIGKILL` therefore leaves it
+    pending rather than losing it.
+  - `RedisStreamsPubSub` runs `XAUTOCLAIM` on a timer for grouped subscriptions
+    (`@mastra/redis-streams/dist/index.js:197-224`), defaulting to `reclaimIdleMs` 60000 and
+    `reclaimIntervalMs` 30000. That is what hands the dead consumer's message to a live
+    sibling, and it is why recovery is not instant.
+
+  **Measured recovery latency: 60-90s** with those defaults (the suite asserts the observed
+  value falls in 55-120s, so a change to either default fails the test rather than silently
+  moving the number in this ledger). Nothing in this port shortens it; a worker that dies mid
+  stage leaves that stage parked for about a minute.
+
+  **Finding that rules out the ledger's first fallback.** The run snapshot carries no record of
+  a step until the step finishes: at the moment of the kill, `steps` held `probe-first`
+  (success) and had no `probe-slow` key at all. A worker startup sweep over storage therefore
+  could not have identified the interrupted step, only that the run was still `running`.
+  Recovery here is the Redis pending-entries list, not the snapshot, which is worth knowing
+  before Phase 7 decides what the worker does on boot.
+
+  The probe is `web/src/mastra/workflows/crash-probe.fixture.mjs`: a two-step workflow
+  (`probe-first`, then `probe-slow` which records, sleeps 15s, records) on its own Mastra
+  instance, isolated to Redis database 11. It touches no provider, no post row and no media
+  directory, so it costs nothing and can stay in the suite. Run directly it is a worker
+  process (`mastra.startWorkers()`); imported it is the `web` side. Both go through the same
+  factory, so the graph the test publishes is the graph the worker executes. Steps record to an
+  append-only JSONL file rather than to a table, because the record of "this body executed in
+  this process" has to survive a `SIGKILL` outside any transaction or buffer the engine owns.
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm exec vitest run --reporter=verbose src/mastra/workflows/crash-probe.test.ts
+   RUN  v4.0.18 /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+
+   ✓ src/mastra/workflows/crash-probe.test.ts > a step whose worker is killed mid-execution > was genuinely in flight when the worker died 2ms
+   ✓ src/mastra/workflows/crash-probe.test.ts > a step whose worker is killed mid-execution > has persisted the completed step and no trace of the running one 1ms
+   ✓ src/mastra/workflows/crash-probe.test.ts > a step whose worker is killed mid-execution > is redelivered to the restarted worker and the run reaches success 1ms
+   ✓ src/mastra/workflows/crash-probe.test.ts > a step whose worker is killed mid-execution > runs the interrupted step body exactly once to completion 0ms
+   ✓ src/mastra/workflows/crash-probe.test.ts > a step whose worker is killed mid-execution > does not re-execute the step that had already completed 0ms
+   ✓ src/mastra/workflows/crash-probe.test.ts > a step whose worker is killed mid-execution > does not rewrite the completed step's persisted result 0ms
+   ✓ src/mastra/workflows/crash-probe.test.ts > a step whose worker is killed mid-execution > feeds the completed step's output into the resumed step 0ms
+   ✓ src/mastra/workflows/crash-probe.test.ts > a step whose worker is killed mid-execution > recovers on the XAUTOCLAIM timer rather than immediately 0ms
+
+   Test Files  1 passed (1)
+        Tests  8 passed (8)
+     Start at  03:28:56
+     Duration  77.88s (transform 29ms, setup 129ms, import 416ms, tests 77.26s, environment 0ms)
+  ```
+
+  The same sequence run by hand first, which is where the numbers above come from. Worker A
+  (pid 71087) executed `probe-first` and started `probe-slow` at 08:00:19.567Z and was killed
+  at 08:00:20.3Z; worker B (pid 71163) was spawned at 08:00:30Z and the step was redelivered to
+  it at 08:01:30.985Z, 70s after the kill:
+
+  ```
+  {"step":"probe-first","phase":"done","label":"crash","pid":71087,"at":"2026-08-22T08:00:19.562Z"}
+  {"step":"probe-slow","phase":"start","label":"crash","pid":71087,"at":"2026-08-22T08:00:19.567Z"}
+  {"step":"probe-slow","phase":"start","label":"crash","pid":71163,"at":"2026-08-22T08:01:30.985Z"}
+  {"step":"probe-slow","phase":"done","label":"crash","pid":71163,"at":"2026-08-22T08:01:55.974Z"}
+  settled after 86s: {"status":"success","steps":{"probe-slow":"success","probe-first":"success"}}
+  ```
+
+  Negative controls, each applied to a green suite and reverted from a copy taken before the
+  mutation (the files are untracked, so `git checkout` cannot revert them):
+
+  | # | Mutation | Expected | Observed |
+  | - | -------- | -------- | -------- |
+  | 1 | worker B spawned against Redis database 12 instead of 11 | no recovery | `Error: timed out waiting for the run to settle under worker B`, 8 skipped |
+  | 2 | worker A not killed (`workerA.kill("SIGKILL")` removed) | redelivery claims fail | 3 failed, 5 passed: redelivered/exactly-once/latency |
+  | 3 | `reclaimIntervalMs: 0` on the probe pubsub (XAUTOCLAIM loop off) | no recovery | `Error: timed out waiting for the run to settle under worker B`, 8 skipped |
+  | 4 | `probe-first` writes its record twice | exactly-once claim fails | 1 failed, 7 passed: "does not re-execute the step that had already completed" |
+
+  Controls 1 and 3 together say the recovery is the XAUTOCLAIM loop over a shared consumer
+  group and nothing else. Control 2 says the redelivery assertions are not satisfied by a run
+  that simply finished normally. Control 4 says the exactly-once assertions count real records.
+
+  Gates. `pnpm test`'s failure count in this worktree is unstable run to run because of the
+  pre-existing `settings.api_keys` race between the agent suites (logged in `todo.md`
+  2026-08-21). Measured across three runs with this suite removed: 9, 10, 11 failures. Across
+  five runs with it: 12, 10, 10, 11, 9. The 9 is the recorded baseline (6 `image-preview` +
+  3 `PostDetail`); 805 passing is 797 plus this item's 8 tests. `scaffold-check.test.ts`'s
+  stream-event race showed up in 3 of the 5 runs with this suite and 0 of the 3 without; it
+  shares no Redis database, topic or row with the probe, so the link is scheduling pressure
+  rather than state, and it is logged in `todo.md` rather than chased here.
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm exec tsc --noEmit
+  (no output)
+  $ cd web && NO_COLOR=1 pnpm lint
+  > content-pipeline-dashboard@0.1.0 lint
+  > eslint
+  (no output, exit 0)
+  $ cd web && NO_COLOR=1 pnpm test
+   Test Files  3 failed | 51 passed (54)
+        Tests  10 failed | 804 passed | 8 skipped (822)
+  ... and, on the fifth run, the clean baseline:
+   Test Files  2 failed | 52 passed (54)
+        Tests  9 failed | 805 passed | 8 skipped (822)
+  $ cd web && NO_COLOR=1 pnpm build
+  ✓ Compiled successfully in 3.3s
+  ```
+
+  Backend gates, unchanged at the Phase 0 baseline (no Python touched):
+
+  ```
+  $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test NO_COLOR=1 uv run pytest -q
+  125 failed, 236 passed, 25 errors in 15.18s
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 126 files already formatted
+  ```
+
+- [ ] 4.5b Pipeline gate: start a full run against the real worker bundle, kill the worker
+  mid-`write`, restart it, and prove the run resumes without re-running `research` or `outline`
+  and without duplicating their column writes. Bills Anthropic for two `write` calls, so it is
+  a scripted procedure with pasted output rather than a suite member. Record the chosen
+  workflow runner (expected: the built-in evented engine, per 4.5a).
 - [ ] 4.6 Concurrency: two pipelines at once must not interleave writes to the same Post row or
   exhaust connections. Test passes.
 - [ ] 4.7 Full workflow runs end to end against the real database.
