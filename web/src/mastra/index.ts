@@ -29,6 +29,7 @@ import { readyAgent } from "./agents/ready"
 import { researchAgent } from "./agents/research"
 import { writeAgent } from "./agents/write"
 import { imagesWorkflow } from "./workflows/images"
+import { pipelineWorkflow } from "./workflows/pipeline"
 import { scaffoldCheckWorkflow } from "./workflows/scaffold-check"
 
 function redisUrl(): string {
@@ -75,11 +76,15 @@ export const mastra = new Mastra({
   storage,
   pubsub,
   logger,
-  // Phase 3 registers the six pipeline stages alongside the scaffold check.
-  // `images` is a workflow rather than a step because its fan-out is
-  // `.foreach()`, which only exists at workflow level; Phase 4 composes it into
-  // the pipeline workflow as a nested stage.
-  workflows: { scaffoldCheck: scaffoldCheckWorkflow, images: imagesWorkflow },
+  // `pipeline` is the six stages composed in order and is what a run starts.
+  // `images` stays registered in its own right because it is a workflow rather
+  // than a step (its fan-out is `.foreach()`, which only exists at workflow
+  // level) and because a single stage can be rerun on its own.
+  workflows: {
+    pipeline: pipelineWorkflow,
+    images: imagesWorkflow,
+    scaffoldCheck: scaffoldCheckWorkflow,
+  },
   agents: {
     research: researchAgent,
     outline: outlineAgent,

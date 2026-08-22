@@ -78,3 +78,8 @@
   image is recorded as failed. `web/src/mastra/images/generate-one.ts` treats a non-string as
   absent instead. No rule asks the model for a null there and no fixture contains one, so the
   divergence is unobserved rather than tested; decide the intended behaviour before Phase 7.
+- [confirmed] 2026-08-22 `api/tests/phase3/test_images_stage.py` writes generated images into
+  the repo's real `media/test-123/` instead of a temp directory and never cleans up, so every
+  `pytest` run leaves new untracked `.webp` files in the working tree. 39 of them were already
+  committed by accident in 5f31ca4. Deleted when `api/` goes in Phase 7, so worth fixing only
+  if pytest stays around longer than expected.

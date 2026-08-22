@@ -4881,8 +4881,87 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
 
 ## Phase 4: Workflow assembly, gates, durable execution
 
-- [ ] 4.1 Compose the six steps into one workflow with `.then()` / `.commit()`, registered on
+- [x] 4.1 Compose the six steps into one workflow with `.then()` / `.commit()`, registered on
   the Mastra instance.
+
+  `web/src/mastra/workflows/pipeline.ts` chains the six in Python's order and
+  commits; `index.ts` registers it as `pipeline`. `images` goes in as a nested
+  workflow rather than a step, because its fan-out is `.foreach()` and that is
+  declared on `Workflow`, not on `Step` (item 3.5f-ii). Nesting typechecks and
+  runs: `EventedWorkflow` extends `Workflow`, which `implements Step<...>`, and
+  both `DefaultEngineType` and `EventedEngineType` are `{}` in
+  `dist/workflows/types.d.ts` and `dist/workflows/evented/workflow.d.ts`, so the
+  engine-type parameter on `.then()` is not a barrier. On the finished run the
+  nested workflow appears in `result.steps` under its own id, `images`, exactly
+  like a step.
+
+  The chain carries only `{ postId }`. Each step re-reads the row the previous
+  one committed, which the prompt assertions below prove, so nothing is handed
+  forward in memory and a run resumed in another process rebuilds its inputs
+  from committed rows.
+
+  Left to their own items, not folded in here: skipping stages already marked
+  complete and single-stage runs (4.2), review gates (4.3), and the per-stage
+  `running` status, execution logs and SSE events the Python runner published
+  around each call (Phase 5's `events` router owns their transport).
+
+  `web/src/mastra/workflows/pipeline.test.ts` runs the whole thing on the
+  evented engine against live Postgres and Redis. Only the six agent calls and
+  the Gemini image call are stubbed, plus `validateLinks`, which would otherwise
+  make live HTTP requests to whatever URLs a stubbed model invents. sharp
+  encodes for real and the manifest is read back out of Postgres.
+
+  ```
+  $ cd web && pnpm vitest run src/mastra/workflows/pipeline.test.ts
+   RUN  v4.0.18 /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+
+   ✓ src/mastra/workflows/pipeline.test.ts (9 tests) 2190ms
+
+   Test Files  1 passed (1)
+        Tests  9 passed (9)
+     Start at  01:18:42
+     Duration  2.91s (transform 108ms, setup 82ms, import 570ms, tests 2.19s, environment 0ms)
+  ```
+
+  Negative controls, one mutation of the chain at a time, restoring between each:
+
+  | mutation of `pipeline.ts` | result |
+  | --- | --- |
+  | `outline` and `write` swapped | Tests 2 failed \| 7 passed (9) |
+  | `.then(imagesWorkflow)` dropped | Tests 6 failed \| 3 passed (9) |
+  | `.then(readyStep)` dropped | Tests 7 failed \| 2 passed (9) |
+  | `.then(researchStep)` dropped | Tests 5 failed \| 4 passed (9) |
+  | restored | Tests 9 passed (9) |
+
+  Frontend gates:
+
+  ```
+  $ cd web && pnpm tsc --noEmit
+  (no output, exit 0)
+  $ cd web && pnpm lint
+  (no output, exit 0)
+  $ cd web && pnpm test
+   Test Files  2 failed | 46 passed (48)
+        Tests  9 failed | 744 passed | 8 skipped (761)
+  $ cd web && pnpm build
+  ✓ Compiled successfully in 3.1s
+  ```
+
+  Failures are the 9-test baseline exactly (6 in `image-preview.test.tsx`, 3 in
+  `PostDetail.test.tsx`). Totals moved 752 -> 761, which is this file's 9 tests.
+  The build emits no warnings on this run, including the BetterAuth base-URL one
+  recorded earlier.
+
+  Backend gates, unchanged at the Phase 0 baseline:
+
+  ```
+  $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test NO_COLOR=1 uv run pytest -q
+  125 failed, 236 passed, 25 errors in 15.12s
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 126 files already formatted
+  ```
 - [ ] 4.2 Support running a single stage in isolation and running all remaining stages from the
   current one, matching `_run_pipeline()`'s `stages` and `check_gates` behavior.
 - [ ] 4.3 Review gates via `suspend()` / `resume()` with typed `suspendSchema` / `resumeSchema`.
