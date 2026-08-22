@@ -12,8 +12,14 @@
  *
  * It stays registered after Phase 3 so those five properties keep a cheap
  * regression test that does not cost a provider call.
+ *
+ * Built on the *evented* engine deliberately. `createWorkflow` from
+ * `@mastra/core/workflows` runs entirely in the calling process and publishes
+ * nothing to Redis, so it could prove none of the cross-process properties the
+ * `web` / `worker` split depends on. The cost is that an evented run only
+ * executes where something has called `mastra.startWorkers()`.
  */
-import { createStep, createWorkflow } from "@mastra/core/workflows"
+import { createStep, createWorkflow } from "@mastra/core/workflows/evented"
 import { z } from "zod"
 
 const echoInput = z.object({

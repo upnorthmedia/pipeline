@@ -1743,7 +1743,206 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
   Failures held at the established baseline of 9; passes went 229 -> 234, exactly the 5 new
   tests. No `api/` file was touched, so the pytest and ruff baselines are unchanged by
   construction.
-- [ ] 2.4 A second process subscribed to the Redis Streams topic receives the same events.
+- [x] 2.4 A second process subscribed to the Redis Streams topic receives the same events.
+
+  Files: `web/src/mastra/scripts/redis-event-observer.mjs` (the second process),
+  `web/src/mastra/crossprocess-events.test.ts` (4 tests), plus the engine change described
+  under "Amendment to 2.3" below.
+
+  **The default workflow engine publishes nothing to Redis at all.** Item 2.3's workflow, built
+  with `createWorkflow` from `@mastra/core/workflows`, executes entirely in the calling process.
+  Measured directly: `redis-cli FLUSHALL`, run the scaffold workflow to completion, then
+
+  ```
+  $ docker compose exec -T redis redis-cli KEYS '*'
+  (empty)
+  ```
+
+  exit=0, zero keys. There is no topic for a second process to subscribe to, so item 2.4 is not
+  satisfiable on the default engine. The evented engine
+  (`createWorkflow`/`createStep` from `@mastra/core/workflows/evented`) is what publishes
+  workflow lifecycle events onto the pub/sub bus, which is the mechanism the objective's
+  section 2 describes and the one Phase 4.4 needs. The scaffold workflow was moved onto it.
+
+  **The second process.** `redis-event-observer.mjs` imports `@mastra/redis-streams` and
+  nothing else from this repo: no Mastra instance, no database client, no workflow definition.
+  It subscribes to the topics named on argv and writes one JSON line per received event to
+  stdout. Nothing but the Redis connection string links it to the process running the workflow,
+  so an event it prints provably crossed a process boundary. It subscribes without a `group`
+  option, so each subscription gets its own fan-out consumer group and the observer cannot
+  steal an event the orchestration worker needed.
+
+  **Passing run** (after `docker compose up -d db redis` and `redis-cli FLUSHALL`):
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm exec vitest run src/mastra/crossprocess-events.test.ts
+
+   RUN  v4.0.18 /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+
+   ✓ src/mastra/crossprocess-events.test.ts (4 tests) 3269ms
+
+   Test Files  1 passed (1)
+        Tests  4 passed (4)
+     Start at  21:04:19
+     Duration  4.07s (transform 38ms, setup 125ms, import 596ms, tests 3.27s, environment 0ms)
+  ```
+
+  exit=0.
+
+  What the four tests assert:
+  1. the run still reached `success` locally and the observer wrote nothing to stderr, so
+     observing did not disturb execution;
+  2. the observer received this run's events on the `workflows` topic: `workflow.start` first,
+     then exactly two `workflow.step.run` and two `workflow.step.end` (one pair per step), then
+     `workflow.end`, every one carrying `workflowId: "scaffold-check"`;
+  3. the terminal event arrives once on the separate `workflows-finish` topic, also as
+     `workflow.end`;
+  4. the per-run stream topic `workflow.events.v2.<runId>` delivers nothing to a third process,
+     because `mastra.pubsub` tags it `localOnly`.
+
+  **Redis state after that run**, confirming the events are really in Redis Streams rather than
+  an in-process emitter:
+
+  ```
+  $ for k in $(docker compose exec -T redis redis-cli KEYS 'mastra:topic:*'); do \
+      echo "$k  XLEN=$(docker compose exec -T redis redis-cli XLEN "$k")"; done
+  mastra:topic:workflows  XLEN=6
+  mastra:topic:workflow.events.v2.44ad5385-6e83-4e30-8119-3f0c3735e7e8  XLEN=0
+  mastra:topic:workflows-finish  XLEN=1
+  ```
+
+  6 events on `workflows` (start + 2 step pairs + end), 1 on `workflows-finish`, and 0 on the
+  run-local topic. The run-local key exists only because `subscribe()` creates the stream with
+  `MKSTREAM`; no publish ever reached it.
+
+  A representative entry read straight out of the stream with `XRANGE mastra:topic:workflows`:
+
+  ```
+  {"type":"workflow.start","runId":"<run-id>","data":{"workflowId":"evented-scratch",
+   "runId":"<run-id>","prevResult":{"status":"success","output":{"message":"scratch"}},
+   "requestContext":{},"initialState":{}},"id":"<event-id>",
+   "createdAt":"2026-08-22T01:57:19.967Z","deliveryAttempt":1}
+  ```
+
+  **Negative control 1: the default engine.** Point `scaffold-check.ts` back at
+  `@mastra/core/workflows` (one-word import change) and rerun:
+
+  ```
+   FAIL  src/mastra/crossprocess-events.test.ts [ src/mastra/crossprocess-events.test.ts ]
+  Error: observer never reported a matching event within 30000ms
+   ❯ Timeout._onTimeout src/mastra/crossprocess-events.test.ts:80:20
+
+   Test Files  1 failed (1)
+        Tests  4 skipped (4)
+     Duration  31.44s
+  ```
+
+  The run itself still succeeds in-process; the observer simply never sees it. Reverted, and the
+  import is back to `@mastra/core/workflows/evented` (verified by grep).
+
+  **Negative control 2: wrong topic names.** Subscribe the observer to `workflows-typo` /
+  `workflows-finish-typo` instead:
+
+  ```
+   FAIL  src/mastra/crossprocess-events.test.ts [ src/mastra/crossprocess-events.test.ts ]
+  Error: observer never reported a matching event within 30000ms
+   ❯ Timeout._onTimeout src/mastra/crossprocess-events.test.ts:80:20
+
+   Test Files  1 failed (1)
+        Tests  4 skipped (4)
+     Duration  32.68s
+  ```
+
+  This rules out the observer reporting anything it did not read from the named Redis stream.
+  Reverted.
+
+  **Amendment to item 2.3.** `web/src/mastra/workflows/scaffold-check.ts` now builds its steps
+  and workflow with `createStep`/`createWorkflow` from `@mastra/core/workflows/evented`, and
+  `scaffold-check.test.ts` gained `await mastra.startWorkers()` in `beforeAll` and
+  `await mastra.stopWorkers()` in `afterAll`. This is an intentional behaviour change, not a
+  test edited to pass: the default engine cannot satisfy 2.4 and cannot support the `web` /
+  `worker` split in 4.4, so the scaffold has to be built the way the real pipeline will be or it
+  stops being a regression test for the infrastructure. Every assertion 2.3 recorded still holds
+  unchanged (`workflow-start` first, `workflow-finish` last, the two `workflow-step-start` and
+  two `workflow-step-result` payloads, the `mastra_workflow_snapshot` row, `getWorkflowRunById`);
+  only the worker lifecycle calls were added:
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm exec vitest run src/mastra
+
+   ✓ src/mastra/no-next-imports.test.ts (3 tests) 6ms
+   ✓ src/mastra/index.test.ts (5 tests) 545ms
+   ✓ src/mastra/workflows/scaffold-check.test.ts (5 tests) 1198ms
+   ✓ src/mastra/crossprocess-events.test.ts (4 tests) 3237ms
+
+   Test Files  4 passed (4)
+        Tests  17 passed (17)
+     Duration  4.03s
+  ```
+
+  exit=0. `no-next-imports.test.ts`'s expected-package list was updated in the same way it will
+  be once per Phase 3 stage: `@mastra/core/workflows` became `@mastra/core/workflows/evented`.
+  The load-bearing `next/*` and `server-only` assertions are untouched.
+
+  **API discrepancies found (continuing the numbering from item 2.2).**
+
+  13. The objective's section 2 says workflow lifecycle events go onto a pub/sub bus that worker
+      processes consume. That is true only of the **evented** engine. `createWorkflow` from
+      `@mastra/core/workflows` publishes nothing to Redis, and every `run.stream()` event it
+      emits is in-process. Phase 4.4 must be built on `@mastra/core/workflows/evented`.
+  14. An evented workflow does not execute unless some process has called
+      `mastra.startWorkers()`. Without it the run is published to `workflows` and nothing
+      consumes it, so `run.stream()` never terminates: item 2.3's test hit its 60s hook timeout
+      with all 5 tests skipped. This is precisely the `web` starts / `worker` executes division,
+      and it means the `web` service must **not** call `startWorkers()` in Phase 4.
+  15. `mastra.createRunAsync()` does not exist on the evented workflow object either
+      (`TypeError: ...createRunAsync is not a function`); `createRun()` is the only constructor.
+      This extends discrepancy 4 from item 2.1 to the evented engine.
+  16. `createStep` and `createWorkflow` from `@mastra/core/workflows/evented` are different
+      function objects from the ones exported by `@mastra/core/workflows` (both `===` checks are
+      false), so the two engines cannot be mixed by importing steps from one and the workflow
+      from the other. Also, `createEventedWorkflow` is **not** an actual runtime export of
+      `@mastra/core` (`undefined` at run time) despite appearing in the typings, correcting
+      discrepancy 3 from item 2.1: the working import path is `@mastra/core/workflows/evented`.
+  17. The evented engine emits `workflow-start` and `workflow-finish` **twice** each on
+      `run.stream().fullStream` (observed sequence: `workflow-start`, `workflow-start`,
+      `workflow-step-start`, `workflow-step-result`, `workflow-step-start`,
+      `workflow-step-result`, `workflow-finish`, `workflow-finish`) with a single Mastra
+      instance and a single registered workflow. Phase 8's trace view must dedupe those two
+      event types or it will render two runs.
+  18. Iteration 14's reading of the `mastra.pubsub` `localOnly` guard was too broad. The guard on
+      the `workflows` / `workflows-finish` topics fires only for workflows in the **internal**
+      registry (`__registerInternalWorkflow`, used by background tasks and durable agents), not
+      for workflows registered publicly on the instance, so a normally registered workflow's
+      events do reach Redis. The unconditional local-only topic is the `workflow.events.v2.*`
+      prefix (`RUN_LOCAL_TOPIC_PREFIXES` in `@mastra/core/dist/topics-BCcUoD5n.js:310`), which
+      test 4 above pins.
+  19. Consequence for Phase 5.5: because the per-run stream topic never leaves the executing
+      process, the SSE route in the `web` service cannot read a worker-side run's chunks from
+      `workflow.events.v2.<runId>`. It has to work from the `workflows` topic or from Mastra's
+      own resumable-stream replay.
+
+  **Frontend gates**, all four run from `web/` after the change:
+
+  ```
+  $ pnpm exec tsc --noEmit
+  tsc exit=0
+
+  $ pnpm lint
+  lint exit=0
+
+  $ NO_COLOR=1 pnpm test
+   Test Files  2 failed | 21 passed (23)
+        Tests  9 failed | 238 passed (247)
+  test exit=1
+
+  $ pnpm build
+  build exit=0
+  ```
+
+  Failures held at the established baseline of 9 (`image-preview.test.tsx` and
+  `PostDetail.test.tsx`); passes went 234 -> 238, exactly the 4 new tests. No `api/` file was
+  touched, so the pytest and ruff baselines are unchanged by construction.
 - [ ] 2.5 Mastra Studio connects to the dev server and lists the trivial workflow. Paste the
   command and a committed screenshot path.
 

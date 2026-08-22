@@ -25,6 +25,11 @@ beforeAll(async () => {
   probe = new Pool({ connectionString: toNodePostgresUrl(process.env.DATABASE_URL_SYNC!) })
   await storage.init()
 
+  // The evented engine executes steps in the orchestration worker, which is
+  // what consumes the `workflows` topic. Without `startWorkers()` the run is
+  // published and nothing ever picks it up, so the stream never ends.
+  await mastra.startWorkers()
+
   const run = await scaffoldCheckWorkflow.createRun()
   runId = run.runId
   const stream = run.stream({ inputData: { message: "phase-2 scaffold" } })
@@ -40,6 +45,7 @@ beforeAll(async () => {
 }, 60_000)
 
 afterAll(async () => {
+  await mastra.stopWorkers()
   await pubsub.close()
   await probe.end()
   await closeDb()

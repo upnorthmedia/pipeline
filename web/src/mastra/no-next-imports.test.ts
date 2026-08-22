@@ -67,7 +67,7 @@ describe("mastra entry point", () => {
     const { packages } = importGraph(ENTRY)
     expect(packages).toEqual([
       "@mastra/core",
-      "@mastra/core/workflows",
+      "@mastra/core/workflows/evented",
       "@mastra/loggers",
       "@mastra/pg",
       "@mastra/redis-streams",
