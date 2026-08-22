@@ -197,3 +197,11 @@
   found while adding item 5.2c-ii-1 and worked around there by keeping the new registration
   assertion inside `index.test.ts`. Worth pinning properly: a keyPrefix of its own for
   `scaffold-check` would settle it.
+  Update 2026-08-22 (item 5.2c-iii): now also seen as a whole-suite failure, `Hook timed out in
+  60000ms` in its `beforeAll`, which skips all five of its tests and pushes the suite from 9
+  failed / 7 skipped to 9 failed / 12 skipped. Measured on both sides: reproduced at HEAD with
+  item 5.2c-iii stashed, so the extra `workflow.start` traffic that item puts on the shared
+  topic is not the cause, and `XINFO GROUPS mastra:topic:workflows` reports `lag 0` for
+  `mastra-orchestration` after a full run, so it is not a backlog either. It passes standalone
+  in under 4s every time. Whoever picks this up should treat the intermittent skip-5 as part of
+  the same defect and not read it as a new regression.

@@ -21,6 +21,15 @@ import { GET as listProfiles, POST as createProfile } from "./route"
 const PREFIX = "profiles-route-test-"
 const URL = "http://test/api/profiles"
 
+/**
+ * Fixture `website_url`s point at the discard port on loopback rather than at
+ * plausible domains, because `POST /api/profiles` now starts a real
+ * `sitemapCrawl` run. Nothing in this file runs a worker, so the run is only
+ * published, but another test file that calls `startWorkers()` on the shared
+ * instance can consume it, and a crawl of somebody else's domain is not
+ * something a unit test should be able to cause. Port 9 refuses immediately.
+ */
+
 /** A throwaway Fernet key, so no real `WP_ENCRYPTION_KEY` is needed to run this. */
 const TEST_KEY = Buffer.alloc(32, 7).toString("base64url")
 
@@ -47,7 +56,7 @@ async function insertProfile(
     .values({
       userId,
       name: "Test Blog",
-      websiteUrl: "https://testblog.com",
+      websiteUrl: "http://127.0.0.1:9/testblog",
       ...values,
     })
     .returning({ id: websiteProfiles.id })
@@ -299,7 +308,7 @@ describe("GET /api/profiles/[id]", () => {
 
 describe("POST /api/profiles", () => {
   it("401s without a session", async () => {
-    const response = await post({ name: "Test Blog", website_url: "https://testblog.com" })
+    const response = await post({ name: "Test Blog", website_url: "http://127.0.0.1:9/testblog" })
 
     expect(response.status).toBe(401)
     expect(await response.json()).toEqual({ detail: "Not authenticated" })
@@ -309,7 +318,7 @@ describe("POST /api/profiles", () => {
     const response = await post(
       {
         name: "Test Blog",
-        website_url: "https://testblog.com",
+        website_url: "http://127.0.0.1:9/testblog",
         niche: "technology",
         target_audience: "developers",
         tone: "Professional",
@@ -322,7 +331,7 @@ describe("POST /api/profiles", () => {
     expect(response.status).toBe(201)
     const body = await response.json()
     expect(body.name).toBe("Test Blog")
-    expect(body.website_url).toBe("https://testblog.com")
+    expect(body.website_url).toBe("http://127.0.0.1:9/testblog")
     expect(body.niche).toBe("technology")
     expect(body.word_count).toBe(2500)
     expect(body.crawl_status).toBe("pending")
@@ -331,7 +340,7 @@ describe("POST /api/profiles", () => {
 
   it("fills in the ProfileCreate defaults for a minimal body", async () => {
     const response = await post(
-      { name: "Minimal", website_url: "https://minimal.com" },
+      { name: "Minimal", website_url: "http://127.0.0.1:9/minimal" },
       user.cookie,
     )
 
@@ -358,7 +367,7 @@ describe("POST /api/profiles", () => {
   it("owns the row by the session user, not by anything in the body", async () => {
     const body = await (
       await post(
-        { name: "Mine", website_url: "https://mine.com", user_id: other.userId },
+        { name: "Mine", website_url: "http://127.0.0.1:9/mine", user_id: other.userId },
         user.cookie,
       )
     ).json()
@@ -368,7 +377,7 @@ describe("POST /api/profiles", () => {
   })
 
   it("422s when name is missing", async () => {
-    const response = await post({ website_url: "https://example.com" }, user.cookie)
+    const response = await post({ website_url: "http://127.0.0.1:9/example" }, user.cookie)
 
     expect(response.status).toBe(422)
     expect((await response.json()).detail).toContainEqual({
@@ -376,7 +385,7 @@ describe("POST /api/profiles", () => {
       loc: ["body", "name"],
       msg: "Field required",
       // pydantic reported the containing object as the input of a missing key.
-      input: { website_url: "https://example.com" },
+      input: { website_url: "http://127.0.0.1:9/example" },
     })
   })
 
@@ -394,7 +403,7 @@ describe("POST /api/profiles", () => {
 
   it("422s with pydantic's own error type and message on a bad integer", async () => {
     const response = await post(
-      { name: "Bad", website_url: "https://bad.com", word_count: "lots" },
+      { name: "Bad", website_url: "http://127.0.0.1:9/bad", word_count: "lots" },
       user.cookie,
     )
 
@@ -409,7 +418,7 @@ describe("POST /api/profiles", () => {
 
   it("422s with int_type, not int_parsing, when the integer is the wrong type", async () => {
     const response = await post(
-      { name: "Bad", website_url: "https://bad.com", word_count: null },
+      { name: "Bad", website_url: "http://127.0.0.1:9/bad", word_count: null },
       user.cookie,
     )
 
@@ -426,7 +435,7 @@ describe("POST /api/profiles", () => {
     const response = await post(
       {
         name: "Bad",
-        website_url: "https://bad.com",
+        website_url: "http://127.0.0.1:9/bad",
         related_keywords: "no",
         nextjs_frontmatter_map: "{}",
       },
@@ -451,7 +460,7 @@ describe("POST /api/profiles", () => {
 
   it("coerces an integral string the way pydantic's lax mode did", async () => {
     const response = await post(
-      { name: "Coerced", website_url: "https://coerced.com", word_count: " 2500 " },
+      { name: "Coerced", website_url: "http://127.0.0.1:9/coerced", word_count: " 2500 " },
       user.cookie,
     )
 
@@ -471,7 +480,7 @@ describe("POST /api/profiles", () => {
 
   it("drops unknown fields instead of rejecting them", async () => {
     const response = await post(
-      { name: "Extra", website_url: "https://extra.com", not_a_column: "ignored" },
+      { name: "Extra", website_url: "http://127.0.0.1:9/extra", not_a_column: "ignored" },
       user.cookie,
     )
 
@@ -483,7 +492,7 @@ describe("POST /api/profiles", () => {
     const response = await post(
       {
         name: "Secrets",
-        website_url: "https://secrets.com",
+        website_url: "http://127.0.0.1:9/secrets",
         wp_app_password: "wp-plaintext-secret",
         nextjs_webhook_secret: "nextjs-plaintext-secret",
       },
@@ -503,7 +512,7 @@ describe("POST /api/profiles", () => {
   it("writes an empty credential through rather than encrypting nothing", async () => {
     const body = await (
       await post(
-        { name: "Empty", website_url: "https://empty.com", wp_app_password: "" },
+        { name: "Empty", website_url: "http://127.0.0.1:9/empty", wp_app_password: "" },
         user.cookie,
       )
     ).json()
@@ -589,7 +598,7 @@ describe("PATCH /api/profiles/[id]", () => {
       id,
       {
         name: "Saved",
-        website_url: "https://saved.com",
+        website_url: "http://127.0.0.1:9/saved",
         niche: null,
         target_audience: null,
         tone: "Professional",
@@ -679,7 +688,7 @@ describe("DELETE /api/profiles/[id]", () => {
       .insert(posts)
       .values({ profileId: id, slug: `${PREFIX}orphan`, topic: "Kept" })
       .returning({ id: posts.id })
-    await db.insert(internalLinks).values({ profileId: id, url: "https://testblog.com/a" })
+    await db.insert(internalLinks).values({ profileId: id, url: "http://127.0.0.1:9/testblog/a" })
 
     expect((await del(id, user.cookie)).status).toBe(204)
 

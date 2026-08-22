@@ -8125,9 +8125,197 @@ three pieces are separately verifiable, so they are separate items.
   repo boots outside a test until Phase 7 runs the `worker` service under
   `docker-compose`. The end-to-end evidence that the cron reaches a real worker
   in a real deployment belongs to 7.6.
-- [ ] 5.2c-iii `profiles`: `POST /api/profiles/{profile_id}/crawl`, plus the
+- [x] 5.2c-iii `profiles`: `POST /api/profiles/{profile_id}/crawl`, plus the
   auto-enqueue on create that 5.2b's `POST` left out because the mechanism did
   not exist yet
+
+  Both callers of ARQ's `enqueue_job("crawl_profile_sitemap", str(profile.id))`
+  now go through `web/src/mastra/start-crawl.ts`, which creates a `sitemapCrawl`
+  run and calls `startAsync()`. That publishes `workflow.start` onto Redis
+  Streams and returns without waiting, so the crawl executes in the `worker`
+  process exactly as ARQ's job did, and a slow site never holds a Next.js
+  request open.
+
+  New files:
+
+  - `web/src/mastra/start-crawl.ts`: the enqueue, in the Mastra layer rather
+    than in a route handler. The nightly sweep deliberately does not use it:
+    `recrawl-check` reaches the workflow through the `mastra` handed to its
+    `execute`, so the runs it starts belong to the instance it is running on.
+  - `web/src/app/api/profiles/[id]/crawl/route.ts`: the 202 endpoint.
+  - `web/src/app/api/profiles/params.ts`: the uuid path-parameter 422 and the
+    `Profile not found` 404, lifted out of `[id]/route.ts` so the crawl handler
+    reuses them instead of copying them.
+
+  **Order of operations, kept verbatim.** Python resolved the profile, set
+  `crawl_status = "crawling"` and committed, *then* enqueued. The port collapses
+  the resolve and the flip into one `UPDATE ... WHERE id = $1 AND user_id = $2
+  RETURNING id`, which is still one unit of work and still writes `crawling`
+  before anything is published: the profiles page polls `crawl_status`, so a
+  started crawl must never be readable at its old status. Zero rows returned is
+  the 404, which keeps another user's profile indistinguishable from a missing
+  one and, because the `WHERE` carries the owner, leaves that owner's row
+  untouched.
+
+  **The failure branch.** Python's `except Exception as e` rolled the status
+  forward to `"failed"`, committed, and raised
+  `HTTPException(500, f"Failed to enqueue crawl: {e}")`. Reproduced, message
+  prefix included.
+
+  **Auto-enqueue on create.** `POST /api/profiles` ended with the same
+  `enqueue_job` wrapped in a bare `except: pass`. That is preserved rather than
+  tidied away: the profile row is already written, so reporting anything but the
+  201 would leave the client believing the create failed. One deliberate
+  addition: the swallowed error is logged through the Mastra logger, because
+  Python's version made a queue outage completely invisible.
+
+  **Two small deviations, both argued.**
+
+  1. The 202 body echoes the stored id rather than the raw path segment.
+     `str(profile_id)` in Python was the *parsed* `uuid.UUID`, so it came back
+     lowercase however the client cased it; the stored id is that same canonical
+     form.
+  2. `updated_at` is stamped on both writes, because `TimestampMixin.onupdate`
+     fired on each of Python's two commits.
+
+  Nothing in `web/src/lib/api.ts` changed: `profiles.crawl()` already declared
+  `{ status: string }`, and the response is a superset of that.
+
+  **Tests.** `web/src/app/api/profiles/[id]/crawl/route.test.ts`, 11 tests
+  against the real database, real BetterAuth sessions and the real Redis Streams
+  bus. "The crawl was enqueued" is asserted from the transport, not from a spy:
+  an independent `RedisStreamsPubSub` subscribes to the `workflows` topic with
+  no `group` (the library then mints a `__fanout-<uuid>` group, so it can never
+  take an event away from a worker) and the test reads the `workflow.start` back
+  and matches on `data.prevResult.output.profileId`. No worker runs in this
+  file, so nothing executes the run; the crawl itself is covered end to end by
+  `src/mastra/workflows/sitemap-crawl.test.ts` under 5.2c-ii-1.
+
+  The one branch that cannot be driven from a real boundary is Python's
+  `except`, so `startSitemapCrawl` is wrapped by a `vi.mock` that delegates to
+  the real implementation unless a test sets a fault message. Every other test
+  in the file goes through the real enqueue.
+
+  ```
+  $ pnpm -C web exec vitest run 'src/app/api/profiles/[id]/crawl/route.test.ts' \
+      src/app/api/profiles/route.test.ts --reporter=verbose
+   ✓ .../crawl/route.test.ts > POST /api/profiles/{id}/crawl > 401s without a session 7ms
+   ✓ .../crawl/route.test.ts > POST /api/profiles/{id}/crawl > 422s on a malformed profile id, the way the uuid path parameter did 11ms
+   ✓ .../crawl/route.test.ts > POST /api/profiles/{id}/crawl > 404s for a profile that does not exist 3ms
+   ✓ .../crawl/route.test.ts > POST /api/profiles/{id}/crawl > 404s for another user's profile and leaves its status alone 3ms
+   ✓ .../crawl/route.test.ts > POST /api/profiles/{id}/crawl > answers 202 with the Python body and flips the row to crawling 15ms
+   ✓ .../crawl/route.test.ts > POST /api/profiles/{id}/crawl > publishes a sitemap-crawl workflow.start carrying the profile id 30ms
+   ✓ .../crawl/route.test.ts > POST /api/profiles/{id}/crawl > re-crawls a profile that already completed 5ms
+   ✓ .../crawl/route.test.ts > POST /api/profiles/{id}/crawl > rolls the status to failed and 500s when the enqueue raises 3ms
+   ✓ .../crawl/route.test.ts > POST /api/profiles/{id}/crawl > bumps updated_at, as the ORM commit did 4ms
+   ✓ .../crawl/route.test.ts > POST /api/profiles auto-enqueue > starts a crawl for the profile it just created 5ms
+   ✓ .../crawl/route.test.ts > POST /api/profiles auto-enqueue > still returns the 201 when the enqueue raises, and logs why 4ms
+
+   Test Files  2 passed (2)
+        Tests  53 passed (53)
+     Duration  2.01s
+  ```
+
+  (The 42 pre-existing `route.test.ts` cases are elided above; all 53 passed.
+  The full verbose listing is reproducible with the command shown.)
+
+  **Negative control.** Replacing `await startSitemapCrawl(id)` in the handler
+  with `void startSitemapCrawl` (so the route still typechecks but enqueues
+  nothing) fails exactly the three tests that depend on the enqueue:
+
+  ```
+  $ pnpm -C web exec vitest run 'src/app/api/profiles/[id]/crawl/route.test.ts'
+   Test Files  1 failed (1)
+        Tests  3 failed | 8 passed (11)
+  # publishes a sitemap-crawl workflow.start ... : no workflow.start within 15000ms
+  # re-crawls a profile that already completed  : no workflow.start within 15000ms
+  # rolls the status to failed and 500s ...     : expected 500, got 202
+  ```
+
+  **Fixture URLs changed in `route.test.ts`.** Because `POST /api/profiles` now
+  starts a real run, the 14 profiles that file creates would each publish a
+  crawl for a plausible-looking domain (`https://testblog.com` and friends).
+  Nothing in that file runs a worker, but `crossprocess-events.test.ts`,
+  `scaffold-check.test.ts` and `reclaim-duplication.test.ts` all call
+  `startWorkers()` on the shared instance and can consume those events while
+  running in parallel. A unit test must not be able to cause a crawl of
+  somebody else's website, so every fixture `website_url` now points at
+  `http://127.0.0.1:9/...`, the discard port on loopback, which refuses
+  immediately. Every assertion in that file compares against the echoed value,
+  so none of them changed meaning.
+
+  **Pre-existing flake, confirmed not caused by this item.**
+  `scaffold-check.test.ts` intermittently fails its whole suite with
+  `Hook timed out in 60000ms` in the full run (already logged in `todo.md` as
+  `[investigate]` in the 5.2c-ii-1 iteration). It was suspected here because
+  this item is what puts extra `workflow.start` traffic on the shared topic, so
+  it was measured: with this iteration's work stashed, the suite at HEAD
+  reproduced it on the first run.
+
+  ```
+  # working tree stashed, so this is HEAD without item 5.2c-iii
+  $ pnpm -C web test
+   FAIL  src/mastra/workflows/scaffold-check.test.ts [ ... ]
+  Error: Hook timed out in 60000ms.
+   Test Files  3 failed | 65 passed (68)
+        Tests  9 failed | 1078 passed | 12 skipped (1099)
+  ```
+
+  The `mastra-orchestration` consumer group on `mastra:topic:workflows` reports
+  `lag 0` after a full suite run, so a backlog of crawl events is not the
+  mechanism either.
+
+  ```
+  $ docker compose exec -T redis redis-cli --no-raw XINFO GROUPS mastra:topic:workflows
+     2) "mastra-orchestration"
+     4) (integer) 243        # consumers
+     6) (integer) 2          # pending
+    10) (integer) 1690       # entries-read
+    12) (integer) 0          # lag
+  ```
+
+  **Not covered by this item.** That a crawl started by the route reaches a
+  worker running as a separate service, rather than one started inside a test
+  process, is 7.6.
+
+  Frontend gates:
+
+  ```
+  $ pnpm -C web exec tsc --noEmit
+  $ echo $?
+  0
+
+  $ pnpm -C web lint
+  $ echo $?
+  0
+
+  $ pnpm -C web test
+   Test Files  2 failed | 67 passed (69)
+        Tests  9 failed | 1094 passed | 7 skipped (1110)
+  # the recorded 9-failure baseline: 6 in image-preview.test.tsx and 3 in
+  # PostDetail.test.tsx, all pre-existing. Passing count 1083 -> 1094 (+11).
+
+  $ pnpm -C web build
+  ✓ Compiled successfully in 3.5s
+  ├ ƒ /api/profiles
+  ├ ƒ /api/profiles/[id]
+  ├ ƒ /api/profiles/[id]/crawl
+  $ echo $?
+  0
+  ```
+
+  `api/` is untouched by this item, and its gates are unchanged:
+
+  ```
+  $ cd api && uv run pytest -q     # .env sourced
+  125 failed, 236 passed, 25 errors in 13.72s
+
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 128 files already formatted
+  ```
 - [ ] 5.3 `posts`
 - [ ] 5.4 `queue`
 - [ ] 5.5 `events` (SSE keeps `web/src/hooks/use-sse.ts`'s existing message shape; sourced from

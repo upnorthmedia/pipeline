@@ -8,6 +8,8 @@ import { desc, eq } from "drizzle-orm"
 
 import { getDb, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { logger } from "@/mastra"
+import { startSitemapCrawl } from "@/mastra/start-crawl"
 
 import { encryptCredentials } from "./secrets"
 import { serializeProfile, type ProfileResponse } from "./serialize"
@@ -39,11 +41,11 @@ export async function GET(request: Request): Promise<Response> {
  * `user_id` comes from the session, never from the body, which is what makes
  * the row unreachable from another account.
  *
- * Not ported here: the `crawl_profile_sitemap` job this endpoint enqueued on
- * success, which has no TypeScript equivalent yet. It is ledger item 5.2c,
- * with the rest of the crawl endpoint. Python wrapped the enqueue in a bare
- * `except` so that a dead queue still returned a 201, meaning the response is
- * the same either way; only the follow-up crawl is missing.
+ * The sitemap crawl is started on success, as Python did. Its `except: pass`
+ * is reproduced rather than tidied away: a dead queue must still return the
+ * 201, because the profile is written and refusing to report it would leave the
+ * client believing the create failed. The swallowed error is logged, which
+ * Python did not do, so an outage is visible somewhere.
  */
 export async function POST(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
@@ -63,6 +65,15 @@ export async function POST(request: Request): Promise<Response> {
     .insert(websiteProfiles)
     .values({ ...encryptCredentials(toColumns(parsed.data)), userId: user.id })
     .returning()
+
+  try {
+    await startSitemapCrawl(row.id)
+  } catch (error) {
+    logger.warn("Profile created but the sitemap crawl could not be started", {
+      profileId: row.id,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
 
   return Response.json(serializeProfile(row), { status: 201 })
 }
