@@ -2101,7 +2101,123 @@ immediately on completion. Parity test asserts the rendered prompt matches the
 Python-rendered prompt (whitespace normalized only) and the output validates against
 `outputSchema`.
 
-- [ ] 3.1 `research`
+- [x] 3.1a Shared prompt assembly (`load_rules` / `build_stage_prompt`), with a prompt-parity
+  test against every golden fixture.
+
+  Split out of 3.1 because it is not research-specific: all six stages render their prompt
+  through the same two Python functions, so porting them once, proven against all 12 golden
+  fixtures, is a self-contained unit and stops each of 3.1b through 3.6 re-deriving it.
+
+  **What was ported.** `web/src/mastra/state.ts` carries the stage vocabulary from
+  `api/src/pipeline/state.py` (`STAGES`, `STAGE_CONTENT_MAP`, `STAGE_PROVIDER_MAP`,
+  `STAGE_RULES_MAP`, `STAGE_OUTPUT_KEY`, the status constants) plus `pipelineContextSchema`,
+  the Zod schema for the prompt-visible subset of `PipelineState`. API keys, `stage_status`
+  and run-control fields are deliberately absent from that schema: they never reach a prompt,
+  so a step cannot leak a credential into a provider payload through it.
+  `web/src/mastra/prompts.ts` ports `load_rules()` and `build_stage_prompt()` from
+  `api/src/pipeline/helpers.py`, including `_build_config_context`, `_get_previous_output` and
+  `_build_links_context`.
+
+  **The prompt contract is not uniform across the six stages.** The parity run against the
+  golden fixtures established, rather than assumed, which stages the shared assembly covers:
+
+  | Stage | Prompt actually sent |
+  | --- | --- |
+  | `research`, `outline`, `write` | exactly `build_stage_prompt()` |
+  | `images` | `build_stage_prompt()` as prompt 1 of N; prompts 2..N are per-image (item 3.5) |
+  | `edit` | `build_stage_prompt()` + `"\n\n---\n\n"` + `_build_analytics_section()` (item 3.4) |
+  | `ready` | not `build_stage_prompt()` at all: `_build_ready_prompt()` is a separate builder (item 3.6) |
+
+  So the test asserts byte equality for the first four, an exact-prefix relationship for
+  `edit`, and for `ready` it pins the fixture's distinguishing markers (`- **SLUG**:`, the
+  fenced `## Image Manifest (generated images only)` block, no `- **BLOG_POST_TOPIC**:`) so
+  item 3.6 cannot wire up the wrong builder unnoticed.
+
+  **Verification.**
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm exec vitest run src/mastra/prompts.test.ts
+
+   RUN  v4.0.18 /Users/cody/.../objective-port-jena-46c1e6-1/web
+
+   ✓ src/mastra/prompts.test.ts (21 tests) 20ms
+
+   Test Files  1 passed (1)
+        Tests  21 passed (21)
+     Start at  21:20:40
+     Duration  203ms (transform 31ms, setup 81ms, import 33ms, tests 20ms, environment 0ms)
+  ```
+
+  The 21 cover: 8 byte-exact fixture comparisons (4 stages x 2 posts), 2 `edit` prefix
+  comparisons, 2 `ready` non-applicability pins, a check that the two captured posts really do
+  differ in `article_type`/`output_format`, TODAY_DATE injection in both directions, rule-file
+  loading for all six stages against the on-disk bytes, the `RULES_DIR` override plus
+  missing-file behaviour, and four assembly edge cases.
+
+  **Negative controls** (each applied, run, reverted):
+
+  ```
+  $ # 1. swap the NICHE and INTENT rows of CONFIG_FIELDS
+   Test Files  1 failed (1)
+        Tests  10 failed | 11 passed (21)
+
+  $ # 2. drop the non-ASCII escaping from pythonJsonDumps
+   FAIL  src/mastra/prompts.test.ts > buildStagePrompt edge cases >
+         escapes non-ASCII in a serialized manifest the way json.dumps does
+   Test Files  1 failed (1)
+        Tests  1 failed | 20 passed (21)
+
+  $ # 3. join sections with "\n\n" instead of "\n\n---\n\n"
+   Test Files  1 failed (1)
+        Tests  10 failed | 11 passed (21)
+
+  $ # restored
+   Test Files  1 passed (1)
+        Tests  21 passed (21)
+  ```
+
+  Control 2 is the one the golden fixtures could not catch on their own, because neither
+  captured manifest contains a non-ASCII character. Python's `json.dumps(..., indent=2)`
+  defaults to `ensure_ascii=True` and `JSON.stringify` does not, so the two stacks would have
+  diverged on exactly the manifests carrying typographic punctuation. Confirmed against the
+  real Python:
+
+  ```
+  $ python3 -c 'import json
+  print(json.dumps({"alt": "café — 90% sure ☕"}, indent=2))'
+  {
+    "alt": "caf\u00e9 \u2014 90% sure \u2615"
+  }
+  ```
+
+  which is the exact string the TypeScript assertion expects.
+
+  **Frontend gates:**
+
+  ```
+  $ cd web && pnpm exec tsc --noEmit
+  tsc exit=0
+
+  $ pnpm lint
+  lint exit=0
+
+  $ NO_COLOR=1 pnpm test
+   Test Files  2 failed | 22 passed (24)
+        Tests  9 failed | 259 passed (268)
+  test exit=1
+
+  $ pnpm build
+  build exit=0
+  ```
+
+  Failures held at the established baseline of 9 (`image-preview.test.tsx` and
+  `PostDetail.test.tsx`); passes moved 238 -> 259, which is the 21 new tests. No `api/` file
+  was touched (`git status --porcelain` listed only the three new `web/src/mastra/` files), so
+  the pytest and ruff baselines are unchanged by construction.
+
+- [ ] 3.1b `research` agent + step (model choice per section 5, output persisted to
+  `research_content` via `STAGE_CONTENT_MAP`, the meta-response retry loop from
+  `research_node`, parity test on the step's output schema).
 - [ ] 3.2 `outline`
 - [ ] 3.3 `write`
 - [ ] 3.4 `edit`
