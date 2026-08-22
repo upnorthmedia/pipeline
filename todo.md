@@ -214,3 +214,11 @@
   Nothing in the dashboard does more than hand these strings to `new Date()`, so this is
   cosmetic, but the two ported serializers should agree: move `toPydanticIso()` somewhere
   shared and use it for profiles too.
+- [confirmed] 2026-08-22 `POST /api/posts/{post_id}/duplicate` silently drops `article_type` and
+  `additional_info`. `duplicate_post`'s `config_fields` list in `api/src/api/posts.py` names
+  eighteen columns and was never extended when those two were added, so a duplicated post loses
+  the article type the new-post form set and any extra instructions the user wrote. Reproduced
+  and pinned by `does not copy article_type or additional_info` in
+  `web/src/app/api/posts/duplicate-batch.test.ts`, where the port keeps the behaviour on
+  purpose: item 5.3b-iii is a port, not a bug fix, and changing what duplicate copies is a
+  product decision. Fixing it is two names in `CONFIG_COLUMNS` plus flipping that test.

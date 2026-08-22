@@ -8532,9 +8532,13 @@ three pieces are separately verifiable, so they are separate items.
     $ cd api && uv run ruff format --check .
     9 files would be reformatted, 128 files already formatted
     ```
-  - [ ] 5.3b Writes (split: five endpoints, two of which carry the whole
+  - [x] 5.3b Writes (split: five endpoints, two of which carry the whole
     `PostCreate` validation and prefill surface. Split into 5.3b-i create,
-    5.3b-ii patch and delete, 5.3b-iii duplicate and batch.)
+    5.3b-ii patch and delete, 5.3b-iii duplicate and batch.) Closed by
+    5.3b-iii: all three sub-items are checked with their own evidence, and the
+    five write endpoints `POST /api/posts`, `PATCH /{post_id}`,
+    `DELETE /{post_id}`, `POST /{post_id}/duplicate` and `POST /batch` are all
+    served from `web/src/app/api/posts/`.
     - [x] 5.3b-i `POST /api/posts`: `PostCreate` validation, the profile-driven
       prefill and the auto-enqueue that replaces
       `enqueue_job("run_pipeline_stage", post.id)`.
@@ -8887,7 +8891,163 @@ three pieces are separately verifiable, so they are separate items.
       $ cd api && uv run ruff format --check .
       9 files would be reformatted, 129 files already formatted
       ```
-    - [ ] 5.3b-iii `POST /{post_id}/duplicate` and `POST /batch`.
+    - [x] 5.3b-iii `POST /{post_id}/duplicate` and `POST /batch`.
+
+      Two handlers, `web/src/app/api/posts/[id]/duplicate/route.ts` and
+      `web/src/app/api/posts/batch/route.ts`. Both are static-vs-dynamic
+      neighbours of the `[id]` route already ported; `next build` resolves them
+      as separate entries, so `POST /api/posts/batch` never reaches `[id]`:
+
+      ```
+      $ pnpm -C web build
+      ├ ƒ /api/posts
+      ├ ƒ /api/posts/[id]
+      ├ ƒ /api/posts/[id]/duplicate
+      ├ ƒ /api/posts/batch
+      ```
+
+      **`duplicate` is a whitelist copy, not a row clone.** `duplicate_post`
+      names eighteen configuration columns in `config_fields` and reads only
+      those off the original, so the six stage content columns, `image_manifest`,
+      `stage_logs`, `execution_logs`, `current_stage`, `stage_status`,
+      `priority`, the five WordPress columns and the two Next.js publishing
+      columns all fall back to their column defaults. That is what makes the
+      duplicate a fresh unrun post. It is also the one write endpoint in the
+      router that starts no pipeline run, which is why the copy sits at
+      `current_stage: "pending"` until the user runs it. Both facts are asserted.
+
+      **A defect in the original, preserved rather than fixed.**
+      `config_fields` predates `article_type` and `additional_info`, so a
+      duplicate silently loses them. This is a port, not a bug fix, and what a
+      duplicate carries is a product decision, so the behaviour is reproduced and
+      pinned by a test that says so. Logged in `todo.md` as `[confirmed]` with
+      the two-line fix.
+
+      **`batch` differs from `create_post` in two ways, both deliberate on the
+      Python side.** It does not stamp `current_stage`/`stage_status`, so a batch
+      post starts at `"pending"` with an empty `stage_status` where a single
+      create starts at `"research"`/`{research: "running"}`; the pytest coverage
+      asserted that directly (`post["current_stage"] == "pending"`). And an empty
+      list is a 201 carrying `[]`. Both are kept.
+
+      All-or-nothing is load-bearing: Python called `session.commit()` once after
+      adding every post, so one item violating `uq_posts_profile_slug` rolls the
+      whole batch back. A single multi-row INSERT keeps that, and Postgres
+      returns RETURNING rows in VALUES order, which is the order
+      `web/src/app/posts/batch/page.tsx` submitted. Both are asserted.
+
+      **Deviation: `batch`'s profile lookup is scoped to the caller.** Python
+      used `session.get(WebsiteProfile, data.profile_id)`, which is not scoped,
+      and skipped the prefill when it came back empty. Two holes follow. Another
+      account's profile is read for its niche, tone, brand voice, word count and
+      WordPress defaults, so a caller who knows a profile id reads settings that
+      are not theirs. Worse, the post is then written carrying that account's
+      `profile_id`, which hands the post to them and hides it from its creator,
+      since every read handler joins through `website_profiles` to reach
+      `user_id`. The objective's Phase 5 rule is explicit that this is a defect
+      rather than a follow-up, so the lookup is scoped and a miss is the same
+      `404 {"detail": "Profile not found"}` `create_post` already answers with,
+      which makes the two create paths agree. The only case that changes for a
+      legitimate caller is a `profile_id` that does not exist at all: that was a
+      foreign-key 500 before and is a 404 now.
+
+      The prefill itself is `applyProfilePrefill` from item 5.3b-i, unchanged, so
+      the ten-case oracle generated from the real `create_post` coroutine still
+      covers `batch`'s fold. The one addition here is that a batch naming two
+      profiles resolves each item against its own, asserted.
+
+      26 tests in `web/src/app/api/posts/duplicate-batch.test.ts`, against the
+      real database, real BetterAuth sessions and the real Redis Streams bus,
+      with the batch enqueue read back off an independent fan-out subscription
+      rather than a spy:
+
+      ```
+       RUN  v4.0.18 /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/{post_id}/duplicate > rejects an unauthenticated request 3ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/{post_id}/duplicate > answers a malformed path uuid with FastAPI's 422 11ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/{post_id}/duplicate > answers a post that does not exist with a 404 5ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/{post_id}/duplicate > answers another user's post with the same 404, writing nothing 9ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/{post_id}/duplicate > answers a post with no profile with a 404, because the join is inner 4ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/{post_id}/duplicate > copies every configuration field in `config_fields` 7ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/{post_id}/duplicate > gives the copy a new id and a `-copy-<6 hex>` slug 5ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/{post_id}/duplicate > mints a different suffix on each call 8ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/{post_id}/duplicate > leaves stage content, logs and pipeline state behind 5ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/{post_id}/duplicate > does not copy `article_type` or `additional_info`, which `config_fields` predates 5ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/{post_id}/duplicate > starts no pipeline run, unlike every other create path 507ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/batch > rejects an unauthenticated request 1ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/batch > answers an empty list with a 201 and an empty list 2ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/batch > answers a body that is not a list with pydantic's `list_type` 3ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/batch > answers invalid JSON with FastAPI's `json_invalid` 2ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/batch > reports the failing item's index in `loc` 2ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/batch > reports every failing item in one response 2ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/batch > creates every post, in the submitted order 3ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/batch > leaves `current_stage` and `stage_status` at their column defaults 2ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/batch > prefills each item from its profile 4ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/batch > prefills each item from its own profile when a batch names two 4ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/batch > answers another user's profile with a 404 and writes nothing 3ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/batch > answers a profile that does not exist with a 404 2ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/batch > rolls the whole batch back when one item violates the slug constraint 8ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/batch > starts a pipeline run for every created post 43ms
+       ✓ src/app/api/posts/duplicate-batch.test.ts > POST /api/posts/batch > scopes the created posts to the caller 8ms
+       Test Files  1 passed (1)
+            Tests  26 passed (26)
+         Start at  13:31:35
+         Duration  2.63s (transform 141ms, setup 75ms, import 694ms, tests 1.75s, environment 0ms)
+      ```
+
+      Three negative controls, each run against the finished tests:
+
+      ```
+      # 1. drop the user_id predicate from batch's profile lookup
+      ×  answers another user's profile with a 404 and writes nothing
+         Tests  1 failed | 25 passed (26)
+
+      # 2. add articleType/additionalInfo to duplicate's CONFIG_COLUMNS
+      ×  does not copy `article_type` or `additional_info`, which `config_fields` predates
+         Tests  1 failed | 25 passed (26)
+
+      # 3. stamp currentStage/stageStatus in batch the way create_post does
+      ×  leaves `current_stage` and `stage_status` at their column defaults
+         Tests  1 failed | 25 passed (26)
+      ```
+
+      `web/src/lib/api.ts` needed no change: `posts.duplicate()` already returns
+      `Post` and `posts.batchCreate()` already returns `Post[]`, which is what
+      both handlers serialize through the shared `PostRead` serializer.
+
+      Frontend gates:
+
+      ```
+      $ cd web && ./node_modules/.bin/tsc --noEmit ; echo "exit: $?"
+      exit: 0
+
+      $ pnpm -C web lint
+      (no output)
+
+      $ pnpm -C web test
+       Test Files  2 failed | 71 passed (73)
+            Tests  9 failed | 1200 passed | 7 skipped (1216)
+
+      $ pnpm -C web build
+      ✓ Compiled successfully
+      ```
+
+      1174 -> 1200 passing is exactly the 26 added here; the 9 failures are the
+      Phase 0 baseline (6 in `image-preview.test.tsx`, 3 in `scaffold-check`,
+      the latter tracked in `todo.md`).
+
+      Backend gates, on their recorded baseline:
+
+      ```
+      $ cd api && uv run pytest -q     # .env sourced
+      125 failed, 236 passed, 25 errors in 13.71s
+
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 129 files already formatted
+      ```
   - [ ] 5.3c Pipeline control: `POST /{post_id}/run`, `/run-all`, `/rerun`, `/restart`,
     `/pause` and `/publish`, started as Mastra runs rather than ARQ jobs.
   - [ ] 5.3d `GET /{post_id}/export/markdown`, `/export/html`, `/export/all`,
