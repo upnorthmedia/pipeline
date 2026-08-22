@@ -10444,7 +10444,8 @@ three pieces are separately verifiable, so they are separate items.
     9 files would be reformatted, 131 files already formatted
     ```
 
-  - [ ] 5.4c `GET /api/queue/worker-status`.
+  - [x] 5.4c `GET /api/queue/worker-status`. (Both sub-items done: 5.4c-i the
+    liveness and backlog reads, 5.4c-ii the last-completed writer and the handler.)
 
     Reads three ARQ artefacts that do not exist under Mastra: the `arq:worker:*`
     heartbeat keys, the `arq:queue` sorted set's cardinality, and
@@ -10634,7 +10635,7 @@ three pieces are separately verifiable, so they are separate items.
       9 files would be reformatted, 131 files already formatted
       ```
 
-    - [ ] 5.4c-ii The `last_completed` writer and the `GET /api/queue/worker-status`
+    - [x] 5.4c-ii The `last_completed` writer and the `GET /api/queue/worker-status`
       route handler.
 
       `_record_job_completed()` writes an ISO timestamp to
@@ -10647,6 +10648,162 @@ three pieces are separately verifiable, so they are separate items.
       then the handler, which also carries `active_jobs`: a `current_stage IN (STAGES)`
       count that Python leaves un-scoped by user, unlike every other query in this
       router (already logged in `todo.md`).
+
+      **The writer.** `recordRunCompleted()` and `readLastCompleted()` in
+      `web/src/mastra/worker-health.ts` write and read
+      `mastra:worker:last_completed`. The key is renamed because nothing named
+      `arq:` survives the port; the value is still one ISO timestamp per completed
+      run.
+
+      Still a written timestamp rather than one derived from the run rows Mastra
+      already keeps. `listWorkflowRuns({ status: "success" })` in
+      `@mastra/pg` ends `ORDER BY "createdAt" DESC`, so the most recently *started*
+      successful run is not the most recently *finished* one when two runs overlap,
+      and answering it correctly means either scanning every successful run ever (the
+      call returns all rows when `perPage`/`page` are omitted) or picking an arbitrary
+      window over the last N. One `SET` per completed run is cheaper than both and
+      says exactly what Python said.
+
+      **Where it fires.** The item flagged that `steps/pipeline-complete.ts` might be
+      too narrow, because Python's call sits *outside* `if is_full_pipeline:`. Checked
+      rather than assumed: the step is in the chain unconditionally and only its
+      `markPipelineComplete` call is gated on `inputData.stages`, so a named-stage
+      rerun passes through it exactly as a full run does. That is the same reach as
+      `_record_job_completed()`: every run that gets to the end without raising, and
+      no run that raised or parked at a review gate. Both branches are asserted
+      against real runs in `workflows/pipeline-completion.test.ts`.
+
+      **The handler.** `web/src/app/api/queue/worker-status/route.ts` answers the four
+      keys Python answered, from four sources rather than Python's four:
+
+      | key | Python | here |
+      | --- | --- | --- |
+      | `worker_alive` | `SCAN arq:worker:*` | live consumers in the orchestration group (5.4c-i) |
+      | `queued_jobs` | `ZCARD arq:queue` | the group's undelivered `lag`, `null` when Redis cannot tell |
+      | `last_completed` | `GET arq:worker:last_completed` | `GET mastra:worker:last_completed` |
+      | `active_jobs` | `current_stage IN (STAGES)`, un-scoped | the same count, scoped to the caller |
+
+      Three deviations, all deliberate:
+
+      1. **`active_jobs` is user-scoped.** Python's query has no user predicate, so
+         every caller was told how many posts were running across the whole
+         installation. Phase 5's rule is that a handler which reports another
+         tenant's rows is a defect to close, so it joins `website_profiles` and
+         filters on `user_id` like the rest of the router. The `todo.md` entry keeps
+         its other two items (the unscoped `session.get` in `retry_dead_letter` and
+         the ignored user dependency), which belong to 5.4d.
+      2. **`worker_alive` can be `true`.** Python's could not: it scanned
+         `arq:worker:*` while ARQ wrote its heartbeat to `arq:queue:health-check`.
+         Argued under 5.4c-i; reproducing a constant `false` would be transcribing a
+         bug.
+      3. **The timestamp is spelled differently.** `Date#toISOString()` gives
+         `...T12:00:00.000Z` where `datetime.now(UTC).isoformat()` gave
+         `...T12:00:00.000000+00:00`: same instant, same ISO 8601, three fewer digits
+         of precision. Nothing consumes the string except this endpoint, which passes
+         it through, and `web/src/lib/api.ts` declares no `workerStatus` at all.
+
+      **One existing test updated.** `src/mastra/no-next-imports.test.ts` asserts the
+      exact package allowlist of the Mastra entry graph, and the entry graph now
+      reaches `redis` through `pipelineCompleteStep`. The allowlist gained `"redis"`
+      with a comment naming this item. That is an intended change to what the entry
+      point pulls in, not a test bent to pass: the transport keeps its own clients
+      private, so a step that writes a Redis key has to open one.
+
+      **One assertion deliberately not written.** The suspended run in
+      `pipeline-completion.test.ts` gets no "did not record a completed job" case.
+      The key is global to the Redis instance and vitest runs files in parallel, so
+      another file's run completing during this one would flip it. The fact it would
+      assert, that a suspended run never reaches the step, is already pinned by that
+      run's null `completed_at`.
+
+      ```
+      $ pnpm -C web exec vitest run src/mastra/worker-health.test.ts \
+          src/app/api/queue/worker-status/route.test.ts --reporter=verbose
+       ✓ src/app/api/queue/worker-status/route.test.ts > GET /api/queue/worker-status > rejects an unauthenticated request 3ms
+       ✓ src/app/api/queue/worker-status/route.test.ts > GET /api/queue/worker-status > answers the four keys Python answered, and no others 28ms
+       ✓ src/app/api/queue/worker-status/route.test.ts > GET /api/queue/worker-status > counts a post on each of the six stages as active 9ms
+       ✓ src/app/api/queue/worker-status/route.test.ts > GET /api/queue/worker-status > counts no post that is not on a stage 7ms
+       ✓ src/app/api/queue/worker-status/route.test.ts > GET /api/queue/worker-status > counts only the caller's active posts 8ms
+       ✓ src/app/api/queue/worker-status/route.test.ts > GET /api/queue/worker-status > excludes an active post with no profile, which matches no user 4ms
+       ✓ src/app/api/queue/worker-status/route.test.ts > GET /api/queue/worker-status > reports the timestamp the worker last recorded 5ms
+       ✓ src/app/api/queue/worker-status/route.test.ts > GET /api/queue/worker-status > reports null when no run has ever finished 3ms
+       ✓ src/mastra/worker-health.test.ts > last completed > does not collide with the ARQ key it replaces 0ms
+       ✓ src/mastra/worker-health.test.ts > last completed > reads null until a run has finished 1ms
+       ✓ src/mastra/worker-health.test.ts > last completed > writes the instant it returns, as an ISO 8601 timestamp 1ms
+       ✓ src/mastra/worker-health.test.ts > last completed > keeps only the latest run's timestamp 7ms
+       ✓ src/mastra/worker-health.test.ts > last completed > opens its own connection when given no client 8ms
+       Test Files  2 passed (2)
+            Tests  24 passed (24)
+      # 24 = 8 new route tests, 5 new last-completed tests, and 5.4c-i's 11 unchanged.
+
+      $ pnpm -C web exec vitest run src/mastra/workflows/pipeline-completion.test.ts --reporter=verbose
+       ✓ a full run that finishes > records the run as the worker's last completed job 0ms
+       ✓ a named-stage run that finishes the post > still records the run as the worker's last completed job 0ms
+       ✓ a full run with every stage already complete > records the run as the worker's last completed job 0ms
+       Test Files  1 passed (1)
+            Tests  14 passed (14)
+      # Real runs against real Postgres, real Redis and the evented engine, with only
+      # the provider calls stubbed. Each of the three deletes the key immediately
+      # before its run, so a non-null read afterwards is this run's work.
+      ```
+
+      Four negative controls, each applied and reverted:
+
+      ```
+      # 1. drop `await recordRunCompleted()` from pipelineCompleteStep
+      $ pnpm -C web exec vitest run src/mastra/workflows/pipeline-completion.test.ts
+            Tests  3 failed | 11 passed (14)
+      # the three real-run assertions, one per branch that reaches the step.
+
+      # 2. drop `inArray(posts.currentStage, [...STAGES])` from the handler
+      $ pnpm -C web exec vitest run src/app/api/queue/worker-status/route.test.ts
+            Tests  1 failed | 7 passed (8)
+      # × counts no post that is not on a stage
+
+      # 3. restore Python's un-scoped active_jobs (drop the join and the user_id filter)
+      $ pnpm -C web exec vitest run src/app/api/queue/worker-status/route.test.ts
+            Tests  4 failed | 4 passed (8)
+      # × counts only the caller's active posts
+      # × excludes an active post with no profile, which matches no user
+      # × counts no post that is not on a stage  (the dev database holds posts on a
+      #   stage that belong to neither test user, which is the hole itself)
+
+      # 4. write String(Date.now()) instead of new Date().toISOString()
+      $ pnpm -C web exec vitest run src/mastra/worker-health.test.ts
+            Tests  1 failed | 15 passed (16)
+      # × writes the instant it returns, as an ISO 8601 timestamp
+      ```
+
+      ```
+      $ pnpm -C web exec tsc --noEmit
+      # exit 0
+
+      $ pnpm -C web exec eslint
+      # exit 0
+
+      $ pnpm -C web test
+       Test Files  2 failed | 79 passed (81)
+            Tests  9 failed | 1436 passed | 7 skipped (1452)
+      # 9 failed is the recorded baseline: 6 in image-preview.test.tsx and 3 in
+      # PostDetail.test.tsx. 1420 -> 1436 passed is exactly this iteration's 16.
+
+      $ pnpm -C web build
+      # exit 0
+      ├ ƒ /api/queue
+      ├ ƒ /api/queue/pause-all
+      ├ ƒ /api/queue/resume-all
+      ├ ƒ /api/queue/worker-status
+
+      $ cd api && uv run pytest -q
+      125 failed, 236 passed, 25 errors in 12.81s
+      # the recorded baseline, unchanged. Requires `set -a; . ./.env; set +a` first.
+
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 131 files already formatted
+      ```
 
   - [ ] 5.4d `GET /api/queue/dead-letter`, `POST /api/queue/dead-letter/{post_id}/retry`
     and `DELETE /api/queue/dead-letter`.

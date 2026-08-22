@@ -88,6 +88,10 @@ describe("mastra entry point", () => {
       "node:path",
       "node:zlib",
       "pg",
+      // `pipelineCompleteStep` records the run's finish time on the key the
+      // worker-status endpoint reads (ledger 5.4c-ii), and the transport keeps
+      // its own clients private, so the completion step opens one of its own.
+      "redis",
       "sharp",
       "zod",
     ])

@@ -28,8 +28,11 @@ import {
   ORCHESTRATION_TOPIC,
   STREAM_KEY_PREFIX,
   WORKER_ALIVE_IDLE_LIMIT_MS,
+  WORKER_LAST_COMPLETED_KEY,
   orchestrationStreamKey,
+  readLastCompleted,
   readWorkerHealth,
+  recordRunCompleted,
   type WorkerHealth,
 } from "./worker-health"
 
@@ -226,5 +229,70 @@ describe("against a real Mastra worker", () => {
     expect(stoppedWorker.workerAlive).toBe(false)
     expect(stoppedWorker.liveWorkers).toBe(0)
     expect(consumersAfterStop).toHaveLength(1)
+  })
+})
+
+/**
+ * Item 5.4c-ii: the replacement for ARQ's `arq:worker:last_completed`, written
+ * by `pipelineCompleteStep` at the end of every run that reaches it.
+ *
+ * Driven against an isolated key rather than the one the worker writes, so
+ * "nothing has finished yet" is a state this suite can create. A real run
+ * writing the real key is asserted in `workflows/pipeline-completion.test.ts`,
+ * where four runs already exist to hang it off.
+ */
+describe("last completed", () => {
+  const key = "mastra:test:worker-health:last_completed"
+
+  beforeAll(async () => {
+    await client.del(key)
+  })
+
+  afterAll(async () => {
+    await client.del(key)
+  })
+
+  it("does not collide with the ARQ key it replaces", () => {
+    expect(WORKER_LAST_COMPLETED_KEY).toBe("mastra:worker:last_completed")
+  })
+
+  it("reads null until a run has finished", async () => {
+    expect(await readLastCompleted({ client, key })).toBeNull()
+  })
+
+  it("writes the instant it returns, as an ISO 8601 timestamp", async () => {
+    const before = Date.now()
+    const written = await recordRunCompleted({ client, key })
+    const after = Date.now()
+
+    expect(written).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+    expect(Date.parse(written)).toBeGreaterThanOrEqual(before)
+    expect(Date.parse(written)).toBeLessThanOrEqual(after)
+    expect(await readLastCompleted({ client, key })).toBe(written)
+  })
+
+  it("keeps only the latest run's timestamp", async () => {
+    const first = await recordRunCompleted({ client, key })
+    await sleep(5)
+    const second = await recordRunCompleted({ client, key })
+
+    expect(second).not.toBe(first)
+    expect(await readLastCompleted({ client, key })).toBe(second)
+  })
+
+  /**
+   * The step calls this with no client, from a worker that holds no
+   * long-lived health connection, so the write has to land anyway. That the
+   * connection is closed again is not asserted here: `CLIENT LIST` on the
+   * shared dev Redis counts every other suite's connections too, so the check
+   * would measure the rest of the suite rather than this call.
+   */
+  it("opens its own connection when given no client", async () => {
+    await client.del(key)
+
+    const written = await recordRunCompleted({ key })
+
+    expect(await client.get(key)).toBe(written)
+    expect(await readLastCompleted({ key })).toBe(written)
   })
 })

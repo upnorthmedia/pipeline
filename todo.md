@@ -246,8 +246,9 @@
   post to `pending`, strip its `_error` log and re-enqueue it. The other two dead-letter
   endpoints (`GET /api/queue/dead-letter`, `DELETE /api/queue/dead-letter`) take a `user`
   dependency and then ignore it entirely, returning and clearing the whole shared list.
-  `GET /api/queue/worker-status` has a milder version: its `active_jobs` count queries every
-  post in the database rather than the caller's. Found while splitting item 5.4; recorded there
-  too. The port should close all four the way 5.3b-iii closed the batch profile lookup, which
-  means the DLQ needs a user dimension it does not currently have, so it is a design decision
-  rather than a one-line predicate.
+  `GET /api/queue/worker-status` had a milder version, its `active_jobs` count querying every
+  post in the database rather than the caller's; that one is closed, the ported handler scopes
+  it through `website_profiles.user_id` (item 5.4c-ii). Found while splitting item 5.4; recorded
+  there too. The port should close the other three the way 5.3b-iii closed the batch profile
+  lookup, which means the DLQ needs a user dimension it does not currently have, so it is a
+  design decision rather than a one-line predicate.

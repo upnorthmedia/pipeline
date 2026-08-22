@@ -17,10 +17,20 @@
  *
  * It passes `ready`'s stage meta straight through, so adding it to the chain
  * leaves the workflow's declared output unchanged.
+ *
+ * It is also where the worker records that it finished a run, which is
+ * `_record_job_completed()` at `api/src/worker.py:313`. That call sits after
+ * Python's `if is_full_pipeline:` block rather than inside it, so it fires for
+ * every run that reaches the end without raising, single-stage reruns
+ * included. This step has exactly that reach: it is the last link in the
+ * chain, a named-stage run still passes through it (only the `completed_at`
+ * stamp above is gated on `is_full_pipeline`), and a run that raised or parked
+ * at a review gate never arrives.
  */
 import { createStep } from "@mastra/core/workflows/evented"
 
 import { markPipelineComplete } from "../post-state"
+import { recordRunCompleted } from "../worker-health"
 import { stageStepOutputSchema } from "./stage-io"
 
 export const pipelineCompleteStep = createStep({
@@ -34,6 +44,7 @@ export const pipelineCompleteStep = createStep({
     // finish time of a post that finished days ago every time one stage is
     // rerun from the dashboard.
     if (!inputData.stages) await markPipelineComplete(inputData.postId)
+    await recordRunCompleted()
     return inputData
   },
 })

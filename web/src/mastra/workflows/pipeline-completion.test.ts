@@ -26,6 +26,18 @@
  *    complete while still waiting on its reviewer would be worse than one that
  *    reported nothing.
  *
+ * The three runs that finish also carry item 5.4c-ii's evidence: the step is
+ * where `_record_job_completed()` lands, so a run that reaches it must leave a
+ * fresh `mastra:worker:last_completed`. The key is deleted immediately before
+ * each of those runs, so "the worker recorded this run" is distinguishable
+ * from "the key was already set".
+ *
+ * The suspended run deliberately carries no matching negative. The key is
+ * global to the Redis instance and vitest runs files in parallel, so another
+ * file's run completing during this one would flip it; the fact it would be
+ * asserting, that a suspended run never reaches the step at all, is already
+ * pinned by that run's null `completed_at` below.
+ *
  * Auto-publish, the other half of `_post_completion_hook`, depends on the
  * `wordpress` and `nextjs` routers and belongs to Phase 5. It is deliberately
  * not asserted here.
@@ -44,6 +56,7 @@ import { Mastra } from "@mastra/core"
 import { PostgresStore } from "@mastra/pg"
 import { RedisStreamsPubSub } from "@mastra/redis-streams"
 import { eq } from "drizzle-orm"
+import { createClient } from "redis"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, getPool, posts } from "../../db"
@@ -54,6 +67,7 @@ import { readyAgent } from "../agents/ready"
 import { researchAgent } from "../agents/research"
 import { writeAgent } from "../agents/write"
 import { CURRENT_STAGE_COMPLETE, STAGES, STATUS_COMPLETE, STATUS_REVIEW } from "../state"
+import { WORKER_LAST_COMPLETED_KEY, readLastCompleted } from "../worker-health"
 import { imagesWorkflow } from "./images"
 import { pipelineWorkflow } from "./pipeline"
 
@@ -127,6 +141,8 @@ const results: Record<string, PipelineResult> = {}
 let warnings: string[]
 /** Where the `images` stage writes, so a run cannot touch the repo's `media/`. */
 let mediaRootDir: string
+/** Reads and clears the key the completion step writes, independent of it. */
+let health: ReturnType<typeof createClient>
 
 function seedValues(postId: string, complete: readonly string[], gatedStage?: string) {
   return {
@@ -162,7 +178,28 @@ async function run(postId: string, stages?: readonly string[]) {
   })
 }
 
+/** Item 5.4c-ii: what the run left at `mastra:worker:last_completed`. */
+const completionStamps: Record<string, { startedAt: number; recorded: string | null }> = {}
+
+async function runRecordingCompletion(
+  name: string,
+  postId: string,
+  stages?: readonly string[],
+) {
+  await health.del(WORKER_LAST_COMPLETED_KEY)
+  const startedAt = Date.now()
+  const result = await run(postId, stages)
+  completionStamps[name] = {
+    startedAt,
+    recorded: await readLastCompleted({ client: health }),
+  }
+  return result
+}
+
 beforeAll(async () => {
+  health = createClient({ url: process.env.REDIS_URL! })
+  await health.connect()
+
   mediaRootDir = await mkdtemp(path.join(tmpdir(), "pipeline-completion-"))
   process.env.MEDIA_DIR = mediaRootDir
 
@@ -189,9 +226,9 @@ beforeAll(async () => {
   await storage.init()
   await testMastra.startWorkers()
 
-  results.fullRun = await run(FULL_RUN_POST_ID)
-  results.namedRun = await run(NAMED_RUN_POST_ID, ["edit"])
-  results.nothingToDo = await run(NOTHING_TO_DO_POST_ID)
+  results.fullRun = await runRecordingCompletion("fullRun", FULL_RUN_POST_ID)
+  results.namedRun = await runRecordingCompletion("namedRun", NAMED_RUN_POST_ID, ["edit"])
+  results.nothingToDo = await runRecordingCompletion("nothingToDo", NOTHING_TO_DO_POST_ID)
   // No wait for the snapshot the way `review-gates.test.ts` does: nothing here
   // resumes the run, and the only row read afterwards is one `reviewGate`
   // commits before the step calls `suspend()`.
@@ -201,6 +238,8 @@ beforeAll(async () => {
 afterAll(async () => {
   await testMastra.stopWorkers()
   await pubsub.close()
+  await health.del(WORKER_LAST_COMPLETED_KEY)
+  await health.close()
   for (const postId of POST_IDS) {
     await db.delete(posts).where(eq(posts.id, postId))
   }
@@ -237,6 +276,13 @@ describe("a full run that finishes", () => {
   it("routes the stage's quality warnings to the instance logger", () => {
     expect(warnings.some((w) => w.startsWith("Flesch reading ease"))).toBe(true)
   })
+
+  it("records the run as the worker's last completed job", () => {
+    const { startedAt, recorded } = completionStamps.fullRun
+
+    expect(recorded).not.toBeNull()
+    expect(Date.parse(recorded!)).toBeGreaterThanOrEqual(startedAt)
+  })
 })
 
 describe("a named-stage run that finishes the post", () => {
@@ -256,6 +302,19 @@ describe("a named-stage run that finishes the post", () => {
     expect(row.currentStage).toBe(CURRENT_STAGE_COMPLETE)
     expect(row.completedAt).toBeNull()
   })
+
+  /**
+   * The pair that makes this run different from the full one: Python gated the
+   * `completed_at` stamp on `is_full_pipeline` and left
+   * `_record_job_completed()` outside it, so a single-stage rerun records a
+   * completed job while leaving the post's own finish time alone.
+   */
+  it("still records the run as the worker's last completed job", () => {
+    const { startedAt, recorded } = completionStamps.namedRun
+
+    expect(recorded).not.toBeNull()
+    expect(Date.parse(recorded!)).toBeGreaterThanOrEqual(startedAt)
+  })
 })
 
 describe("a full run with every stage already complete", () => {
@@ -274,6 +333,13 @@ describe("a full run with every stage already complete", () => {
     expect(row.currentStage).toBe(CURRENT_STAGE_COMPLETE)
     expect(row.completedAt).toBeInstanceOf(Date)
     expect(row.finalMdContent).toBe("seeded final markdown")
+  })
+
+  it("records the run as the worker's last completed job", () => {
+    const { startedAt, recorded } = completionStamps.nothingToDo
+
+    expect(recorded).not.toBeNull()
+    expect(Date.parse(recorded!)).toBeGreaterThanOrEqual(startedAt)
   })
 })
 
