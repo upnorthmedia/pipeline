@@ -7067,9 +7067,212 @@ pages that use it work with the Python API stopped.
   `api_keys_validation`, so `valid` is `null` for every provider on the ported
   endpoint.
 
-- [ ] 5.1b-ii `settings`: `PUT /api/settings/api-keys`, the write half of
+- [x] 5.1b-ii `settings`: `PUT /api/settings/api-keys`, the write half of
   `api/src/services/api_keys.py` (`save_api_keys`, `save_validation_results`) and
   the live per-provider validation in `api/src/services/api_key_validator.py`
+
+  `PUT /api/settings/api-keys` now lives in `web/src/app/api/settings/api-keys/route.ts`
+  alongside the `GET` from 5.1b-i. `saveApiKeys()` and `saveValidationResults()`
+  joined `web/src/mastra/api-keys.ts`, and the three validators moved to a new
+  `web/src/mastra/api-key-validator.ts`. `web/src/lib/api.ts` was not touched:
+  `apiKeys.update()` already declared `PUT /api/settings/api-keys` returning
+  `Record<string, ApiKeyStatus>`, and that is exactly what the handler returns.
+
+  **Provider endpoints, verified live rather than recalled.** Python reached
+  the three providers through the `anthropic`, `httpx` and `google-genai`
+  packages; none of the three is a `web/` dependency, so the port uses `fetch`.
+  Every URL, header name and failure shape below was confirmed by calling the
+  real endpoint on 2026-08-22, with a deliberately invalid key where no key is
+  held. No credential appears in the commands or the output.
+
+  ```
+  $ curl -s -o /dev/null -w "%{http_code}\n" https://api.anthropic.com/v1/messages \
+      -H "content-type: application/json" -H "x-api-key: sk-ant-not-a-real-key" \
+      -H "anthropic-version: 2023-06-01" \
+      -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,
+           "messages":[{"role":"user","content":"hi"}]}'
+  401
+  {"type":"error","error":{"type":"authentication_error","message":"API key is invalid."},"request_id":null}
+
+  $ curl -s -o /dev/null -w "%{http_code}\n" https://api.perplexity.ai/chat/completions \
+      -H "content-type: application/json" -H "Authorization: Bearer pplx-not-a-real-key" \
+      -d '{"model":"sonar","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}'
+  401
+  {"error":{"message":"Invalid API key provided. Ensure your API key is correct and active.","type":"invalid_api_key","code":401}}
+
+  $ curl -s -w "%{http_code}\n" -H "x-goog-api-key: $GEMINI_API_KEY" \
+      "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1"
+  200
+  {"models":[{"name":"models/gemini-2.5-flash","version":"001", ... }]}
+
+  $ curl -s -w "%{http_code}\n" -H "x-goog-api-key: AIzaNotARealKey" \
+      "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1"
+  400
+  {"error":{"code":400,"message":"API key not valid. Please pass a valid API key.",
+   "status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID", ...}]}}
+  ```
+
+  Two things that fall out of that and are encoded in the port: Google answers a
+  bad key with a **400**, not a 401, which is why Python matched on the message
+  (`"401" in err or "API_KEY_INVALID" in err or "PERMISSION_DENIED" in err`) and
+  why the TS validator matches the same three markers against the body rather
+  than switching on the status. And the Gemini probe is the models **list**, a
+  metadata-only call, so it stays green on the zero-quota key this environment
+  holds where a generation probe would not.
+
+  **Model IDs.** `claude-haiku-4-5-20251001` (Anthropic probe) and `sonar`
+  (Perplexity probe) are carried over verbatim from
+  `api/src/services/api_key_validator.py`. Neither is a stage model and neither
+  is a choice made here; verifying and possibly upgrading the six stage models
+  is item 6.1. The Anthropic ID could not be confirmed against a live 200 because
+  this environment holds no Anthropic key, and a 401 short-circuits before the
+  model name is looked at. Recorded as a gap rather than papered over.
+
+  **Three intentional deviations from Python, all argued:**
+
+  1. *One 15s timeout for all three validators.* Python bounded only the
+     Perplexity call at 15s and let the Anthropic SDK's 600s default and the
+     `google-genai` default stand. The three run sequentially inside a `PUT` a
+     human is waiting on, so a wedged provider could park that request for ten
+     minutes. The shared bound turns a hang into a reportable error string.
+  2. *The jsonb merge moved into SQL.* `save_api_keys()` and
+     `save_validation_results()` both read the row, merged in memory and wrote it
+     back, losing a concurrent write to a different provider. `mergeSettingsValue()`
+     does `insert ... on conflict do update set value = settings.value ||
+     excluded.value`, which is the same shallow-merge semantics (right side wins
+     per key, absent keys preserved) in one statement. Covered by the
+     `keeps both writes when two providers are saved concurrently` test.
+  3. *A `{"detail": ...}` 422 rather than FastAPI's validation-error array.* This
+     matches the other ported handlers in this router and the shape
+     `web/src/lib/api.ts` surfaces on `ApiError`.
+
+  Behaviour deliberately preserved, because it looks like a bug and is not: a key
+  is stored **even when the provider rejects it**. The common cause is a good key
+  and a momentarily unreachable provider, and discarding the input would make
+  that unrecoverable from the settings page. The failure is reported through
+  `valid: false` instead. Also preserved: a provider submitted as an empty string
+  is neither validated nor cleared, which is what lets the settings form submit
+  masked fields the user did not retype.
+
+  **Live smoke.** `api-key-validator.test.ts` ends with a `describe.skipIf(!process.env.GEMINI_API_KEY)`
+  block that calls the real Gemini endpoint with the real credential and with a
+  malformed one. It ran (not skipped) in the run below. There is no Anthropic or
+  Perplexity live smoke because this environment holds no key for either; the
+  recorded 401 bodies above are replayed by the stubbed-transport tests instead.
+
+  ```
+  $ cd web && pnpm exec vitest run src/mastra/api-key-validator.test.ts --reporter=verbose
+   ✓ src/mastra/api-key-validator.test.ts > validateAnthropic > sends the one-token probe the Python validator sent 
+   ✓ src/mastra/api-key-validator.test.ts > validateAnthropic > reports a 401 as the actionable 'Invalid API key'
+   ✓ src/mastra/api-key-validator.test.ts > validateAnthropic > passes any other provider error through with its message
+   ✓ src/mastra/api-key-validator.test.ts > validateAnthropic > falls back to the status when the error body carries no message
+   ✓ src/mastra/api-key-validator.test.ts > validateAnthropic > reports a transport failure rather than throwing
+   ✓ src/mastra/api-key-validator.test.ts > validateAnthropic > rejects an empty key without calling the provider
+   ✓ src/mastra/api-key-validator.test.ts > validatePerplexity > sends the one-token completion the Python validator sent
+   ✓ src/mastra/api-key-validator.test.ts > validatePerplexity > reports a 401 as 'Invalid API key'
+   ✓ src/mastra/api-key-validator.test.ts > validatePerplexity > reports any other status by number, as Python did
+   ✓ src/mastra/api-key-validator.test.ts > validatePerplexity > rejects an empty key without calling the provider
+   ✓ src/mastra/api-key-validator.test.ts > validateGemini > lists models, the metadata-only probe that costs no tokens
+   ✓ src/mastra/api-key-validator.test.ts > validateGemini > reads a bad key out of Google's 400, which is not a 401
+   ✓ src/mastra/api-key-validator.test.ts > validateGemini > treats PERMISSION_DENIED as a bad key too
+   ✓ src/mastra/api-key-validator.test.ts > validateGemini > passes a quota failure through instead of blaming the key
+   ✓ src/mastra/api-key-validator.test.ts > validateGemini > rejects an empty key without calling the provider
+   ✓ src/mastra/api-key-validator.test.ts > validateKeys > validates every supplied provider and reports each verdict
+   ✓ src/mastra/api-key-validator.test.ts > validateKeys > skips empty and absent providers entirely
+   ✓ src/mastra/api-key-validator.test.ts > live provider smoke > validates a real Gemini key against the real endpoint 134ms
+   ✓ src/mastra/api-key-validator.test.ts > live provider smoke > rejects a malformed key against the real endpoint 60ms
+
+   Test Files  1 passed (1)
+        Tests  19 passed (19)
+  ```
+
+  Ten service tests, ported from `test_save_and_load_round_trip`,
+  `test_save_empty_key_not_stored` and `test_save_upserts_existing` in
+  `api/tests/phase11/test_api_keys_service.py`, against the real database:
+
+  ```
+  $ cd web && pnpm exec vitest run src/mastra/api-keys.test.ts --reporter=verbose
+   ✓ saveApiKeys > stores ciphertext, not the key, and reads back the plaintext 3ms
+   ✓ saveApiKeys > does not store an empty key 2ms
+   ✓ saveApiKeys > upserts the row rather than inserting a second one 2ms
+   ✓ saveApiKeys > leaves providers absent from the call untouched 2ms
+   ✓ saveApiKeys > keeps both writes when two providers are saved concurrently 6ms
+   ✓ saveApiKeys > writes nothing at all when every supplied key is empty 1ms
+   ✓ saveValidationResults > persists a verdict that a later read returns 2ms
+   ✓ saveValidationResults > merges into existing results instead of replacing them 2ms
+   ✓ saveValidationResults > overwrites a provider's earlier verdict 2ms
+   ✓ saveValidationResults > writes nothing when there is nothing to record 1ms
+
+   Test Files  1 passed (1)
+        Tests  26 passed (26)
+  ```
+
+  Nine route tests, ported from `test_put_api_keys_saves_and_validates`,
+  `test_put_api_keys_encrypted_at_rest`, `test_put_api_keys_partial_update` and
+  `test_put_api_keys_validation_failure` in `api/tests/phase11/test_api_keys.py`.
+  Python patched `validate_keys` out; these stub the HTTP transport instead, so
+  the real validator runs inside the real handler over a real BetterAuth session
+  and a real database, and anything that is not a provider URL falls through to
+  the real `fetch`:
+
+  ```
+  $ cd web && pnpm exec vitest run src/app/api/settings/api-keys/route.test.ts --reporter=verbose
+   ✓ PUT /api/settings/api-keys > 401s without a session 1ms
+   ✓ PUT /api/settings/api-keys > 422s a body that is not an object of provider strings 10ms
+   ✓ PUT /api/settings/api-keys > stores the key and reports the provider's verdict 9ms
+   ✓ PUT /api/settings/api-keys > stores the key encrypted, never in plaintext 9ms
+   ✓ PUT /api/settings/api-keys > leaves the providers the body did not name alone 9ms
+   ✓ PUT /api/settings/api-keys > still stores a key the provider rejected, and says it is invalid 14ms
+   ✓ PUT /api/settings/api-keys > persists the verdict so a later GET reports it without re-validating 15ms
+   ✓ PUT /api/settings/api-keys > neither validates nor clears a provider submitted as an empty string 6ms
+   ✓ PUT /api/settings/api-keys > never returns a plaintext key 8ms
+
+   Test Files  1 passed (1)
+        Tests  18 passed (18)
+  ```
+
+  **A leak the first full run caught.** In isolation all three files passed, but
+  the full suite then reported 10 failures instead of 9: the new PUT tests write
+  `settings.api_keys_validation`, and `route.test.ts` only ever saved and restored
+  `settings.api_keys`. The leftover row made 5.1b-i's `valid: null` assertion see
+  `valid: true` on the next run. Fixed by saving, clearing and restoring both rows
+  in that file's `beforeAll`/`afterAll`, the same way `src/mastra/api-keys.test.ts`
+  already did. Worth recording: on a shared database, a test that writes a row it
+  does not restore fails a *different* test on a *later* run, which reads as flake.
+
+  Frontend gates, all four, after the fix. The failure count is back at the
+  recorded baseline of **9** (six `image-preview.test.tsx`, three
+  `PostDetail.test.tsx`, all pre-existing), and the pass count rose by exactly the
+  38 tests this item added (877 -> 915):
+
+  ```
+  $ cd web && pnpm exec tsc --noEmit ; echo "EXIT=$?"
+  EXIT=0
+  $ cd web && pnpm lint ; echo "EXIT=$?"
+  EXIT=0
+  $ cd web && pnpm test
+   Test Files  2 failed | 60 passed (62)
+        Tests  9 failed | 915 passed | 7 skipped (931)
+     Duration  78.88s
+  $ cd web && pnpm build ; echo "EXIT=$?"
+  EXIT=0
+  ```
+
+  `api/` was not touched (`git status --short api/` is empty). Its gates are
+  unchanged from the 4.7c-i baseline:
+
+  ```
+  $ cd api && set -a && . ../.env && set +a && uv run pytest -q
+  125 failed, 236 passed, 25 errors in 13.18s
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 126 files already formatted
+  ```
+
+  With this, item 5.1 (`settings`) is complete: `GET`/`PATCH /api/settings`
+  (5.1a), the two API-key read endpoints (5.1b-i) and the API-key write endpoint
+  with live validation (5.1b-ii) are all ported.
 - [ ] 5.2 `profiles`
 - [ ] 5.3 `posts`
 - [ ] 5.4 `queue`

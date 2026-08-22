@@ -1,35 +1,39 @@
 // @vitest-environment node
 /**
- * Item 5.1b-i: the two read endpoints of the ported settings router, called
- * directly with a `Request` against the real database and a real BetterAuth
- * session, so the 401 and the loopback gate are genuinely exercised.
+ * Items 5.1b-i and 5.1b-ii: the three API-key endpoints of the ported settings
+ * router, called directly with a `Request` against the real database and a
+ * real BetterAuth session, so the 401 and the loopback gate are genuinely
+ * exercised.
  *
- * The full masking semantics are covered in `src/mastra/api-keys.test.ts`;
- * what is left here is auth, the loopback gate, the unknown-provider path and
- * the wire shape. `settings.api_keys` is a single global row with no `user_id`
- * to isolate on, so this file swaps it once in `beforeAll` and restores it in
- * `afterAll` rather than per test, keeping the window in which a sibling file
- * could observe it as narrow as the file allows. That cross-file race is a
- * known defect logged in `todo.md`.
+ * The full masking and persistence semantics are covered in
+ * `src/mastra/api-keys.test.ts`; what is left here is auth, the loopback gate,
+ * the unknown-provider path, body validation and the wire shape.
+ * `settings.api_keys` is a single global row with no `user_id` to isolate on,
+ * so this file holds the cross-process lock in `src/test/api-keys-row.ts` for
+ * its whole lifetime and restores the row in `afterAll`.
  *
- * Ported from `test_get_api_keys_empty` and
- * `test_get_api_keys_never_returns_plaintext` in
- * `api/tests/phase11/test_api_keys.py`.
+ * Ported from `api/tests/phase11/test_api_keys.py`.
  *
  * Requires `docker compose up -d db`.
  */
 import { randomBytes } from "node:crypto"
 
 import { eq } from "drizzle-orm"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, settings } from "@/db"
-import { encryptWithKey } from "@/lib/crypto"
-import { API_KEYS_SETTING_KEY, PROVIDERS, type Provider } from "@/mastra/api-keys"
+import { decryptWithKey, encryptWithKey } from "@/lib/crypto"
+import { ANTHROPIC_MESSAGES_URL, PERPLEXITY_CHAT_URL } from "@/mastra/api-key-validator"
+import {
+  API_KEYS_SETTING_KEY,
+  API_KEYS_VALIDATION_SETTING_KEY,
+  PROVIDERS,
+  type Provider,
+} from "@/mastra/api-keys"
 import { lockApiKeysRow, unlockApiKeysRow } from "@/test/api-keys-row"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
-import { GET as GET_STATUS } from "./route"
+import { GET as GET_STATUS, PUT } from "./route"
 import { GET as GET_REVEAL } from "./[provider]/reveal/route"
 
 const PREFIX = "api-keys-route-test-"
@@ -54,7 +58,21 @@ const STORED: Partial<Record<Provider, string>> = {
 
 let user: TestSession
 let savedRow: { value: unknown } | undefined
+let savedValidationRow: { value: unknown } | undefined
 let savedEncryptionKey: string | undefined
+
+/** Upsert one of the two rows this file owns, or delete it when it had none. */
+async function restoreRow(key: string, saved: { value: unknown } | undefined) {
+  if (!saved) {
+    await getDb().delete(settings).where(eq(settings.key, key))
+    return
+  }
+  const value = saved.value as Record<string, unknown>
+  await getDb()
+    .insert(settings)
+    .values({ key, value })
+    .onConflictDoUpdate({ target: settings.key, set: { value } })
+}
 
 beforeAll(async () => {
   await lockApiKeysRow()
@@ -71,6 +89,14 @@ beforeAll(async () => {
     .limit(1)
   savedRow = rows[0]
 
+  const validationRows = await getDb()
+    .select({ value: settings.value })
+    .from(settings)
+    .where(eq(settings.key, API_KEYS_VALIDATION_SETTING_KEY))
+    .limit(1)
+  savedValidationRow = validationRows[0]
+  await getDb().delete(settings).where(eq(settings.key, API_KEYS_VALIDATION_SETTING_KEY))
+
   const value = Object.fromEntries(
     Object.entries(STORED).map(([provider, key]) => [provider, encryptWithKey(key, TEST_KEY)]),
   )
@@ -81,15 +107,8 @@ beforeAll(async () => {
 }, 30_000)
 
 afterAll(async () => {
-  if (savedRow) {
-    const value = savedRow.value as Record<string, string>
-    await getDb()
-      .insert(settings)
-      .values({ key: API_KEYS_SETTING_KEY, value })
-      .onConflictDoUpdate({ target: settings.key, set: { value } })
-  } else {
-    await getDb().delete(settings).where(eq(settings.key, API_KEYS_SETTING_KEY))
-  }
+  await restoreRow(API_KEYS_SETTING_KEY, savedRow)
+  await restoreRow(API_KEYS_VALIDATION_SETTING_KEY, savedValidationRow)
   if (savedEncryptionKey === undefined) delete process.env.WP_ENCRYPTION_KEY
   else process.env.WP_ENCRYPTION_KEY = savedEncryptionKey
 
@@ -216,5 +235,173 @@ describe("GET /api/settings/api-keys/{provider}/reveal", () => {
         expect(await response.json()).toEqual({ detail: "Key not configured" })
       }
     }
+  })
+})
+
+/**
+ * Item 5.1b-ii, ported from `test_put_api_keys_saves_and_validates`,
+ * `test_put_api_keys_encrypted_at_rest`, `test_put_api_keys_partial_update`
+ * and `test_put_api_keys_validation_failure` in
+ * `api/tests/phase11/test_api_keys.py`.
+ *
+ * Python patched `validate_keys` out. This stubs the HTTP transport instead,
+ * so the real validator runs and the assertion covers the handler's use of it
+ * as well as the handler itself. Anything that is not a provider URL falls
+ * through to the real `fetch`, so nothing else in the process is affected.
+ */
+describe("PUT /api/settings/api-keys", () => {
+  let restoreFetch: (() => void) | undefined
+
+  /** Replays one status per provider endpoint and records what was called. */
+  function stubProviders(status: Partial<Record<Provider, number>>) {
+    const calledFor: Provider[] = []
+    const realFetch = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : String(input)
+      const provider: Provider | undefined = url.startsWith(ANTHROPIC_MESSAGES_URL)
+        ? "anthropic"
+        : url.startsWith(PERPLEXITY_CHAT_URL)
+          ? "perplexity"
+          : url.includes("generativelanguage.googleapis.com")
+            ? "gemini"
+            : undefined
+      if (!provider) return realFetch(input, init)
+      calledFor.push(provider)
+      return new Response("{}", {
+        status: status[provider] ?? 200,
+        headers: { "content-type": "application/json" },
+      })
+    }) as typeof globalThis.fetch
+    restoreFetch = () => void (globalThis.fetch = realFetch)
+    return calledFor
+  }
+
+  const put = (body: unknown) =>
+    apiRequest(STATUS_URL, { method: "PUT", cookie: user.cookie, body: JSON.stringify(body) })
+
+  async function storedKeys(): Promise<Record<string, string>> {
+    const rows = await getDb()
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, API_KEYS_SETTING_KEY))
+      .limit(1)
+    return (rows[0]?.value ?? {}) as Record<string, string>
+  }
+
+  beforeEach(async () => {
+    const value = Object.fromEntries(
+      Object.entries(STORED).map(([provider, key]) => [provider, encryptWithKey(key, TEST_KEY)]),
+    )
+    await getDb()
+      .insert(settings)
+      .values({ key: API_KEYS_SETTING_KEY, value })
+      .onConflictDoUpdate({ target: settings.key, set: { value } })
+    await getDb().delete(settings).where(eq(settings.key, API_KEYS_VALIDATION_SETTING_KEY))
+  })
+
+  afterEach(() => {
+    restoreFetch?.()
+    restoreFetch = undefined
+  })
+
+  it("401s without a session", async () => {
+    const response = await PUT(
+      apiRequest(STATUS_URL, { method: "PUT", body: JSON.stringify({ anthropic: "sk-ant-x" }) }),
+    )
+
+    expect(response.status).toBe(401)
+    expect(await response.json()).toEqual({ detail: "Not authenticated" })
+  })
+
+  it("422s a body that is not an object of provider strings", async () => {
+    for (const body of [[], "anthropic", { anthropic: 7 }]) {
+      const response = await PUT(put(body))
+
+      expect(response.status, JSON.stringify(body)).toBe(422)
+      expect(await response.json()).toEqual({ detail: "Each provider key must be a string" })
+    }
+  })
+
+  it("stores the key and reports the provider's verdict", async () => {
+    const calledFor = stubProviders({ anthropic: 200 })
+
+    const response = await PUT(put({ anthropic: "sk-ant-newkey1234" }))
+
+    expect(response.status).toBe(200)
+    expect(calledFor).toEqual(["anthropic"])
+    expect((await response.json()).anthropic).toEqual({
+      provider: "anthropic",
+      configured: true,
+      source: "db",
+      hint: "...1234",
+      valid: true,
+    })
+  })
+
+  it("stores the key encrypted, never in plaintext", async () => {
+    stubProviders({ anthropic: 200 })
+
+    await PUT(put({ anthropic: "sk-ant-secret-value" }))
+
+    const stored = await storedKeys()
+    expect(stored.anthropic).not.toBe("sk-ant-secret-value")
+    expect(decryptWithKey(stored.anthropic, TEST_KEY)).toBe("sk-ant-secret-value")
+  })
+
+  it("leaves the providers the body did not name alone", async () => {
+    stubProviders({ perplexity: 200 })
+
+    const body = await (await PUT(put({ perplexity: "pplx-newkey5678" }))).json()
+
+    expect(body.perplexity.hint).toBe("...5678")
+    expect(body.perplexity.valid).toBe(true)
+    expect(body.anthropic).toEqual({
+      provider: "anthropic",
+      configured: true,
+      source: "db",
+      hint: `...${STORED.anthropic!.slice(-4)}`,
+      valid: null,
+    })
+  })
+
+  it("still stores a key the provider rejected, and says it is invalid", async () => {
+    stubProviders({ anthropic: 401 })
+
+    const body = await (await PUT(put({ anthropic: "sk-ant-badkey12345" }))).json()
+
+    expect(body.anthropic.configured).toBe(true)
+    expect(body.anthropic.valid).toBe(false)
+    expect(decryptWithKey((await storedKeys()).anthropic, TEST_KEY)).toBe("sk-ant-badkey12345")
+  })
+
+  it("persists the verdict so a later GET reports it without re-validating", async () => {
+    stubProviders({ anthropic: 200, perplexity: 401 })
+
+    await PUT(put({ anthropic: "sk-ant-newkey1234", perplexity: "pplx-badkey5678" }))
+    restoreFetch?.()
+    restoreFetch = undefined
+
+    const body = await (await GET_STATUS(apiRequest(STATUS_URL, { cookie: user.cookie }))).json()
+    expect(body.anthropic.valid).toBe(true)
+    expect(body.perplexity.valid).toBe(false)
+    expect(body.gemini.valid).toBeNull()
+  })
+
+  it("neither validates nor clears a provider submitted as an empty string", async () => {
+    const calledFor = stubProviders({})
+
+    const body = await (await PUT(put({ anthropic: "" }))).json()
+
+    expect(calledFor).toEqual([])
+    expect(body.anthropic.hint).toBe(`...${STORED.anthropic!.slice(-4)}`)
+    expect(body.anthropic.valid).toBeNull()
+  })
+
+  it("never returns a plaintext key", async () => {
+    stubProviders({ anthropic: 200 })
+
+    const serialised = await (await PUT(put({ anthropic: "sk-ant-supersecretkey" }))).text()
+
+    expect(serialised).not.toContain("sk-ant-supersecretkey")
   })
 })

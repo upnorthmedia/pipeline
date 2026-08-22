@@ -17,7 +17,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, settings } from "../db"
 import { lockApiKeysRow, unlockApiKeysRow } from "../test/api-keys-row"
-import { encryptWithKey } from "../lib/crypto"
+import { decryptWithKey, encryptWithKey } from "../lib/crypto"
 import {
   API_KEYS_SETTING_KEY,
   API_KEYS_VALIDATION_SETTING_KEY,
@@ -27,6 +27,8 @@ import {
   getValidationResults,
   requireApiKey,
   revealApiKey,
+  saveApiKeys,
+  saveValidationResults,
 } from "./api-keys"
 
 /** A throwaway Fernet key: 32 random bytes, url-safe base64, exactly as Python generates. */
@@ -240,5 +242,116 @@ describe("revealApiKey", () => {
     await writeKeys({ anthropic: encryptWithKey("sk-ant-1234", TEST_KEY) })
 
     await expect(revealApiKey("openai")).resolves.toBeNull()
+  })
+})
+
+/**
+ * Item 5.1b-ii. Ported from `test_save_and_load_round_trip`,
+ * `test_save_empty_key_not_stored` and `test_save_upserts_existing` in
+ * `api/tests/phase11/test_api_keys_service.py`.
+ */
+describe("saveApiKeys", () => {
+  /** The stored ciphertext for one provider, read straight out of the row. */
+  async function storedValue(): Promise<Record<string, string>> {
+    const rows = await getDb()
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, API_KEYS_SETTING_KEY))
+      .limit(1)
+    return (rows[0]?.value ?? {}) as Record<string, string>
+  }
+
+  it("stores ciphertext, not the key, and reads back the plaintext", async () => {
+    await saveApiKeys({ anthropic: "sk-ant-test123", perplexity: "pplx-test456" })
+
+    const stored = await storedValue()
+    expect(stored.anthropic).not.toBe("sk-ant-test123")
+    expect(decryptWithKey(stored.anthropic, TEST_KEY)).toBe("sk-ant-test123")
+
+    expect(await getApiKeys()).toEqual({
+      anthropic: "sk-ant-test123",
+      perplexity: "pplx-test456",
+      gemini: "",
+    })
+  })
+
+  it("does not store an empty key", async () => {
+    await saveApiKeys({ anthropic: "sk-ant-test", gemini: "" })
+
+    expect(Object.keys(await storedValue())).toEqual(["anthropic"])
+  })
+
+  it("upserts the row rather than inserting a second one", async () => {
+    await saveApiKeys({ anthropic: "sk-ant-first" })
+    await saveApiKeys({ anthropic: "sk-ant-second" })
+
+    expect((await getApiKeys()).anthropic).toBe("sk-ant-second")
+  })
+
+  it("leaves providers absent from the call untouched", async () => {
+    await saveApiKeys({ anthropic: "sk-ant-keep", perplexity: "pplx-keep" })
+    await saveApiKeys({ perplexity: "pplx-new" })
+
+    expect(await getApiKeys()).toEqual({
+      anthropic: "sk-ant-keep",
+      perplexity: "pplx-new",
+      gemini: "",
+    })
+  })
+
+  it("keeps both writes when two providers are saved concurrently", async () => {
+    await Promise.all([
+      saveApiKeys({ anthropic: "sk-ant-concurrent" }),
+      saveApiKeys({ perplexity: "pplx-concurrent" }),
+    ])
+
+    expect(await getApiKeys()).toEqual({
+      anthropic: "sk-ant-concurrent",
+      perplexity: "pplx-concurrent",
+      gemini: "",
+    })
+  })
+
+  it("writes nothing at all when every supplied key is empty", async () => {
+    await saveApiKeys({ anthropic: "", perplexity: "", gemini: "" })
+
+    const rows = await getDb()
+      .select({ key: settings.key })
+      .from(settings)
+      .where(eq(settings.key, API_KEYS_SETTING_KEY))
+    expect(rows).toEqual([])
+  })
+})
+
+/** Item 5.1b-ii, ported from `save_validation_results()` in `api_keys.py`. */
+describe("saveValidationResults", () => {
+  it("persists a verdict that a later read returns", async () => {
+    await saveValidationResults({ anthropic: true, perplexity: false })
+
+    expect(await getValidationResults()).toEqual({ anthropic: true, perplexity: false })
+  })
+
+  it("merges into existing results instead of replacing them", async () => {
+    await saveValidationResults({ anthropic: true })
+    await saveValidationResults({ perplexity: false })
+
+    expect(await getValidationResults()).toEqual({ anthropic: true, perplexity: false })
+  })
+
+  it("overwrites a provider's earlier verdict", async () => {
+    await saveValidationResults({ anthropic: true })
+    await saveValidationResults({ anthropic: false })
+
+    expect(await getValidationResults()).toEqual({ anthropic: false })
+  })
+
+  it("writes nothing when there is nothing to record", async () => {
+    await saveValidationResults({})
+
+    const rows = await getDb()
+      .select({ key: settings.key })
+      .from(settings)
+      .where(eq(settings.key, API_KEYS_VALIDATION_SETTING_KEY))
+    expect(rows).toEqual([])
   })
 })

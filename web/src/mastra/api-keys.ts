@@ -12,10 +12,10 @@
  * The cost is one indexed single-row read per provider call; the alternative
  * is a secret in the run history of every pipeline that has ever run.
  */
-import { eq } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 
 import { getDb, settings } from "../db"
-import { decrypt } from "../lib/crypto"
+import { decrypt, encrypt } from "../lib/crypto"
 
 /** Providers the pipeline holds keys for, matching Python's `PROVIDERS`. */
 export const PROVIDERS = ["anthropic", "perplexity", "gemini"] as const
@@ -138,4 +138,55 @@ export async function getMaskedKeys(): Promise<Record<Provider, ApiKeyStatus>> {
 export async function revealApiKey(provider: string): Promise<string | null> {
   if (!(PROVIDERS as readonly string[]).includes(provider)) return null
   return (await getApiKeys())[provider as Provider] || null
+}
+
+/**
+ * Encrypt the supplied keys and merge them into the `api_keys` row, ported
+ * from `save_api_keys()`.
+ *
+ * Only non-empty values are written, so a provider left blank on the settings
+ * page keeps whatever key it already had rather than being cleared. That is
+ * Python's behaviour and the reason the settings page can submit a form that
+ * shows masked hints for the fields the user did not retype.
+ *
+ * Python read the row, merged in memory and wrote it back, which loses a
+ * concurrent write to a different provider. The merge here is the jsonb `||`
+ * operator inside the upsert, so the read and the write are one statement and
+ * the row is never round-tripped through this process. Semantics are identical
+ * (right side wins per key, absent keys preserved); the race is not.
+ */
+export async function saveApiKeys(keys: Partial<Record<Provider, string>>): Promise<void> {
+  const encrypted: Record<string, string> = {}
+  for (const provider of PROVIDERS) {
+    const value = keys[provider]
+    if (value) encrypted[provider] = encrypt(value)
+  }
+  await mergeSettingsValue(API_KEYS_SETTING_KEY, encrypted)
+}
+
+/**
+ * Persist per-provider validation results, ported from
+ * `save_validation_results()`, so the settings page still shows the last known
+ * verdict after a reload rather than re-billing three provider calls.
+ */
+export async function saveValidationResults(
+  results: Partial<Record<Provider, boolean>>,
+): Promise<void> {
+  await mergeSettingsValue(API_KEYS_VALIDATION_SETTING_KEY, results)
+}
+
+/**
+ * Upsert one settings row, shallow-merging `patch` into whatever the row
+ * already holds. Both callers own a single global row with no `user_id`, which
+ * is why there is no user predicate here; see the note in `../app/api/settings/route.ts`.
+ */
+async function mergeSettingsValue(key: string, patch: Record<string, unknown>): Promise<void> {
+  if (Object.keys(patch).length === 0) return
+  await getDb()
+    .insert(settings)
+    .values({ key, value: patch })
+    .onConflictDoUpdate({
+      target: settings.key,
+      set: { value: sql`${settings.value} || excluded.value`, updatedAt: new Date() },
+    })
 }
