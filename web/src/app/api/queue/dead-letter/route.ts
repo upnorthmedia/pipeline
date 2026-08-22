@@ -26,6 +26,7 @@
  */
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import { listDeadLetterEntries } from "@/mastra/dead-letter"
+import { clearFailureMarkers } from "@/mastra/post-state"
 
 export async function GET(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
@@ -40,4 +41,39 @@ export async function GET(request: Request): Promise<Response> {
   }))
 
   return Response.json({ entries, count: entries.length })
+}
+
+/**
+ * Port of `DELETE /api/queue/dead-letter` in `api/src/api/queue.py:202`.
+ *
+ * Python read `llen(DLQ_KEY)`, deleted the key and returned
+ * `{status: "cleared", count}`. There is no key here, so clearing is retiring
+ * the caller's entries: popping `_error` off each post that currently has one,
+ * which is the same acknowledgement `POST /dead-letter/{post_id}/retry` makes,
+ * minus the retry.
+ *
+ * Three consequences, all deliberate:
+ *
+ * - **The clear is scoped to the caller.** Python deleted one global list, so
+ *   any authenticated user could wipe every tenant's dead-letter queue. Only
+ *   posts reached through `website_profiles.user_id` are touched.
+ * - **`current_stage` is untouched, and so is the run row.** A cleared post
+ *   stays `failed` and keeps counting in `GET /api/queue`'s `failed` bucket,
+ *   which is what Python's clear did too: it deleted a Redis list and never
+ *   wrote a post. The failed run also stays in Mastra's storage, so the history
+ *   Studio shows survives being acknowledged.
+ * - **`count` is entries, not posts.** Python's `count` was the list length,
+ *   which is exactly the `count` `GET` reported a moment earlier, so the same
+ *   invariant is kept here: `DELETE` returns what `GET` would have. A post with
+ *   two failed runs contributes two entries and one write, for the reason
+ *   `listDeadLetterEntries` records.
+ */
+export async function DELETE(request: Request): Promise<Response> {
+  const user = await getRequestUser(request)
+  if (!user) return unauthorized()
+
+  const entries = await listDeadLetterEntries(user.id)
+  await clearFailureMarkers([...new Set(entries.map((entry) => entry.postId))])
+
+  return Response.json({ status: "cleared", count: entries.length })
 }

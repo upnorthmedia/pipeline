@@ -252,8 +252,10 @@
   too: the ported handler joins each failed run's post through `website_profiles.user_id`
   (item 5.4d-ii), which is the user dimension the Redis list never had. `retry_dead_letter()`
   is closed as well: the ported handler looks the post up through the same join, so another
-  user's post answers 404 (item 5.4d-iii-a). Found while splitting item 5.4; recorded there
-  too. That leaves `DELETE /api/queue/dead-letter`, for item 5.4d-iii-b.
+  user's post answers 404 (item 5.4d-iii-a). `DELETE /api/queue/dead-letter` is closed last:
+  the ported handler pops `_error` only off the posts the caller's own entries name, so a
+  clear can no longer wipe another tenant's queue (item 5.4d-iii-b). Found while splitting
+  item 5.4; recorded there too. All four holes in this router are now closed.
 - [investigate] 2026-08-22 Mastra's engine logs step failures to a logger the app cannot
   configure. `MastraBase`'s constructor gives every primitive its own `ConsoleLogger`
   (`base-BeUQ6mLP.js:12`) and only adopts the Mastra instance's logger in

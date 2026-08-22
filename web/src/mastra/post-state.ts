@@ -11,7 +11,7 @@
  * Kept out of `state.ts` so that module stays free of database imports: the
  * prompt assembly and the stage vocabulary are pure, this file is not.
  */
-import { eq, getTableColumns, sql } from "drizzle-orm"
+import { eq, getTableColumns, inArray, sql } from "drizzle-orm"
 
 import { getDb, internalLinks, posts } from "../db"
 import {
@@ -318,6 +318,15 @@ export async function loadPipelineState(postId: string): Promise<PipelineState> 
 }
 
 /**
+ * The dead-letter acknowledgement itself: drop `_error` and leave every other
+ * key in `stage_logs` as the statement finds it.
+ *
+ * Shared by the two endpoints that retire an entry, so "what removal means"
+ * has one definition rather than a copy per route.
+ */
+const dropErrorLog = sql`coalesce(${posts.stageLogs}, '{}'::jsonb) - '_error'`
+
+/**
  * Take a post out of the dead-letter queue and back to the front of the
  * pipeline, ported from the post-writing half of `retry_dead_letter()` in
  * `api/src/api/queue.py:190`: `current_stage = "pending"` and
@@ -340,8 +349,29 @@ export async function retryFailedPost(postId: string): Promise<void> {
       // The column's own default, and the value the queue status route counts
       // in its `pending` bucket.
       currentStage: "pending",
-      stageLogs: sql`coalesce(${posts.stageLogs}, '{}'::jsonb) - '_error'`,
+      stageLogs: dropErrorLog,
       updatedAt: new Date(),
     })
     .where(eq(posts.id, postId))
+}
+
+/**
+ * Retire a post's dead-letter entries without retrying them, the post-writing
+ * half of `DELETE /api/queue/dead-letter`.
+ *
+ * `current_stage` is deliberately left where the failure put it. Python's clear
+ * deleted a Redis list and never touched a post at all, so a cleared post stayed
+ * `failed`; under the acknowledgement rule item 5.4d-iii-a settled, popping
+ * `_error` is the whole of the removal, and moving the stage as well would take
+ * a post out of the `failed` bucket `GET /api/queue` counts.
+ *
+ * One statement for the whole batch, so a clear is atomic the way Python's
+ * single `DELETE` was.
+ */
+export async function clearFailureMarkers(postIds: string[]): Promise<void> {
+  if (postIds.length === 0) return
+  await getDb()
+    .update(posts)
+    .set({ stageLogs: dropErrorLog, updatedAt: new Date() })
+    .where(inArray(posts.id, postIds))
 }

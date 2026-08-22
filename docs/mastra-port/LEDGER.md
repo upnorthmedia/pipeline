@@ -10152,7 +10152,14 @@ three pieces are separately verifiable, so they are separate items.
       177 errors` because `POSTGRES_HOST_PORT` is 5435 in this checkout, not the 5433
       compose default. That is the trap recorded in the project memory, and it is easy to
       mistake for a regression.
-- [ ] 5.4 `queue` (split: seven endpoints, and four of them are about the ARQ worker
+- [x] 5.4 `queue` (all four sub-items done: 5.4a the status counts, 5.4b pause-all and
+  resume-all, 5.4c worker-status, 5.4d the dead-letter trio. All seven endpoints are
+  ported, and the four ARQ keys are replaced rather than transcribed: `arq:worker:*` and
+  `arq:queue` by the `mastra-orchestration` consumer group on the `workflows` topic,
+  `WORKER_LAST_COMPLETED_KEY` by `mastra:worker:last_completed`, and `DLQ_KEY` by
+  Mastra's own failed run rows plus `stage_logs._error` as the acknowledgement. Every
+  tenancy hole `todo.md` recorded for this router is closed.)
+  (split: seven endpoints, and four of them are about the ARQ worker
   rather than about posts. `GET /worker-status` reads `arq:worker:*`, `arq:queue` and
   `WORKER_LAST_COMPLETED_KEY`, and the three dead-letter endpoints read and write
   `DLQ_KEY`, a Redis list `api/src/worker.py` writes. None of those four keys exists in
@@ -10805,8 +10812,12 @@ three pieces are separately verifiable, so they are separate items.
       9 files would be reformatted, 131 files already formatted
       ```
 
-  - [ ] 5.4d `GET /api/queue/dead-letter`, `POST /api/queue/dead-letter/{post_id}/retry`
-    and `DELETE /api/queue/dead-letter`.
+  - [x] 5.4d `GET /api/queue/dead-letter`, `POST /api/queue/dead-letter/{post_id}/retry`
+    and `DELETE /api/queue/dead-letter`. (All four sub-items done: 5.4d-i the writer,
+    5.4d-ii the list, 5.4d-iii-a the acknowledgement rule plus the retry, 5.4d-iii-b the
+    clear. Both defects this item flagged are fixed rather than carried over: the
+    unscoped `session.get(Post, post_id)` closed in 5.4d-iii-a, and all three endpoints
+    now scope the queue by user.)
 
     All three read `DLQ_KEY`, a Redis list `api/src/worker.py` pushes onto when a job
     exhausts its retries. The TypeScript worker had no such list, so the item was blocked
@@ -11332,12 +11343,147 @@ three pieces are separately verifiable, so they are separate items.
       $ cd api && uv run ruff format --check .
       9 files would be reformatted, 131 files already formatted
       ```
-    - [ ] 5.4d-iii-b `DELETE /api/queue/dead-letter`. Python returned
-      `{status: "cleared", count}` where `count` was `llen(DLQ_KEY)` before the delete,
-      unscoped. On the 5.4d-iii-a rule, clearing is popping `_error` off the caller's
-      posts that currently have entries, which retires them without touching
-      `current_stage` (so the `failed` bucket 5.4a reports is unchanged) and without
-      deleting a run row.
+    - [x] 5.4d-iii-b `DELETE /api/queue/dead-letter`.
+
+      `DELETE` added to `web/src/app/api/queue/dead-letter/route.ts` next to the
+      `GET` item 5.4d-ii ported. Python read `llen(DLQ_KEY)`, deleted the key and
+      returned `{status: "cleared", count}`. There is no key here, so clearing is
+      retiring the caller's entries: `clearFailureMarkers()` in
+      `web/src/mastra/post-state.ts` pops `_error` off every post the caller's
+      entries name, in one statement for the whole batch, the way Python's clear
+      was one `DELETE`.
+
+      **The acknowledgement expression now has one definition.** `retryFailedPost()`
+      and `clearFailureMarkers()` are the two endpoints that retire an entry and
+      both need the same pop, so `coalesce(stage_logs, '{}'::jsonb) - '_error'` was
+      lifted to a `dropErrorLog` constant they share rather than copied. The `-`
+      operator rather than a read-modify-write is the reason `retryFailedPost`
+      already recorded: Python read the map, mutated a copy and wrote the whole
+      thing back, which erases anything a concurrently running stage logged in
+      between.
+
+      **Three deviations from Python, all deliberate.**
+
+      1. **The clear is scoped to the caller.** Python deleted one global Redis
+         list, so any authenticated user could wipe every tenant's dead-letter
+         queue. This is the last of the three tenancy holes `todo.md` recorded for
+         this router; the other two closed in 5.4d-ii and 5.4d-iii-a.
+      2. **`count` is entries, not posts.** Python's `count` was the list length,
+         which is exactly the `count` `GET` had reported a moment earlier, so that
+         invariant is what is preserved: `DELETE` returns what `GET` would have. A
+         post with two failed runs therefore contributes two to `count` and one
+         write, which follows from the divergence `listDeadLetterEntries` already
+         records (a run row is a permanent record of a run, so a post that failed
+         twice has two of them).
+      3. **`updated_at` moves on a cleared post.** Python never wrote a post at
+         all, so there is no Python behaviour to match here; every other write in
+         this port stamps it, and nothing in `web/src/lib/api.ts` branches on it.
+
+      **Deliberately preserved.** `current_stage` is left where the failure put it,
+      so a cleared post stays `failed` and keeps counting in the `failed` bucket
+      `GET /api/queue` reports (5.4a). `stage_status` is untouched, so a later
+      manual rerun still resumes rather than restarts. The engine's failed run row
+      survives, so the run history Studio shows is not traded away for the
+      dismissal, which is the same call 5.4d-iii-a made when it rejected
+      `deleteWorkflowRunById`.
+
+      **`web/src/lib/api.ts` needed no change.** Its `queue` namespace declares
+      `status`, `pauseAll` and `resumeAll` and nothing else, and
+      `grep -rn "dead-letter" web/src packages` finds no caller outside the two
+      route files and their tests. The endpoint is ported for parity, not for a
+      dashboard consumer that exists today.
+
+      18 tests in `web/src/app/api/queue/dead-letter-clear.test.ts`. The first
+      suite is the round trip for real: the real workflow on a real evented engine
+      over real Redis Streams fails inside `write`, the failure recorder stamps
+      `_error`, `GET` reports the entry, `DELETE` retires it, and the post's stage,
+      its sibling `stage_logs` entries, its `stage_status` and the engine's run row
+      all survive. The second suite persists run snapshots through the same storage
+      adapter for the shapes one failure cannot produce: two failed runs on one
+      post, an already-retired post, another tenant's entry and a post no profile
+      owns.
+
+      ```
+      $ (set -a; . ./.env; set +a; cd web && pnpm exec vitest run \
+          src/app/api/queue/dead-letter-clear.test.ts --reporter=verbose)
+      RUN  v4.0.18 /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, a real failed run > the run really failed inside write, and the engine said so 1ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, a real failed run > the entry was listed before the clear 0ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, a real failed run > answers 200 with Python's cleared envelope 0ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, a real failed run > counts entries, matching what GET reported a moment earlier 0ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, a real failed run > pops _error off the post 1ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, a real failed run > leaves every other stage_logs entry alone 1ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, a real failed run > leaves current_stage on failed, so the queue's failed bucket is unchanged 1ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, a real failed run > leaves stage_status alone, so a later retry still resumes 1ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, a real failed run > keeps the engine's failed run row 7ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, a real failed run > drops the entry out of GET 10ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, a real failed run > is idempotent: a second clear finds nothing to clear 11ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, scope and count > counts runs, not posts: two failed runs on one post are two entries 0ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, scope and count > retires every one of the caller's posts that carried _error 1ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, scope and count > leaves the caller's already-retired post byte-identical 0ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, scope and count > does not touch another tenant's entry 0ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, scope and count > does not touch a post no profile owns 0ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, scope and count > leaves the bystander's own queue intact, and clearable by them 22ms
+       ✓ src/app/api/queue/dead-letter-clear.test.ts > DELETE /api/queue/dead-letter, scope and count > rejects an unauthenticated clear 1ms
+
+       Test Files  1 passed (1)
+            Tests  18 passed (18)
+         Start at  16:32:28
+         Duration  1.94s (transform 125ms, setup 72ms, import 686ms, tests 1.12s, environment 0ms)
+      ```
+
+      Negative controls, each reverted after running:
+
+      | Change | Result |
+      | --- | --- |
+      | `DELETE` clears every failed run's post, unscoped, the way Python's global list wipe did | 8 failed, including both tenancy tests and the unauthenticated one |
+      | The clear also writes `current_stage = "pending"` | 1 failed: `leaves current_stage on failed` |
+      | The clear replaces `stage_logs` wholesale instead of popping one key | 1 failed: `leaves every other stage_logs entry alone` |
+      | `count` reports posts cleared rather than entries | 1 failed: `counts runs, not posts` |
+      | Membership drops the `_error` predicate, so every post the caller owns is an entry | 4 failed, including the already-retired post and the idempotence test |
+
+      The unscoped control failing the unauthenticated test too is worth naming: it
+      is not a second tenancy assertion, it is the orphan post that control had
+      already cleared in an earlier test, so `rejects an unauthenticated clear`'s
+      "and nothing was written" half no longer had an untouched row to check.
+
+      Gates, all at the recorded baseline:
+
+      ```
+      $ (set -a; . ./.env; set +a; cd web && pnpm exec tsc --noEmit); echo "exit: $?"
+      exit: 0
+
+      $ (set -a; . ./.env; set +a; cd web && pnpm run lint); echo "exit: $?"
+      > content-pipeline-dashboard@0.1.0 lint /.../web
+      > eslint
+      exit: 0
+
+      $ (set -a; . ./.env; set +a; cd web && pnpm exec vitest run)
+       Test Files  2 failed | 83 passed (85)
+            Tests  9 failed | 1508 passed | 7 skipped (1524)
+      ```
+
+      9 failed is the recorded baseline: the 6 `image-preview` failures and the 3
+      `PostDetail` ones. 1490 -> 1508 passed is exactly this iteration's 18.
+
+      ```
+      $ (set -a; . ./.env; set +a; cd web && pnpm run build); echo "exit: $?"
+      exit: 0
+
+      $ (set -a; . ./.env; set +a; cd api && uv run pytest -q)
+      125 failed, 236 passed, 25 errors in 12.73s
+
+      $ (cd api && uvx ruff check .)
+      Found 32 errors.
+      [*] 17 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).
+
+      $ (cd api && uvx ruff format --check .)
+      9 files would be reformatted, 131 files already formatted
+      ```
+
+      The three Python numbers are the recorded baseline, unchanged. Requires
+      `set -a; . ./.env; set +a` first.
 - [ ] 5.5 `events` (SSE keeps `web/src/hooks/use-sse.ts`'s existing message shape; sourced from
   the Redis Streams pub/sub topic, not an in-process stream; uses Mastra resumable-stream
   replay; test disconnects and reconnects mid-run and asserts no gap in the event sequence)
