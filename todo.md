@@ -205,3 +205,12 @@
   `mastra-orchestration` after a full run, so it is not a backlog either. It passes standalone
   in under 4s every time. Whoever picks this up should treat the intermittent skip-5 as part of
   the same defect and not read it as a new regression.
+- [confirmed] 2026-08-22 `web/src/app/api/profiles/serialize.ts` formats timestamps with a plain
+  `Date.toISOString()`, which always writes exactly three fractional digits. Pydantic 2.12 trims
+  trailing zeros and drops the fraction entirely when it is zero, so a profile whose
+  `created_at` landed on a whole second is served as `...T12:34:56.000Z` where FastAPI served
+  `...T12:34:56Z`. Found while porting `PostRead` for item 5.3a, which added
+  `toPydanticIso()` in `web/src/app/api/posts/serialize.ts` to reproduce the pydantic rule.
+  Nothing in the dashboard does more than hand these strings to `new Date()`, so this is
+  cosmetic, but the two ported serializers should agree: move `toPydanticIso()` somewhere
+  shared and use it for profiles too.

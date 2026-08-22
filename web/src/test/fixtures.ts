@@ -71,7 +71,7 @@ export function makePost(overrides?: Partial<Post>): Post {
     current_stage: "research",
     stage_status: {},
     stage_logs: {},
-    thread_id: null,
+    execution_logs: [],
     priority: 5,
     research_content: null,
     outline_content: null,

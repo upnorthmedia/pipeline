@@ -117,7 +117,7 @@ export interface Post {
   current_stage: PostStage;
   stage_status: StageStatusMap;
   stage_logs: Record<string, unknown>;
-  thread_id: string | null;
+  execution_logs: Record<string, unknown>[];
   priority: number;
   research_content: string | null;
   outline_content: string | null;

@@ -8316,7 +8316,228 @@ three pieces are separately verifiable, so they are separate items.
   $ cd api && uv run ruff format --check .
   9 files would be reformatted, 128 files already formatted
   ```
-- [ ] 5.3 `posts`
+- [ ] 5.3 `posts` (split: this router is 665 lines over 17 endpoints, far more than one
+  iteration. Split into 5.3a reads, 5.3b writes, 5.3c pipeline control, 5.3d exports,
+  logs and analytics.)
+  - [x] 5.3a `GET /api/posts` and `GET /api/posts/{post_id}`, plus the shared `PostRead`
+    serializer.
+
+    Ported to `web/src/app/api/posts/route.ts` and
+    `web/src/app/api/posts/[id]/route.ts`, with `serialize.ts` (the `PostRead` wire
+    shape), `params.ts` (the uuid path parameter and the 404) and `query.ts` (the list
+    query string and its 422s).
+
+    **The `PostRead` field set was read off the live schema class, not from
+    `web/src/lib/api.ts`, and the two disagreed.** `api.ts` declared `thread_id` and
+    omitted `execution_logs`; `PostRead` has never declared `thread_id` (Alembic 005
+    dropped the column) and has always declared `execution_logs`. `api.ts` and
+    `web/src/test/fixtures.ts` are corrected in this iteration, which is the whole
+    blast radius: `grep -rn "thread_id\|execution_logs" web/src/` found no other reader.
+
+    ```
+    $ cd api && PYTHONPATH=. uv run python /tmp/probe_postread_b_5_3a.py
+    FIELD ORDER: ['slug', 'topic', 'profile_id', 'target_audience', 'niche', 'intent',
+     'word_count', 'tone', 'output_format', 'website_url', 'related_keywords',
+     'competitor_urls', 'image_style', 'image_brand_colors', 'image_exclude',
+     'brand_voice', 'avoid', 'required_mentions', 'article_type', 'additional_info',
+     'stage_settings', 'id', 'current_stage', 'stage_status', 'stage_logs',
+     'execution_logs', 'priority', 'research_content', 'outline_content',
+     'draft_content', 'final_md_content', 'final_html_content', 'image_manifest',
+     'ready_content', 'wp_category_id', 'wp_author_id', 'wp_post_id', 'wp_post_url',
+     'wp_publish_status', 'nextjs_publish_status', 'nextjs_published_at', 'created_at',
+     'updated_at', 'completed_at']
+    ```
+
+    That list is asserted verbatim by the "emits exactly PostRead's field set" test.
+
+    **Deviation 1: a null non-optional column returns the pydantic default instead of a
+    500.** Pydantic does not substitute a declared default for an attribute that is
+    present and `None`; it raises, and FastAPI turned that into a 500. Probed against the
+    real `PostRead`, with every attribute set to `None`:
+
+    ```
+    $ cd api && PYTHONPATH=. uv run python /tmp/probe_postread_5_3a.py
+    RAISED ValidationError
+    13 validation errors for PostRead
+    word_count
+      Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
+    tone
+      Input should be a valid string [type=string_type, input_value=None, input_type=NoneType]
+    output_format
+      Input should be a valid string [type=string_type, input_value=None, input_type=NoneType]
+    related_keywords
+      Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]
+    ...
+    priority
+      Input should be a valid integer [type=int_type, input_value=None, input_type=NoneType]
+    ```
+
+    Every one of those columns carries a server default, so only a row written with an
+    explicit null reaches the branch. `serializePost()` returns the declared default
+    (`word_count` 2000, `output_format` `"markdown"`, `stage_settings` the six-key all
+    `"auto"` map, `current_stage` `"pending"`, and so on) rather than reproducing a 500.
+    `created_at`/`updated_at` are the exception: pydantic required them and there is no
+    default to invent, so the null carries through.
+
+    Note the `output_format` disagreement is the same one recorded under 5.2b for
+    profiles: `PostBase.output_format` is `"markdown"` while the column's server default
+    is `"both"`. The pydantic value is what the dashboard saw.
+
+    **Deviation 2: sort field names that made SQLAlchemy raise now take the fallback.**
+    `getattr(Post, sort, Post.created_at)` accepted the 44 mapped column names and fell
+    back to `created_at` for anything unmapped, but a few non-column attribute names
+    raised inside SQLAlchemy and surfaced as a 500:
+
+    ```
+    $ cd api && PYTHONPATH=. uv run python /tmp/probe_sort_5_3a.py
+    topic -> OK FROM posts ORDER BY posts.topic DESC
+    metadata -> RAISES AttributeError 'MetaData' object has no attribute 'desc'
+    profile -> RAISES NotImplementedError <function desc_op at 0x1021340e0>
+    bogus -> OK FROM posts ORDER BY posts.created_at DESC
+    registry -> RAISES AttributeError 'registry' object has no attribute 'desc'
+    __init__ -> RAISES AttributeError 'function' object has no attribute 'desc'
+    ```
+
+    `SORT_COLUMNS` in `query.ts` is exactly those 44 column names; everything else,
+    including `metadata` and `profile`, takes the `created_at` fallback. That removes an
+    error path rather than adding one.
+
+    **Deviation 3: timestamps lose sub-millisecond precision.** Pydantic 2.12 renders an
+    aware datetime with a `Z` suffix and trims trailing zeros off the fraction, dropping
+    it entirely when zero. `toPydanticIso()` reproduces that format, and the test pins it
+    against values pasted from `jsonable_encoder`:
+
+    ```
+    "nextjs_published_at": "2026-08-22T12:34:56.789012Z",
+    "updated_at": "2026-08-22T12:34:56Z",
+    ```
+
+    The microseconds themselves cannot survive: `pg` parses a Postgres timestamp into a
+    JS `Date`, which has millisecond resolution, so `...789012Z` reads back as
+    `...789Z`. Nothing in the dashboard does more than hand these strings to
+    `new Date()`. `web/src/app/api/profiles/serialize.ts` uses a plain `toISOString()`
+    and so still emits `.000Z` where pydantic emitted no fraction; logged in `todo.md`
+    rather than changed here.
+
+    **Query-string 422s** were probed against a FastAPI app declaring the same `Query()`
+    parameters and are reproduced byte for byte apart from `uuid_parsing`'s `ctx.error`,
+    which comes from the Rust uuid crate's parser:
+
+    ```
+    $ cd api && PYTHONPATH=. uv run python /tmp/probe_query_5_3a.py
+    page=0 -> 422 {"detail": [{"type": "greater_than_equal", "loc": ["query", "page"], "msg": "Input should be greater than or equal to 1", "input": "0", "ctx": {"ge": 1}}]}
+    per_page=201 -> 422 {"detail": [{"type": "less_than_equal", "loc": ["query", "per_page"], "msg": "Input should be less than or equal to 200", "input": "201", "ctx": {"le": 200}}]}
+    per_page=0 -> 422 {"detail": [{"type": "greater_than_equal", "loc": ["query", "per_page"], "msg": "Input should be greater than or equal to 1", "input": "0", "ctx": {"ge": 1}}]}
+    page=abc -> 422 {"detail": [{"type": "int_parsing", "loc": ["query", "page"], "msg": "Input should be a valid integer, unable to parse string as an integer", "input": "abc"}]}
+    page=1.5 -> 422 {"detail": [{"type": "int_parsing", "loc": ["query", "page"], "msg": "Input should be a valid integer, unable to parse string as an integer", "input": "1.5"}]}
+    profile_id=nope -> 422 {"detail": [{"type": "uuid_parsing", "loc": ["query", "profile_id"], "msg": "Input should be a valid UUID, invalid character: ...", "input": "nope", "ctx": {...}}]}
+    page= -> 422 {"detail": [{"type": "int_parsing", "loc": ["query", "page"], "msg": "Input should be a valid integer, unable to parse string as an integer", "input": ""}]}
+    per_page=200&page=2 -> 200 {"ok": true}
+    ```
+
+    **Multi-tenancy.** Both handlers reproduce `_get_user_post()`: `posts` is joined to
+    `website_profiles` and filtered on `website_profiles.user_id`, so another user's post
+    is the same `{"detail": "Post not found"}` 404 as a missing one, and a post whose
+    `profile_id` is null is invisible to every user. That exclusion follows from the
+    `user_id` predicate rather than the join strategy (an unowned row matches no user);
+    swapping `innerJoin` for `leftJoin` in a negative control changed nothing, so the
+    join is kept inner only to mirror the original.
+
+    27 tests, against the real database and real BetterAuth sessions:
+
+    ```
+    $ cd web && npx vitest run src/app/api/posts/route.test.ts   # repo .env sourced
+     ✓ src/app/api/posts/route.test.ts (27 tests) 137ms
+       ✓ GET /api/posts > rejects an unauthenticated request the way get_current_user did
+       ✓ GET /api/posts > returns only posts whose profile belongs to the caller
+       ✓ GET /api/posts > hides a post with no profile, which no user_id filter can match
+       ✓ GET /api/posts > orders by created_at descending by default
+       ✓ GET /api/posts > honours sort and order
+       ✓ GET /api/posts > falls back to created_at for an unknown sort field
+       ✓ GET /api/posts > filters on current_stage through either status or stage, status winning
+       ✓ GET /api/posts > filters by profile_id
+       ✓ GET /api/posts > searches topic and slug case-insensitively
+       ✓ GET /api/posts > paginates with page and per_page
+       ✓ GET /api/posts > answers ?page=0 with FastAPI's 422 body
+       ✓ GET /api/posts > answers ?per_page=0 with FastAPI's 422 body
+       ✓ GET /api/posts > answers ?per_page=201 with FastAPI's 422 body
+       ✓ GET /api/posts > answers ?page=abc with FastAPI's 422 body
+       ✓ GET /api/posts > answers ?page=1.5 with FastAPI's 422 body
+       ✓ GET /api/posts > answers ?page= with FastAPI's 422 body
+       ✓ GET /api/posts > reports every bad query parameter in one 422, as FastAPI did
+       ✓ GET /api/posts > rejects a malformed profile_id with a uuid_parsing 422
+       ✓ GET /api/posts > accepts per_page at its bounds
+       ✓ GET /api/posts/{post_id} > rejects an unauthenticated request
+       ✓ GET /api/posts/{post_id} > returns the caller's post
+       ✓ GET /api/posts/{post_id} > answers another user's post with the same 404 as a missing one
+       ✓ GET /api/posts/{post_id} > rejects a malformed id with a 422 rather than letting Postgres raise
+       ✓ PostRead serialization > emits exactly PostRead's field set, in PostRead's order
+       ✓ PostRead serialization > substitutes PostRead's declared default for a null non-optional column
+       ✓ PostRead serialization > formats timestamps the way pydantic 2.12 does
+       ✓ PostRead serialization > carries a stored image_manifest and stage_status through unchanged
+
+     Test Files  1 passed (1)
+          Tests  27 passed (27)
+    ```
+
+    Negative controls. Flipping the `status || stage` precedence:
+
+    ```
+     × filters on current_stage through either status or stage, status winning
+    ```
+
+    Breaking the timestamp formatter and pointing `output_format`'s fallback at the
+    column default instead of the pydantic one:
+
+    ```
+     × substitutes PostRead's declared default for a null non-optional column
+     × formats timestamps the way pydantic 2.12 does
+          Tests  2 failed | 25 passed (27)
+    ```
+
+    Frontend gates:
+
+    ```
+    $ cd web && npx tsc --noEmit
+    $ echo $?
+    0
+
+    $ pnpm -C web lint
+    > eslint
+    $ echo $?
+    0
+
+    $ pnpm -C web test
+     Test Files  2 failed | 68 passed (70)
+          Tests  9 failed | 1121 passed | 7 skipped (1137)
+    # 9 failed is the recorded baseline: 6 in image-preview.test.tsx and 3 in
+    # PostDetail.test.tsx, all pre-existing. Passing count 1094 -> 1121 (+27).
+
+    $ pnpm -C web build
+    ├ ƒ /api/posts
+    ├ ƒ /api/posts/[id]
+    $ echo $?
+    0
+    ```
+
+    `api/` is untouched by this item, and its gates are unchanged:
+
+    ```
+    $ cd api && uv run pytest -q     # .env sourced
+    125 failed, 236 passed, 25 errors in 13.75s
+
+    $ cd api && uv run ruff check .
+    Found 32 errors.
+
+    $ cd api && uv run ruff format --check .
+    9 files would be reformatted, 128 files already formatted
+    ```
+  - [ ] 5.3b `POST /api/posts` (profile prefill plus the auto-enqueue), `PATCH`, `DELETE`,
+    `POST /{post_id}/duplicate` and `POST /batch`.
+  - [ ] 5.3c Pipeline control: `POST /{post_id}/run`, `/run-all`, `/rerun`, `/restart`,
+    `/pause` and `/publish`, started as Mastra runs rather than ARQ jobs.
+  - [ ] 5.3d `GET /{post_id}/export/markdown`, `/export/html`, `/export/all`,
+    `/{post_id}/logs` and `/{post_id}/analytics`.
 - [ ] 5.4 `queue`
 - [ ] 5.5 `events` (SSE keeps `web/src/hooks/use-sse.ts`'s existing message shape; sourced from
   the Redis Streams pub/sub topic, not an in-process stream; uses Mastra resumable-stream
