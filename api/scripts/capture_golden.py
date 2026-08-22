@@ -134,6 +134,17 @@ class Recorder:
             {"provider": provider, "request": request, "response": response}
         )
 
+    def record_error(self, provider: str, request: Any, exc: BaseException) -> None:
+        """A failed call is still a captured request; the payload is the oracle."""
+        self.calls.append(
+            {
+                "provider": provider,
+                "request": request,
+                "error": {"type": type(exc).__name__, "message": str(exc)},
+                "response": None,
+            }
+        )
+
 
 def _serialize(obj: Any) -> Any:
     """Best-effort JSON-safe view of a provider request or response object."""
@@ -160,6 +171,40 @@ def _serialize(obj: Any) -> Any:
         except Exception:  # noqa: BLE001
             pass
     return repr(obj)
+
+
+# Provider responses embed generated images as base64. Keeping them inline would
+# make a single fixture tens of megabytes, so blobs are replaced by their length
+# and digest; the bytes themselves are already on disk as the optimised .webp.
+_BLOB_KEYS = frozenset({"data", "inline_data", "inlineData", "b64_json", "image_bytes"})
+_MAX_INLINE_CHARS = 200_000
+
+
+def _blob_summary(value: str | bytes) -> dict[str, Any]:
+    raw = value.encode() if isinstance(value, str) else value
+    return {
+        "__elided_blob__": True,
+        "length": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+def _elide_value(key: Any, value: Any) -> Any:
+    is_blob = (
+        str(key) in _BLOB_KEYS and isinstance(value, (str, bytes)) and len(value) > 1024
+    )
+    return _blob_summary(value) if is_blob else _elide_blobs(value)
+
+
+def _elide_blobs(obj: Any) -> Any:
+    """Replace embedded binary payloads with a length + digest summary."""
+    if isinstance(obj, (str, bytes)) and len(obj) > _MAX_INLINE_CHARS:
+        return _blob_summary(obj)
+    if isinstance(obj, dict):
+        return {k: _elide_value(k, v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_elide_blobs(v) for v in obj]
+    return obj
 
 
 def _redact(obj: Any, secrets: list[str]) -> Any:
@@ -333,7 +378,15 @@ def install_recorders(rec: Recorder, dry_run: bool) -> None:
                 request=httpx.Request("POST", str(self.base_url) + str(url)),
             )
         else:
-            response = await real_post(self, url, *args, **kwargs)
+            try:
+                response = await real_post(self, url, *args, **kwargs)
+            except BaseException as exc:
+                rec.record_error(
+                    "perplexity",
+                    {"url": str(self.base_url) + str(url), **(payload or {})},
+                    exc,
+                )
+                raise
         body: Any
         try:
             body = response.json()
@@ -355,7 +408,11 @@ def install_recorders(rec: Recorder, dry_run: bool) -> None:
             text = _STUB_CLAUDE_TEXT.get(rec.stage, "stub")
             response: Any = _StubMessage(text, kwargs.get("model", ""))
         else:
-            response = await real_create(self, **kwargs)
+            try:
+                response = await real_create(self, **kwargs)
+            except BaseException as exc:
+                rec.record_error("anthropic", _serialize(kwargs), exc)
+                raise
         rec.record("anthropic", _serialize(kwargs), _serialize(response))
         return response
 
@@ -367,7 +424,11 @@ def install_recorders(rec: Recorder, dry_run: bool) -> None:
         if dry_run:
             response: Any = _StubGeminiResponse()
         else:
-            response = real_generate(self, **kwargs)
+            try:
+                response = real_generate(self, **kwargs)
+            except BaseException as exc:
+                rec.record_error("gemini", _serialize(kwargs), exc)
+                raise
         rec.record("gemini", _serialize(kwargs), _serialize(response))
         return response
 
@@ -424,7 +485,7 @@ async def capture_post(
         state_input = _redact(_serialize(dict(state)), secrets)
         rec.start(stage)
         output = await nodes[stage](state)
-        calls = _redact(_serialize(rec.calls), secrets)
+        calls = _elide_blobs(_redact(_serialize(rec.calls), secrets))
 
         fixture = {
             "schema_version": 1,

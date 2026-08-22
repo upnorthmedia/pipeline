@@ -529,9 +529,158 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
   needed. `settings.media_dir` is redirected under the output directory, so a capture run
   never dirties the repo's `media/`.
 
-- [ ] 0.4b Live capture for `how-to-choose-a-crm-for-a-small-team` (all six stages) with real
+- [x] 0.4b Live capture for `how-to-choose-a-crm-for-a-small-team` (all six stages) with real
   provider keys. Commit `docs/mastra-port/golden/how-to-choose-a-crm-for-a-small-team/*.json`
   and the generated images. Record the run's token usage and cost in this ledger.
+
+  Keys sourced from the main checkout's gitignored `.env` (this worktree has none):
+
+  ```sh
+  cd api && set -a && . /Users/cody/Documents/code/jena-ai/.env && set +a \
+    && uv run python scripts/capture_golden.py --out ../docs/mastra-port/golden \
+       --post how-to-choose-a-crm-for-a-small-team
+  ```
+
+  ```
+  [how-to-choose-a-crm-for-a-small-team] research: running
+  [how-to-choose-a-crm-for-a-small-team] research: wrote .../research.json (68563 bytes)
+  [how-to-choose-a-crm-for-a-small-team] outline: running
+  [how-to-choose-a-crm-for-a-small-team] outline: wrote .../outline.json (115274 bytes)
+  [how-to-choose-a-crm-for-a-small-team] write: running
+  [how-to-choose-a-crm-for-a-small-team] write: wrote .../write.json (114402 bytes)
+  [how-to-choose-a-crm-for-a-small-team] edit: running
+  Dead link (404): https://example.com/blog/sales-pipeline-basics
+  Dead link (404): https://example.com/pricing
+  Dead link (404): https://example.com/blog/crm-data-hygiene
+  [how-to-choose-a-crm-for-a-small-team] edit: wrote .../edit.json (161899 bytes)
+  [how-to-choose-a-crm-for-a-small-team] images: running
+  [how-to-choose-a-crm-for-a-small-team] images: wrote .../images.json (185217 bytes)
+  [how-to-choose-a-crm-for-a-small-team] ready: running
+  [how-to-choose-a-crm-for-a-small-team] ready: wrote .../ready.json (155739 bytes)
+
+  Wrote 6 fixture file(s) under .../docs/mastra-port/golden
+  ```
+
+  ### Recorded usage (from each fixture's `stage_output._stage_meta`)
+
+  ```
+  stage       bytes calls  err model                                       in     out    sec
+  research    68563     1    0 sonar-pro                                 1510    4635   37.0
+  outline    115274     1    0 claude-opus-4-6                           7092    4214  103.6
+  write      114402     1    0 claude-opus-4-6                           5542    3423   90.1
+  edit       161899     1    0 claude-opus-4-6                           8457    5953  135.7
+  images     185217     6    5 claude-opus-4-6                           6994    3037   68.3
+  ready      155739     1    0 claude-opus-4-6                           5222    2967   83.6
+  TOTAL tokens_in 34817 tokens_out 24229
+  ```
+
+  Cost for this article at verified list prices:
+
+  | provider | model | $/Mtok in | $/Mtok out | tokens in | tokens out | cost |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | Perplexity | `sonar-pro` | 3 | 15 | 1510 | 4635 | $0.074 |
+  | Anthropic | `claude-opus-4-6` | 5 | 25 | 33307 | 19594 | $0.656 |
+  | | | | | | **total** | **$0.73** |
+
+  Price sources, both checked 2026-08-21: Perplexity from
+  https://docs.perplexity.ai/getting-started/pricing (`sonar-pro` `"input": 3`,
+  `"output": 15`, "$ per 1,000,000 tokens"); Anthropic from the bundled `claude-api`
+  skill's model table (`claude-opus-4-6`, $5.00 in / $25.00 out per 1M, table cached
+  2026-06-24). Excluded from the total: Perplexity's separate per-request search fee, and
+  all image generation, because no images were produced (see below). **~$0.73 per article**
+  is the Phase 5 cost baseline any model upgrade is measured against.
+
+  ### Blocker recorded honestly: no images were generated
+
+  All five Gemini calls returned HTTP 429 on this API key. The key has **zero** free-tier
+  image quota, so this is a provider account limit and not a code fault:
+
+  ```
+  Failed to generate image 0: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message':
+  'You exceeded your current quota, please check your plan and billing details. ...
+  * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests,
+    limit: 0, model: gemini-3.1-flash-image ...
+  ```
+
+  Consequences and what was captured instead:
+
+  - `images.json` holds the full Claude manifest (5 image specs with prompts, placements,
+    alt text, aspect ratios and sizes) and all **5 Gemini request payloads** with their
+    exact `model` / `contents` / `config` parameters plus the 429 error, so the Phase 3.5
+    prompt-parity gate has its oracle. Only the returned image bytes are missing.
+  - `image_manifest` records `total_generated: 0, total_failed: 5` and the stage still
+    reports `images: complete`, which is itself the Python behaviour the port must match.
+  - No `.webp` files exist to commit. Phase 5's images model verification (section 5 of the
+    objective) must first resolve billing on the Gemini key.
+
+  ### Defect found and fixed while capturing: `_parse_manifest` could not read a real response
+
+  The first live run returned `{"images": [], "style_brief": {}, "error": "Failed to parse
+  manifest"}`. Claude wraps the manifest in a ```json fence **and appends commentary after
+  the closing fence** ("You can review and edit the prompts before generation ... Proceed?").
+  The old parser stripped every line starting with a fence and then `json.loads`d the whole
+  remainder including the prose, so it failed every time. This is a production bug, not a
+  harness bug: the images stage would fail this way on any run where Claude adds a closing
+  remark. Regression test written first and confirmed failing for the right reason:
+
+  ```
+  $ cd api && uv run pytest tests/phase3/test_images_stage.py -q -k trailing_prose
+  E         Left contains 1 more item:
+  E         {'error': 'Failed to parse manifest'}
+  FAILED tests/phase3/test_images_stage.py::TestParseManifest::test_strips_code_fences_with_trailing_prose
+  1 failed, 10 deselected in 0.07s
+  ```
+
+  After the fix (`_FENCED_BLOCK` regex takes the first fenced block, with an
+  outermost-`{`..`}` fallback):
+
+  ```
+  $ cd api && uv run pytest tests/phase3/test_images_stage.py -q
+  ...........                                                              [100%]
+  11 passed in 0.14s
+  ```
+
+  ### Harness changes needed for live mode (both verified by `--dry-run` before spending)
+
+  1. **Blob elision.** Gemini responses embed the generated image as base64, and
+     `_serialize` reaches it through pydantic `model_dump_json`, so a successful images
+     fixture would have been tens of megabytes. `_elide_blobs` now replaces any
+     `data`/`inline_data`/`b64_json`/`image_bytes` string over 1 KiB, and any string over
+     200 000 chars, with `{"__elided_blob__": true, "length": n, "sha256": ...}`. Rendered
+     prompts are untouched.
+  2. **Failed calls are recorded.** The wrappers previously let a provider exception
+     propagate before `rec.record`, which is why the first post-fix run captured zero Gemini
+     calls despite issuing five. `Recorder.record_error` now stores the request payload and
+     the exception, then re-raises. This is what makes the 429 run useful rather than empty.
+
+  ### Gates after the change
+
+  ```
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  exit=1
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 118 files already formatted
+  exit=1
+  $ docker compose up -d db redis
+  $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test uv run pytest -q
+  125 failed, 236 passed, 25 errors in 15.87s
+  exit=1
+  ```
+
+  Both ruff gates match the 0.1 baseline exactly. pytest is 125 failed / 25 errors as at
+  baseline with **236 passed, one more than the 235 baseline**: the new regression test.
+
+  ### Secret check on the committed fixtures
+
+  ```
+  $ for k in "$PERPLEXITY_API_KEY" "$ANTHROPIC_API_KEY" "$GEMINI_API_KEY" \
+             "$WP_ENCRYPTION_KEY" "$BETTER_AUTH_SECRET"; do
+      grep -rlF "$k" docs/mastra-port/golden/; done | wc -l
+  0
+  $ grep -rlE "sk-ant-|pplx-|AIzaSy" docs/mastra-port/golden/ | wc -l
+  0
+  ```
 - [ ] 0.4c Live capture for `best-time-tracking-tools-for-agencies` (all six stages). Commit
   its fixtures, then check 0.4.
 

@@ -163,6 +163,20 @@ class TestParseManifest:
         result = _parse_manifest(raw)
         assert result == data
 
+    def test_strips_code_fences_with_trailing_prose(self):
+        """Claude appends commentary after the fenced manifest.
+
+        Observed in the 2026-08-21 live golden capture.
+        """
+        data = {"images": [], "style_brief": {}}
+        raw = (
+            "```json\n"
+            + json.dumps(data)
+            + "\n```\n\nYou can review and edit the prompts before generation. Proceed?"
+        )
+        result = _parse_manifest(raw)
+        assert result == data
+
     def test_handles_invalid_json(self):
         result = _parse_manifest("not json at all")
         assert "error" in result

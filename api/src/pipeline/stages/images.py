@@ -7,6 +7,7 @@ import io
 import json
 import logging
 import random
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -247,12 +248,19 @@ async def images_node(state: PipelineState) -> dict:
     }
 
 
+_FENCED_BLOCK = re.compile(r"```(?:json)?\s*\n(.*?)\n```", re.DOTALL)
+
+
 def _parse_manifest(content: str) -> dict:
     """Parse image manifest JSON from Claude response."""
     text = content.strip()
 
-    # Strip markdown code fences if present
-    if text.startswith("```"):
+    # Claude wraps the manifest in a fenced block and often adds commentary
+    # after it, so prefer the first fenced block over the whole response.
+    fenced = _FENCED_BLOCK.search(text)
+    if fenced:
+        text = fenced.group(1)
+    elif text.startswith("```"):
         lines = text.split("\n")
         lines = [line for line in lines if not line.strip().startswith("```")]
         text = "\n".join(lines)
@@ -260,5 +268,15 @@ def _parse_manifest(content: str) -> dict:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        logger.warning("Failed to parse image manifest JSON, returning empty manifest")
-        return {"images": [], "style_brief": {}, "error": "Failed to parse manifest"}
+        pass
+
+    # Last resort: the outermost JSON object embedded in surrounding prose.
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    logger.warning("Failed to parse image manifest JSON, returning empty manifest")
+    return {"images": [], "style_brief": {}, "error": "Failed to parse manifest"}
