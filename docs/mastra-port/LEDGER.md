@@ -8677,8 +8677,216 @@ three pieces are separately verifiable, so they are separate items.
       $ cd api && uv run ruff format --check .
       9 files would be reformatted, 129 files already formatted
       ```
-    - [ ] 5.3b-ii `PATCH /{post_id}` and `DELETE /{post_id}`, including the media
+    - [x] 5.3b-ii `PATCH /{post_id}` and `DELETE /{post_id}`, including the media
       directory cleanup the delete performed.
+
+      Both ported into `web/src/app/api/posts/[id]/route.ts`, alongside the `GET`
+      from 5.3a. `PostUpdate` and its column map live in
+      `web/src/app/api/posts/validation.ts` next to `PostCreate`; the 422 bodies
+      come from the shared `web/src/app/api/pydantic.ts` unchanged, so this item
+      added no new error-shape code.
+
+      **`PostUpdate` is not `PostCreate` partialised.** It drops `slug` and
+      `profile_id`, so a patch can neither rename a post nor move it to another
+      user's profile, and it adds the six stage content columns, which is how the
+      editor on `posts/[id]` saves. Every one of its 27 fields is `X | None =
+      None`, so `null` is legal for the list and dict fields too, where the same
+      fields on create are non-nullable with a container default. Read off the
+      real model rather than from `web/src/lib/api.ts`, which (as in 5.3a) was
+      wrong: its `PostUpdate` omitted `article_type`, `additional_info`,
+      `wp_category_id` and `wp_author_id`. Those four are added in this
+      iteration; nothing else in `api.ts` changed and no caller sent them.
+
+      ```
+      $ cd api && PYTHONPATH=. uv run python /tmp/probe_postupdate_5_3b_ii.py
+      == FIELDS ==
+      topic: str | None default=None
+      target_audience: str | None default=None
+      niche: str | None default=None
+      intent: str | None default=None
+      word_count: int | None default=None
+      tone: str | None default=None
+      output_format: str | None default=None
+      website_url: str | None default=None
+      related_keywords: list[str] | None default=None
+      competitor_urls: list[str] | None default=None
+      image_style: str | None default=None
+      image_brand_colors: list[str] | None default=None
+      image_exclude: list[str] | None default=None
+      brand_voice: str | None default=None
+      avoid: str | None default=None
+      required_mentions: str | None default=None
+      article_type: str | None default=None
+      additional_info: str | None default=None
+      stage_settings: dict | None default=None
+      wp_category_id: int | None default=None
+      wp_author_id: int | None default=None
+      research_content: str | None default=None
+      outline_content: str | None default=None
+      draft_content: str | None default=None
+      final_md_content: str | None default=None
+      final_html_content: str | None default=None
+      ready_content: str | None default=None
+
+      == EXCLUDE_UNSET ==
+      dump: {'topic': 't', 'niche': None}
+      full keys: 27
+
+      == 422 SHAPES ==
+      {"word_count": "abc"} -> [{"type": "int_parsing", "loc": ["word_count"], "msg": "Input should be a valid integer, unable to parse string as an integer", "input": "abc", ...}]
+      {"word_count": [1]} -> [{"type": "int_type", "loc": ["word_count"], "msg": "Input should be a valid integer", "input": [1], ...}]
+      {"word_count": " 7 "} -> OK {'word_count': 7}
+      {"related_keywords": "x"} -> [{"type": "list_type", "loc": ["related_keywords"], "msg": "Input should be a valid list", "input": "x", ...}]
+      {"related_keywords": [1]} -> [{"type": "string_type", "loc": ["related_keywords", 0], "msg": "Input should be a valid string", "input": 1, ...}]
+      {"stage_settings": []} -> [{"type": "dict_type", "loc": ["stage_settings"], "msg": "Input should be a valid dictionary", "input": [], ...}]
+      {"topic": 5} -> [{"type": "string_type", "loc": ["topic"], "msg": "Input should be a valid string", "input": 5, ...}]
+      {"topic": null} -> OK {'topic': None}
+      ```
+
+      **The delete cascades over nothing, unlike the profile delete.** `Post`
+      declares only the many-to-one `profile` relationship, and the one foreign
+      key pointing at `posts` is `internal_links.post_id`, which Alembic 006 gave
+      `ON DELETE SET NULL`. So a plain `DELETE` is faithful here, where the
+      profile port needed a hand-written orphaning update. Probed against the
+      real ORM and the real database, and against the live constraint:
+
+      ```
+      $ psql "$DATABASE_URL_SYNC" -c "SELECT conname, confdeltype,
+        pg_get_constraintdef(oid) FROM pg_constraint WHERE confrelid = 'posts'::regclass;"
+                 conname           | confdeltype |                     pg_get_constraintdef
+       -----------------------------+-------------+---------------------------------------------------------------
+       internal_links_post_id_fkey | n           | FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE SET NULL
+      (1 row)
+
+      $ cd api && PYTHONPATH=. uv run python /tmp/probe_patch_delete_5_3b_ii.py
+      created_at == updated_at: False
+      dirty after identical setattr: True
+      updated_at changed by identical setattr: False
+      updated_at changed by empty patch: False
+      updated_at changed by real patch: True
+      links after post delete: [(UUID('638f4c1b-3c74-43b3-8fc4-f690ab4cbb8e'), None)]
+      ```
+
+      **Deviation, carried over from `PATCH /api/profiles/{profile_id}` and now
+      measured.** `updated_at` is stamped by hand here because
+      `TimestampMixin.onupdate` did it in Python. The probe above shows what that
+      misses: SQLAlchemy marks the instance dirty on any `setattr` but compares
+      the value against the loaded one at flush time, so a patch submitting only
+      values the row already holds emitted no UPDATE and left `updated_at` alone.
+      Reproducing that needs a deep equality over the jsonb and array columns
+      (Python's `dict.__eq__` is key-order-insensitive, `JSON.stringify` is not),
+      and its failure mode is skipping a write that should happen, which is worse
+      than a timestamp no caller branches on. The empty-body case *is*
+      reproduced, because Drizzle rejects an empty `set` and forces the read path
+      anyway.
+
+      **Deviation.** `rm(dir, { recursive: true, force: true })` stands in for
+      `if media_dir.exists(): shutil.rmtree(media_dir)`. Both are silent when the
+      directory was never created and neither swallows a failure to remove one
+      that was; `force` only ignores `ENOENT`. `post_id` has already been matched
+      against the uuid pattern before it reaches `path.join`, so it cannot escape
+      the media root. `mediaRoot()` moved out of
+      `web/src/mastra/images/generate-one.ts` into
+      `web/src/mastra/images/media-dir.ts` for this: a delete handler reaching
+      into the image generator for a path helper read like a mistake, and there
+      is only one correct definition of `settings.media_dir`.
+
+      Ownership rides on the update and the delete as a correlated `EXISTS` over
+      `website_profiles`, because Drizzle's `update`/`delete` take no join. Same
+      predicate as `_get_user_post()`'s inner join, including its consequence
+      that a post whose `profile_id` is null is invisible to both verbs.
+
+      28 tests in `web/src/app/api/posts/update-delete.test.ts`, against the real
+      database, real BetterAuth sessions and real files under a temporary
+      `MEDIA_DIR`:
+
+      ```
+
+       RUN  v4.0.18 /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > rejects an unauthenticated request the way get_current_user did 5ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > answers a malformed uuid with FastAPI's path 422 13ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > answers an unknown post with _get_user_post's 404 8ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > answers another user's post with the same 404 and writes nothing 10ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > cannot see a post whose profile_id is null, because the join is inner 7ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > answers a body that is not JSON with FastAPI's json_invalid 422 4ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > writes only the keys the client sent, which is exclude_unset 6ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > clears a column sent as null, including a list column 5ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > ignores keys PostUpdate does not declare, so slug and profile_id are immovable 6ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > applies pydantic's lax int coercion to word_count 5ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > reproduces pydantic's 422 for {"word_count":"abc"} 5ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > reproduces pydantic's 422 for {"word_count":[1]} 4ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > reproduces pydantic's 422 for {"related_keywords":"x"} 4ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > reproduces pydantic's 422 for {"related_keywords":[1]} 4ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > reproduces pydantic's 422 for {"stage_settings":[]} 4ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > reproduces pydantic's 422 for {"topic":5} 4ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > returns the row untouched for an empty body, leaving updated_at alone 5ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > stamps updated_at on a real change, standing in for TimestampMixin.onupdate 5ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > saves stage content the way the editor on posts/[id] does 5ms
+       ✓ src/app/api/posts/update-delete.test.ts > PATCH /api/posts/{post_id} > answers with the full PostRead shape, not just the changed columns 7ms
+       ✓ src/app/api/posts/update-delete.test.ts > DELETE /api/posts/{post_id} > rejects an unauthenticated request the way get_current_user did 1ms
+       ✓ src/app/api/posts/update-delete.test.ts > DELETE /api/posts/{post_id} > answers a malformed uuid with FastAPI's path 422 2ms
+       ✓ src/app/api/posts/update-delete.test.ts > DELETE /api/posts/{post_id} > answers an unknown post with _get_user_post's 404 2ms
+       ✓ src/app/api/posts/update-delete.test.ts > DELETE /api/posts/{post_id} > answers another user's post with the same 404 and leaves the row in place 5ms
+       ✓ src/app/api/posts/update-delete.test.ts > DELETE /api/posts/{post_id} > removes the row and answers 204 with no body 5ms
+       ✓ src/app/api/posts/update-delete.test.ts > DELETE /api/posts/{post_id} > detaches internal links rather than deleting them, per Alembic 006's SET NULL 5ms
+       ✓ src/app/api/posts/update-delete.test.ts > DELETE /api/posts/{post_id} > removes the post's media directory and nothing beside it 6ms
+       ✓ src/app/api/posts/update-delete.test.ts > DELETE /api/posts/{post_id} > succeeds when the post never generated images, matching the exists() guard 4ms
+
+       Test Files  1 passed (1)
+            Tests  28 passed (28)
+         Start at  13:22:22
+         Duration  722ms (transform 55ms, setup 114ms, import 369ms, tests 169ms, environment 0ms)
+      ```
+
+      Three negative controls, each reverted:
+
+      ```
+      # 1. drop the rm() call from DELETE
+      Tests  1 failed | 27 passed (28)
+           x removes the post's media directory and nothing beside it
+
+      # 2. replace PATCH's ownership EXISTS with a bare eq(posts.id, id)
+      Tests  2 failed | 26 passed (28)
+           x answers another user's post with the same 404 and writes nothing
+           x cannot see a post whose profile_id is null, because the join is inner
+
+      # 3. point updateToColumns at COLUMN_OF (the create map) instead of UPDATE_COLUMN_OF
+      Tests  1 failed | 27 passed (28)
+           x saves stage content the way the editor on posts/[id] does
+      ```
+
+      Frontend gates, all four green, with the failure count still on its
+      recorded 9-failure baseline:
+
+      ```
+      $ cd web && ./node_modules/.bin/tsc --noEmit
+      tsc exit=0
+
+      $ pnpm -C web lint
+      (no output, exit 0)
+
+      $ pnpm -C web test
+      Test Files  2 failed | 70 passed (72)
+           Tests  9 failed | 1174 passed | 7 skipped (1190)
+
+      $ pnpm -C web build
+      Compiled successfully in 3.5s
+      |- f /api/posts/[id]
+      ```
+
+      The api gates are unchanged from their recorded baseline:
+
+      ```
+      $ cd api && uv run pytest -q     # .env sourced
+      125 failed, 236 passed, 25 errors in 13.48s
+
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 129 files already formatted
+      ```
     - [ ] 5.3b-iii `POST /{post_id}/duplicate` and `POST /batch`.
   - [ ] 5.3c Pipeline control: `POST /{post_id}/run`, `/run-all`, `/rerun`, `/restart`,
     `/pause` and `/publish`, started as Mastra runs rather than ARQ jobs.

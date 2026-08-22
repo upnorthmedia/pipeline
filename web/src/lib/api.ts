@@ -181,7 +181,11 @@ export interface PostUpdate {
   brand_voice?: string | null;
   avoid?: string | null;
   required_mentions?: string | null;
+  article_type?: string | null;
+  additional_info?: string | null;
   stage_settings?: Partial<StageSettings>;
+  wp_category_id?: number | null;
+  wp_author_id?: number | null;
   research_content?: string | null;
   outline_content?: string | null;
   draft_content?: string | null;

@@ -28,7 +28,7 @@ import { createWorkflow } from "@mastra/core/workflows/evented"
 import { z } from "zod"
 
 import { requireApiKey } from "../api-keys"
-import { ensureMediaDir, mediaRoot } from "../images/generate-one"
+import { ensureMediaDir, mediaRoot } from "../images/media-dir"
 import { imagesAssembleStep, imagesStageOutputSchema } from "../steps/images-assemble"
 import { imageJobSchema, imagesGenerateStep } from "../steps/images-generate"
 import { imagesManifestStep } from "../steps/images-manifest"

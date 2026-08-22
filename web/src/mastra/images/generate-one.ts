@@ -33,7 +33,7 @@
  * there and the corpus has no such case, so the exact `None` behaviour would
  * have to be invented rather than observed; see `todo.md`.
  */
-import { mkdir, writeFile } from "node:fs/promises"
+import { writeFile } from "node:fs/promises"
 import path from "node:path"
 
 import { generateImage } from "./gemini"
@@ -199,23 +199,4 @@ export async function generateOneImage(
       usage,
     }
   }
-}
-
-/**
- * `settings.media_dir`: where generated images are written.
- *
- * Same shape as `rulesDir()`, and for the same reason. Python resolves the
- * repository's `media/` directory relative to its own source file and lets
- * `MEDIA_DIR` override it in Docker; this keeps both behaviours so a container
- * that already sets `MEDIA_DIR` for the Python worker needs no new variable.
- */
-export function mediaRoot(): string {
-  return process.env.MEDIA_DIR ?? path.resolve(process.cwd(), "..", "media")
-}
-
-/** `media_dir.mkdir(parents=True, exist_ok=True)`, run once before the fan-out. */
-export async function ensureMediaDir(mediaRoot: string, postId: string): Promise<string> {
-  const dir = path.join(mediaRoot, postId)
-  await mkdir(dir, { recursive: true })
-  return dir
 }
