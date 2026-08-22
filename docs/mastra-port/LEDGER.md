@@ -871,12 +871,140 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
 
 ## Phase 1: TypeScript data layer
 
-- [ ] 1.1 Introspect the live database and define the full schema in TypeScript (Drizzle
+- [x] 1.1 Introspect the live database and define the full schema in TypeScript (Drizzle
   recommended; justify any other choice here). Must cover every table and column produced by
   Alembic 001-011, including `posts.stage_logs`, `execution_logs`, `stage_status`,
   `stage_settings`, `image_manifest` (JSONB), the WordPress fields, the Next.js publishing
   fields, and the `user_id` multi-tenancy column. Do not create a second database or a
   migration that recreates tables.
+
+  Drizzle was used as recommended. Installed into `web/`:
+
+  ```
+  $ cd web && pnpm add drizzle-orm && pnpm add -D drizzle-kit
+  dependencies:
+  + drizzle-orm 0.45.2
+  devDependencies:
+  + drizzle-kit 0.31.10
+  ```
+
+  The dev database from item 0.3 was restarted and confirmed at Alembic head:
+
+  ```
+  $ POSTGRES_HOST_PORT=5435 docker compose up -d db redis
+  $ PGPASSWORD=pipeline psql -h localhost -p 5435 -U pipeline -d content_pipeline -At \
+      -c "select version_num from alembic_version;"
+  011
+
+  $ PGPASSWORD=pipeline psql -h localhost -p 5435 -U pipeline -d content_pipeline -c '\dt'
+   Schema |       Name       | Type  |  Owner
+  --------+------------------+-------+----------
+   public | alembic_version  | table | pipeline
+   public | internal_links   | table | pipeline
+   public | posts            | table | pipeline
+   public | settings         | table | pipeline
+   public | website_profiles | table | pipeline
+  (5 rows)
+  ```
+
+  The schema was not written by hand. `drizzle-kit pull` introspected the live database, and
+  its output was adopted as `web/src/db/schema.ts` with JSONB element types (`$type<>()`),
+  doc comments, and `mode: "date"` timestamps added:
+
+  ```
+  $ pnpm exec drizzle-kit pull --config=/tmp/drizzle.pull.config.ts
+  [✓] 5  tables fetched
+  [✓] 90 columns fetched
+  [✓] 0  enums fetched
+  [✓] 3  indexes fetched
+  [✓] 3  foreign keys fetched
+  [✓] 0  policies fetched
+  [✓] 0  check constraints fetched
+  [✓] 0  views fetched
+  ```
+
+  **Fidelity proof.** DDL was generated from `web/src/db/schema.ts` and compared, statement
+  for statement, against the DDL `drizzle-kit pull` produced from the live database. After
+  stripping the introspection comment wrapper and normalising statement order, the two are
+  identical:
+
+  ```
+  $ pnpm exec drizzle-kit generate --config=/tmp/drizzle.gen.config.ts
+  posts 44 columns 0 indexes 1 fks
+  settings 4 columns 1 indexes 0 fks
+  website_profiles 32 columns 1 indexes 0 fks
+  [✓] Your SQL migration file ➜ /tmp/drizzle-gen/0000_overconfident_pestilence.sql
+
+  $ norm() { grep -v -e '^--> statement-breakpoint' -e '^-- Current sql file' \
+      -e '^-- If you want to run' -e '^/\*$' -e '^\*/$' "$1" | sed '/^$/d' | sort; }
+  $ diff <(norm /tmp/drizzle-pull/0000_*.sql) <(norm /tmp/drizzle-gen/0000_*.sql)
+  $ echo "normalized diff exit=$?"
+  normalized diff exit=0
+  ```
+
+  No migration was created against the real database and no second database exists.
+  `web/drizzle.config.ts` deliberately has no migrate workflow: `out: "./drizzle"` is only a
+  scratch target for drift detection, and the config comment states that `src/db/schema.ts`
+  mirrors the Alembic-owned schema rather than generating it.
+
+  All the columns the item calls out are present in `web/src/db/schema.ts`:
+  `posts.stageLogs`, `posts.executionLogs`, `posts.stageStatus`, `posts.stageSettings`,
+  `posts.imageManifest`, the five `wp*` post columns plus the eight profile-side WordPress
+  columns, the Next.js publishing fields (`posts.nextjsPublishStatus`,
+  `posts.nextjsPublishedAt`, `websiteProfiles.nextjsWebhookUrl`,
+  `websiteProfiles.nextjsWebhookSecret`, `websiteProfiles.nextjsFrontmatterMap`), and the
+  `user_id` column on both `settings` and `website_profiles`.
+
+  Findings recorded while introspecting:
+
+  1. **`posts` has no `user_id` column.** Multi-tenancy from Alembic 010 lands on
+     `settings.user_id` and `website_profiles.user_id` only; posts are scoped transitively
+     through `profile_id`. Phase 5's per-handler tenancy scoping must join through
+     `website_profiles`, not filter `posts.user_id`.
+  2. **`settings`' primary key is `key` alone**, with `user_id` only indexed. Per-user
+     settings rows therefore collide on key today. Phase 6 (per-stage model settings,
+     "persist per user") runs into this and cannot be solved by a schema change, since the
+     port forbids one. Logged in `todo.md`.
+  3. **`website_profiles.user_id` is nullable in the database** (`is_nullable = YES`), which
+     contradicts iteration 1's reading that Alembic 010 made it NOT NULL. The pytest
+     `NotNullViolationError` cluster therefore comes from the SQLAlchemy model, not the
+     database constraint.
+  4. **The SQLAlchemy model and the migrations disagree on two defaults.**
+     `api/src/models/post.py` declares `output_format` server default `"markdown"` and
+     `stage_settings` defaulting to all six stages at `"auto"`; the database Alembic actually
+     produced has `'both'` and a five-stage `"review"` map. The TS schema follows the
+     database, which is the stated ground truth. Logged in `todo.md`.
+  5. **`nextjs_frontmatter_map` is `json`, not `jsonb`**, unlike every other JSON column.
+     Preserved as `json()` in the TS schema.
+  6. **`posts` has a hole at `ordinal_position` 30**, the `thread_id` column dropped by
+     Alembic 005. Nothing to port; noted so a future column count of 44 (not 45) is not read
+     as a missing column.
+
+  Timestamps use `mode: "date"` rather than `drizzle-kit pull`'s default `mode: "string"`.
+  `mode: "string"` returns Postgres' native `2026-08-21 12:00:00+00` form, which is not the
+  ISO-8601 shape FastAPI emits today and would silently change every API response; `Date`
+  objects serialise to ISO-8601 via `JSON.stringify`. Phase 5 must still confirm the exact
+  string each handler emits against `web/src/lib/api.ts`.
+
+  Gates after the change, all at the item 0.2 baseline:
+
+  ```
+  $ cd web && pnpm exec tsc --noEmit ; echo "tsc exit=$?"
+  tsc exit=0
+
+  $ pnpm lint ; echo "lint exit=$?"
+  lint exit=0
+
+  $ pnpm test ; echo "test exit=$?"
+   Test Files  2 failed | 14 passed (16)
+        Tests  9 failed | 191 passed (200)
+  test exit=1
+
+  $ pnpm build ; echo "build exit=$?"
+  build exit=0
+  ```
+
+  No Python file was touched, so the backend gates are unchanged from item 0.4.
 - [ ] 1.2 Write a schema-parity check that fails if any table or column known to Alembic is
   missing from the TS schema, or vice versa.
 - [ ] 1.3 Port `api/src/services/crypto.py` to TypeScript and prove with a test that a value

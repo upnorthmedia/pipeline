@@ -26,3 +26,13 @@
   performance in our testing". Every live pipeline run emits this UserWarning. Decide the
   target thinking configuration during the Phase 3 stage ports rather than copying the
   deprecated shape into TypeScript.
+
+- [confirmed] 2026-08-21 `settings` primary key is `key` alone while `user_id` is only an
+  index, so two users cannot hold different values for the same setting key. Phase 6 asks for
+  per-user per-stage model settings and the port forbids schema changes, so this needs a
+  decision (namespaced keys, or a schema change deferred past the port).
+- [confirmed] 2026-08-21 `api/src/models/post.py` disagrees with the Alembic-produced
+  database on two defaults: it declares `output_format` server default `"markdown"` and a
+  six-stage all-`"auto"` `stage_settings`, while the database has `'both'` and a five-stage
+  all-`"review"` map. Rows created through SQLAlchemy and rows created by raw SQL therefore
+  get different defaults.
