@@ -4052,9 +4052,210 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
 
     All three at the Phase 0 baseline. No file under `api/` was touched this
     iteration.
-  - [ ] 3.5d Gemini image-generation client ported: `generate_image` with `aspect_ratio`,
+  - [x] 3.5d Gemini image-generation client ported: `generate_image` with `aspect_ratio`,
     `image_size` and `response_modalities`, plus the token accounting the stage sums into
     `_stage_meta_gemini`, and a live smoke test.
+
+    **The oracle had to be built, because the fixtures have none**
+
+    Every Gemini call in both golden fixtures is a 429, so they pin the prompt text
+    and nothing else: not the request that carries it, not the shape of a successful
+    answer, and not the token accounting. `api/scripts/export_gemini_parity.py`
+    supplies all three by driving the real `GeminiClient` with
+    `google.genai._api_client.SyncHttpxClient.request` replaced, so both the
+    outbound request and the parsing of a canned answer come from the production
+    Python path rather than from a reading of it. It writes
+    `web/src/mastra/images/data/gemini-parity.json`: 5 `wire` cases (the exact
+    request `google-genai` builds) and 14 `responses` cases (a canned status and
+    body, with the resulting `ImageGenResponse` or the raised exception, plus the
+    number of HTTP attempts Python actually made).
+
+    **Three things the corpus settled that reading the Python did not**
+
+    1. *The retry wrapper is inert for this client.* `_retry` wraps the call, but
+       `_is_retryable` tests for `httpx.HTTPStatusError` and
+       `anthropic.APIStatusError`, and `google.genai.errors.ClientError` inherits
+       from neither (`ClientError -> APIError -> Exception`, checked against the
+       installed 1.65.0). So a 429 fails on the first attempt and no `Retry-After`
+       is ever read. The corpus records `attempts: 1` for both the 429 and the 500
+       case, which matches the fixtures having exactly one recorded 429 per image.
+       Only the 180s timeout and transport failures retry, and the port reproduces
+       that split with `GeminiTransportError` as the single retryable class.
+    2. *A part carrying `inline_data` with no bytes ends the search.* Python breaks
+       on the first part whose `inline_data` is truthy and only then checks for
+       `None`, so such a part fails the call with "No image returned in Gemini
+       response" rather than deferring to a later image part. Corpus case
+       `inline-data-without-bytes` confirms it against a body whose second part is
+       a valid image.
+    3. *Byte equality on the request body is unreachable.* `json.dumps` writes
+       `", "` and `": "` as separators and escapes every non-ASCII character;
+       `JSON.stringify` does neither. The corpus records both the parsed body and
+       the raw string, and the test asserts
+       `sent === JSON.stringify(JSON.parse(pythonRaw))`, which normalises exactly
+       those two differences and nothing else, so key order and every value still
+       have to match.
+
+    **What was built**
+
+    - `api/scripts/export_gemini_parity.py`, the corpus generator.
+    - `web/src/mastra/images/gemini.ts`: `generateImage`, `GeminiApiError`,
+      `GeminiTransportError` and the constants (`GEMINI_IMAGE_MODEL_ID`,
+      `GEMINI_IMAGE_SIZE_TOKENS`, `GEMINI_TIMEOUT_MS`, `GEMINI_MAX_RETRIES`,
+      `GEMINI_BASE_DELAY_MS`, `GEMINI_API_BASE`).
+    - `web/src/mastra/images/gemini.test.ts`: 38 tests.
+
+    **Why this posts to `generateContent` directly instead of adding `@google/genai`**
+
+    The oracle is a recorded request. Matching a recorded request byte for byte is
+    not a check the JS SDK can be made to perform on itself, and the surface in use
+    is one POST with a five-field body, so a dependency whose own request shape
+    would then need a second parity corpus buys nothing. The recorded URL, method,
+    header names and body are asserted directly instead. No dependency was added.
+
+    **Deliberate divergence**
+
+    `GeminiApiError`'s message is `${code} ${status}. ${JSON.stringify(details)}`
+    where Python's `APIError` uses `f'{code} {status}. {details}'` with `details`
+    rendered by `repr(dict)`. That string reaches the `image_manifest` JSONB column
+    through the stage's `str(e)` on a failed image, so the divergence is real but
+    confined to failure text; reproducing Python's dict `repr` for arbitrary
+    provider payloads would need a second float-and-string formatting port. The
+    code and the `${code} ${status}. ` prefix are asserted to match.
+
+    ### Corpus and tests
+
+    ```
+    $ cd api && uv run python scripts/export_gemini_parity.py
+    wrote web/src/mastra/images/data/gemini-parity.json
+      wire cases: 5
+      response cases: 14
+
+    $ cd web && NO_COLOR=1 pnpm vitest run src/mastra/images/gemini.test.ts
+     OK src/mastra/images/gemini.test.ts (38 tests | 2 skipped) 16ms
+     Test Files  1 passed (1)
+          Tests  36 passed | 2 skipped (38)
+    ```
+
+    ### Negative controls, each applied and reverted
+
+    Every mutation below was applied to `gemini.ts` alone, the file's suite run, and
+    the file restored. The two marked `(*)` passed on the first attempt and
+    the tests were tightened until they failed: both assertions were computing the
+    expected value from the port's own exported constant, which made them
+    self-referential. The retry tests now advance the fake clock by literal 999 /
+    1 / 1999 / 1 ms and assert the attempt count at each step.
+
+    ```
+    NC1  drop `role: "user"` from the body                    5 failed | 31 passed
+    NC2  unknown-size fallback 1100 -> 1200                   1 failed | 35 passed
+    NC3  trust a reported candidatesTokenCount of 0           7 failed | 29 passed
+    NC4  skip an inlineData part that carries no bytes        1 failed | 35 passed
+    NC5  retry status errors as well as transport errors      9 failed | 27 passed
+    NC6  GET instead of POST                                  5 failed | 31 passed
+    NC7  credential in `authorization` not `x-goog-api-key`   5 failed | 31 passed
+    NC8  swap the two generationConfig keys                   5 failed | 31 passed
+    NC9  tokensIn read from candidatesTokenCount              2 failed | 34 passed
+    NC10 v1beta -> v1 in the base URL                         6 failed | 30 passed
+    NC11 MAX_RETRIES 3 -> 2                                (*) 2 failed | 34 passed
+    NC12 drop the empty-parts guard                           2 failed | 34 passed
+    NC13 backoff base 1s -> 5s                             (*) 3 failed | 33 passed
+    NC14 linear backoff instead of exponential                1 failed | 35 passed
+    ```
+
+    ### Live API
+
+    The key is read out of the developer `.env` and never written to the repo.
+
+    ```
+    $ cd web && GEMINI_API_KEY=<redacted> NO_COLOR=1 pnpm vitest run \
+        src/mastra/images/gemini.test.ts -t "live smoke"
+     OK src/mastra/images/gemini.test.ts (38 tests | 37 skipped) 151ms
+     Test Files  1 passed (1)
+          Tests  1 passed | 37 skipped (38)
+    ```
+
+    That test GETs `v1beta/models/gemini-3.1-flash-image-preview` and asserts the
+    returned `name` and that `supportedGenerationMethods` contains
+    `generateContent`. The live body, for the record:
+
+    ```
+    $ curl -s -H "x-goog-api-key: <redacted>" \
+        https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview
+    {
+      "name": "models/gemini-3.1-flash-image-preview",
+      "version": "3.0",
+      "displayName": "Nano Banana 2",
+      "description": "Gemini 3.1 Flash Image Preview.",
+      "inputTokenLimit": 65536,
+      "outputTokenLimit": 65536,
+      "supportedGenerationMethods": ["generateContent", "countTokens", "batchGenerateContent"],
+      "temperature": 1, "topP": 0.95, "topK": 64, "maxTemperature": 1, "thinking": true
+    }
+    HTTP 200
+    ```
+
+    **Gap: the end-to-end image call cannot run on this account.** The second live
+    test does the real `generateImage` round trip and is gated on a second env var,
+    `GEMINI_IMAGE_QUOTA`, because the developer key's project has no image quota at
+    all. Run without that gate it fails, and this is the real failure, which is also
+    why every Gemini call in the golden fixtures is a 429:
+
+    ```
+    $ cd web && GEMINI_API_KEY=<redacted> NO_COLOR=1 pnpm vitest run \
+        src/mastra/images/gemini.test.ts -t "live smoke"
+     FAIL  src/mastra/images/gemini.test.ts > live smoke > reaches Gemini and returns
+           bytes for the configured model id
+    GeminiApiError: 429 RESOURCE_EXHAUSTED. {"error":{"code":429,"message":"You exceeded
+    your current quota ... * Quota exceeded for metric:
+    generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0,
+    model: gemini-3.1-flash-image ...","status":"RESOURCE_EXHAUSTED", ...}}
+     Test Files  1 failed (1)
+          Tests  1 failed | 36 skipped (37)
+    ```
+
+    `limit: 0` is a free-tier entitlement, not a rate limit that clears, so no wait
+    or retry reaches a successful image on this key. What the 429 does establish is
+    that the request is well formed enough to be routed and quota-checked against
+    this exact model: an unknown model id returns 404 NOT_FOUND, not a quota
+    violation naming `gemini-3.1-flash-image`. The bytes-out path is therefore
+    covered by the corpus and by the `optimize.ts` parity work of item 3.5b, and is
+    unproven against a live image only. Item 6.1 revisits the model choice and will
+    need a billed project to close this.
+
+    ### Gates
+
+    ```
+    $ cd web && NO_COLOR=1 pnpm tsc --noEmit
+    tsc exit=0
+    $ cd web && NO_COLOR=1 pnpm lint
+    lint exit=0
+    $ cd web && NO_COLOR=1 pnpm test
+     Test Files  2 failed | 39 passed (41)
+          Tests  9 failed | 629 passed | 7 skipped (645)
+    $ cd web && NO_COLOR=1 pnpm build
+    (built; route table printed, exit 0)
+    ```
+
+    Failures hold at the Phase 0 baseline of 9 (6 `image-preview`, 3 `PostDetail`).
+    Totals moved 607 -> 645, which is the 38 new tests, and skips moved 5 -> 7,
+    which is the two new live tests. The first full run of this iteration showed 10
+    failures, adding `src/mastra/api-keys.test.ts`; that is the shared-`settings`-row
+    flake already logged in `todo.md`, now seen to hit `api-keys.test.ts` as well as
+    the three agent suites, and the note has been updated. The rerun above is clean
+    at baseline.
+
+    ```
+    $ cd api && set -a && . ../.env && set +a && NO_COLOR=1 uv run pytest -q
+    125 failed, 236 passed, 25 errors in 15.19s
+    $ cd api && uv run ruff check .
+    Found 32 errors.
+    $ cd api && uv run ruff format --check .
+    9 files would be reformatted, 124 files already formatted
+    ```
+
+    All three at the Phase 0 baseline. `ruff format --check`'s "already formatted"
+    count moved 123 -> 124, which is the new script; the reformat count is
+    unchanged.
   - [ ] 3.5e `images` **step**: `createStep` with Zod schemas, `.foreach()` for per-image
     generation, the `image_manifest` JSONB shape preserved byte for byte, both `_stage_meta`
     and `_stage_meta_gemini` returned, and the persistence contract via `saveStageOutput`.

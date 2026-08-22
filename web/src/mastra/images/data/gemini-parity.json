@@ -1,0 +1,628 @@
+{
+  "wire": [
+    {
+      "label": "defaults",
+      "why": "generate_image's own defaults: 4:3 at 1K on the incumbent model",
+      "args": {
+        "prompt": "a teal isometric dashboard"
+      },
+      "request": {
+        "method": "post",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent",
+        "headers": {
+          "content-type": "application/json",
+          "x-goog-api-key": "<redacted>",
+          "user-agent": "<redacted>",
+          "x-goog-api-client": "<redacted>"
+        },
+        "body": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "a teal isometric dashboard"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "generationConfig": {
+            "responseModalities": [
+              "IMAGE"
+            ],
+            "imageConfig": {
+              "aspectRatio": "4:3",
+              "imageSize": "1K"
+            }
+          }
+        },
+        "body_raw": "{\"contents\": [{\"parts\": [{\"text\": \"a teal isometric dashboard\"}], \"role\": \"user\"}], \"generationConfig\": {\"responseModalities\": [\"IMAGE\"], \"imageConfig\": {\"aspectRatio\": \"4:3\", \"imageSize\": \"1K\"}}}"
+      }
+    },
+    {
+      "label": "featured",
+      "why": "what images_node sends for placement=featured: 16:9 at 2K",
+      "args": {
+        "prompt": "a wide editorial header",
+        "aspect_ratio": "16:9",
+        "image_size": "2K"
+      },
+      "request": {
+        "method": "post",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent",
+        "headers": {
+          "content-type": "application/json",
+          "x-goog-api-key": "<redacted>",
+          "user-agent": "<redacted>",
+          "x-goog-api-client": "<redacted>"
+        },
+        "body": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "a wide editorial header"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "generationConfig": {
+            "responseModalities": [
+              "IMAGE"
+            ],
+            "imageConfig": {
+              "aspectRatio": "16:9",
+              "imageSize": "2K"
+            }
+          }
+        },
+        "body_raw": "{\"contents\": [{\"parts\": [{\"text\": \"a wide editorial header\"}], \"role\": \"user\"}], \"generationConfig\": {\"responseModalities\": [\"IMAGE\"], \"imageConfig\": {\"aspectRatio\": \"16:9\", \"imageSize\": \"2K\"}}}"
+      }
+    },
+    {
+      "label": "inline-1k-1x1",
+      "why": "a square aspect ratio, to pin the field is passed through verbatim",
+      "args": {
+        "prompt": "a square icon",
+        "aspect_ratio": "1:1",
+        "image_size": "512"
+      },
+      "request": {
+        "method": "post",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent",
+        "headers": {
+          "content-type": "application/json",
+          "x-goog-api-key": "<redacted>",
+          "user-agent": "<redacted>",
+          "x-goog-api-client": "<redacted>"
+        },
+        "body": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "a square icon"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "generationConfig": {
+            "responseModalities": [
+              "IMAGE"
+            ],
+            "imageConfig": {
+              "aspectRatio": "1:1",
+              "imageSize": "512"
+            }
+          }
+        },
+        "body_raw": "{\"contents\": [{\"parts\": [{\"text\": \"a square icon\"}], \"role\": \"user\"}], \"generationConfig\": {\"responseModalities\": [\"IMAGE\"], \"imageConfig\": {\"aspectRatio\": \"1:1\", \"imageSize\": \"512\"}}}"
+      }
+    },
+    {
+      "label": "explicit-model",
+      "why": "a non-default model id, to pin where the id lands in the URL",
+      "args": {
+        "prompt": "any",
+        "model": "gemini-3.1-flash-image-preview",
+        "aspect_ratio": "4:3",
+        "image_size": "4K"
+      },
+      "request": {
+        "method": "post",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent",
+        "headers": {
+          "content-type": "application/json",
+          "x-goog-api-key": "<redacted>",
+          "user-agent": "<redacted>",
+          "x-goog-api-client": "<redacted>"
+        },
+        "body": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "any"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "generationConfig": {
+            "responseModalities": [
+              "IMAGE"
+            ],
+            "imageConfig": {
+              "aspectRatio": "4:3",
+              "imageSize": "4K"
+            }
+          }
+        },
+        "body_raw": "{\"contents\": [{\"parts\": [{\"text\": \"any\"}], \"role\": \"user\"}], \"generationConfig\": {\"responseModalities\": [\"IMAGE\"], \"imageConfig\": {\"aspectRatio\": \"4:3\", \"imageSize\": \"4K\"}}}"
+      }
+    },
+    {
+      "label": "unicode-prompt",
+      "why": "non-ASCII in the prompt, to pin the JSON escaping of the body",
+      "args": {
+        "prompt": "caf\u00e9 \u2014 \u65e5\u672c\u8a9e \ud83c\udfa8"
+      },
+      "request": {
+        "method": "post",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent",
+        "headers": {
+          "content-type": "application/json",
+          "x-goog-api-key": "<redacted>",
+          "user-agent": "<redacted>",
+          "x-goog-api-client": "<redacted>"
+        },
+        "body": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "caf\u00e9 \u2014 \u65e5\u672c\u8a9e \ud83c\udfa8"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "generationConfig": {
+            "responseModalities": [
+              "IMAGE"
+            ],
+            "imageConfig": {
+              "aspectRatio": "4:3",
+              "imageSize": "1K"
+            }
+          }
+        },
+        "body_raw": "{\"contents\": [{\"parts\": [{\"text\": \"caf\\u00e9 \\u2014 \\u65e5\\u672c\\u8a9e \\ud83c\\udfa8\"}], \"role\": \"user\"}], \"generationConfig\": {\"responseModalities\": [\"IMAGE\"], \"imageConfig\": {\"aspectRatio\": \"4:3\", \"imageSize\": \"1K\"}}}"
+      }
+    }
+  ],
+  "responses": [
+    {
+      "label": "usage-reported",
+      "why": "the happy path: both token counts come from usage_metadata",
+      "args": {
+        "prompt": "p"
+      },
+      "status": 200,
+      "body": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "inlineData": {
+                    "mimeType": "image/png",
+                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+                  }
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ],
+        "usageMetadata": {
+          "promptTokenCount": 37,
+          "candidatesTokenCount": 1290,
+          "totalTokenCount": 1327
+        }
+      },
+      "result": {
+        "image_bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "model": "gemini-3.1-flash-image-preview",
+        "tokens_in": 37,
+        "tokens_out": 1290
+      },
+      "attempts": 1
+    },
+    {
+      "label": "usage-absent",
+      "why": "no usage_metadata at all: tokens_out falls back to the 1K entry",
+      "args": {
+        "prompt": "p"
+      },
+      "status": 200,
+      "body": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "inlineData": {
+                    "mimeType": "image/png",
+                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+                  }
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      },
+      "result": {
+        "image_bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "model": "gemini-3.1-flash-image-preview",
+        "tokens_in": 0,
+        "tokens_out": 1100
+      },
+      "attempts": 1
+    },
+    {
+      "label": "usage-zero-candidates-2k",
+      "why": "candidatesTokenCount 0 with usage_metadata present: 2K fallback",
+      "args": {
+        "prompt": "p",
+        "image_size": "2K"
+      },
+      "status": 200,
+      "body": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "inlineData": {
+                    "mimeType": "image/png",
+                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+                  }
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ],
+        "usageMetadata": {
+          "promptTokenCount": 12,
+          "candidatesTokenCount": 0
+        }
+      },
+      "result": {
+        "image_bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "model": "gemini-3.1-flash-image-preview",
+        "tokens_in": 12,
+        "tokens_out": 1700
+      },
+      "attempts": 1
+    },
+    {
+      "label": "usage-zero-candidates-512",
+      "why": "the 512 entry of the fallback table",
+      "args": {
+        "prompt": "p",
+        "image_size": "512"
+      },
+      "status": 200,
+      "body": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "inlineData": {
+                    "mimeType": "image/png",
+                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+                  }
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ],
+        "usageMetadata": {
+          "promptTokenCount": 0
+        }
+      },
+      "result": {
+        "image_bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "model": "gemini-3.1-flash-image-preview",
+        "tokens_in": 0,
+        "tokens_out": 750
+      },
+      "attempts": 1
+    },
+    {
+      "label": "usage-zero-candidates-4k",
+      "why": "the 4K entry of the fallback table",
+      "args": {
+        "prompt": "p",
+        "image_size": "4K"
+      },
+      "status": 200,
+      "body": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "inlineData": {
+                    "mimeType": "image/png",
+                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+                  }
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ],
+        "usageMetadata": {
+          "promptTokenCount": 0
+        }
+      },
+      "result": {
+        "image_bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "model": "gemini-3.1-flash-image-preview",
+        "tokens_in": 0,
+        "tokens_out": 2500
+      },
+      "attempts": 1
+    },
+    {
+      "label": "unknown-image-size",
+      "why": "an image_size outside the table: the 1K default, not an error",
+      "args": {
+        "prompt": "p",
+        "image_size": "3K"
+      },
+      "status": 200,
+      "body": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "inlineData": {
+                    "mimeType": "image/png",
+                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+                  }
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      },
+      "result": {
+        "image_bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "model": "gemini-3.1-flash-image-preview",
+        "tokens_in": 0,
+        "tokens_out": 1100
+      },
+      "attempts": 1
+    },
+    {
+      "label": "text-part-first",
+      "why": "a text part first: the loop takes the first inline_data, not part[0]",
+      "args": {
+        "prompt": "p"
+      },
+      "status": 200,
+      "body": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "here is your image"
+                },
+                {
+                  "inlineData": {
+                    "mimeType": "image/png",
+                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+                  }
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      },
+      "result": {
+        "image_bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "model": "gemini-3.1-flash-image-preview",
+        "tokens_in": 0,
+        "tokens_out": 1100
+      },
+      "attempts": 1
+    },
+    {
+      "label": "two-image-parts",
+      "why": "two inline parts: the loop breaks on the first",
+      "args": {
+        "prompt": "p"
+      },
+      "status": 200,
+      "body": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "inlineData": {
+                    "mimeType": "image/png",
+                    "data": "iVBORy1maXJzdA=="
+                  }
+                },
+                {
+                  "inlineData": {
+                    "mimeType": "image/png",
+                    "data": "iVBORy1zZWNvbmQ="
+                  }
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      },
+      "result": {
+        "image_bytes_base64": "iVBORy1maXJzdA==",
+        "model": "gemini-3.1-flash-image-preview",
+        "tokens_in": 0,
+        "tokens_out": 1100
+      },
+      "attempts": 1
+    },
+    {
+      "label": "inline-data-without-bytes",
+      "why": "a part carrying inline_data with no bytes: the loop breaks on the truthy Blob and then trips the None check, so this reaches the second RuntimeError rather than skipping to the next part",
+      "args": {
+        "prompt": "p"
+      },
+      "status": 200,
+      "body": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "inlineData": {
+                    "mimeType": "image/png"
+                  }
+                },
+                {
+                  "inlineData": {
+                    "mimeType": "image/png",
+                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+                  }
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      },
+      "error": {
+        "type": "RuntimeError",
+        "message": "No image returned in Gemini response"
+      },
+      "attempts": 1
+    },
+    {
+      "label": "candidate-without-content",
+      "why": "a candidate with no content at all, the other shape of an empty answer",
+      "args": {
+        "prompt": "p"
+      },
+      "status": 200,
+      "body": {
+        "candidates": [
+          {
+            "finishReason": "SAFETY"
+          }
+        ]
+      },
+      "error": {
+        "type": "RuntimeError",
+        "message": "Empty response from Gemini (possible safety filter)"
+      },
+      "attempts": 1
+    },
+    {
+      "label": "no-candidates",
+      "why": "an empty response, the shape a safety filter produces",
+      "args": {
+        "prompt": "p"
+      },
+      "status": 200,
+      "body": {},
+      "error": {
+        "type": "RuntimeError",
+        "message": "Empty response from Gemini (possible safety filter)"
+      },
+      "attempts": 1
+    },
+    {
+      "label": "text-only",
+      "why": "parts present but none inline: the second RuntimeError branch",
+      "args": {
+        "prompt": "p"
+      },
+      "status": 200,
+      "body": {
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "I cannot generate that"
+                }
+              ],
+              "role": "model"
+            }
+          }
+        ]
+      },
+      "error": {
+        "type": "RuntimeError",
+        "message": "No image returned in Gemini response"
+      },
+      "attempts": 1
+    },
+    {
+      "label": "error-429",
+      "why": "what every golden fixture recorded; _retry does not retry it",
+      "args": {
+        "prompt": "p"
+      },
+      "status": 429,
+      "body": {
+        "error": {
+          "code": 429,
+          "message": "RESOURCE_EXHAUSTED",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      },
+      "error": {
+        "type": "ClientError",
+        "message": "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'RESOURCE_EXHAUSTED', 'status': 'RESOURCE_EXHAUSTED'}}"
+      },
+      "attempts": 1
+    },
+    {
+      "label": "error-500",
+      "why": "a server error is retryable for the httpx clients and not for this one",
+      "args": {
+        "prompt": "p"
+      },
+      "status": 500,
+      "body": {
+        "error": {
+          "code": 500,
+          "message": "internal",
+          "status": "INTERNAL"
+        }
+      },
+      "error": {
+        "type": "ServerError",
+        "message": "500 INTERNAL. {'error': {'code': 500, 'message': 'internal', 'status': 'INTERNAL'}}"
+      },
+      "attempts": 1
+    }
+  ]
+}

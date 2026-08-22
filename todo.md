@@ -48,6 +48,9 @@
   three consecutive runs) while passing when run alone. Suspect shared state across suites:
   they swap `globalThis.fetch` and read the same `settings` rows. Makes the failure baseline
   unreliable, so it is worth pinning down before Phase 5 adds more DB-backed suites.
+  2026-08-22: `src/mastra/api-keys.test.ts` joins the list (2 extra failures in one run of
+  iteration 32, then 0 on the rerun), which points at the shared `settings.api_keys` row
+  rather than at the agent suites specifically.
 
 - [confirmed] 2026-08-21 The agent test files' `beforeAll`/`afterAll` key save-and-restore
   makes the placeholder key permanent: a run captures whatever is in `settings.api_keys`,
