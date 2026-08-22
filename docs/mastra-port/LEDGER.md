@@ -3321,8 +3321,118 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
     125 failed / 236 passed / 25 errors. The repo-wide `ruff check .` baseline of
     32 errors is untouched; the one file this iteration added to `api/` passes
     both ruff gates.
-  - [ ] 3.4d `edit` **agent**: system message, model id, `max_tokens`, wire-payload parity
+  - [x] 3.4d `edit` **agent**: system message, model id, `max_tokens`, wire-payload parity
     against the golden fixtures' recorded Anthropic request.
+
+    **What was built**
+
+    - `web/src/mastra/agents/edit.ts`: `editAgent`, the provider-facing half of
+      `edit_node`. `EDIT_SYSTEM_MESSAGE` reproduces Python's twelve adjacent
+      string literals with the same splits, `EDIT_MAX_TOKENS` is Python's
+      `max_tokens=16000`, `EDIT_MODEL_ID` is the incumbent
+      `anthropic/claude-opus-4-6`, and the credential is resolved per call
+      through `requireApiKey` so no key enters `RequestContext`, the Redis event
+      payloads or the Postgres workflow snapshots. Extended thinking comes from
+      the shared `claudeStageOptions`, as for `outline`, `write` and (later)
+      `ready`.
+    - `EDIT_FORMAT_INSTRUCTION` is spelled out as its own constant because
+      `edit_node` is the only stage that names a `format_instruction`. In Python
+      it is a local variable, which reads like a branch point; the comment above
+      it records that it is not one (the stage always emits Markdown, with the
+      WordPress HTML conversion deferred to publish time).
+    - Registered on the Mastra instance as `agents.edit`.
+    - `web/src/mastra/agents/edit.test.ts`: 10 tests, 9 of which run without
+      credentials.
+
+    **Divergences recorded, not fixed**
+
+    1. The `system`-as-block-list divergence recorded under item 3.2 applies
+       unchanged: Python sends `system` as a bare string, the AI SDK sends the
+       same text as a one-element `[{type: "text", text}]` list. The test asserts
+       the AI SDK shape against the fixture's string, so the text is pinned even
+       though the envelope differs.
+    2. `edit_node` publishes three `publish_stage_log` progress lines plus up to
+       three warning lines; the agent publishes none, for the same reason
+       recorded under item 3.1c-ii. The warnings themselves are the step's
+       business, item 3.4e.
+    3. `EDIT_SYSTEM_MESSAGE` contains two literal U+2014 em-dashes, because the
+       Python string does and this port must not change the bytes the provider
+       sees. This is the one place the repo's own no-em-dash writing rule is
+       deliberately not applied; the file says so at the constant.
+
+    **Evidence**
+
+    ```
+    $ docker compose up -d db redis
+    $ cd web && NO_COLOR=1 pnpm vitest run src/mastra/agents/edit.test.ts
+     OK src/mastra/agents/edit.test.ts (10 tests | 1 skipped) 90ms
+
+     Test Files  1 passed (1)
+          Tests  9 passed | 1 skipped (10)
+       Duration  925ms
+    ```
+
+    The skipped test is the live Anthropic smoke test, gated on
+    `ANTHROPIC_API_KEY` so the default `pnpm test` needs no credentials. Run
+    with the real key, which is what confirms `claude-opus-4-6` still resolves:
+
+    ```
+    $ cd web && ANTHROPIC_API_KEY=<redacted> NO_COLOR=1 pnpm vitest run \
+        src/mastra/agents/edit.test.ts -t "live smoke"
+     OK src/mastra/agents/edit.test.ts (10 tests | 9 skipped) 2074ms
+         OK reaches Anthropic and reports back the configured model id  2056ms
+
+     Test Files  1 passed (1)
+          Tests  1 passed | 9 skipped (10)
+       Duration  2.96s
+    ```
+
+    **Negative controls**, each applied to `agents/edit.ts` (or `index.ts`) and
+    reverted; every one turned the suite red:
+
+    | mutation | result |
+    | --- | --- |
+    | requirement 1's em-dash replaced with a hyphen | FAIL |
+    | the `\n` after requirement 1 replaced with a space | FAIL |
+    | `EDIT_FORMAT_INSTRUCTION` suffix replaced with `""` | FAIL |
+    | `EDIT_MAX_TOKENS` 16000 -> 8000 | FAIL |
+    | model id opus -> sonnet | FAIL |
+    | trailing space dropped after `blog editor and SEO specialist.` | FAIL |
+    | `edit: editAgent` removed from the Mastra instance | FAIL |
+
+    **Gates**
+
+    ```
+    $ cd web && pnpm tsc --noEmit
+    (exit 0, no output)
+    $ cd web && pnpm lint
+    (exit 0, no output)
+    $ cd web && pnpm build
+    (exit 0)
+    $ cd web && NO_COLOR=1 pnpm test
+     Test Files  2 failed | 34 passed (36)
+          Tests  9 failed | 474 passed | 4 skipped (487)
+    ```
+
+    `pnpm test` is 9 failed, the recorded failure baseline (6 in
+    `image-preview.test.tsx`, 3 in `PostDetail.test.tsx`) unchanged, with passes
+    moving 465 -> 474 (the 9 new credential-free tests) and skips 3 -> 4 (the
+    new live smoke test).
+
+    ```
+    $ cd api && set -a && . ../.env && set +a && uv run pytest -q
+    125 failed, 236 passed, 25 errors in 15.08s
+    $ cd api && uv run ruff check .
+    Found 32 errors.
+    ```
+
+    Both at the Phase 0 baseline; no file under `api/` was touched this
+    iteration. Note for future iterations: `pytest` must be run with `.env`
+    sourced. This worktree's Postgres is on `POSTGRES_HOST_PORT=5435`, while
+    `api/tests/conftest.py` falls back to `localhost:5433` when
+    `TEST_DATABASE_URL` is unset, which points at a different Postgres and turns
+    the baseline into `4 failed, 205 passed, 177 errors` with
+    `InvalidPasswordError` rather than a real regression.
   - [ ] 3.4e `edit` **step**: `createStep`, the analytics section appended to the prompt,
     the post-edit validation warnings, persistence to `final_md`, and the prompt-parity
     test against both golden fixtures.
