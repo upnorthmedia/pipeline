@@ -362,7 +362,7 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
   `..._redisdata`) persist, so `docker compose up -d db redis` from the repo root restores the
   migrated `content_pipeline` and empty `content_pipeline_test` databases immediately. The
   local `.env` holding `POSTGRES_HOST_PORT=5435` is gitignored and stays in the worktree.
-- [ ] 0.4 Capture golden fixtures: run the existing Python pipeline end to end on at least 2
+- [x] 0.4 Capture golden fixtures: run the existing Python pipeline end to end on at least 2
   representative posts with different `article_type` and `output_format`. For each stage
   save the fully rendered prompt, the provider request parameters, and the raw output to
   `docs/mastra-port/golden/<post-slug>/<stage>.json`. Redact API keys. Exit: >= 12 fixture
@@ -372,6 +372,37 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
   and take real time, so it is split into 0.4a (harness, no provider spend), 0.4b (live run
   for post 1) and 0.4c (live run for post 2). 0.4 is checked only when 0.4a-0.4c are all
   checked and >= 12 fixture files are committed.
+
+  **Done.** 0.4a, 0.4b and 0.4c are all checked and 12 fixture files are committed, two
+  posts x six stages, with different `article_type` / `output_format`
+  (`how-to`/`markdown` and `listicle`/`nextjs`):
+
+  ```sh
+  $ ls -l docs/mastra-port/golden/*/*.json | awk '{print $5, $9}'
+  183447 docs/mastra-port/golden/best-time-tracking-tools-for-agencies/edit.json
+  219810 docs/mastra-port/golden/best-time-tracking-tools-for-agencies/images.json
+  121857 docs/mastra-port/golden/best-time-tracking-tools-for-agencies/outline.json
+  186373 docs/mastra-port/golden/best-time-tracking-tools-for-agencies/ready.json
+  71788 docs/mastra-port/golden/best-time-tracking-tools-for-agencies/research.json
+  123643 docs/mastra-port/golden/best-time-tracking-tools-for-agencies/write.json
+  161899 docs/mastra-port/golden/how-to-choose-a-crm-for-a-small-team/edit.json
+  185217 docs/mastra-port/golden/how-to-choose-a-crm-for-a-small-team/images.json
+  115274 docs/mastra-port/golden/how-to-choose-a-crm-for-a-small-team/outline.json
+  155739 docs/mastra-port/golden/how-to-choose-a-crm-for-a-small-team/ready.json
+  68563 docs/mastra-port/golden/how-to-choose-a-crm-for-a-small-team/research.json
+  114402 docs/mastra-port/golden/how-to-choose-a-crm-for-a-small-team/write.json
+  $ ls docs/mastra-port/golden/*/*.json | wc -l
+  12
+  ```
+
+  **Known gap in the oracle.** Not one image was generated across either post: the Gemini
+  key returns 429 `limit: 0` for `gemini-3.1-flash-image` on every request. Both `images`
+  fixtures therefore record a real, fully parsed `image_manifest` with 6 prompts,
+  `total_generated: 0` and `total_failed: 6`, plus the real outbound Gemini request
+  parameters and the 429 responses. That is enough to build the Phase 3 prompt-parity and
+  manifest-shape tests against, but there is no golden image binary and no successful Gemini
+  response body to compare against. Unblocking it needs Google billing, not code. See
+  `todo.md`.
 
 - [x] 0.4a Build the golden-fixture capture harness (`api/scripts/capture_golden.py`) and
   verify it end to end with `--dry-run`, which stubs only the network call and leaves prompt
@@ -681,8 +712,12 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
   $ grep -rlE "sk-ant-|pplx-|AIzaSy" docs/mastra-port/golden/ | wc -l
   0
   ```
-- [ ] 0.4c Live capture for `best-time-tracking-tools-for-agencies` (all six stages). Commit
+- [x] 0.4c Live capture for `best-time-tracking-tools-for-agencies` (all six stages). Commit
   its fixtures, then check 0.4.
+
+  Done via 0.4c-i (resumable harness plus the live `research.json`) and 0.4c-ii (the
+  remaining five stages). All six fixtures for this post are committed; evidence under those
+  two sub-items.
 
   **Split.** A full six-stage live capture is a ~10 minute uninterrupted run and two
   attempts have now been cut off partway, discarding provider spend on the stages that had
@@ -749,7 +784,7 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
   imports (`grep -rn "capture_golden" api/tests/` is empty), and the last recorded pytest
   result stands at 125 failed / 236 passed / 25 errors.
 
-- [ ] 0.4c-ii Capture the remaining five stages (`outline`, `write`, `edit`, `images`,
+- [x] 0.4c-ii Capture the remaining five stages (`outline`, `write`, `edit`, `images`,
   `ready`) for `best-time-tracking-tools-for-agencies` with real keys, using `--resume`.
   Record usage and cost, commit the fixtures, then check 0.4c and 0.4.
 
@@ -758,6 +793,81 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
     && uv run python scripts/capture_golden.py --out ../docs/mastra-port/golden \
        --post best-time-tracking-tools-for-agencies --resume
   ```
+
+  Real output (Gemini 429 bodies elided to one line each; the full text is identical to the
+  quota block already recorded under 0.4b):
+
+  ```
+  [best-time-tracking-tools-for-agencies] research: skipped, reusing .../golden/best-time-tracking-tools-for-agencies/research.json
+  [best-time-tracking-tools-for-agencies] outline: running
+  [best-time-tracking-tools-for-agencies] outline: wrote .../outline.json (121857 bytes)
+  [best-time-tracking-tools-for-agencies] write: running
+  [best-time-tracking-tools-for-agencies] write: wrote .../write.json (123643 bytes)
+  [best-time-tracking-tools-for-agencies] edit: running
+  [best-time-tracking-tools-for-agencies] edit: wrote .../edit.json (183447 bytes)
+  [best-time-tracking-tools-for-agencies] images: running
+  Failed to generate image 2: 429 RESOURCE_EXHAUSTED. ... limit: 0, model: gemini-3.1-flash-image ...
+  Failed to generate image 1: 429 RESOURCE_EXHAUSTED. ... limit: 0, model: gemini-3.1-flash-image ...
+  Failed to generate image 0: 429 RESOURCE_EXHAUSTED. ... limit: 0, model: gemini-3.1-flash-image ...
+  Failed to generate image 4: 429 RESOURCE_EXHAUSTED. ... limit: 0, model: gemini-3.1-flash-image ...
+  Failed to generate image 3: 429 RESOURCE_EXHAUSTED. ... limit: 0, model: gemini-3.1-flash-image ...
+  Failed to generate image 5: 429 RESOURCE_EXHAUSTED. ... limit: 0, model: gemini-3.1-flash-image ...
+  [best-time-tracking-tools-for-agencies] images: wrote .../images.json (219810 bytes)
+  [best-time-tracking-tools-for-agencies] ready: running
+  [best-time-tracking-tools-for-agencies] ready: wrote .../ready.json (186373 bytes)
+
+  Wrote 5 fixture file(s) under .../docs/mastra-port/golden
+  exit=0
+  ```
+
+  `research` was reused from disk, so the resume path cost nothing for it and the five
+  remaining stages ran live exactly once. Usage, read from each fixture's
+  `stage_output._stage_meta`:
+
+  | stage | model | tokens in | tokens out | duration s | provider calls |
+  |---|---|---:|---:|---:|---:|
+  | research | `sonar-pro` | 1475 | 5489 | 37.5 | 1 |
+  | outline | `claude-opus-4-6` | 7892 | 4201 | 95.7 | 1 |
+  | write | `claude-opus-4-6` | 5429 | 4085 | 102.9 | 1 |
+  | edit | `claude-opus-4-6` | 8952 | 7002 | 161.8 | 1 |
+  | images | `claude-opus-4-6` | 8027 | 4077 | 91.9 | 7 |
+  | ready | `claude-opus-4-6` | 6295 | 3725 | 104.4 | 1 |
+  | **total** | | **38070** | **28579** | **594.2** | |
+
+  The `images` row counts only the Claude manifest call; its other 6 provider calls are the
+  Gemini image attempts, all of which failed with 429 and consumed no tokens.
+
+  Cost for this article: Perplexity reports it directly in the response body
+  (`usage.cost.total_cost` = **$0.09276**, which includes the $6/1000 request fee on top of
+  $3/$15 per Mtok). Anthropic at the $5.00/$25.00 per Mtok list price already verified under
+  0.4b: 36595 in / 23090 out = **$0.7602**. Article total **$0.8530** with zero images
+  generated. Post 1 was $0.73, so the two live articles bracket roughly $0.73-$0.85 in text
+  generation, and the images stage's true cost is still unmeasured.
+
+  Verified after the run:
+
+  ```sh
+  $ ls docs/mastra-port/golden/*/*.json | wc -l
+  12
+  $ python3 -c "import json;d=json.load(open('docs/mastra-port/golden/best-time-tracking-tools-for-agencies/images.json'));m=d['stage_output']['image_manifest'];print(len(m['images']),m['total_generated'],m['total_failed'])"
+  6 0 6
+  $ python3 -c "import json;d=json.load(open('docs/mastra-port/golden/best-time-tracking-tools-for-agencies/images.json'));print(json.dumps(d['stage_output']['stage_status']))"
+  {"research": "complete", "outline": "complete", "write": "complete", "edit": "complete", "images": "complete"}
+  $ grep -rlE "sk-ant-|pplx-|AIzaSy" docs/mastra-port/golden/ | wc -l
+  0
+  ```
+
+  The live API key values from `.env` were also grepped for literally across the new fixture
+  directory and matched 0 files each for `PERPLEXITY_API_KEY`, `ANTHROPIC_API_KEY` and
+  `GEMINI_API_KEY`; the fixtures carry 6 `REDACTED` markers in their place.
+
+  The 0.4b manifest-parsing fix held on fresh live output: `_parse_manifest` produced a
+  complete 6-image manifest with `style_brief`, so the images stage reached
+  `stage_status.images = complete` rather than failing empty.
+
+  No source files changed this iteration (only fixtures and this ledger), so no code gate
+  was re-run; the standing results are pytest 125 failed / 236 passed / 25 errors, `ruff
+  check` and `ruff format --check` clean, and the frontend gates at the 0.2 baseline.
 
 ## Phase 1: TypeScript data layer
 
