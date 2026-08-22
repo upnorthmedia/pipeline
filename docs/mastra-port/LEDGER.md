@@ -1943,8 +1943,154 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
   Failures held at the established baseline of 9 (`image-preview.test.tsx` and
   `PostDetail.test.tsx`); passes went 234 -> 238, exactly the 4 new tests. No `api/` file was
   touched, so the pytest and ruff baselines are unchanged by construction.
-- [ ] 2.5 Mastra Studio connects to the dev server and lists the trivial workflow. Paste the
+- [x] 2.5 Mastra Studio connects to the dev server and lists the trivial workflow. Paste the
   command and a committed screenshot path.
+
+  **The command.** Run from `web/`, with the repo-root `.env` passed explicitly because the
+  Mastra CLI does not read it on its own (negative control 1 below):
+
+  ```
+  $ cd web && pnpm exec mastra dev --env ../.env
+  ◐ Preparing development environment...
+  ✓ Initial bundle complete
+  ◇ Starting Mastra dev server...
+
+   mastra  1.26.0 ready in 1010 ms
+
+  │ Studio: http://localhost:4111
+  │ API:    http://localhost:4111/api
+
+  ◯ watching for file changes...
+  ```
+
+  `docker compose up -d db redis` first; the entry point opens both connections at import time.
+
+  **Studio lists the workflow and its steps.** Read back out of the server it serves:
+
+  ```
+  $ curl -s http://localhost:4111/api/workflows | node -e 'let s="";process.stdin.on("data",
+      d=>s+=d).on("end",()=>{const w=JSON.parse(s);for(const[k,v]of Object.entries(w))
+      console.log(k,"->",v.name,"| steps:",Object.keys(v.steps).join(", "))})'
+  scaffoldCheck -> scaffold-check | steps: scaffold-first, scaffold-second
+  ```
+
+  **Committed screenshots** (captured with `npx -y chrome-devtools-axi`, per the objective's
+  browser-tool constraint):
+
+  - `docs/mastra-port/studio/2.5-studio-workflows-list.png`: `http://localhost:4111/workflows`,
+    one row: `scaffold-check`, Number of steps `2`.
+  - `docs/mastra-port/studio/2.5-studio-workflow-detail.png`:
+    `http://localhost:4111/workflows/scaffoldCheck`, showing the rendered graph
+    `Start → scaffold-first → scaffold-second → End`, the `2 steps` badge, the form generated
+    from the workflow's Zod `inputSchema` (a required `Message` field), and 21 `success` runs
+    under **Recent runs**.
+
+  ```
+  $ npx -y chrome-devtools-axi open http://localhost:4111/workflows
+  $ npx -y chrome-devtools-axi screenshot <path> --full-page
+  $ npx -y chrome-devtools-axi console
+  console:
+  ## Console messages
+  <no console messages found>
+  $ npx -y chrome-devtools-axi stop
+  status: stopped
+  ```
+
+  No browser console messages of any kind, so no errors.
+
+  **Studio is reading the shared Postgres, not a private store.** The two newest run IDs Studio
+  rendered under Recent runs exist in `mastra_workflow_snapshot` in the `content_pipeline`
+  database that also holds `posts`:
+
+  ```
+  $ psql "$DATABASE_URL_SYNC" -c "select workflow_name, run_id, snapshot->>'status' as status
+      from mastra_workflow_snapshot where run_id in
+      ('7e7b55d0-cbd7-4fc6-b2c8-eb4db46bfc2f','ecb3ff7a-d6ec-482d-80b0-5553ddaadbe9');"
+   workflow_name  |                run_id                | status
+  ----------------+--------------------------------------+---------
+   scaffold-check | ecb3ff7a-d6ec-482d-80b0-5553ddaadbe9 | success
+   scaffold-check | 7e7b55d0-cbd7-4fc6-b2c8-eb4db46bfc2f | success
+  (2 rows)
+  ```
+
+  Those runs were produced by the item 2.3 and 2.4 test suites, in a different process, so
+  Studio is observing state it did not create.
+
+  **Negative control 1: the CLI does not find the env on its own.** Drop `--env ../.env` and
+  clear the inherited variables, and the server dies loading the entry point instead of
+  silently starting against a default store:
+
+  ```
+  $ env -u DATABASE_URL_SYNC -u DATABASE_URL -u REDIS_URL pnpm exec mastra dev
+  ◇ Starting Mastra dev server...
+  Error: DATABASE_URL_SYNC (or DATABASE_URL) must be set to reach the database
+      at connectionString (.mastra/output/index.mjs:60:11)
+      at getPool (.mastra/output/index.mjs:67:70)
+  $ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:4111/api/workflows
+  000
+  ```
+
+  This is what makes `--env ../.env` a required part of the documented command rather than a
+  convenience, and it also proves Studio bundles *this* entry point: the thrown message is the
+  one in `web/src/db/index.ts`.
+
+  **Negative control 2: the listing reflects the registry.** Change `web/src/mastra/index.ts`
+  to `workflows: {}`, restart, and Studio has nothing to list:
+
+  ```
+  $ pnpm exec mastra dev --env ../.env
+   mastra  1.26.0 ready in 1005 ms
+  $ curl -s http://localhost:4111/api/workflows
+  {}
+  ```
+
+  Reverted (`workflows: { scaffoldCheck: scaffoldCheckWorkflow }`) and the listing returned, as
+  the command output above shows.
+
+  **Two repo changes this item forced**, both consequences of `mastra dev` writing a build
+  directory at `web/.mastra/`:
+
+  1. `web/.gitignore` gains `.mastra`. The directory is CLI build output (bundled server plus
+     the whole Studio UI) and must not be committed.
+  2. `web/eslint.config.mjs` gains `.mastra/**` to its `globalIgnores`. ESLint's flat config
+     does not consult `.gitignore`, so with the directory present `pnpm lint` walked the
+     bundled Studio assets and died:
+
+     ```
+     $ pnpm lint
+     [BABEL] Note: The code generator has deoptimised the styling of
+       web/.mastra/output/studio/assets/livekit-client.esm-CKIgC2IJ.js as it exceeds the max of 500KB.
+     FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed -
+       JavaScript heap out of memory
+     ```
+
+     This is a real gate break for anyone who runs Studio, not a cosmetic ignore: the lint gate
+     fails on a clean checkout the moment `mastra dev` has been run once.
+
+  **Frontend gates** after both changes:
+
+  ```
+  $ cd web && pnpm exec tsc --noEmit
+  tsc exit=0
+
+  $ pnpm lint
+  lint exit=0
+
+  $ NO_COLOR=1 pnpm test
+   Test Files  2 failed | 21 passed (23)
+        Tests  9 failed | 238 passed (247)
+  test exit=1
+
+  $ pnpm build
+  build exit=0
+  ```
+
+  Failures held at the established baseline of 9 (`image-preview.test.tsx` and
+  `PostDetail.test.tsx`) and passes held at 238; this item adds no tests, since its evidence is
+  the running Studio and the committed screenshots. No `api/` file was touched, so the pytest
+  and ruff baselines are unchanged by construction.
+
+  **Phase 2 is complete**: 2.1 through 2.5 are all checked.
 
 ## Phase 3: Port the six stages (one per iteration)
 
