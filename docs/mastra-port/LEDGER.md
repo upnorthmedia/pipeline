@@ -5567,6 +5567,13 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   storage carries no record of an interrupted step, so a sweep could not have found one),
   no `@mastra/inngest`, no second queue. Evidence under 4.5a and 4.5b.
 
+  **Amended by 4.7a.** The runner decision stands, but the recovery latency recorded here and
+  under 4.5a (70-98s, being `reclaimIdleMs` 60s plus up to one 30s `reclaimIntervalMs` tick) was
+  measured at the transport's defaults. 4.7a found that the same 60s window re-executes any
+  *live* step that runs longer than a minute, which is every stage in this pipeline, and raised
+  `reclaimIdleMs` to 15 minutes. Crash recovery therefore now takes up to ~15 minutes rather
+  than ~90 seconds. The guarantee is unchanged; the number is not.
+
 - [x] 4.5a Engine guarantee: a step whose worker is `SIGKILL`ed mid-execution is redelivered to
   a restarted worker and completes, while the step that had already completed is neither
   re-executed nor rewritten. Provider-free, automated, stays in the suite.
@@ -6016,6 +6023,200 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   ```
 
 - [ ] 4.7 Full workflow runs end to end against the real database.
+
+  Split. The first attempt at the run itself (the procedure is
+  `web/src/mastra/scripts/full-pipeline.mjs`, committed under 4.7a) found three defects: one
+  that kills the `edit` stage on a deployed worker, one that silently strips every stage's rule
+  file from its prompt, and one that has been double-billing every stage of every run since
+  Phase 2. Fixing them is not one iteration's work and each needs its own evidence, so:
+
+  - 4.7a the duplicate-execution defect the run exposed, and its fix
+  - 4.7b the full-pipeline completion hook (`current_stage = "complete"`, `completed_at`),
+    which `_post_completion_hook` in `api/src/worker.py:429` runs at the end of a full run and
+    the port never had
+  - 4.7c the green end-to-end run with pasted evidence
+
+  The two deployability defects (`RULES_DIR` and `TEXTSTAT_DATA_DIR` on the worker bundle) are
+  configuration rather than code, are recorded under 4.7a and in `todo.md`, and belong to items
+  7.1 and 7.2 where the compose and Railway service definitions are written.
+
+- [x] 4.7a **The reclaim window re-executes every stage.** A step that runs longer than
+  `reclaimIdleMs` is delivered a second time to a *live* worker and executed again, concurrently
+  with the first. No crash, no failure, one worker.
+
+  **How it was found.** `web/src/mastra/scripts/full-pipeline.mjs` runs the real thing: it
+  builds the deployable worker bundle from scratch, starts a run from a separate `web` process
+  that then exits, spawns the worker, and installs an `AFTER INSERT OR UPDATE` trigger on the
+  seeded post row that records the md5 of all six content columns on every write. The second
+  attempt ended `success` with all six stages `complete`, and the write log said this:
+
+  ```
+  $ cd web && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+      src/mastra/scripts/full-pipeline.mjs
+  [2026-08-22T13:52:38.505Z] stage_status.research = complete at 63.1s
+  [2026-08-22T13:53:44.598Z] stage_status.outline = complete at 129.2s
+  [2026-08-22T13:54:23.652Z] stage_status.write = complete at 168.2s
+  [2026-08-22T13:55:38.756Z] stage_status.edit = complete at 243.4s
+  [2026-08-22T13:56:35.845Z] stage_status.images = complete at 300.4s
+  [2026-08-22T13:57:35.966Z] stage_status.ready = complete at 360.6s
+  [2026-08-22T13:57:35.969Z] run settled as success after 360.6s
+  ...
+  FAIL  each-column-written-once: distinct values over 13 logged writes:
+        research_content=2 outline_content=2 draft_content=1 final_md_content=4
+        image_manifest=3 ready_content=1
+  FAIL  no-stage-billed-nothing: research.skipped=false outline.skipped=false write.skipped=true
+        edit.skipped=false images.skipped=true ready.skipped=false
+  ```
+
+  Read the durations against the write counts and the rule is exact: `research` took 63s and was
+  written twice, `outline` 66s and twice, `edit` 75s and four times, `images` 57s and three
+  times, `write` 39s and once. Anything over 60 seconds ran more than once. The worker's own log
+  agrees, with `edit`'s post-stage warning appearing four times from one process:
+
+  ```
+  $ grep -c "SEO checks still failing after edit" web/.mastra/full-pipeline/worker.log
+  4
+  ```
+
+  The `skipped=true` entries are the same defect seen from the other end: a duplicate that
+  starts after the original has committed takes the skip branch, so `write` and `images` report
+  as skipped on a run that plainly executed them.
+
+  **Mechanism**, read out of the installed package rather than inferred. `RedisStreamsPubSub`
+  starts a reclaim loop per grouped subscription (`#startReclaimLoop`,
+  `node_modules/@mastra/redis-streams/dist/index.js:202-225`) which every `reclaimIntervalMs`
+  runs `XAUTOCLAIM <stream> <group> <consumer> <reclaimIdleMs> 0-0` and delivers whatever it
+  claims. `XAUTOCLAIM` selects purely on idle time; it cannot tell a consumer that died from one
+  that is still working. `WorkflowEventProcessor.handle` awaits the step body before the
+  transport acks (4.5a), so a `workflow.step.run` message is pending for the whole step. The
+  package's own type documentation says the quiet part out loud:
+
+  ```
+  $ sed -n '47,53p' node_modules/@mastra/redis-streams/dist/index.d.ts
+      /**
+       * Minimum idle time (in ms) before a pending message is eligible for
+       * reclaim. Should be much larger than typical in-flight processing time to
+       * avoid double-delivery. Defaults to 60_000 ms.
+       */
+      reclaimIdleMs?: number;
+  ```
+
+  The instance was left at that default in Phase 2, and every stage in this pipeline is an LLM
+  call of 40 to 120 seconds. This is the same loop that recovers a crashed worker's step
+  (4.5a), so it cannot be disabled: the window has to be wider than a step.
+
+  **The fix.** `RECLAIM_IDLE_MS = 15 * 60_000` in `web/src/mastra/index.ts`, passed to the
+  pubsub. 15 minutes is well past the slowest stage measured (`edit` 75s, `images` 57s over four
+  generations) with room for a slow provider. The cost is recovery latency: a genuinely dead
+  worker's in-flight step now waits up to 15 minutes for reclaim instead of the 70-98s recorded
+  under 4.5. Duplicate billing on every stage of every run is the worse of the two, and a step
+  that does outlive the window is re-delivered rather than lost, with the duplicate taking the
+  skip branch if the original has committed. Item 4.5 is annotated with the new number.
+
+  **Regression test**, provider-free and in the suite. `reclaim-duplication.test.ts` builds the
+  same one-step probe workflow twice, once with a window under the step duration and once over,
+  and asserts the app's own instance is wired wider than the slowest stage:
+
+  ```
+  $ cd web && NO_COLOR=1 npx vitest run src/mastra/workflows/reclaim-duplication.test.ts
+
+   RUN  v4.0.18 /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+
+   ✓ src/mastra/workflows/reclaim-duplication.test.ts (5 tests) 23236ms
+
+   Test Files  1 passed (1)
+        Tests  5 passed (5)
+     Duration  24.22s
+  ```
+
+  **Order, stated honestly.** The failing-first artifact is the end-to-end run above, not a unit
+  test: the defect was found by the write audit, and the fix and the regression test were
+  written after it. Tests 1-3 in the file parameterise their own window, so they do not depend
+  on the app's configuration; tests 4 and 5 do, and the control below restores the pre-fix state
+  and shows test 5 failing.
+
+  **Negative controls.**
+
+  | Control | Expectation | Result |
+  | --- | --- | --- |
+  | `reclaimIntervalMs: 0` on the short-window probe (reclaim loop off, everything else equal) | duplication tests fail | `2 failed \| 2 passed (4)`, exactly the two duplication tests, `expected 1 to be greater than 1` |
+  | Delete `reclaimIdleMs: RECLAIM_IDLE_MS` from `index.ts` (constant kept, wiring removed) | the wiring test fails | `1 failed \| 4 skipped (5)` |
+  | The two windows against the same 6s step (2s vs 60s) | duplication in one, not the other | 2s: more than one execution, second starting inside the first; 60s: exactly one |
+
+  **The two deployability defects the same run found**, both logged in `todo.md` for items 7.1
+  and 7.2. The worker bundle runs with cwd set to its own output directory, and both asset paths
+  are resolved from `process.cwd()`:
+
+  - `RULES_DIR`: `rulesDir()` falls back to `<cwd>/../rules`, which under the bundle is
+    `web/.mastra/rules`. `loadRules` returns `""` for a missing file rather than throwing, so
+    every stage would silently run with its rule file stripped from the prompt. Item 4.5b's
+    durability-gate run was executed this way.
+  - `TEXTSTAT_DATA_DIR`: `textstatDataDir()` falls back to `<cwd>/src/mastra/textstat/data`.
+    This one is fatal, and it killed the first attempt at the run after `research`, `outline`
+    and `write` had already been billed:
+
+    ```
+    $ grep -i error web/.mastra/full-pipeline/worker.log
+    Error executing step edit: Error: ENOENT: no such file or directory, open
+    '.../web/.mastra/worker-e2e/src/mastra/textstat/data/cmudict-syllables.txt.gz'
+    ```
+
+  `mastra worker build` has no asset-copy option (`BundlerConfig` is `externals`, `sourcemap`,
+  `minify`, `transpilePackages`, `dynamicPackages`), so the data files cannot ride inside the
+  bundle and the environment variables are the only lever. `docker-compose.yml` already sets
+  `RULES_DIR: /app/rules` for the Python worker; the TypeScript `worker` service needs
+  `RULES_DIR`, `TEXTSTAT_DATA_DIR` and `MEDIA_DIR`.
+
+  **Two findings carried to 4.7b and 4.7c.**
+
+  1. `current_stage` ended the successful run as `ready`, not `complete`. Python's full-pipeline
+     branch calls `_post_completion_hook` (`api/src/worker.py:429`), which sets
+     `current_stage = "complete"` and `completed_at` and queues any configured publish. The port
+     has `markCompleteIfAllStagesComplete`, but only the single-stage rerun path calls it. That
+     is item 4.7b.
+  2. All four Gemini generations returned `429 RESOURCE_EXHAUSTED ... limit: 0, model:
+     gemini-3.1-flash-image`, so the stage stored a manifest with `total_generated: 0` and
+     `total_failed: 4` and the run continued. This is the environment, not the port: the Python
+     golden capture hit the same wall on the same key
+     (`docs/mastra-port/golden/how-to-choose-a-crm-for-a-small-team/images.json` records
+     `total_generated 0, total_failed 5`). 4.7c cannot assert on generated image files with this
+     key, and the honest exit is manifest shape plus per-entry provider errors matching Python's.
+
+  **Gates.**
+
+  ```
+  $ cd web && npx tsc --noEmit
+  (exit 0, no output)
+  $ cd web && npx eslint
+  (exit 0, no output)
+  $ cd web && NO_COLOR=1 npx vitest run
+   Test Files  2 failed | 54 passed (56)
+        Tests  9 failed | 820 passed | 8 skipped (837)
+  ```
+
+  The 9 are the recorded baseline: 6 in `image-preview.test.tsx` and 3 in `PostDetail.test.tsx`.
+  An earlier run of the same suite showed 11, the extra two being the `settings.api_keys` race
+  in `agents/outline.test.ts` and the `scaffold-check` stream race, both already in `todo.md`.
+
+  ```
+  $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test NO_COLOR=1 uv run pytest -q
+  125 failed, 236 passed, 25 errors in 15.23s
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 126 files already formatted
+  ```
+
+  Unchanged from the baseline recorded under 4.5b and 4.6; nothing in this item touches `api/`.
+
+- [ ] 4.7b Port the full-pipeline completion hook: a full run ends with
+  `current_stage = "complete"` and `completed_at` set, matching `_post_completion_hook` in
+  `api/src/worker.py:429`. The auto-publish half of that hook depends on the `wordpress` and
+  `nextjs` routers and belongs to Phase 5.
+
+- [ ] 4.7c Full workflow runs end to end against the real database: green run of
+  `web/src/mastra/scripts/full-pipeline.mjs` with its output pasted here. Image generation is
+  bounded by the Gemini key's quota (see 4.7a finding 2).
 
 ## Phase 5: Route handlers (one router per iteration)
 

@@ -67,8 +67,37 @@ function sink(level: "debug" | "warn") {
   }
 }
 
+/**
+ * How long a step message may sit unacked before the transport hands it to
+ * another consumer.
+ *
+ * `RedisStreamsPubSub` runs `XAUTOCLAIM` on a timer and claims any pending
+ * entry idle longer than this, with no liveness check on the consumer holding
+ * it. A `workflow.step.run` message stays pending for the whole of the step
+ * body, so at the 60s default every stage that takes longer than a minute is
+ * re-delivered to a *live* worker and executed a second time alongside the
+ * first. The first end-to-end run (ledger 4.7) measured `research` at 63s,
+ * `outline` at 66s and `edit` at 75s, and the audit trigger caught `edit`
+ * writing four different values; the run still ended `success`, so nothing
+ * short of a write log would have shown it.
+ *
+ * 15 minutes is well past the slowest stage seen (`edit` at 75s, `images` at
+ * 57s over four generations) with room for a slow provider, and the library's
+ * own guidance is that this "should be much larger than typical in-flight
+ * processing time to avoid double-delivery".
+ *
+ * The cost is recovery latency: this is also the window before a genuinely
+ * dead worker's in-flight step is picked up by a replacement (ledger 4.5
+ * measured 70-98s at the default). A crashed stage now waits up to 15 minutes
+ * instead. Duplicate billing on every stage of every run is the worse of the
+ * two, and a stage that does outlive the window is re-delivered rather than
+ * lost: the duplicate takes the skip branch if the original has committed.
+ */
+export const RECLAIM_IDLE_MS = 15 * 60_000
+
 export const pubsub = new RedisStreamsPubSub({
   url: redisUrl(),
+  reclaimIdleMs: RECLAIM_IDLE_MS,
   logger: { debug: sink("debug"), warn: sink("warn") },
 })
 

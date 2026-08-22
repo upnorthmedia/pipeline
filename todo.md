@@ -138,3 +138,22 @@
   unsubscribes the transport while a step may still be executing. Whether the in-flight step's
   message is left pending for reclaim, acked, or nacked decides whether a routine worker deploy
   loses or duplicates a stage. Worth answering in 4.5b or Phase 7, not assumed.
+- [confirmed] 2026-08-22 The worker bundle resolves `rules/` from its own output directory, so
+  it needs `RULES_DIR` set explicitly. `prompts.ts` falls back to
+  `path.resolve(process.cwd(), "..", "rules")` and `mastra worker start` runs with cwd set to
+  the bundle directory (`web/.mastra/<bundle>`), so the fallback points at
+  `web/.mastra/rules`, which does not exist. `loadRules` returns `""` for a missing file rather
+  than throwing, so every stage would silently run with its rule file stripped out of the
+  prompt. `docker-compose.yml` already sets `RULES_DIR: /app/rules`; item 7.2's Railway
+  definitions must set it too, and item 4.5b's durability-gate run was executed without it.
+- [confirmed] 2026-08-22 The worker bundle also needs `TEXTSTAT_DATA_DIR` set, and unlike the
+  missing rules it is fatal. `textstatDataDir()` falls back to
+  `path.resolve(process.cwd(), "src/mastra/textstat/data")`, so under the bundle's cwd it
+  resolves to `web/.mastra/<bundle>/src/mastra/textstat/data` and the `edit` stage dies with
+  `ENOENT ... cmudict-syllables.txt.gz` (observed on item 4.7's first end-to-end run, run
+  ec961af1, after `research`, `outline` and `write` had already been billed). `mastra worker
+  build` has no asset-copy option (`BundlerConfig` is externals / sourcemap / minify /
+  transpilePackages / dynamicPackages), so the two data files cannot ride inside the bundle
+  and the variable is the only lever. Item 7.2 must set `RULES_DIR`, `TEXTSTAT_DATA_DIR` and
+  `MEDIA_DIR` on the Railway `worker` service, and 7.1 must set them on the compose `worker`
+  service.
