@@ -1,0 +1,5 @@
+
+> content-pipeline-dashboard@0.1.0 lint /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+> eslint
+
+exit=0

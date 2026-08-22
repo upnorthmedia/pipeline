@@ -54,5 +54,6 @@ repomix*
 # Superpowers
 .superpowers/
 
-# Docs (local only)
-docs/
+# Docs (local only), except the Mastra port record which is part of the deliverable
+docs/*
+!docs/mastra-port/

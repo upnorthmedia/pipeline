@@ -1,0 +1,3 @@
+src/lib/auth.ts(5,22): error TS7016: Could not find a declaration file for module 'pg'. '/Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web/node_modules/.pnpm/pg@8.20.0/node_modules/pg/esm/index.mjs' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/pg` if it exists or add a new declaration (.d.ts) file containing `declare module 'pg';`
+exit=1
