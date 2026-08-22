@@ -24,6 +24,7 @@ import { RedisStreamsPubSub } from "@mastra/redis-streams"
 import { getPool } from "../db"
 import { outlineAgent } from "./agents/outline"
 import { researchAgent } from "./agents/research"
+import { writeAgent } from "./agents/write"
 import { scaffoldCheckWorkflow } from "./workflows/scaffold-check"
 
 function redisUrl(): string {
@@ -72,5 +73,5 @@ export const mastra = new Mastra({
   logger,
   // Phase 3 registers the six pipeline stages alongside the scaffold check.
   workflows: { scaffoldCheck: scaffoldCheckWorkflow },
-  agents: { research: researchAgent, outline: outlineAgent },
+  agents: { research: researchAgent, outline: outlineAgent, write: writeAgent },
 })

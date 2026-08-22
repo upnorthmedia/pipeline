@@ -2667,7 +2667,138 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   4. The step test seeds no internal links. `buildStagePrompt` offers them to `edit`
      only, so they cannot affect this stage's prompt; `edit`'s parity test (item 3.4)
      is where the link inventory has to be seeded for real.
-- [ ] 3.3 `write`
+- [x] 3.3 `write`
+
+  Ported as an agent (`web/src/mastra/agents/write.ts`, registered on the Mastra
+  instance) plus a step (`web/src/mastra/steps/write.ts`). Structurally the same as
+  `outline`: no validator, no retry loop, one Claude call wrapped in the state
+  contract, reusing the item-3.1a prompt assembly, the item-3.1c-i posts-table
+  bridge and the shared `agents/claude.ts` call settings. What differs is the chain
+  input (`posts.outline_content` rather than `posts.research_content`), the token
+  budget and the column the draft is committed to (`posts.draft_content`).
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm vitest run src/mastra/steps/write.test.ts src/mastra/agents/write.test.ts
+   RUN  v4.0.18 /Users/cody/.../web
+
+   OK src/mastra/steps/write.test.ts (6 tests) 69ms
+   OK src/mastra/agents/write.test.ts (8 tests | 1 skipped) 73ms
+
+   Test Files  2 passed (2)
+        Tests  13 passed | 1 skipped (14)
+     Duration  970ms
+  ```
+
+  The skipped test is the live Anthropic smoke test, gated on `ANTHROPIC_API_KEY`
+  so the default `pnpm test` needs no credentials. Run with the real key:
+
+  ```
+  $ cd web && ANTHROPIC_API_KEY=<redacted> NO_COLOR=1 pnpm vitest run \
+      src/mastra/agents/write.test.ts -t "live smoke"
+   OK src/mastra/agents/write.test.ts (8 tests | 7 skipped) 1928ms
+       OK reaches Anthropic and reports back the configured model id  1910ms
+
+   Test Files  1 passed (1)
+        Tests  1 passed | 7 skipped (8)
+  ```
+
+  That asserts `response.modelId === "claude-opus-4-6"`, so `anthropic/claude-opus-4-6`
+  resolves through Mastra's model router against the live API. The model choice is
+  still the incumbent; item 6.1 owns picking and justifying a better one.
+
+  **The other branch of the token-budget divergence.** Item 3.2 recorded that
+  Python's `effective_max = max(max_tokens, thinking_budget + 1024)` and the AI SDK's
+  `max_tokens = maxOutputTokens + budget_tokens` only agree because
+  `claudeStageOptions` subtracts the budget. `outline`'s 8000 exercises the clamped
+  branch (raised to the 11024 floor); `write`'s 16000 is the first stage that clears
+  the floor, so it exercises the pass-through branch and pins `max_tokens = 16000`
+  on the wire against the golden fixture. Both branches are now covered.
+
+  **The internal-link inventory is withheld from `write`, and that is now pinned.**
+  The `how-to-choose-a-crm-for-a-small-team` fixture was captured with three internal
+  links in `state["internal_links"]` and its recorded prompt has no link section,
+  because `build_stage_prompt` offers links to `edit` only. So this step's test seeds
+  a real `website_profiles` row and three real `internal_links` rows, attaches the
+  post to that profile, and asserts the prompt still matches byte for byte and
+  contains neither the heading nor any of the three URLs. The second fixture has no
+  links and stays unattached, so the no-links path through `stateFromPost` is still
+  covered.
+
+  Negative control, seeding `outlineContent: null` so the step renders without the
+  outline the previous stage committed:
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm vitest run src/mastra/steps/write.test.ts
+       x sends the prompt the Python stage sent for how-to-choose-a-crm-for-a-small-team
+       x sends the prompt the Python stage sent for best-time-tracking-tools-for-agencies
+       x carries the outline the previous stage committed, not the research
+       OK withholds the internal-link inventory even when the post has links
+       x commits the draft to its column and reports Python's stage meta
+       OK fails loudly on a post that does not exist rather than billing a call
+        Tests  4 failed | 2 passed (6)
+  ```
+
+  Negative control, extending `buildStagePrompt`'s link condition from
+  `stage === "edit"` to `stage === "edit" || stage === "write"`. Both the
+  withholding test and the first fixture's byte-parity test go red, which also
+  proves the seeded links really reach the prompt path rather than the assertion
+  passing vacuously:
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm vitest run src/mastra/steps/write.test.ts
+       x sends the prompt the Python stage sent for how-to-choose-a-crm-for-a-small-team
+       OK sends the prompt the Python stage sent for best-time-tracking-tools-for-agencies
+       OK carries the outline the previous stage committed, not the research
+       x withholds the internal-link inventory even when the post has links
+       OK commits the draft to its column and reports Python's stage meta
+       OK fails loudly on a post that does not exist rather than billing a call
+    AssertionError: expected '# Blog Writing Agent...' not to contain 'Available Internal Links'
+        Tests  2 failed | 4 passed (6)
+  ```
+
+  Negative control, `WRITE_MAX_TOKENS` set to `outline`'s 8000 so the clamp applies:
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm vitest run src/mastra/agents/write.test.ts
+       x puts Python's model, max_tokens and thinking budget on the wire 53ms
+       x passes 16000 through untouched because it clears the thinking floor 0ms
+    AssertionError: expected 11024 to be 16000 // Object.is equality
+    AssertionError: expected 8000 to be 16000 // Object.is equality
+        Tests  2 failed | 5 passed | 1 skipped (8)
+  ```
+
+  Frontend gates:
+
+  ```
+  $ cd web && pnpm tsc --noEmit
+  tsc exit=0
+
+  $ cd web && NO_COLOR=1 pnpm lint
+  lint exit=0
+
+  $ cd web && NO_COLOR=1 pnpm test
+   Test Files  2 failed | 30 passed (32)
+        Tests  9 failed | 310 passed | 3 skipped (322)
+
+  $ cd web && pnpm build
+  build exit=0
+  ```
+
+  Failures held at the established baseline of 9, still the same two files
+  (`image-preview.test.tsx` 6, `PostDetail.test.tsx` 3); passes moved 297 -> 310,
+  which is the 13 new tests, and skips moved 2 -> 3, which is the live smoke test.
+  No `api/` file was touched, so the pytest and ruff baselines are unchanged by
+  construction.
+
+  **Discrepancies noted.**
+  1. Python builds `write_node`'s `system=` by concatenating five adjacent string
+     literals; `WRITE_SYSTEM_MESSAGE` reproduces the concatenation with the same
+     splits, and both golden fixtures' recorded `system` are asserted equal to it.
+  2. `write_node` publishes three SSE progress lines through `publish_stage_log`;
+     the step publishes none, for the same reason recorded under item 3.1c-ii.
+  3. The `system`-as-block-list and `url`-override discrepancies recorded under item
+     3.2 apply unchanged here; they are properties of the shared Anthropic path, not
+     of this stage.
 - [ ] 3.4 `edit`
 - [ ] 3.5 `images` (identical `image_manifest` JSONB shape; `.foreach()` for per-image generation)
 - [ ] 3.6 `ready`
