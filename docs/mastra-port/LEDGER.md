@@ -4718,7 +4718,166 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
       ```
 
       All three at the Phase 0 baseline; no Python file was touched this iteration.
-- [ ] 3.6 `ready`
+- [x] 3.6 `ready`. The last stage, and the only one that does not go through
+  `build_stage_prompt`: `ready_node` has a private `_build_ready_prompt` that
+  replaces the thirteen-field configuration block and the `## Previous Stage
+  Output` section with three lines of post configuration, the edited markdown,
+  and the image manifest filtered down to the entries that actually generated.
+
+  **Ported as:**
+  - `web/src/mastra/agents/ready.ts`: `readyAgent`, registered on the Mastra
+    instance under `ready`. `READY_SYSTEM_MESSAGE` (byte-identical to both
+    fixtures), `READY_MAX_TOKENS = 16_000`, `READY_MODEL_ID =
+    "anthropic/claude-opus-4-6"`, and the shared `claudeStageOptions` thinking
+    configuration. The incumbent model is carried over unchanged; choosing a
+    stronger one is item 6.1.
+  - `web/src/mastra/steps/ready.ts`: `readyStep`, plus `buildReadyPrompt` and
+    `generatedImages` exported as pure functions so the prompt half is
+    assertable without a provider.
+  - `web/src/mastra/prompts.ts`: `pythonJsonDumps` exported. It was written for
+    `buildStagePrompt`'s previous-output section, but `ready` is the stage that
+    actually serializes JSON and it does not use that path, so it needs the same
+    `ensure_ascii` escaping around a *filtered* manifest.
+
+  **The golden fixture is not the production oracle for this stage.** This is
+  the finding of the iteration and it changed how the item was verified.
+  `capture_golden.py` builds one in-memory `Post`, threads a single state dict
+  from stage to stage (`state.update(saved)`), and never touches Postgres.
+  `_run_pipeline` does the opposite: it reloads the post from the database
+  before every stage (`api/src/worker.py:144`, "Load fresh post from DB each
+  iteration"). The ready prompt embeds the image manifest as pretty-printed
+  JSON, and `jsonb` does not store a document, it stores a normalised value:
+  object keys come back sorted by length, then bytewise. So the prompt in
+  `docs/mastra-port/golden/<slug>/ready.json` and the prompt the Python worker
+  sends for the same post differ, in the order of the manifest's keys, for both
+  fixtures.
+
+  The port reads its state from the table (that is what makes a crash
+  resumable), so its oracle has to be the production path.
+  `api/scripts/export_ready_prompt_parity.py` produces it: for each fixture it
+  writes `final_md_content` and `image_manifest` into the real `posts` table,
+  reads the row back, builds the state the way the worker does, and renders the
+  real `_build_ready_prompt` over it. No provider is called and no API key is
+  read.
+
+  ```
+  $ cd api && DATABASE_URL=postgresql://pipeline:pipeline@localhost:5435/content_pipeline \
+      uv run python scripts/export_ready_prompt_parity.py
+  how-to-choose-a-crm-for-a-small-team: prompt 20429 chars, differs from fixture: True
+  best-time-tracking-tools-for-agencies: prompt 24954 chars, differs from fixture: True
+  wrote .../web/src/mastra/steps/data/ready-prompt-parity.json
+  ```
+
+  Both oracles are now gates, and a third test pins the relationship between
+  them: the step's database-sourced prompt is byte-equal to Python's production
+  prompt; `buildReadyPrompt` fed the fixture's in-memory manifest is byte-equal
+  to the fixture's captured prompt; and the two differ *only* in the manifest's
+  key order, with everything outside that section identical and the parsed
+  documents deep-equal.
+
+  **Three more divergences recorded, none of them invented behaviour:**
+  1. Both captures ran against an account with zero image quota, so every
+     manifest entry in both fixtures has `generated: false` and the
+     generated-images filter's only observable effect there is an empty list.
+     Item 3.5e's parity corpus came out of the real Python images stage and
+     carries 12 generated and 4 failed entries, so it stands in as the filter's
+     oracle.
+  2. `if manifest:` is falsy for `{}` in Python and truthy in JavaScript, and
+     `manifest.get("images", [])` distinguishes an absent key from an explicit
+     `null`. Both are reproduced explicitly rather than with `??`.
+  3. A manifest whose `images` is not a list, or whose entries are not mappings,
+     raises out of `_build_ready_prompt` before any call is billed. The port
+     throws rather than guessing, and both branches are asserted.
+
+  **Tests** (31 credential-free, 1 live):
+
+  ```
+  $ cd web && NO_COLOR=1 npx vitest run \
+      src/mastra/steps/ready.test.ts src/mastra/agents/ready.test.ts
+   RUN  v4.0.18 .../web
+   OK src/mastra/steps/ready.test.ts (23 tests) 145ms
+   OK src/mastra/agents/ready.test.ts (9 tests | 1 skipped) 81ms
+
+   Test Files  2 passed (2)
+        Tests  31 passed | 1 skipped (32)
+     Duration  1.01s
+  ```
+
+  The skipped test is the live Anthropic smoke test, gated on
+  `ANTHROPIC_API_KEY` so the default `pnpm test` needs no credentials. Run with
+  the real key, which is what confirms `claude-opus-4-6` still resolves for this
+  stage:
+
+  ```
+  $ cd web && ANTHROPIC_API_KEY=<redacted> NO_COLOR=1 npx vitest run \
+      src/mastra/agents/ready.test.ts -t "live smoke"
+   OK src/mastra/agents/ready.test.ts (9 tests | 8 skipped) 2015ms
+       OK reaches Anthropic and reports back the configured model id  1997ms
+
+   Test Files  1 passed (1)
+        Tests  1 passed | 8 skipped (9)
+     Duration  3.06s
+  ```
+
+  **Negative controls**, each applied to `steps/ready.ts`, `agents/ready.ts` or
+  `index.ts` and reverted; every one turned the suite red:
+
+  | mutation | result |
+  | --- | --- |
+  | `OUTPUT_FORMAT` line hardcoded to `markdown` | 2 failed |
+  | `{...manifest, images}` -> `{images, ...manifest}` (key moves) | 7 failed |
+  | empty `final_md` section no longer suppressed | 1 failed |
+  | `Object.keys(manifest).length > 0` -> `if (manifest)` (JS truthiness) | 1 failed |
+  | `pythonTruthy(generated)` -> `generated === true` | 1 failed |
+  | `"images" in manifest ? ... : []` -> `manifest.images ?? []` | 1 failed |
+  | `pythonJsonDumps` -> `JSON.stringify(..., 2)` (no `ensure_ascii`) | 1 failed |
+  | section separator `\n\n---\n\n` -> `\n\n***\n\n` | 13 failed |
+  | `stage_status` replaced instead of merged | 1 failed |
+  | reported model hardcoded instead of read off the response | 1 failed |
+  | system message: `publishing notes` -> `publication notes` | 3 failed |
+  | system message literals joined with a newline | 3 failed |
+  | `READY_MAX_TOKENS` 16000 -> 8000 | 2 failed |
+  | agent unregistered from the Mastra instance | 1 failed |
+  | `saveStageOutput(postId, "ready", ...)` -> `"edit"` | 1 failed |
+
+  The "reported model hardcoded" control only became a control once a test
+  replayed a response carrying a server-side alias: both fixtures recorded the
+  same id the agent asks for, so fixture equality alone cannot tell a
+  passthrough from a constant.
+
+  **Gates.**
+
+  ```
+  $ cd web && npx tsc --noEmit
+  tsc exit=0
+  $ NO_COLOR=1 pnpm lint
+  (no output, exit 0)
+  $ NO_COLOR=1 pnpm test --run
+   Test Files  2 failed | 45 passed (47)
+        Tests  9 failed | 735 passed | 8 skipped (752)
+  $ NO_COLOR=1 pnpm build
+  build exit=0
+  ```
+
+  Failures are the 9-test baseline exactly (6 in `image-preview.test.tsx`, 3 in
+  `PostDetail.test.tsx`). Totals moved 720 -> 752, which is the 32 new tests;
+  skips moved 7 -> 8, which is the new live smoke test. `next build` emits the
+  same pre-existing BetterAuth base-URL warning recorded under item 3.5f-ii.
+
+  ```
+  $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test NO_COLOR=1 uv run pytest -q
+  125 failed, 236 passed, 25 errors in 15.26s
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 126 files already formatted
+  ```
+
+  All three at the Phase 0 baseline. The only Python file added is the parity
+  exporter, which is why `already formatted` moved 125 -> 126; the 9 files that
+  would be reformatted and the 32 ruff errors are unchanged and all pre-existing.
+
+  With this item all six stages are ported. Phase 4 composes them.
 
 ## Phase 4: Workflow assembly, gates, durable execution
 

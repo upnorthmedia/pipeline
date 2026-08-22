@@ -39,15 +39,19 @@ export function loadRules(stage: Stage): string {
 /**
  * Python's `json.dumps(..., indent=2)` escapes every non-ASCII character to a
  * `\uXXXX` sequence (`ensure_ascii` defaults to true) while `JSON.stringify`
- * emits it literally. The only prompt that serializes JSON is `ready`, whose
- * previous-stage output is the image manifest, and manifest prose routinely
- * carries typographic punctuation. Without this the two stacks' prompts differ
- * on exactly the posts that matter.
+ * emits it literally. The only prompt that serializes JSON is `ready`, which
+ * embeds the image manifest, and manifest prose routinely carries typographic
+ * punctuation. Without this the two stacks' prompts differ on exactly the posts
+ * that matter.
+ *
+ * Exported because `ready` does not go through `buildStagePrompt`: it has its
+ * own builder in `steps/ready.ts` and serializes a *filtered* manifest, so it
+ * needs the same escaping without the surrounding section.
  *
  * Iterating the string by UTF-16 code unit escapes astral characters as the
  * surrogate pair Python also emits.
  */
-function pythonJsonDumps(value: unknown): string {
+export function pythonJsonDumps(value: unknown): string {
   return JSON.stringify(value, null, 2).replace(/[\u0080-\uffff]/g, (char) =>
     `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
   )
