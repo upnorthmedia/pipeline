@@ -2215,9 +2215,158 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   was touched (`git status --porcelain` listed only the three new `web/src/mastra/` files), so
   the pytest and ruff baselines are unchanged by construction.
 
-- [ ] 3.1b `research` agent + step (model choice per section 5, output persisted to
-  `research_content` via `STAGE_CONTENT_MAP`, the meta-response retry loop from
-  `research_node`, parity test on the step's output schema).
+- [x] 3.1b `research` **agent**: the provider-facing half of the stage (model id, system
+  message, credential resolution), registered on the Mastra instance.
+
+  Split from the original 3.1b, which bundled the agent, the step, the meta-response
+  retry loop, the persistence contract and the parity test into one item. The agent half
+  carries the port's biggest unknown for Phase 3 (can Mastra's model router reach
+  Perplexity at all, and where does the API key come from) and is verifiable on its own
+  with a live call, so it is its own iteration. The step half is 3.1c.
+
+  **What was built**
+
+  - `web/src/mastra/api-keys.ts`: `getApiKeys()` / `requireApiKey()`, ported from
+    `get_api_keys()` in `api/src/services/api_keys.py`. Reads the encrypted `api_keys`
+    row out of the `settings` table and decrypts it with `web/src/lib/crypto.ts` (item
+    1.3). Same `PROVIDERS` tuple and same "missing provider maps to empty string"
+    behaviour as Python.
+  - `web/src/mastra/agents/research.ts`: the `research` Mastra `Agent`.
+    `RESEARCH_SYSTEM_MESSAGE` is byte-identical to the `system=` string
+    `research_node` sends; `RESEARCH_MODEL_ID` is `perplexity/sonar-pro`.
+  - `web/src/mastra/index.ts`: `agents: { research: researchAgent }`.
+
+  **Credential path decision.** The key is resolved inside the agent's dynamic `model`
+  resolver, from the database, per call. It is deliberately *not* passed through the
+  workflow input or `RequestContext`: the evented engine serialises run input into Redis
+  Streams payloads and into the `mastra_workflow_snapshot` rows in Postgres, so a key
+  routed that way would be persisted in the run history of every pipeline that ever ran.
+  Resolving per call also means rotating the key on the settings page takes effect
+  without restarting the worker, and it works identically in `web` and `worker` because
+  both reach the same database. The cost is one indexed single-row read per provider
+  call.
+
+  **Model choice.** `sonar-pro` is carried over unchanged from
+  `PerplexityClient.chat()`'s default. Per section 5, keeping a working incumbent is a
+  success; choosing a stronger research model with its live verification and cost
+  delta is ledger item 6.1, and changing it here would be an unverified choice. The
+  live response below confirms the incumbent id resolves through Mastra's router.
+
+  **Mastra's provider registry reaches Perplexity with no extra dependency.**
+  `node_modules/@mastra/core/dist/provider-registry.json` carries a `perplexity`
+  provider (`apiKeyEnvVar: PERPLEXITY_API_KEY`, models `sonar`, `sonar-deep-research`,
+  `sonar-pro`, `sonar-reasoning-pro`, `npm: @ai-sdk/perplexity`), and the router
+  resolves `{ id: "perplexity/sonar-pro", apiKey }` (an `OpenAICompatibleConfig`, see
+  `@mastra/core/dist/llm/model/shared.types.d.ts:24-35`) without `@ai-sdk/perplexity`
+  being installed. No new dependency was added for this item.
+
+  **Evidence**
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm exec vitest run src/mastra/api-keys.test.ts
+   Test Files  1 passed (1)
+        Tests  6 passed (6)
+  exit=0
+
+  $ cd web && PERPLEXITY_API_KEY=<redacted> NO_COLOR=1 pnpm exec vitest run \
+      src/mastra/agents/research.test.ts
+   ✓ src/mastra/agents/research.test.ts (6 tests) 834ms
+       ✓ reaches Perplexity and reports back the configured model id  810ms
+   Test Files  1 passed (1)
+        Tests  6 passed (6)
+  exit=0
+  ```
+
+  The live smoke test writes the real key into the `settings` table encrypted with a
+  throwaway Fernet key, runs one minimal generate, asserts the provider's own reported
+  model id, and removes the row again, so it exercises the whole production path
+  (encrypted row -> `crypto.ts` -> model router -> Perplexity) instead of a stub. It is
+  `describe.skipIf(!process.env.PERPLEXITY_API_KEY)` so the default `pnpm test` needs no
+  credentials; in the unkeyed run it reports as 1 skipped. The dev database is left with
+  zero `settings` rows afterwards:
+
+  ```
+  $ PGPASSWORD=<redacted> psql -h localhost -p 5435 -U pipeline -d content_pipeline \
+      -c "select count(*) from settings;"
+   count
+  -------
+       0
+  (1 row)
+  ```
+
+  **Live provider response (redacted).** Captured from a scratch call before the agent
+  was written, confirming both the resolved model id and that the router carries
+  Perplexity's citations and cost metadata through:
+
+  ```
+  MODELID: {"modelId":"sonar-pro","id":"24482d0f-621f-42cb-83d6-ed0c69ac6df8"}
+  SOURCES: [{"type":"source","payload":{"sourceType":"url",
+             "url":"https://www.reddit.com/r/CRM/comments/1f0yp7n/..."}}, ...]
+  PROVIDERMETA: {"perplexity":{"images":null,
+    "usage":{"citationTokens":null,"numSearchQueries":null},
+    "cost":{"inputTokensCost":0.00007,"outputTokensCost":0.00042,
+            "requestCost":0.006,"totalCost":0.00649}}}
+  USAGE: {"inputTokens":15,"outputTokens":1,"totalTokens":16,"reasoningTokens":0, ...
+          "raw":{"raw":{"cost":{"request_cost":0.006,"total_cost":0.00606}}}}
+  ```
+
+  Two notes this hands forward. `result.sources` exposes Perplexity's citation URLs as
+  structured `source` parts, which is a better input for the `link_validator` TS port
+  (item 5.7) than re-parsing them out of the markdown. And `result.usage.raw.raw.cost`
+  carries the provider's own per-request cost in dollars, so Phase 8's cost column does
+  not have to maintain a price table for Perplexity.
+
+  **Negative controls** (each applied, run, reverted)
+
+  1. Changed `RESEARCH_SYSTEM_MESSAGE`'s opening clause to "You are a helpful
+     assistant.": `× sends the system message the Python stage sent, per the golden
+     fixtures`, `AssertionError: expected 'You are an expert SEO content researc...' to
+     be 'You are a helpful assistant. Respond ...'`. Proves the system message is
+     checked against the golden fixtures, not against a copy of itself.
+  2. Changed `RESEARCH_MODEL_ID` to `perplexity/sonar`: three tests red, including the
+     live one with `AssertionError: expected 'sonar' to be 'sonar-pro'` reported by
+     Perplexity itself. Proves the live assertion reads the provider's response rather
+     than echoing the configured constant.
+  3. Made `getApiKeys()` return the stored value without calling `decrypt()`: 4 of 6
+     api-key tests red, including `expected 'gAAAAABqiQn5BeTxPn8UOkO4LVYYgH9X-KDUD...'
+     to be 'pplx-only'`. Proves the reader decrypts real Fernet ciphertext out of the
+     real table.
+
+  **Intentional test update.** `no-next-imports.test.ts`'s expected package list gained
+  `@mastra/core/agent`, `drizzle-orm` and `node:crypto`, which the registered agent
+  legitimately pulls into the entry point's import graph, and the test name changed from
+  "the packages the scaffold needs" to "the packages the registered primitives need".
+  The load-bearing assertion in that file (no `next/*` or `server-only` anywhere in the
+  graph) is untouched and still passes.
+
+  **Gates**
+
+  ```
+  $ cd web && pnpm exec tsc --noEmit
+  tsc exit=0
+
+  $ cd web && pnpm lint
+  lint exit=0
+
+  $ cd web && NO_COLOR=1 pnpm test
+   Test Files  2 failed | 24 passed (26)
+        Tests  9 failed | 270 passed | 1 skipped (280)
+  test exit=1
+
+  $ cd web && pnpm build
+  build exit=0
+  ```
+
+  Failures held at the established baseline of 9 (`image-preview.test.tsx` and
+  `PostDetail.test.tsx`); passes moved 259 -> 270, which is the 11 new non-skipped
+  tests. No `api/` file was touched, so the pytest and ruff baselines are unchanged by
+  construction.
+
+- [ ] 3.1c `research` **step**: `createStep` with Zod input/output schemas, prompt
+  assembled by `buildStagePrompt` (item 3.1a), the meta-response retry loop from
+  `research_node` (`_REFUSAL_PATTERNS`, `_EXPECTED_SECTIONS`, `MAX_RESEARCH_ATTEMPTS`,
+  `_reinforced_prompt`), output persisted to `research_content` via
+  `STAGE_CONTENT_MAP`, and the parity test against the golden fixtures.
 - [ ] 3.2 `outline`
 - [ ] 3.3 `write`
 - [ ] 3.4 `edit`

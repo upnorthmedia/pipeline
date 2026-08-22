@@ -22,6 +22,7 @@ import { PostgresStore } from "@mastra/pg"
 import { RedisStreamsPubSub } from "@mastra/redis-streams"
 
 import { getPool } from "../db"
+import { researchAgent } from "./agents/research"
 import { scaffoldCheckWorkflow } from "./workflows/scaffold-check"
 
 function redisUrl(): string {
@@ -70,5 +71,5 @@ export const mastra = new Mastra({
   logger,
   // Phase 3 registers the six pipeline stages alongside the scaffold check.
   workflows: { scaffoldCheck: scaffoldCheckWorkflow },
-  agents: {},
+  agents: { research: researchAgent },
 })

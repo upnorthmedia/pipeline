@@ -63,16 +63,19 @@ describe("mastra entry point", () => {
     expect(nextish).toEqual([])
   })
 
-  it("pulls in only the packages the scaffold needs", () => {
+  it("pulls in only the packages the registered primitives need", () => {
     const { packages } = importGraph(ENTRY)
     expect(packages).toEqual([
       "@mastra/core",
+      "@mastra/core/agent",
       "@mastra/core/workflows/evented",
       "@mastra/loggers",
       "@mastra/pg",
       "@mastra/redis-streams",
+      "drizzle-orm",
       "drizzle-orm/node-postgres",
       "drizzle-orm/pg-core",
+      "node:crypto",
       "pg",
       "zod",
     ])
