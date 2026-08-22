@@ -167,9 +167,102 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
   directory only. `CLAUDE.md` is also gitignored; item 7.4 asks for it to be updated, so decide
   there whether to un-ignore it too or record the change elsewhere.
 
-- [ ] 0.2 Fix the pre-existing `tsc`/`build` break by adding `@types/pg` to `web/`, so the
+- [x] 0.2 Fix the pre-existing `tsc`/`build` break by adding `@types/pg` to `web/`, so the
   Phase 0 gate baseline for `tsc --noEmit` and `build` is exit 0. Confirm `pnpm test`
   failure count is still 9.
+
+  `@types/pg@8.23.1` added to `web/` devDependencies. The `pnpm-lock.yaml` diff adds exactly
+  one resolution (verified: `git diff web/pnpm-lock.yaml | grep -cE '^-.*resolution:'` -> `0`,
+  and a single added `resolution:` line, the `@types/pg` integrity hash). Everything else in
+  that diff is peer-dependency hash re-keying, because `drizzle-orm`/`better-auth` peer sets
+  now include `@types/pg`. No package version changed. `api/` was not touched, so the Python
+  gates are unaffected and were not re-run.
+
+  ### Reproduction of the break, before the fix
+
+  ```
+  $ cd web && pnpm exec tsc --noEmit
+  src/lib/auth.ts(5,22): error TS7016: Could not find a declaration file for module 'pg'. '.../web/node_modules/.pnpm/pg@8.20.0/node_modules/pg/esm/index.mjs' implicitly has an 'any' type.
+    Try `npm i --save-dev @types/pg` if it exists or add a new declaration (.d.ts) file containing `declare module 'pg';`
+  exit=2
+  ```
+
+  ### `cd web && pnpm add -D @types/pg` -> **exit 0**
+
+  ```
+  devDependencies:
+  + @types/pg 8.23.1
+
+  Done in 2.2s using pnpm v10.26.2
+  exit=0
+  ```
+
+  ### Gate: `cd web && pnpm exec tsc --noEmit` -> **exit 0** (was exit 1/2)
+
+  ```
+  $ pnpm exec tsc --noEmit; echo "exit=$?"
+  exit=0
+  ```
+
+  ### Gate: `cd web && pnpm lint` -> **exit 0** (unchanged)
+
+  ```
+  > content-pipeline-dashboard@0.1.0 lint /Users/cody/.../web
+  > eslint
+
+  exit=0
+  ```
+
+  ### Gate: `cd web && pnpm test` -> **exit 1**, still exactly 9 failed / 191 passed (200)
+
+  ```
+  ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+   Test Files  2 failed | 14 passed (16)
+        Tests  9 failed | 191 passed (200)
+  exit=1
+  ```
+
+  Identical to the 0.1 baseline: the ceiling of 9 pre-existing failures holds, no new failures.
+
+  ### Gate: `cd web && pnpm build` -> **exit 0** (was exit 1)
+
+  ```
+  > content-pipeline-dashboard@0.1.0 build /Users/cody/.../web
+  > next build
+
+   ▲ Next.js 16.1.6 (Turbopack)
+
+   ⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
+     Creating an optimized production build ...
+   ✓ Compiled successfully in 2.9s
+     Running TypeScript ...
+   ✓ Generating static pages using 15 workers (25/25) in 295.5ms
+     Finalizing page optimization ...
+
+  Route (app)
+  ┌ ○ /
+  ├ ○ /_not-found
+  ├ ƒ /api/auth/[...all]
+  ├ ○ /apple-icon.png
+  ├ ● /auth/[path]
+  ├ ○ /icon0.svg
+  ├ ○ /icon1.png
+  ├ ○ /manifest.json
+  ├ ○ /monitor
+  ├ ƒ /posts/[id]
+  ├ ○ /posts/batch
+  ├ ○ /posts/new
+  ├ ○ /profiles
+  ├ ƒ /profiles/[id]
+  └ ○ /settings
+  exit=0
+  ```
+
+  **Revised gate baseline from here on.** `tsc --noEmit` and `build` must exit 0 for the rest
+  of the port; the "pre-existing failure" allowance recorded in 0.1 for those two gates no
+  longer applies. `pnpm test` remains at most 9 failures, `pnpm lint` exit 0. The deprecation
+  warning about the `middleware` file convention is pre-existing and unrelated to this port;
+  it is the only warning `build` emits.
 - [ ] 0.3 Stand up a reachable dev database for this repo (resolve the host-port 5433
   collision) and record the working local invocation, so later phases can run the Python
   pipeline and, later, the TypeScript data layer against a real database.
