@@ -306,10 +306,18 @@ describe("the worker service executes runs that web starts", () => {
     expect(afterWorker.gatedRow.currentStage).toBe("research")
   })
 
-  it("leaves the skipped post untouched, because every stage was already complete", () => {
-    expect(afterWorker.skippedRow.currentStage).toBe("pending")
+  /**
+   * No stage ran, so no content column moved. `current_stage` and
+   * `completed_at` do move, because the `pipeline-complete` step at the tail of
+   * the chain (item 4.7b) stamps a finished full run whether or not that run
+   * had anything left to do, the way Python's `_post_completion_hook` sat
+   * outside the stage loop.
+   */
+  it("writes no content for the skipped post, because every stage was already complete", () => {
     expect(afterWorker.skippedRow.researchContent).toBeNull()
     expect(afterWorker.skippedRow.readyContent).toBeNull()
+    expect(afterWorker.skippedRow.currentStage).toBe("complete")
+    expect(afterWorker.skippedRow.completedAt).toBeInstanceOf(Date)
   })
 
   it("reports nothing on the worker's stderr", () => {

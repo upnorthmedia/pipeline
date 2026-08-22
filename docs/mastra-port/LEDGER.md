@@ -6209,10 +6209,131 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
 
   Unchanged from the baseline recorded under 4.5b and 4.6; nothing in this item touches `api/`.
 
-- [ ] 4.7b Port the full-pipeline completion hook: a full run ends with
+- [x] 4.7b Port the full-pipeline completion hook: a full run ends with
   `current_stage = "complete"` and `completed_at` set, matching `_post_completion_hook` in
   `api/src/worker.py:429`. The auto-publish half of that hook depends on the `wordpress` and
   `nextjs` routers and belongs to Phase 5.
+
+  **What was missing.** Nothing sat at the end of the chain at all. A full run left
+  `current_stage` reading whichever stage happened to run last (`"ready"`, or `"pending"` when
+  every stage was already complete and all six steps skipped) and `completed_at` null for good.
+  Those two columns are the pair the dashboard and the posts list read to tell a finished post
+  from one still moving, so every post the port ever ran came out reading unfinished.
+
+  **The port.** A seventh step, `pipeline-complete`, on the tail of the workflow:
+
+  ```
+  research -> outline -> write -> edit -> images -> ready -> pipeline-complete
+  ```
+
+  A step rather than a callback, because the structural rule of this port is that everything a
+  run does is a Mastra primitive: as a step it appears in Studio, in `run.stream()`'s events and
+  on the finished run's `steps` map. It passes `ready`'s stage meta straight through, so the
+  workflow's declared `outputSchema` is unchanged.
+
+  Three decisions worth recording:
+
+  1. **Gated on the selection, not on `stage_status`.** Python's `if is_full_pipeline:` block is
+     the only caller of `_post_completion_hook`, so a run that names its stages must not stamp
+     `completed_at`; `markRerunComplete` (item 4.2b) already settles `current_stage` for that
+     path. Restamping here would move the finish time of a post that finished days ago every
+     time one stage is rerun from the dashboard.
+  2. **Unconditional once the chain reaches it.** Unlike `markCompleteIfAllStagesComplete`, the
+     hook does not re-read `stage_status`. A stage can finish without succeeding: `images`
+     writes `images: failed` and returns rather than raising (`api/src/pipeline/stages/images.py`
+     returns at line 99), and Python's run carries on to `ready` and reaches the hook anyway.
+     Checking the map would leave such a run reading unfinished forever, which is not what the
+     dashboard showed before the port.
+  3. **A suspended run never reaches it**, because it is the last step. That is asserted rather
+     than assumed.
+
+  **Failing first.** The three assertions the hook exists to satisfy, before it was written:
+
+  ```
+  $ cd web && NO_COLOR=1 npx vitest run src/mastra/workflows/pipeline-completion.test.ts
+   FAIL  ... > a full run that finishes > promotes current_stage to complete
+  AssertionError: expected 'edit' to be 'complete' // Object.is equality
+   FAIL  ... > a full run that finishes > stamps completed_at
+  AssertionError: expected null to be an instance of Date
+   FAIL  ... > a full run with every stage already complete > stamps both columns even though no stage ran
+  AssertionError: expected 'pending' to be 'complete' // Object.is equality
+   Test Files  1 failed (1)
+        Tests  3 failed | 8 passed (11)
+  ```
+
+  The other eight passed unchanged, which is the point of the negative controls: the named-stage
+  run and the gated run must behave the same before and after.
+
+  **After.** Four real evented runs against live Postgres and Redis, every provider boundary
+  stubbed and nothing else:
+
+  ```
+  $ cd web && NO_COLOR=1 npx vitest run src/mastra/workflows/pipeline-completion.test.ts
+   ✓ src/mastra/workflows/pipeline-completion.test.ts (11 tests) 5542ms
+   Test Files  1 passed (1)
+        Tests  11 passed (11)
+  ```
+
+  | Run | `stages` | Seeded `stage_status` | `current_stage` after | `completed_at` after |
+  | --- | --- | --- | --- | --- |
+  | full, one stage left | absent | all but `edit` | `complete` | set |
+  | named-stage rerun | `["edit"]` | all but `edit` | `complete` (item 4.2b) | **null** |
+  | full, nothing to do | absent | all six | `complete` | set |
+  | full, gated on `edit` | absent | all but `edit` | `edit` (suspended) | **null** |
+
+  **Three existing tests changed, because the behaviour they pinned is what this item changes.**
+  Each now asserts the new contract and says why in a comment:
+
+  - `workflows/pipeline.test.ts`: a full run's `current_stage` is `"complete"`, not `"ready"`,
+    and `completed_at` is set.
+  - `workflows/worker-process.test.ts`: the all-complete post the worker skips still gets both
+    columns stamped; the assertion that no content column moved is kept and strengthened.
+  - `workflows/rerun-completion.test.ts`: its full-run case asserted "does not promote", with a
+    comment saying the hook was not ported yet. It now asserts that the promotion came from the
+    hook rather than from the rerun check, using `completed_at` (which only the hook writes) to
+    tell the two apart.
+
+  **A test-infrastructure defect found and fixed on the way.** The new file was first written
+  with post ids `...04c1/04c2/04c3`, which are exactly `review-gates.test.ts`'s ids. Vitest runs
+  files in parallel, so the two files deleted and re-inserted the same three rows underneath each
+  other. Symptoms were nonsense: this file's runs came back `"suspended"` for posts with no gate
+  configured, a post seeded all-complete came out at `current_stage = "outline"`, and one run hit
+  `duplicate key value violates unique constraint "posts_pkey"` on an insert two lines after the
+  matching delete. Moving to `...061a`-`061d` fixed it, and the file now carries a comment saying
+  ids have to be unique across the suite rather than within a file. Worth knowing for Phase 5,
+  which will add many more database-backed test files.
+
+  **Gates.** Two consecutive full-suite runs, both exactly at the recorded baseline:
+
+  ```
+  $ cd web && npx tsc --noEmit
+  (exit 0, no output)
+  $ cd web && npx eslint
+  (exit 0, no output)
+  $ cd web && NO_COLOR=1 npx vitest run
+   Test Files  2 failed | 55 passed (57)
+        Tests  9 failed | 831 passed | 8 skipped (848)
+  $ cd web && NO_COLOR=1 npx vitest run
+   Test Files  2 failed | 55 passed (57)
+        Tests  9 failed | 831 passed | 8 skipped (848)
+  $ cd web && NO_COLOR=1 npx next build
+  (exit 0)
+  ```
+
+  The 9 are the recorded baseline: 6 in `image-preview.test.tsx` and 3 in `PostDetail.test.tsx`.
+  848 total is 837 plus the 11 new tests.
+
+  ```
+  $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test NO_COLOR=1 uv run pytest -q
+  125 failed, 236 passed, 25 errors in 15.46s
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 126 files already formatted
+  ```
+
+  Unchanged from the baseline recorded under 4.5b, 4.6 and 4.7a; nothing in this item touches
+  `api/`.
 
 - [ ] 4.7c Full workflow runs end to end against the real database: green run of
   `web/src/mastra/scripts/full-pipeline.mjs` with its output pasted here. Image generation is

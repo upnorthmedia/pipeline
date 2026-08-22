@@ -157,3 +157,15 @@
   and the variable is the only lever. Item 7.2 must set `RULES_DIR`, `TEXTSTAT_DATA_DIR` and
   `MEDIA_DIR` on the Railway `worker` service, and 7.1 must set them on the compose `worker`
   service.
+- [confirmed] 2026-08-22 `web/src/components/__tests__/export-button.test.tsx` writes real files
+  into the repo's `media/test-123/` on every `pnpm -C web test` run, leaving untracked `.webp`
+  artifacts behind. It never sets `MEDIA_DIR`, unlike the workflow suites, which point it at a
+  temp directory in `beforeAll`. Harmless but it dirties the working tree and hides real
+  untracked files in `git status`.
+- [confirmed] 2026-08-22 Test post ids have to be unique across the whole vitest suite, not just
+  within a file: files run in parallel, so two files seeding the same `posts` row delete and
+  re-insert it underneath each other. Found when `pipeline-completion.test.ts` reused
+  `review-gates.test.ts`'s `...04c1/04c2/04c3` and both files went intermittently red with
+  nonsense symptoms (runs reported `suspended` on gates they never configured, a
+  `duplicate key ... posts_pkey` two lines after the matching delete). Fixed there; Phase 5 adds
+  many more database-backed test files, so a shared id registry may be worth it.

@@ -22,12 +22,12 @@
  *    complete, `stages: ["images"]`. `images` is three steps and a fan-out
  *    rather than one step, so its promotion is a separate code path from the
  *    other five stages'.
- * 4. **Full run.** Five stages complete, no selection. The stage runs, but the
- *    promotion must not happen here, because Python gated it on
- *    `if not is_full_pipeline` and the full path's own completion hook (which
- *    also stamps `completed_at` and queues publishing) is not ported yet.
- *    Promoting here would half-complete a post: `current_stage` saying
- *    `"complete"` with `completed_at` still null.
+ * 4. **Full run.** Five stages complete, no selection. The stage runs, but this
+ *    rule must not be what promotes it, because Python gated it on
+ *    `if not is_full_pipeline`. The full path is settled by its own completion
+ *    hook, `steps/pipeline-complete.ts` (item 4.7b), which is what
+ *    `completed_at` distinguishes: this rule never stamps it, that hook always
+ *    does. `pipeline-completion.test.ts` owns the hook's own coverage.
  *
  * Every provider boundary is stubbed and nothing else. The database, Redis and
  * the evented engine are real. Own `Mastra` instance and own Redis key prefix,
@@ -269,14 +269,16 @@ describe("a full run that completes the last outstanding stage", () => {
   })
 
   /**
-   * The promotion is the named-stage path's business only. The full path ends
-   * at a completion hook that is not ported yet, and promoting here would leave
-   * a post reading `"complete"` with `completed_at` still null.
+   * This rule is the named-stage path's business only, so the `completed_at`
+   * that comes back set is proof the completion hook did the promotion and
+   * this rule stood down: the hook stamps both columns, this rule stamps
+   * neither on a full run.
    */
-  it("does not promote current_stage", async () => {
+  it("is not what promotes current_stage: the completion hook is", async () => {
     const row = await readPost(FULL_RUN_POST_ID)
 
-    expect(row.currentStage).toBe("edit")
+    expect(row.currentStage).toBe("complete")
+    expect(row.completedAt).toBeInstanceOf(Date)
     expect(row.stageStatus).toEqual(Object.fromEntries(STAGES.map((s) => [s, STATUS_COMPLETE])))
   })
 })

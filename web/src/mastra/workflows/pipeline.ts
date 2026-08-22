@@ -8,8 +8,13 @@
  * which `.then()` now declares.
  *
  * ```
- * research -> outline -> write -> edit -> images -> ready
+ * research -> outline -> write -> edit -> images -> ready -> pipeline-complete
  * ```
+ *
+ * `pipeline-complete` is not a stage. It is the tail of Python's
+ * `if is_full_pipeline:` block, stamping `current_stage = "complete"` and
+ * `completed_at` on a full run that reached the end (see
+ * `steps/pipeline-complete.ts`).
  *
  * `images` is a nested workflow, not a step, because its per-image fan-out is
  * `.foreach()` and that only exists at workflow level (see `workflows/images.ts`).
@@ -28,16 +33,16 @@
  * `skipped: true` and bills nothing, which is the `continue` in Python's stage
  * loop. See `steps/stage-io.ts`.
  *
- * Deliberately not here yet, each with its own ledger item: the single-stage
- * rerun's `current_stage = "complete"` check (4.2b), review gates (4.3), and the
- * per-stage `running` status, execution logs and SSE events the Python runner
- * published around each call (Phase 5's `events` router owns the transport
- * those need).
+ * Deliberately not here yet: the per-stage `running` status, execution logs and
+ * SSE events the Python runner published around each call, and the auto-publish
+ * half of the completion hook. All four need the transport and the routers
+ * Phase 5's `events`, `wordpress` and `nextjs` items own.
  */
 import { createWorkflow } from "@mastra/core/workflows/evented"
 
 import { editStep } from "../steps/edit"
 import { outlineStep } from "../steps/outline"
+import { pipelineCompleteStep } from "../steps/pipeline-complete"
 import { readyStep } from "../steps/ready"
 import { researchStep } from "../steps/research"
 import { stageStepInputSchema, stageStepOutputSchema } from "../steps/stage-io"
@@ -62,4 +67,5 @@ export const pipelineWorkflow = createWorkflow({
   .then(editStep)
   .then(imagesWorkflow)
   .then(readyStep)
+  .then(pipelineCompleteStep)
   .commit()

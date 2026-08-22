@@ -236,11 +236,18 @@ describe("the pipeline workflow", () => {
     expect((row.imageManifest as Record<string, unknown>).total_generated).toBe(2)
   })
 
-  it("leaves the post complete on every stage, at the last one", async () => {
+  /**
+   * `current_stage` reads `"complete"` rather than `"ready"` because the chain
+   * ends at the `pipeline-complete` step (item 4.7b), Python's
+   * `_post_completion_hook`. `pipeline-completion.test.ts` owns that rule's own
+   * coverage; here it is only the last thing this run does.
+   */
+  it("leaves the post complete on every stage, and marked complete", async () => {
     const row = await readPost()
 
     expect(row.stageStatus).toEqual(Object.fromEntries(STAGES.map((s) => [s, "complete"])))
-    expect(row.currentStage).toBe("ready")
+    expect(row.currentStage).toBe("complete")
+    expect(row.completedAt).toBeInstanceOf(Date)
   })
 
   /**

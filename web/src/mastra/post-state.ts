@@ -229,6 +229,29 @@ export async function markCompleteIfAllStagesComplete(postId: string): Promise<b
 }
 
 /**
+ * Stamp a post finished, ported from `_post_completion_hook` in
+ * `api/src/worker.py:426`: `current_stage = "complete"` and `completed_at` now.
+ *
+ * Deliberately unconditional, unlike `markCompleteIfAllStagesComplete`. Python
+ * ran this at the end of a full pipeline without consulting `stage_status`,
+ * which matters because a stage can finish without succeeding: the `images`
+ * stage writes `images: failed` and returns rather than raising, and the run
+ * carries on to `ready` and ends. Checking the map here would leave such a run
+ * with `completed_at` null and `current_stage` stuck on the last stage, which
+ * is not what the dashboard showed before the port.
+ *
+ * The auto-publish half of Python's hook (queueing WordPress and Next.js
+ * publishes) depends on those two routers and belongs to Phase 5.
+ */
+export async function markPipelineComplete(postId: string): Promise<void> {
+  const now = new Date()
+  await getDb()
+    .update(posts)
+    .set({ currentStage: CURRENT_STAGE_COMPLETE, completedAt: now, updatedAt: now })
+    .where(eq(posts.id, postId))
+}
+
+/**
  * The internal links offered to the `edit` stage, ported from
  * `_fetch_internal_links()` in `api/src/worker.py`: every link crawled for the
  * post's profile, or none when the post has no profile.
