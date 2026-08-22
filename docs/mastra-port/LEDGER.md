@@ -9048,8 +9048,166 @@ three pieces are separately verifiable, so they are separate items.
       $ cd api && uv run ruff format --check .
       9 files would be reformatted, 129 files already formatted
       ```
-  - [ ] 5.3c Pipeline control: `POST /{post_id}/run`, `/run-all`, `/rerun`, `/restart`,
-    `/pause` and `/publish`, started as Mastra runs rather than ARQ jobs.
+  - [ ] 5.3c Pipeline control (split: six endpoints, three of which rewrite the whole
+    stage map. Split into 5.3c-i `/run` and `/run-all`, 5.3c-ii `/rerun` and `/restart`,
+    5.3c-iii `/pause` and `/publish`.)
+    - [x] 5.3c-i `POST /{post_id}/run` and `POST /{post_id}/run-all`, started as Mastra
+      runs rather than ARQ jobs.
+
+      Ported to `web/src/app/api/posts/[id]/run/route.ts` and
+      `web/src/app/api/posts/[id]/run-all/route.ts`, with `run-control.ts` holding
+      `_next_stage()` and the 400 helper the control endpoints share.
+      `startPipeline()` gains an optional `stages` argument, which is ARQ's `stage`
+      positional: `run_pipeline_stage(post_id, stage)` turned it into `stages=[stage]`.
+
+      **`_next_stage()` stays at the route layer.** Python defined it in the router,
+      not in `state.py`, and the reason survives the port: it decides which stage name
+      the 202 echoes, not which stages the run executes. The run is handed `stage`
+      verbatim, so a `/run` with no `stage` starts a full pipeline whose own skip rule
+      (`shouldRunStage()` in `mastra/steps/stage-io.ts`) re-derives the same
+      first-incomplete stage from the committed row. Pinning the run to the stage the
+      response happened to name would be a behaviour change: the row can move between
+      the read and the worker picking the event up.
+
+      **Deviation 1: a repeated `?stage=` keeps the last value, not the first.**
+      FastAPI read `stage: str | None` through Starlette's `QueryParams`, which is a
+      multidict whose `get()` returns the last value of a repeated key.
+      `URLSearchParams.get()` returns the first. Probed against the installed
+      Starlette rather than assumed:
+
+      ```
+      $ cd api && uv run python -c "
+      from starlette.datastructures import QueryParams
+      q = QueryParams('stage=write&stage=edit')
+      print('get:', q.get('stage'))
+      print('empty:', QueryParams('stage=').get('stage'))
+      "
+      get: edit
+      empty:
+      ```
+
+      The handler therefore reads `searchParams.getAll("stage").at(-1)`. The same probe
+      pins the second behaviour the handler reproduces: `?stage=` yields `""`, which is
+      falsy in Python, so an empty value behaved as if the parameter were absent.
+
+      **Deviation 2: `/run-all` always issues its UPDATE and bumps `updated_at`.**
+      SQLAlchemy compared the new `stage_settings` dict against the loaded one at flush
+      time, so a run-all on a post whose six stages are already complete emitted no
+      UPDATE. Reproducing that needs a deep equality over a jsonb column whose failure
+      mode is skipping a write that should happen. This is the same deviation already
+      recorded for `PATCH /api/posts/{post_id}` and `PATCH /api/profiles/{profile_id}`,
+      and nothing in `web/src/lib/api.ts` branches on `updated_at`.
+
+      **Not deviations, deliberately preserved.** The 404 is resolved before `stage` is
+      validated, so a bad stage on another user's post is a 404 and never confirms the
+      post exists. `/run` writes `current_stage` and `stage_status[target] = "running"`
+      before the run is started, so the post detail page's poll never sees a started
+      run at its old status. `/run-all` guards on `stage_status`, not on the mode, so a
+      stage already complete keeps its review setting for the next rerun, and the
+      whole-map copy means non-stage keys stored in `stage_settings` survive.
+
+      `web/src/lib/api.ts` needed no change: `posts.run()` already declares
+      `{ status: string; stage: string }` and `posts.runAll()` already declares
+      `{ status: string; mode: string }`, which is what both handlers return.
+
+      **Every real enqueue in the test file starts a run that cannot reach a
+      provider**, because a worker started by another test file shares the bus. The
+      `/run` case leaves `stage_settings` gating `research` at `"review"` so the run
+      suspends before it spends; the `/run-all` case uses a post whose six stages are
+      complete so every stage is skipped; and the stage-selection case starts
+      `startPipeline()` on a post id no row has, so the step throws out of
+      `loadPipelineState()` before rendering a prompt. The `?stage=` mapping is
+      asserted through a recorded no-op start instead, because a named stage skips the
+      review gate by design (`stageNeedsReview()`) and starting one for real would put
+      a live provider call on the bus.
+
+      ```
+      $ cd web && npx vitest run src/app/api/posts/run-control.test.ts --reporter=verbose
+       ✓ POST /api/posts/{post_id}/run > rejects an unauthenticated request 3ms
+       ✓ POST /api/posts/{post_id}/run > answers a malformed path uuid with FastAPI's 422 15ms
+       ✓ POST /api/posts/{post_id}/run > answers a post that does not exist with a 404 5ms
+       ✓ POST /api/posts/{post_id}/run > answers another user's post with the same 404, starting nothing 7ms
+       ✓ POST /api/posts/{post_id}/run > prefers the 404 over the invalid-stage 400 on another user's post 4ms
+       ✓ POST /api/posts/{post_id}/run > answers a stage outside STAGES with a 400 naming it 5ms
+       ✓ POST /api/posts/{post_id}/run > answers a fully complete pipeline with a 400, starting nothing 4ms
+       ✓ POST /api/posts/{post_id}/run > targets the first stage of a post that has run nothing 6ms
+       ✓ POST /api/posts/{post_id}/run > targets the first incomplete stage, preserving the statuses around it 6ms
+       ✓ POST /api/posts/{post_id}/run > treats an empty ?stage= as absent, the way a falsy Python string was 5ms
+       ✓ POST /api/posts/{post_id}/run > keeps the last value of a repeated ?stage=, as Starlette's QueryParams does 4ms
+       ✓ POST /api/posts/{post_id}/run > runs a named stage that is already complete, marking only that stage running 4ms
+       ✓ POST /api/posts/{post_id}/run > publishes a real workflow.start for the gated full run 44ms
+       ✓ POST /api/posts/{post_id}/run > carries a named stage selection across the bus 29ms
+       ✓ POST /api/posts/{post_id}/run-all > rejects an unauthenticated request 1ms
+       ✓ POST /api/posts/{post_id}/run-all > answers a malformed path uuid with FastAPI's 422 2ms
+       ✓ POST /api/posts/{post_id}/run-all > answers a post that does not exist with a 404 2ms
+       ✓ POST /api/posts/{post_id}/run-all > answers another user's post with the same 404, writing nothing 5ms
+       ✓ POST /api/posts/{post_id}/run-all > forces every incomplete stage to auto and starts an unselected run 5ms
+       ✓ POST /api/posts/{post_id}/run-all > leaves a completed stage's mode alone 5ms
+       ✓ POST /api/posts/{post_id}/run-all > preserves stage_settings keys that are not stage names 6ms
+       ✓ POST /api/posts/{post_id}/run-all > changes no mode when every stage is complete 5ms
+       ✓ POST /api/posts/{post_id}/run-all > publishes a real workflow.start for a post with nothing left to run 32ms
+       Test Files  1 passed (1)
+            Tests  23 passed (23)
+         Duration  2.28s (transform 141ms, setup 116ms, import 856ms, tests 1.23s, environment 0ms)
+      ```
+
+      Two negative controls, each run against the finished tests:
+
+      ```
+      # 1. read the query parameter with URLSearchParams.get() (first wins)
+      ×  keeps the last value of a repeated ?stage=, as Starlette's QueryParams does
+         Tests  1 failed | 22 passed (23)
+
+      # 2. drop run-all's stage_status guard and force every stage to "auto"
+      ×  leaves a completed stage's mode alone
+      ×  changes no mode when every stage is complete
+         Tests  2 failed | 21 passed (23)
+      ```
+
+      Frontend gates:
+
+      ```
+      $ cd web && npx tsc --noEmit ; echo "exit: $?"
+      exit: 0
+
+      $ cd web && npx eslint ; echo "exit: $?"
+      exit: 0
+
+      $ cd web && npx vitest run
+       Test Files  2 failed | 72 passed (74)
+            Tests  9 failed | 1223 passed | 7 skipped (1239)
+
+      $ cd web && npx next build ; echo "exit: $?"
+      ✓ Compiled successfully in 3.5s
+      ├ ƒ /api/posts
+      ├ ƒ /api/posts/[id]
+      ├ ƒ /api/posts/[id]/duplicate
+      ├ ƒ /api/posts/[id]/run
+      ├ ƒ /api/posts/[id]/run-all
+      ├ ƒ /api/posts/batch
+      exit: 0
+      ```
+
+      1200 -> 1223 passing is exactly the 23 added here; the 9 failures are the Phase 0
+      baseline (6 in `image-preview.test.tsx`, 3 in `PostDetail.test.tsx`). An earlier
+      run of the same suite reported 10, the extra one being `scaffold-check.test.ts`'s
+      known intermittent, already tracked in `todo.md`; it passes on its own and passed
+      on the rerun above.
+
+      `api/` is untouched by this item, and its gates are unchanged:
+
+      ```
+      $ cd api && uv run pytest -q     # .env sourced
+      125 failed, 236 passed, 25 errors in 14.67s
+
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 129 files already formatted
+      ```
+    - [ ] 5.3c-ii `POST /{post_id}/rerun` and `POST /{post_id}/restart`.
+    - [ ] 5.3c-iii `POST /{post_id}/pause` and `POST /{post_id}/publish`.
   - [ ] 5.3d `GET /{post_id}/export/markdown`, `/export/html`, `/export/all`,
     `/{post_id}/logs` and `/{post_id}/analytics`.
 - [ ] 5.4 `queue`
