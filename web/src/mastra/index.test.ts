@@ -21,6 +21,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getPool, toNodePostgresUrl } from "../db"
 import { logger, mastra, pubsub, storage } from "./index"
+import { RECRAWL_CHECK_CRON, recrawlCheckWorkflow } from "./workflows/recrawl-check"
 import { sitemapCrawlWorkflow } from "./workflows/sitemap-crawl"
 
 /** An independent connection, so the assertions do not read through the pool under test. */
@@ -76,6 +77,33 @@ describe("mastra instance", () => {
     }[]
     expect(graph.map((entry) => entry.type)).toEqual(["step"])
     expect(graph[0].step?.id).toBe("sitemap-crawl")
+  })
+
+  /**
+   * The nightly re-crawl check's registration (item 5.2c-ii-2), here for the
+   * same reason. Registering it is what schedules it: the declared cron is read
+   * off the workflow by the instance's scheduler, so an unregistered
+   * `recrawlCheckWorkflow` is a re-crawl that never happens.
+   */
+  it("registers the nightly re-crawl check with its cron declared", () => {
+    expect(mastra.getWorkflow("recrawlCheck")).toBe(recrawlCheckWorkflow)
+    expect(Object.keys(mastra.listWorkflows())).toContain("recrawlCheck")
+    expect(recrawlCheckWorkflow.id).toBe("recrawl-check")
+    // `createWorkflow` returns `EventedWorkflow`, which declares
+    // `getScheduleConfigs()`, but `.then().commit()` narrows back to the base
+    // `Workflow`, which does not. The method is there at runtime (it is what
+    // the scheduler reads at registration); only the chained type loses it.
+    const scheduled = recrawlCheckWorkflow as unknown as {
+      getScheduleConfigs(): { cron: string; inputData?: unknown }[]
+    }
+    expect(scheduled.getScheduleConfigs()).toEqual([{ cron: RECRAWL_CHECK_CRON, inputData: {} }])
+
+    const graph = recrawlCheckWorkflow.serializedStepGraph as {
+      type: string
+      step?: { id?: string }
+    }[]
+    expect(graph.map((entry) => entry.type)).toEqual(["step"])
+    expect(graph[0].step?.id).toBe("recrawl-check")
   })
 })
 

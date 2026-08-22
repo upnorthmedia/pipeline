@@ -7735,7 +7735,7 @@ three pieces are separately verifiable, so they are separate items.
   warning per unreachable sitemap and per parse failure. The crawl job is where
   those log lines belong.
 
-- [ ] 5.2c-ii `profiles`: the `crawl_profile_sitemap` job itself, as a Mastra
+- [x] 5.2c-ii `profiles`: the `crawl_profile_sitemap` job itself, as a Mastra
   primitive registered on the instance and executed in the `worker` process off
   the Redis Streams bus, upserting `internal_links` by `(profile_id, url)` and
   moving `crawl_status` / `last_crawled_at`. Also decide the home of
@@ -7746,6 +7746,9 @@ three pieces are separately verifiable, so they are separate items.
   **Split.** The item carries two independent pieces of work: the job, and the
   scheduler that fires it. They are split into 5.2c-ii-1 (the job) and
   5.2c-ii-2 (the nightly check), and 5.2c-ii is checked when both are.
+
+  **Both are done.** Evidence is under 5.2c-ii-1 and 5.2c-ii-2; this header
+  carries none of its own.
 
 - [x] 5.2c-ii-1 `profiles`: `crawl_profile_sitemap` as a registered Mastra
   workflow, executed off the Redis Streams bus, upserting `internal_links` by
@@ -7917,7 +7920,7 @@ three pieces are separately verifiable, so they are separate items.
   9 files would be reformatted, 127 files already formatted
   ```
 
-- [ ] 5.2c-ii-2 `profiles`: the home of `check_recrawl_schedules`, the daily
+- [x] 5.2c-ii-2 `profiles`: the home of `check_recrawl_schedules`, the daily
   `cron(check_recrawl_schedules, hour=0, minute=0)` in `WorkerSettings` that
   starts a crawl per profile whose `recrawl_interval` (weekly / biweekly /
   monthly) is due. Mastra has a first-party home for it that was not obvious
@@ -7929,6 +7932,199 @@ three pieces are separately verifiable, so they are separate items.
   version before relying on it, and decide between a `recrawl-check` workflow
   that starts one `sitemapCrawl` run per due profile and a schedule declared on
   `sitemapCrawl` itself
+
+  **Decision: a `recrawl-check` workflow that carries the cron, not a schedule
+  on `sitemapCrawl`.** A declared schedule carries one static `inputData`, and
+  `sitemapCrawl` needs a different `profileId` per run, so the fan-out has to
+  be a step that queries. `web/src/mastra/steps/recrawl-check.ts` is that step
+  and `web/src/mastra/workflows/recrawl-check.ts` the one-step workflow that
+  declares `schedule: { cron: "0 0 * * *", inputData: {} }`, registered on the
+  instance as `recrawlCheck`.
+
+  `startAsync()` is the `enqueue_job` equivalent: it publishes `workflow.start`
+  and returns the run id without waiting, so one slow site cannot hold up the
+  rest of the nightly sweep. The scheduler only runs where `startWorkers()` was
+  called, which the `web` service never does, so the sweep fires in `worker`.
+
+  **The declared schedule really fires against the installed version.** The
+  ledger item asked for this to be confirmed rather than assumed. A probe
+  workflow with a six-part per-second cron, registered on the test instance
+  with `scheduler: { tickIntervalMs: 500 }`, executed its step 755ms after the
+  workers started. `@mastra/core` is 1.61.0.
+
+  **Parity oracle.** `api/scripts/export_recrawl_parity.py` copies the
+  per-profile branch out of `check_recrawl_schedules` verbatim, runs it on the
+  `api/` interpreter against a fixed reference `now`, and writes
+  `web/src/mastra/steps/data/recrawl-due-parity.json`. 16 cases: each interval
+  one second either side of its threshold, the never-crawled short circuit
+  (including with an interval the job does not recognise and with an empty
+  one), an unrecognised interval long overdue, and three `last_crawled_at`
+  values in the future.
+
+  ```
+  $ cd api && uv run python scripts/export_recrawl_parity.py
+  wrote 16 cases to /Users/cody/.../web/src/mastra/steps/data/recrawl-due-parity.json
+  ```
+
+  **Three behaviours a rewrite would have lost**, all pinned by tests:
+
+  1. `if not profile.last_crawled_at` short-circuits *before* the interval is
+     read, so a profile with an interval the job does not recognise and no
+     `last_crawled_at` is still crawled. The port keeps that ordering.
+  2. `crawl_status != "crawling"` renders `crawl_status <> 'crawling'`, which
+     is NULL and therefore false for a NULL `crawl_status`. A profile whose
+     status was never set is skipped by both stacks. `ne()` in drizzle renders
+     the same SQL, so this is faithful by default; the negative control below
+     shows what including NULL would do.
+  3. `recrawl_interval` is an unconstrained `varchar(20)`, so the interval
+     table is a `Map`, not an object literal. An object literal would resolve
+     `constructor` to a function and compare it silently.
+
+  `Math.floor` matches `timedelta.days` (both floor toward negative infinity).
+  The two only diverge for a negative delta and every threshold here is
+  positive, so both answer "not due" for a `last_crawled_at` in the future.
+  Confirmed: swapping `Math.floor` for `Math.trunc` leaves all 19 pure tests
+  passing. It stays `Math.floor` for faithfulness, not for an observable
+  difference, and the oracle covers the future-dated cases in case a threshold
+  ever changes.
+
+  **Test isolation deviation.** The test's `PostgresStore` uses
+  `schemaName: "mastra_test_recrawl"` rather than the shared `public` schema,
+  and drops it in `afterAll`. `mastra_schedules` is one table for the whole
+  database, and a scheduler refuses to fire a schedule whose target workflow it
+  does not know, deleting the row after a few consecutive misses. Registering a
+  scheduled workflow on the production instance means every test file that
+  calls `mastra.startWorkers()` now runs a scheduler over that shared table, so
+  it either steals this file's fires through the compare-and-swap or deletes
+  the probe row. Measured: on `public` the per-second probe never fired inside
+  30s when the whole `src/mastra` suite ran, and fires in about a second on its
+  own schema.
+
+  **Installed-types discrepancy.** `createWorkflow` from
+  `@mastra/core/workflows/evented` returns `EventedWorkflow`, which declares
+  `getScheduleConfigs()`, but `.then().commit()` narrows back to the base
+  `Workflow`, which does not. The method exists at runtime (it is what the
+  scheduler reads at registration); only the chained type loses it, so
+  `index.test.ts` asserts on it through a narrow cast with that noted.
+
+  ```
+  $ cd web && ./node_modules/.bin/vitest run --reporter=verbose \
+      src/mastra/steps/recrawl-check.test.ts \
+      src/mastra/workflows/recrawl-check.test.ts
+
+   ✓ src/mastra/steps/recrawl-check.test.ts > the due decision > has an oracle covering every branch of the Python job 0ms
+   ✓ ... > matches check_recrawl_schedules for 'never crawled, weekly' 0ms
+   ✓ ... > matches check_recrawl_schedules for 'never crawled, unrecognised interval' 0ms
+   ✓ ... > matches check_recrawl_schedules for 'never crawled, empty interval' 0ms
+   ✓ ... > matches check_recrawl_schedules for 'weekly, one second short of 7 days' 0ms
+   ✓ ... > matches check_recrawl_schedules for 'weekly, exactly 7 days' 0ms
+   ✓ ... > matches check_recrawl_schedules for 'weekly, 30 days' 0ms
+   ✓ ... > matches check_recrawl_schedules for 'biweekly, 13 days 23h' 0ms
+   ✓ ... > matches check_recrawl_schedules for 'biweekly, exactly 14 days' 0ms
+   ✓ ... > matches check_recrawl_schedules for 'biweekly, 7 days' 0ms
+   ✓ ... > matches check_recrawl_schedules for 'monthly, 29 days 23h59m' 0ms
+   ✓ ... > matches check_recrawl_schedules for 'monthly, exactly 30 days' 0ms
+   ✓ ... > matches check_recrawl_schedules for 'monthly, 14 days' 0ms
+   ✓ ... > matches check_recrawl_schedules for 'unrecognised interval, long overdue' 0ms
+   ✓ ... > matches check_recrawl_schedules for 'weekly, crawled one second in the fut…' 0ms
+   ✓ ... > matches check_recrawl_schedules for 'weekly, crawled 400 days in the future' 0ms
+   ✓ ... > matches check_recrawl_schedules for 'weekly, crawled at exactly now' 0ms
+   ✓ ... > the due decision > reads only its own intervals, not Object.prototype 0ms
+   ✓ ... > the due decision > keeps the three intervals the job understood 0ms
+   ✓ src/mastra/workflows/recrawl-check.test.ts > the declared cron > persists a schedule row for the re-crawl check 2ms
+   ✓ ... > the declared cron > keeps ARQ's cron(hour=0, minute=0) as midnight daily 0ms
+   ✓ ... > the declared cron > actually fires a scheduled workflow against the installed version 755ms
+   ✓ ... > the profile scan > starts a crawl for the due profile and the never-crawled one only 0ms
+   ✓ ... > the profile scan > gives every started run a run id 0ms
+   ✓ ... > the profile scan > considers only profiles with an interval and a status that is not crawling 0ms
+   ✓ ... > the profile scan > logs the line ARQ logged 0ms
+   ✓ ... > the profile scan > leaves the excluded profiles untouched 3ms
+   ✓ ... > the profile scan > runs the crawls it started through to completion 1ms
+   ✓ ... > the profile scan > advances last_crawled_at past the due threshold 1ms
+
+   Test Files  2 passed (2)
+        Tests  29 passed (29)
+     Duration  3.24s
+  ```
+
+  **Negative controls.** Three, each reverted afterwards.
+
+  Dropping `schedule: { cron: RECRAWL_CHECK_CRON, inputData: {} }` from the
+  workflow:
+
+  ```
+   FAIL  src/mastra/workflows/recrawl-check.test.ts > the declared cron > persists a schedule row for the re-crawl check
+  AssertionError: expected [] to have a length of 1 but got +0
+   Tests  1 failed | 9 passed (10)
+  ```
+
+  Widening the status filter to `or(isNull(crawlStatus), ne(crawlStatus, "crawling"))`,
+  which is the mistake that would silently re-crawl every profile whose status
+  was never set:
+
+  ```
+   × starts a crawl for the due profile and the never-crawled one only
+   × leaves the excluded profiles untouched
+   Tests  2 failed | 8 passed (10)
+  ```
+
+  Changing the due comparison from `>= days` to `> days`:
+
+  ```
+   FAIL  src/mastra/steps/recrawl-check.test.ts > the due decision > matches check_recrawl_schedules for 'monthly, exactly 30 days'
+  AssertionError: expected false to be true
+   Tests  3 failed | 16 passed (19)
+  ```
+
+  **Gates.**
+
+  ```
+  $ cd web && ./node_modules/.bin/tsc --noEmit
+  (no output, exit 0)
+
+  $ pnpm -C web lint
+  (no output, exit 0)
+
+  $ pnpm -C web test
+  Test Files  2 failed | 66 passed (68)
+       Tests  9 failed | 1083 passed | 7 skipped (1099)
+  # the recorded 9-failure baseline: 6 in image-preview.test.tsx and 3 in
+  # PostDetail.test.tsx, all pre-existing
+
+  $ pnpm -C web build
+  ✓ Compiled successfully
+  ```
+
+  `api/` is unchanged except for the new export script, which is why the format
+  check now reports one more already-formatted file (127 -> 128):
+
+  ```
+  $ cd api && uv run pytest -q     # .env sourced
+  125 failed, 236 passed, 25 errors in 15.31s
+
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 128 files already formatted
+  ```
+
+  **Side effect worth knowing about.** Registration is what schedules: the
+  first `startWorkers()` on the production instance writes the row, so the dev
+  database now holds one, which is the behaviour a deploy will have:
+
+  ```
+  $ psql "$DATABASE_URL_SYNC" -c "select id, cron, status, target from mastra_schedules"
+          id        |   cron    | status |                                target
+  ------------------+-----------+--------+----------------------------------------------------------------------
+   wf_recrawl-check | 0 0 * * * | active | {"type": "workflow", "inputData": {}, "workflowId": "recrawl-check"}
+  ```
+
+  **Not covered by this item.** The scheduler is only started by
+  `startWorkers()`, so the nightly sweep is not exercised by any process this
+  repo boots outside a test until Phase 7 runs the `worker` service under
+  `docker-compose`. The end-to-end evidence that the cron reaches a real worker
+  in a real deployment belongs to 7.6.
 - [ ] 5.2c-iii `profiles`: `POST /api/profiles/{profile_id}/crawl`, plus the
   auto-enqueue on create that 5.2b's `POST` left out because the mechanism did
   not exist yet

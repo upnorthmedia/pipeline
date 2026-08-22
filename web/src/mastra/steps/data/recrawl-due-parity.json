@@ -1,0 +1,102 @@
+{
+  "python_version": "3.13.12",
+  "now": "2026-08-22T12:00:00+00:00",
+  "cases": [
+    {
+      "name": "never crawled, weekly",
+      "recrawl_interval": "weekly",
+      "last_crawled_at": null,
+      "enqueues": true
+    },
+    {
+      "name": "never crawled, unrecognised interval",
+      "recrawl_interval": "quarterly",
+      "last_crawled_at": null,
+      "enqueues": true
+    },
+    {
+      "name": "never crawled, empty interval",
+      "recrawl_interval": "",
+      "last_crawled_at": null,
+      "enqueues": true
+    },
+    {
+      "name": "weekly, one second short of 7 days",
+      "recrawl_interval": "weekly",
+      "last_crawled_at": "2026-08-15T12:00:01+00:00",
+      "enqueues": false
+    },
+    {
+      "name": "weekly, exactly 7 days",
+      "recrawl_interval": "weekly",
+      "last_crawled_at": "2026-08-15T12:00:00+00:00",
+      "enqueues": true
+    },
+    {
+      "name": "weekly, 30 days",
+      "recrawl_interval": "weekly",
+      "last_crawled_at": "2026-07-23T12:00:00+00:00",
+      "enqueues": true
+    },
+    {
+      "name": "biweekly, 13 days 23h",
+      "recrawl_interval": "biweekly",
+      "last_crawled_at": "2026-08-08T13:00:00+00:00",
+      "enqueues": false
+    },
+    {
+      "name": "biweekly, exactly 14 days",
+      "recrawl_interval": "biweekly",
+      "last_crawled_at": "2026-08-08T12:00:00+00:00",
+      "enqueues": true
+    },
+    {
+      "name": "biweekly, 7 days",
+      "recrawl_interval": "biweekly",
+      "last_crawled_at": "2026-08-15T12:00:00+00:00",
+      "enqueues": false
+    },
+    {
+      "name": "monthly, 29 days 23h59m",
+      "recrawl_interval": "monthly",
+      "last_crawled_at": "2026-07-23T12:01:00+00:00",
+      "enqueues": false
+    },
+    {
+      "name": "monthly, exactly 30 days",
+      "recrawl_interval": "monthly",
+      "last_crawled_at": "2026-07-23T12:00:00+00:00",
+      "enqueues": true
+    },
+    {
+      "name": "monthly, 14 days",
+      "recrawl_interval": "monthly",
+      "last_crawled_at": "2026-08-08T12:00:00+00:00",
+      "enqueues": false
+    },
+    {
+      "name": "unrecognised interval, long overdue",
+      "recrawl_interval": "quarterly",
+      "last_crawled_at": "2025-07-18T12:00:00+00:00",
+      "enqueues": false
+    },
+    {
+      "name": "weekly, crawled one second in the future",
+      "recrawl_interval": "weekly",
+      "last_crawled_at": "2026-08-22T12:00:01+00:00",
+      "enqueues": false
+    },
+    {
+      "name": "weekly, crawled 400 days in the future",
+      "recrawl_interval": "weekly",
+      "last_crawled_at": "2027-09-26T12:00:00+00:00",
+      "enqueues": false
+    },
+    {
+      "name": "weekly, crawled at exactly now",
+      "recrawl_interval": "weekly",
+      "last_crawled_at": "2026-08-22T12:00:00+00:00",
+      "enqueues": false
+    }
+  ]
+}

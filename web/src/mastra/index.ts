@@ -30,6 +30,7 @@ import { researchAgent } from "./agents/research"
 import { writeAgent } from "./agents/write"
 import { imagesWorkflow } from "./workflows/images"
 import { pipelineWorkflow } from "./workflows/pipeline"
+import { recrawlCheckWorkflow } from "./workflows/recrawl-check"
 import { scaffoldCheckWorkflow } from "./workflows/scaffold-check"
 import { sitemapCrawlWorkflow } from "./workflows/sitemap-crawl"
 
@@ -121,11 +122,16 @@ export const mastra = new Mastra({
   // `sitemapCrawl` is not part of a pipeline run: it is the ARQ
   // `crawl_profile_sitemap` job, started per profile by the crawl route and by
   // the nightly re-crawl check.
+  // `recrawlCheck` is that nightly check, and is ARQ's `cron_jobs` entry: it
+  // carries its own cron, so registering it here is what schedules it. The
+  // scheduler only runs where `startWorkers()` was called, so it fires in the
+  // `worker` service and never in `web`.
   workflows: {
     pipeline: pipelineWorkflow,
     images: imagesWorkflow,
     scaffoldCheck: scaffoldCheckWorkflow,
     sitemapCrawl: sitemapCrawlWorkflow,
+    recrawlCheck: recrawlCheckWorkflow,
   },
   agents: {
     research: researchAgent,
