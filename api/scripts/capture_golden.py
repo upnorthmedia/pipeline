@@ -18,6 +18,11 @@ spending provider credits.
 Usage:
     uv run python scripts/capture_golden.py --dry-run --out /tmp/golden-dryrun
     uv run python scripts/capture_golden.py --out ../docs/mastra-port/golden
+
+`--resume` reuses any stage fixture that already exists on disk, replaying its
+saved `stage_output` into the running state instead of re-issuing the provider
+call, so a capture interrupted partway through can be finished without paying
+again for the stages that already succeeded.
 """
 
 from __future__ import annotations
@@ -454,6 +459,7 @@ async def capture_post(
     rec: Recorder,
     api_keys: dict[str, str],
     dry_run: bool,
+    resume: bool = False,
 ) -> list[Path]:
     from src.pipeline.stages.edit import edit_node
     from src.pipeline.stages.images import images_node
@@ -481,6 +487,16 @@ async def capture_post(
     written: list[Path] = []
 
     for stage in stages:
+        existing = post_dir / f"{stage}.json"
+        if resume and existing.exists():
+            # Replay the saved output into state exactly as the live path does
+            # (including `_stage_meta`), so a resumed run feeds later stages the
+            # same input a single uninterrupted run would have.
+            saved = json.loads(existing.read_text())["stage_output"]
+            state.update(saved)
+            print(f"[{slug}] {stage}: skipped, reusing {existing}", flush=True)
+            continue
+
         print(f"[{slug}] {stage}: running", flush=True)
         state_input = _redact(_serialize(dict(state)), secrets)
         rec.start(stage)
@@ -528,6 +544,11 @@ async def main() -> int:
     )
     parser.add_argument("--post", action="append", help="limit to these post slugs")
     parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse any stage fixture that already exists instead of re-running it",
+    )
+    parser.add_argument(
         "--stages", default=",".join(STAGES), help="comma separated stage list"
     )
     args = parser.parse_args()
@@ -564,7 +585,7 @@ async def main() -> int:
     written: list[Path] = []
     for spec in specs:
         written += await capture_post(
-            spec, stages, out_dir, rec, api_keys, args.dry_run
+            spec, stages, out_dir, rec, api_keys, args.dry_run, args.resume
         )
 
     print(f"\nWrote {len(written)} fixture file(s) under {out_dir}")

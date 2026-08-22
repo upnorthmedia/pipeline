@@ -684,6 +684,81 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
 - [ ] 0.4c Live capture for `best-time-tracking-tools-for-agencies` (all six stages). Commit
   its fixtures, then check 0.4.
 
+  **Split.** A full six-stage live capture is a ~10 minute uninterrupted run and two
+  attempts have now been cut off partway, discarding provider spend on the stages that had
+  already succeeded, because the harness always restarted from `research`. 0.4c is split
+  into 0.4c-i (make the harness resumable, no provider spend beyond what is already on
+  disk) and 0.4c-ii (capture the remaining stages). 0.4c is checked when both are done.
+
+- [x] 0.4c-i Make `capture_golden.py` resumable so an interrupted capture can be finished
+  without re-paying for completed stages, and commit the one stage fixture already captured
+  live for this post (`research.json`, 71788 bytes, `sonar-pro`, 1475 in / 5489 out,
+  37.5s).
+
+  `--resume` reuses any stage fixture already on disk, replaying its saved `stage_output`
+  into the running state (including `_stage_meta`, which the live path also leaves in
+  state) instead of re-issuing the provider call.
+
+  Verified against the real `research.json` with the network stubbed, so the skip path is
+  exercised on a genuine live fixture without spending:
+
+  ```sh
+  mkdir -p /tmp/golden-resume/best-time-tracking-tools-for-agencies
+  cp docs/mastra-port/golden/best-time-tracking-tools-for-agencies/research.json \
+     /tmp/golden-resume/best-time-tracking-tools-for-agencies/
+  cd api && uv run python scripts/capture_golden.py --dry-run --resume \
+     --out /tmp/golden-resume --post best-time-tracking-tools-for-agencies
+  ```
+
+  ```
+  [best-time-tracking-tools-for-agencies] research: skipped, reusing /private/tmp/golden-resume/best-time-tracking-tools-for-agencies/research.json
+  [best-time-tracking-tools-for-agencies] outline: wrote .../outline.json (86648 bytes)
+  [best-time-tracking-tools-for-agencies] write: wrote .../write.json (41600 bytes)
+  [best-time-tracking-tools-for-agencies] edit: wrote .../edit.json (63458 bytes)
+  [best-time-tracking-tools-for-agencies] images: wrote .../images.json (59428 bytes)
+  [best-time-tracking-tools-for-agencies] ready: wrote .../ready.json (40634 bytes)
+  Wrote 5 fixture file(s) under /private/tmp/golden-resume
+  ```
+
+  The replayed state is byte-identical to what an uninterrupted run would have fed the next
+  stage, and the research document really does reach the outline prompt:
+
+  ```
+  research chars in resumed outline state_input: 22005
+  matches live research output exactly: True
+  _stage_meta carried: {'stage': 'research', 'model': 'sonar-pro', 'tokens_in': 1475, 'tokens_out': 5489, 'duration_s': 37.51096874999348}
+  research text present in outline prompt: True
+  ```
+
+  Gates after the change, both identical to the 0.1 baseline (the touched file itself is
+  already correctly formatted):
+
+  ```
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  exit=1
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 118 files already formatted
+  exit=1
+  $ cd api && uv run ruff format --check scripts/capture_golden.py
+  1 file already formatted
+  exit=0
+  ```
+
+  Not run this iteration: `pytest`. The change is confined to `api/scripts/`, which no test
+  imports (`grep -rn "capture_golden" api/tests/` is empty), and the last recorded pytest
+  result stands at 125 failed / 236 passed / 25 errors.
+
+- [ ] 0.4c-ii Capture the remaining five stages (`outline`, `write`, `edit`, `images`,
+  `ready`) for `best-time-tracking-tools-for-agencies` with real keys, using `--resume`.
+  Record usage and cost, commit the fixtures, then check 0.4c and 0.4.
+
+  ```sh
+  cd api && set -a && . /Users/cody/Documents/code/jena-ai/.env && set +a \
+    && uv run python scripts/capture_golden.py --out ../docs/mastra-port/golden \
+       --post best-time-tracking-tools-for-agencies --resume
+  ```
+
 ## Phase 1: TypeScript data layer
 
 - [ ] 1.1 Introspect the live database and define the full schema in TypeScript (Drizzle
