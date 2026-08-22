@@ -13,7 +13,7 @@
  */
 import { eq, getTableColumns } from "drizzle-orm"
 
-import { getDb, posts } from "../db"
+import { getDb, internalLinks, posts } from "../db"
 import { STAGE_CONTENT_MAP, STAGES, pipelineContextSchema } from "./state"
 import type { InternalLink, Stage } from "./state"
 import { z } from "zod"
@@ -153,4 +153,37 @@ export async function saveStageOutput(
   if (stageStatus !== undefined) values.stageStatus = stageStatus
 
   await getDb().update(posts).set(values).where(eq(posts.id, postId))
+}
+
+/**
+ * The internal links offered to the `edit` stage, ported from
+ * `_fetch_internal_links()` in `api/src/worker.py`: every link crawled for the
+ * post's profile, or none when the post has no profile.
+ *
+ * Python also carries each link's `slug`, which no prompt reads; only `url` and
+ * `title` reach `buildStagePrompt`, so only those are selected here.
+ */
+export async function loadInternalLinks(profileId: string | null): Promise<InternalLink[]> {
+  if (!profileId) return []
+  const rows = await getDb()
+    .select({ url: internalLinks.url, title: internalLinks.title })
+    .from(internalLinks)
+    .where(eq(internalLinks.profileId, profileId))
+  return rows.map((row) => ({ url: row.url, title: row.title ?? undefined }))
+}
+
+/**
+ * Read a run's state straight from the database, which is what makes a stage
+ * resumable: a step never trusts what an earlier step held in memory, it reads
+ * the columns those steps committed.
+ *
+ * Throws on a missing post rather than returning a default state, because every
+ * caller is a step that would otherwise render a prompt full of empty strings
+ * and bill a provider for it.
+ */
+export async function loadPipelineState(postId: string): Promise<PipelineState> {
+  const rows = await getDb().select().from(posts).where(eq(posts.id, postId)).limit(1)
+  const post = rows[0]
+  if (!post) throw new Error(`post ${postId} not found`)
+  return stateFromPost(post, await loadInternalLinks(post.profileId))
 }

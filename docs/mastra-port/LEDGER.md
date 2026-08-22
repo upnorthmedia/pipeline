@@ -2456,12 +2456,99 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   reports zero problems. No `api/` file was touched, so the pytest and ruff baselines
   are unchanged by construction.
 
-- [ ] 3.1c-ii `research` **step**: `createStep` with Zod input/output schemas, prompt
+- [x] 3.1c-ii `research` **step**: `createStep` with Zod input/output schemas, prompt
   assembled by `buildStagePrompt` (item 3.1a), the agent from item 3.1b, the
   meta-response retry loop from `research_node` (`_REFUSAL_PATTERNS`,
   `_EXPECTED_SECTIONS`, `MAX_RESEARCH_ATTEMPTS`, `_reinforced_prompt`), output persisted
   to `research_content` through `saveStageOutput` (item 3.1c-i), and the parity test
   against the golden fixtures.
+
+  **What was built**
+
+  - `web/src/mastra/steps/stage-io.ts`: the input/output contract every stage step
+    shares. Input is `{ postId }` only. A step reads its inputs from the columns
+    previous steps committed rather than from the workflow snapshot, which is what
+    makes a resume cheap and correct; the snapshot never carries article-sized
+    strings. Output is Python's `_stage_meta` (`stage`, `model`, `tokens_in`,
+    `tokens_out`, `duration_s`) plus `postId`, so the next step in the chain gets a
+    valid input with no mapping step between them.
+  - `web/src/mastra/steps/research.ts`: `researchStep` via `createStep` from
+    `@mastra/core/workflows/evented` (the same engine the scaffold workflow uses, per
+    item 2.4), plus the ported `isValidResearch`, `REFUSAL_PATTERNS`,
+    `EXPECTED_SECTIONS`, `MAX_RESEARCH_ATTEMPTS` and `reinforcedPrompt`.
+  - `web/src/mastra/post-state.ts` gains `loadInternalLinks` and `loadPipelineState`,
+    the read path a step uses: post row plus the profile's crawled links, matching
+    `_fetch_internal_links()` in `api/src/worker.py`. A missing post throws rather
+    than yielding an empty state, so a bad id cannot bill a provider call for a
+    prompt full of empty strings.
+
+  Nothing was registered on the Mastra instance by this item: `createStep` products
+  reach the instance through the workflow they are composed into, which is item 4.1.
+
+  **Parity oracle.** The fixture's `post_spec` is inserted into the real
+  Alembic-owned database, the step reads it back through drizzle, and the prompt it
+  hands the agent is compared byte for byte against the fixture's
+  `rendered_prompts[0]`. The provider call is replayed from the fixture's recorded
+  response body rather than made live; the live Perplexity call is item 3.1b's smoke
+  test, and re-billing a 6k-token research call on every `pnpm test` would prove
+  nothing this replay does not. Both database round trips run for real.
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm exec vitest run src/mastra/steps/research.test.ts
+   RUN  v4.0.18 /Users/cody/.../web
+
+   ✓ src/mastra/steps/research.test.ts (9 tests) 57ms
+
+   Test Files  1 passed (1)
+        Tests  9 passed (9)
+  ```
+
+  **Negative controls** (each reverted immediately):
+  1. `loadRules("research")` -> `loadRules("outline")`: both prompt parity tests red
+     with `- # Blog Research Agent` / `+ # Blog Outline Agent` in the diff. Proves the
+     comparison is against the real rendered prompt, not a self-consistent rebuild.
+  2. `tokensIn +=` -> `tokensIn =`: `AssertionError: expected 1510 to be 1610`. Proves
+     the retry test pins Python's sum-across-attempts billing rather than last-call
+     billing.
+  3. Reworded the retry preamble (`your limitations` -> `your limits`): retry test red
+     with the two `IMPORTANT: You must respond with ONLY...` strings differing. Worth
+     recording that the first version of this assertion compared against
+     `reinforcedPrompt()` itself and stayed green under this control, because both
+     sides moved together; it now compares against a `PYTHON_RETRY_PREAMBLE` literal
+     copied from `_reinforced_prompt`.
+  4. Deleted the `break` out of the retry loop: four tests red, including
+     `expected [ ...(3) ] to have a length of 1 but got 3`. Proves a valid first
+     response really does stop the loop instead of being re-asked three times.
+
+  **Gates**
+
+  ```
+  $ cd web && pnpm exec tsc --noEmit
+  tsc exit=0
+
+  $ cd web && pnpm lint
+  lint exit=0
+
+  $ cd web && NO_COLOR=1 pnpm test
+   Test Files  2 failed | 26 passed (28)
+        Tests  9 failed | 285 passed | 1 skipped (295)
+
+  $ cd web && pnpm build
+  build exit=0
+  ```
+
+  Failures held at the established baseline of 9, still the same two files
+  (`image-preview.test.tsx` 6, `PostDetail.test.tsx` 3); passes moved 276 -> 285,
+  which is the 9 new tests. No `api/` file was touched, so the pytest and ruff
+  baselines are unchanged by construction.
+
+  **Discrepancy noted.** `research_node` publishes four SSE progress lines through
+  `publish_stage_log` (rules loaded, calling Perplexity, retry warnings, token
+  count). The step logs the retry and degraded-research cases through
+  `mastra.getLogger()` but publishes no SSE. The event bus that carries these to the
+  dashboard is item 5.5, and Phase 8 reads step progress from Mastra's own stream
+  events rather than from hand-published log lines, so wiring a second channel here
+  would be building something Phase 8 replaces.
 - [ ] 3.2 `outline`
 - [ ] 3.3 `write`
 - [ ] 3.4 `edit`
