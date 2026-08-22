@@ -230,6 +230,49 @@ export async function announceStageStart(
   })
 }
 
+/**
+ * Python's `round(value, 2)` on a duration in seconds.
+ *
+ * The event carries a rounded number rather than the raw float because
+ * `debug-log-panel.tsx` renders `duration_s` straight into the log line, and a
+ * measured elapsed time is fifteen significant figures wide.
+ */
+function roundSeconds(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
+/**
+ * Announce that a stage finished, ported from the `publish_event` Python ran
+ * immediately after the database block that saved the stage's output
+ * (`api/src/worker.py:266`).
+ *
+ * Position matters the same way it does for the start announcement, and for
+ * the same reason: `posts/[id]/page.tsx` refetches the post on `stage_complete`,
+ * so the column and `stage_status` have to be committed before the event goes
+ * out. Every call site therefore sits after `saveStageOutput` and after
+ * `markRerunComplete`, which is where Python's publish sat relative to its own
+ * two writes.
+ *
+ * Takes the output the step is about to return rather than the fields
+ * separately, so what a browser is told and what the next step receives cannot
+ * drift apart. `model` and `durationS` are the only two Python sent; the token
+ * counts stayed in the execution log, which is item 5.5c.
+ *
+ * A skipped stage announces nothing, because Python's `continue` jumped over
+ * the publish along with the rest of the loop body. That is a property of where
+ * this is called from: every step returns before it reaches this line.
+ */
+export async function announceStageComplete(
+  mastra: { pubsub: PubSub },
+  output: StageStepOutput,
+): Promise<void> {
+  await publishPipelineEvent(mastra.pubsub, output.postId, "stage_complete", {
+    stage: output.stage,
+    model: output.model,
+    duration_s: roundSeconds(output.durationS),
+  })
+}
+
 /** The output of a stage that was skipped: the chain's fields and nothing else. */
 export function skippedStageOutput(input: StageStepInput, stage: Stage): StageStepOutput {
   return {

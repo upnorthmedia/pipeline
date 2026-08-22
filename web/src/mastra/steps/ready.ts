@@ -22,6 +22,7 @@ import { STATUS_COMPLETE } from "../state"
 import { pythonTruthy } from "./images-manifest"
 import type { JsonValue } from "./images-manifest"
 import {
+  announceStageComplete,
   announceStageStart,
   gateResumeSchema,
   gateSuspendSchema,
@@ -142,7 +143,7 @@ export const readyStep = createStep({
     await saveStageOutput(postId, "ready", result.text, { ready: STATUS_COMPLETE })
     await markRerunComplete(inputData)
 
-    return {
+    const output = {
       postId,
       stages: inputData.stages,
       stage: "ready" as const,
@@ -154,5 +155,7 @@ export const readyStep = createStep({
       tokensOut: result.usage?.outputTokens ?? 0,
       durationS: durationMs / 1000,
     }
+    await announceStageComplete(mastra, output)
+    return output
   },
 })

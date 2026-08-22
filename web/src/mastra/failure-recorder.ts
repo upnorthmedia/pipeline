@@ -28,16 +28,20 @@
  *
  *   - a single failed run publishes `workflow.fail` more than once, so the
  *     write has to be safe to repeat. It is: every field it sets is derived
- *     from the event, so a repeat rewrites the same values.
+ *     from the event, so a repeat rewrites the same values. The `stage_error`
+ *     announcement is not, because the dashboard raises a toast per event, so
+ *     that one is guarded by run id.
  *   - `subscribe()` with no group is fan-out, so every worker process receives
  *     every event. Same consequence, same answer.
  *
  * A throwing listener is nacked by Mastra's wrapper and redelivered, so a
  * transient database error here retries rather than losing the record.
  */
-import type { Event } from "@mastra/core/events"
+import type { Event, PubSub } from "@mastra/core/events"
 
+import { publishPipelineEvent } from "./pipeline-events"
 import { markPipelineFailed } from "./post-state"
+import { STAGES, type Stage } from "./state"
 import { pipelineWorkflow } from "./workflows/pipeline"
 
 /**
@@ -85,14 +89,69 @@ function messageOf(data: unknown): string {
 }
 
 /**
- * Record a `workflow.fail` event against its post. Registered as the
- * `workflows-finish` listener in `index.ts`.
+ * The stage that failed: the step in the run's results whose own status is
+ * `failed`. Python sent `target_stages[0] if len(target_stages) == 1 else ""`,
+ * so a full run reported no stage at all and the dashboard showed "Pipeline
+ * failed"; the run results name the step that actually threw, so this reports
+ * it, which is the same choice `dead-letter.ts` records for the DLQ list.
+ *
+ * Only the six stage ids are considered, so `input`, `__state` and the
+ * bookkeeping steps in the chain cannot be mistaken for one.
+ */
+function failedStageOf(data: unknown): Stage | "" {
+  const stepResults = (data as { stepResults?: Record<string, unknown> })?.stepResults
+  for (const stage of STAGES) {
+    const step = stepResults?.[stage] as { status?: unknown } | undefined
+    if (step?.status === "failed") return stage
+  }
+  return ""
+}
+
+/**
+ * Runs already announced by this process, so one failure produces one
+ * `stage_error` on the bus.
+ *
+ * The engine publishes `workflow.fail` more than once for a single failed run
+ * (measured in `failure-recorder.test.ts`), which the database write above can
+ * absorb because it rewrites the same values. A notification cannot: the
+ * dashboard raises a toast per `stage_error` and appends one debug log line
+ * per event, so a repeat is visible to the operator. Python published exactly
+ * one per attempt.
+ *
+ * In-process, and deliberately so: it guards the measured duplicate, which is
+ * two publishes of the same event a few milliseconds apart, reaching the same
+ * subscriber. It is not a distributed lock, and a second `worker` process
+ * subscribed to the same fan-out topic would announce the same failure again.
+ * The bound keeps a long-lived worker from accumulating run ids forever;
+ * insertion order makes the oldest entry the one to drop.
+ */
+const announced = new Set<string>()
+const ANNOUNCED_LIMIT = 1000
+
+function firstAnnouncementOf(runId: string): boolean {
+  if (announced.has(runId)) return false
+  announced.add(runId)
+  if (announced.size > ANNOUNCED_LIMIT) {
+    const oldest = announced.values().next().value
+    if (oldest !== undefined) announced.delete(oldest)
+  }
+  return true
+}
+
+/**
+ * Record a `workflow.fail` event against its post and tell the dashboard.
+ * Registered as the `workflows-finish` listener in `index.ts`.
  *
  * Events for other workflows, other lifecycle types, and runs with no post id
  * on their input are ignored rather than treated as errors: the topic carries
  * every run's terminal event, not only this workflow's.
+ *
+ * The row is written before the event goes out, which is the order every
+ * announcement in this port keeps: `posts/[id]/page.tsx` refetches the post on
+ * `stage_error`, so the refetch must not read a row that still calls the run
+ * healthy.
  */
-export async function recordRunFailure(event: Event): Promise<void> {
+export async function recordRunFailure(event: Event, pubsub: PubSub): Promise<void> {
   if (event.type !== "workflow.fail") return
   const data = event.data as { workflowId?: unknown }
   if (data?.workflowId !== PIPELINE_WORKFLOW_ID) return
@@ -100,5 +159,30 @@ export async function recordRunFailure(event: Event): Promise<void> {
   const postId = postIdOf(event.data)
   if (!postId) return
 
-  await markPipelineFailed(postId, messageOf(event.data), executionsBeforeFailure())
+  const message = messageOf(event.data)
+  await markPipelineFailed(postId, message, executionsBeforeFailure())
+
+  if (!firstAnnouncementOf(event.runId)) return
+  await publishPipelineEvent(pubsub, postId, "stage_error", {
+    stage: failedStageOf(event.data),
+    error: message,
+    // Python's `f"Pipeline failed: {e}"`, which is what `debug-log-panel.tsx`
+    // prefers over the bare error when it renders the line.
+    message: `Pipeline failed: ${message}`,
+  })
+}
+
+/**
+ * The topic listeners the `worker` service subscribes, bound to the transport
+ * the run is executing on.
+ *
+ * A factory rather than a constant because a listener that publishes needs a
+ * `PubSub`, and taking it from `index.ts` would both close an import cycle and
+ * publish onto the production transport even when a test builds its own
+ * instance. `index.ts` builds this from the same `pubsub` it hands `Mastra`.
+ */
+export function createWorkerEvents(pubsub: PubSub) {
+  return {
+    "workflows-finish": (event: Event) => recordRunFailure(event, pubsub),
+  }
 }

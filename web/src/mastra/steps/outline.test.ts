@@ -258,6 +258,15 @@ describe("outline step announcement", () => {
         stage: "outline",
         message: "Starting outline...",
       },
+      {
+        event: "stage_complete",
+        post_id: fixtureIds[0],
+        stage: "outline",
+        model: replayOf(fixtures[0]).response.modelId,
+        // Real elapsed time around a stubbed provider call; the rounding it
+        // goes through is pinned in `pipeline-events.test.ts`.
+        duration_s: expect.any(Number),
+      },
     ])
   })
 })

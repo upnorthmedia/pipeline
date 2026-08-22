@@ -523,6 +523,15 @@ describe("ready step announcement", () => {
         stage: "ready",
         message: "Starting ready...",
       },
+      {
+        event: "stage_complete",
+        post_id: fixtureIds[0],
+        stage: "ready",
+        model: replayOf(fixtures[0]).response.modelId,
+        // Real elapsed time around a stubbed provider call; the rounding it
+        // goes through is pinned in `pipeline-events.test.ts`.
+        duration_s: expect.any(Number),
+      },
     ])
   })
 })

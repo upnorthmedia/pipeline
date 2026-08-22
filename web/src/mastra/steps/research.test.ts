@@ -25,6 +25,7 @@ import { eq, inArray } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, posts } from "../../db"
+import { STATUS_COMPLETE } from "../state"
 import { stageStepOutputSchema } from "./stage-io"
 import {
   MAX_RESEARCH_ATTEMPTS,
@@ -109,6 +110,17 @@ function replayMastra(replies: Replay[]) {
   const warnings: string[] = []
   const errors: string[] = []
   const announced: unknown[] = []
+  /**
+   * The row as it stood at the moment each announcement was published, keyed by
+   * event name.
+   *
+   * Read from inside the publish callback on purpose: `publishPipelineEvent`
+   * awaits it, so the step cannot proceed past the announcement until this
+   * resolves. That makes "the write happened first" an ordering fact rather
+   * than a race the assertion happens to win, which is what the same check
+   * against a real Redis topic in `pipeline-events.test.ts` cannot promise.
+   */
+  const rowOnAnnounce: Record<string, Record<string, string>> = {}
   const mastra = {
     /**
      * The step announces itself on the event bus before it calls its provider
@@ -117,8 +129,10 @@ function replayMastra(replies: Replay[]) {
      * Streams topic and asserts the payload it carries.
      */
     pubsub: {
-      publish: async (_topic: string, event: { data: unknown }) => {
+      publish: async (_topic: string, event: { data: { event: string; post_id: string } }) => {
         announced.push(event.data)
+        const [row] = await db.select().from(posts).where(eq(posts.id, event.data.post_id))
+        rowOnAnnounce[event.data.event] = (row?.stageStatus ?? {}) as Record<string, string>
       },
     },
     getAgent: () => ({
@@ -132,7 +146,7 @@ function replayMastra(replies: Replay[]) {
       error: (message: string) => errors.push(message),
     }),
   }
-  return { mastra, prompts, announced, warnings, errors }
+  return { mastra, prompts, announced, rowOnAnnounce, warnings, errors }
 }
 
 type ExecuteParams = Parameters<typeof researchStep.execute>[0]
@@ -343,6 +357,23 @@ describe("research step announcement", () => {
         stage: "research",
         message: "Starting research...",
       },
+      {
+        event: "stage_complete",
+        post_id: fixtureIds[0],
+        stage: "research",
+        model: replayOf(fixtures[0]).response.modelId,
+        // Real elapsed time around a stubbed provider call; the rounding it
+        // goes through is pinned in `pipeline-events.test.ts`.
+        duration_s: expect.any(Number),
+      },
     ])
+  })
+
+  it("commits the stage before it reports it complete, and not before it starts", async () => {
+    const { rowOnAnnounce } = await runStep(fixtureIds[0], [replayOf(fixtures[0])])
+
+    // Python's order, both times: the row is written, then the browser is told.
+    expect(rowOnAnnounce.stage_start.research).toBe("running")
+    expect(rowOnAnnounce.stage_complete.research).toBe(STATUS_COMPLETE)
   })
 })

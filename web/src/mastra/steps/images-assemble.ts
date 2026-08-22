@@ -22,7 +22,12 @@ import { saveStageOutput } from "../post-state"
 import { STATUS_COMPLETE, STATUS_FAILED } from "../state"
 import { generatedImageSchema } from "./images-generate"
 import { imageManifestSchema, imagesManifestStep } from "./images-manifest"
-import { markRerunComplete, skippedStageOutput, stageStepOutputSchema } from "./stage-io"
+import {
+  announceStageComplete,
+  markRerunComplete,
+  skippedStageOutput,
+  stageStepOutputSchema,
+} from "./stage-io"
 
 /** `_stage_meta_gemini`: the image spend, reported separately from Claude's. */
 export const geminiStageMetaSchema = z.object({
@@ -86,7 +91,7 @@ export const imagesAssembleStep = createStep({
   id: "images-assemble",
   inputSchema: z.array(generatedImageSchema),
   outputSchema: imagesStageOutputSchema,
-  execute: async ({ inputData, getStepResult }) => {
+  execute: async ({ inputData, getStepResult, mastra }) => {
     const manifestResult = getStepResult(imagesManifestStep)
     const { postId, stages, stageStartedAtMs, parseFailed, skipped } = manifestResult
 
@@ -126,7 +131,7 @@ export const imagesAssembleStep = createStep({
       })
       // No rerun completion check here: the stage just marked itself failed, so
       // the "every stage complete" it would ask about cannot be true.
-      return {
+      const failedOutput = {
         ...claudeMeta,
         durationS: 0,
         totalGenerated: 0,
@@ -134,6 +139,12 @@ export const imagesAssembleStep = createStep({
         parseFailed: true,
         gemini: null,
       }
+      // Announced even though the stage marked itself failed: Python's node
+      // returned normally on this branch, so the worker loop reached its
+      // `stage_complete` publish with `duration_s` still 0. The failure shows
+      // up as `stage_status.images = "failed"` on the row the browser refetches.
+      await announceStageComplete(mastra, failedOutput)
+      return failedOutput
     }
 
     const images = inputData.map((result) => result.spec)
@@ -148,7 +159,7 @@ export const imagesAssembleStep = createStep({
     // still records the id it would have used.
     const billed = inputData.map((result) => result.usage).filter((usage) => usage !== null)
 
-    return {
+    const output = {
       ...claudeMeta,
       durationS,
       totalGenerated,
@@ -162,5 +173,7 @@ export const imagesAssembleStep = createStep({
         durationS,
       },
     }
+    await announceStageComplete(mastra, output)
+    return output
   },
 })

@@ -33,7 +33,8 @@ import { outlineAgent } from "@/mastra/agents/outline"
 import { readyAgent } from "@/mastra/agents/ready"
 import { researchAgent } from "@/mastra/agents/research"
 import { writeAgent } from "@/mastra/agents/write"
-import { pubsub as productionPubsub, workerEvents } from "@/mastra/index"
+import { createWorkerEvents } from "@/mastra/failure-recorder"
+import { pubsub as productionPubsub } from "@/mastra/index"
 import { STAGES } from "@/mastra/state"
 import { imagesWorkflow } from "@/mastra/workflows/images"
 import { pipelineWorkflow } from "@/mastra/workflows/pipeline"
@@ -108,7 +109,7 @@ const testMastra = new Mastra({
   workflows: { pipeline: pipelineWorkflow, images: imagesWorkflow },
   // The failure recorder, so the failing run stamps `_error` the way it does in
   // the worker service. That key is what makes the run a dead-letter entry.
-  events: workerEvents,
+  events: createWorkerEvents(pubsub),
   agents: {
     research: researchAgent,
     outline: outlineAgent,

@@ -151,14 +151,28 @@ type ExecuteParams = Parameters<typeof imagesAssembleStep.execute>[0]
 
 async function runAssemble(manifestOutput: ImagesManifestOutput, results: GeneratedImageOutput[]) {
   const seen: unknown[] = []
+  /**
+   * The step announces `stage_complete` on the event bus once it has committed
+   * the manifest (item 5.5b). Recorded here rather than published, because this
+   * file is about manifest parity; `pipeline-events.test.ts` makes the same
+   * call against a real Redis Streams topic.
+   */
+  const announced: unknown[] = []
   const output = await imagesAssembleStep.execute({
     inputData: results,
     getStepResult: (step: unknown) => {
       seen.push(step)
       return manifestOutput
     },
+    mastra: {
+      pubsub: {
+        publish: async (_topic: string, event: { data: unknown }) => {
+          announced.push(event.data)
+        },
+      },
+    },
   } as unknown as ExecuteParams)
-  return { output: imagesStageOutputSchema.parse(output), seen }
+  return { output: imagesStageOutputSchema.parse(output), seen, announced }
 }
 
 async function readRow(postId: string) {
@@ -388,6 +402,69 @@ describe("images assemble step against the 3.5e generation corpus", () => {
       tokensOut: corpus.stage_meta_gemini.tokens_out,
       durationS: STAGE_ELAPSED_MS / 1000,
     })
+  })
+})
+
+describe("images assemble step announcement", () => {
+  it("announces stage_complete once it has committed the manifest", async () => {
+    const fixture = fixtures[0]
+    const postId = fixtureIds[0]
+
+    const { announced, output } = await runAssemble(
+      manifestOutputOf(fixture, postId),
+      fixtureResults(fixture),
+    )
+
+    expect(announced).toEqual([
+      {
+        event: "stage_complete",
+        post_id: postId,
+        stage: "images",
+        // Claude's manifest model, which is what Python's `_stage_meta` carried
+        // and so what its `stage_complete` payload reported. The Gemini spend is
+        // a second meta record and was never on this event.
+        model: fixture.stage_output._stage_meta.model,
+        // Rounded, where the step's own output keeps the raw elapsed seconds.
+        duration_s: Math.round(output.durationS * 100) / 100,
+      },
+    ])
+  })
+
+  it("announces the parse-failure branch too, the way Python's node returning did", async () => {
+    const postId = fixtureIds[0]
+
+    const { announced } = await runAssemble(
+      {
+        ...manifestOutputOf(fixtures[0], postId),
+        parseFailed: true,
+        manifest: { images: [], style_brief: {}, error: "Failed to parse manifest" },
+        images: [],
+      } as unknown as ImagesManifestOutput,
+      [],
+    )
+
+    // `duration_s` 0 for the reason the branch reports `durationS` 0: Python
+    // returned from inside the `with`, so `StageTimer` never measured anything.
+    expect(announced).toEqual([
+      {
+        event: "stage_complete",
+        post_id: postId,
+        stage: "images",
+        model: fixtures[0].stage_output._stage_meta.model,
+        duration_s: 0,
+      },
+    ])
+  })
+
+  it("announces nothing for a stage the run skipped", async () => {
+    const postId = fixtureIds[0]
+
+    const { announced } = await runAssemble(
+      { ...manifestOutputOf(fixtures[0], postId), skipped: true } as ImagesManifestOutput,
+      [],
+    )
+
+    expect(announced).toEqual([])
   })
 })
 

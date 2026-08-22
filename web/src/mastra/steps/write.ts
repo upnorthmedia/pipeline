@@ -13,6 +13,7 @@ import { loadPipelineState, saveStageOutput } from "../post-state"
 import { buildStagePrompt, loadRules } from "../prompts"
 import { STATUS_COMPLETE } from "../state"
 import {
+  announceStageComplete,
   announceStageStart,
   gateResumeSchema,
   gateSuspendSchema,
@@ -51,7 +52,7 @@ export const writeStep = createStep({
     await saveStageOutput(postId, "write", result.text, { write: STATUS_COMPLETE })
     await markRerunComplete(inputData)
 
-    return {
+    const output = {
       postId,
       stages: inputData.stages,
       stage: "write" as const,
@@ -63,5 +64,7 @@ export const writeStep = createStep({
       tokensOut: result.usage?.outputTokens ?? 0,
       durationS: durationMs / 1000,
     }
+    await announceStageComplete(mastra, output)
+    return output
   },
 })

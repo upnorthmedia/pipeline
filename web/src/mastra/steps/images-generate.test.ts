@@ -299,6 +299,9 @@ describe("the generated images reach the stored manifest and the ready prompt", 
     await imagesAssembleStep.execute({
       inputData: [content, featured, promptless],
       getStepResult: () => manifestOutput,
+      // The step announces `stage_complete` once it has committed the manifest
+      // (item 5.5b); swallowed here, and asserted in `images-assemble.test.ts`.
+      mastra: { pubsub: { publish: async () => {} } },
     } as unknown as AssembleParams)
 
     const rows = await db.select().from(posts).where(eq(posts.id, POST_ID))

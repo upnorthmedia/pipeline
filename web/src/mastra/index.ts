@@ -28,7 +28,7 @@ import { outlineAgent } from "./agents/outline"
 import { readyAgent } from "./agents/ready"
 import { researchAgent } from "./agents/research"
 import { writeAgent } from "./agents/write"
-import { recordRunFailure } from "./failure-recorder"
+import { createWorkerEvents } from "./failure-recorder"
 import { imagesWorkflow } from "./workflows/images"
 import { pipelineWorkflow } from "./workflows/pipeline"
 import { recrawlCheckWorkflow } from "./workflows/recrawl-check"
@@ -108,15 +108,15 @@ export const pubsub = new RedisStreamsPubSub({
  * Topic listeners, subscribed by `startWorkers()` and so live in the `worker`
  * service and not in `web`. `workflows-finish` carries every run's terminal
  * event; `recordRunFailure` is the port of the post-writing half of Python's
- * `_move_to_dlq()` (see `failure-recorder.ts`).
+ * `_move_to_dlq()` plus its `stage_error` announcement (see
+ * `failure-recorder.ts`).
  *
- * Exported so a test can run the same map on its own instance rather than
- * restating it: `Mastra` keeps its `events` config private, so this is the
- * subscribed shape and the checkable one at once.
+ * Built from the transport above rather than importing it back inside the
+ * listener, which would close an import cycle. A test builds the same map on
+ * its own transport, so the subscribed shape and the checkable one stay the
+ * same function: `Mastra` keeps its `events` config private.
  */
-export const workerEvents = {
-  "workflows-finish": recordRunFailure,
-}
+export const workerEvents = createWorkerEvents(pubsub)
 
 export const mastra = new Mastra({
   storage,

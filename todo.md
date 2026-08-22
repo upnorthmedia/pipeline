@@ -265,3 +265,11 @@
   the app's structured logs. Found in item 5.4d-i, where capturing that line in a test
   needed a `console.error` spy. Worth checking whether a later `@mastra/core` wires it, or
   whether the worker entry should install a console bridge.
+- [investigate] 2026-08-22 `src/mastra/workflows/scaffold-check.test.ts > emits the workflow
+  lifecycle events the trace view will read` failed once on a full `vitest run` and passed
+  on the other two full runs and when run alone. It is the only test file that streams a run
+  off the *production* Mastra instance and transport on the default Redis key prefix, while
+  85 other files execute in parallel; every other real-run file gives itself an isolated
+  `keyPrefix`. Suspicion is cross-file interference on the shared `workflows` topic rather
+  than a defect in the workflow. Found while verifying item 5.5b, which touches no topic
+  that file reads. Fix is probably to give it its own instance and prefix like the others.

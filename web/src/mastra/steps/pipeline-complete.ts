@@ -29,6 +29,7 @@
  */
 import { createStep } from "@mastra/core/workflows/evented"
 
+import { publishPipelineEvent } from "../pipeline-events"
 import { markPipelineComplete } from "../post-state"
 import { recordRunCompleted } from "../worker-health"
 import { stageStepOutputSchema } from "./stage-io"
@@ -37,13 +38,23 @@ export const pipelineCompleteStep = createStep({
   id: "pipeline-complete",
   inputSchema: stageStepOutputSchema,
   outputSchema: stageStepOutputSchema,
-  execute: async ({ inputData }) => {
+  execute: async ({ inputData, mastra }) => {
     // Python's `if is_full_pipeline`. A run that named its stages is a rerun of
     // part of a post, and `markRerunComplete` in `stage-io.ts` already settles
     // `current_stage` for it; restamping `completed_at` here would move the
     // finish time of a post that finished days ago every time one stage is
     // rerun from the dashboard.
-    if (!inputData.stages) await markPipelineComplete(inputData.postId)
+    if (!inputData.stages) {
+      await markPipelineComplete(inputData.postId)
+      // Python's `pipeline_complete` publish, from inside the same
+      // `if is_full_pipeline:` block and after the stamp, because the dashboard
+      // refetches the post on this event and must read the finished row.
+      // A named-stage rerun sends nothing, as it sent nothing in Python: the
+      // run finished, but the post did not.
+      await publishPipelineEvent(mastra.pubsub, inputData.postId, "pipeline_complete", {
+        message: "Pipeline finished",
+      })
+    }
     await recordRunCompleted()
     return inputData
   },

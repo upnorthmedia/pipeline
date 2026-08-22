@@ -11704,9 +11704,245 @@ three pieces are separately verifiable, so they are separate items.
 
     The three Python numbers are the recorded baseline, unchanged. Requires
     `set -a; . ./.env; set +a` first.
-  - [ ] 5.5b `stage_complete`, `pipeline_complete` and `stage_error`, from the same
+  - [x] 5.5b `stage_complete`, `pipeline_complete` and `stage_error`, from the same
     positions Python published them: after each stage's `saveStageOutput` with the
     stage's model and duration, from the completion step, and from the failure path.
+
+    The three remaining events a run tells the dashboard about itself. With 5.5a's
+    `stage_start`, `use-sse.ts`'s four pipeline event names all have a producer.
+
+    Where each one is published, and the Python line it comes from:
+
+    | Event | Python | Port |
+    | --- | --- | --- |
+    | `stage_complete` | `worker.py:266`, after the `async with session_factory()` block that saved the stage | `announceStageComplete()` in `steps/stage-io.ts`, called by all six stages after `saveStageOutput` and `markRerunComplete` |
+    | `pipeline_complete` | `worker.py:300`, inside `if is_full_pipeline:` after `_post_completion_hook` | `steps/pipeline-complete.ts`, inside the same `!inputData.stages` branch that stamps `completed_at` |
+    | `stage_error` | `worker.py:321`, in the `except` around the stage loop | `failure-recorder.ts`, on the `workflows-finish` listener that item 5.4d-i added |
+
+    `announceStageComplete` takes the `StageStepOutput` the step is about to return
+    rather than the fields separately, so what the browser is told and what the next
+    step receives cannot drift apart. The payload is Python's exactly:
+    `{stage, model, duration_s}`. The token counts stayed in the execution log,
+    which is item 5.5c, and are deliberately not added here.
+
+    **Deviation 1: `stage_error` names the stage that threw.** Python computed
+    `failed_stage = target_stages[0] if len(target_stages) == 1 else ""`, so a full
+    pipeline run reported no stage at all and `posts/[id]/page.tsx` rendered
+    "Pipeline failed". The `workflow.fail` event's `stepResults` names the step whose
+    own status is `failed`, so the port reports it and the toast reads "write
+    failed". This is the same choice, for the same reason, that 5.4d-ii recorded for
+    the dead-letter list. The `""` case is still reachable and still tested: a
+    terminal event with no failed step result reports it.
+
+    **Deviation 2: the announcement is guarded by run id.** 5.4d-i measured the
+    evented engine publishing `workflow.fail` twice for one failed run, and the
+    database write absorbs that because it rewrites the same values. A notification
+    does not: `global-notifications.tsx` raises one toast per `stage_error` and
+    `debug-log-panel.tsx` appends one line. So `recordRunFailure` announces once per
+    run id, from a bounded in-process `Set`. It is explicitly not a distributed
+    lock: a second `worker` process on the same fan-out topic would announce again.
+    Python published exactly one `stage_error` per attempt, so one per run is the
+    faithful count.
+
+    **Deviation 3: `workerEvents` became `createWorkerEvents(pubsub)`.** A listener
+    that publishes needs a transport, and importing `index.ts` from inside
+    `failure-recorder.ts` would close an import cycle (`index.ts` already imports the
+    listener) and would publish onto the production transport even when a test builds
+    its own instance. The four test files that registered the production map now
+    register the same factory on their own transport, which is what makes the
+    `stage_error` assertions below possible at all.
+
+    Two positions worth stating because they are not transcription:
+
+    - The `images` stage announces from `steps/images-assemble.ts`, not from
+      `images-manifest`, because that is the only step in the three-step stage that
+      writes the row, and it is where Python's single whole-stage `duration_s` is
+      computed. It announces on the parse-failure branch too, with `duration_s` 0,
+      because Python's `images_node` *returned* on that branch rather than raising,
+      so the worker loop reached its publish with `timer.duration` still 0.
+    - A run that names its stages sends no `pipeline_complete`, matching Python's
+      `if is_full_pipeline:`. Its own stage still reports `stage_complete`.
+
+    **A hermeticity bug in `failure-recorder.test.ts`, found by this item and fixed.**
+    Asserting "exactly one `stage_error`" failed with 26. The cause is 5.5a's trap on
+    a second topic: `workflows-finish` is a retained Redis stream and an ungrouped
+    `subscribe()` reads it from its first entry, so every previous execution of the
+    file replayed. Measured before the fix:
+
+    ```
+    FAILEVENTS 54 [ 27 distinct run ids, each appearing twice ]
+    STAGEERRORS 26
+    ```
+
+    27 historical runs, two `workflow.fail` deliveries each, all re-processed by the
+    listener on every subsequent execution. It was invisible before this item because
+    the only effect was rewriting one post row with the same values. The fix is
+    `await pubsub.clearTopic("workflows-finish")` before subscribing, next to the one
+    5.5a already added for the pipeline topic.
+
+    Tests. `pipeline-events.test.ts` gained a fourth real run (a post whose finished
+    stages are rerun with `stages: ["edit"]`) and thirteen assertions; the delivery
+    time snapshot is now keyed by event name as well as stage, because `stage_start`
+    and `stage_complete` both name one and a single key let the later delivery
+    overwrite what the earlier saw. `failure-recorder.test.ts` subscribes the pipeline
+    topic and asserts the announcement off the same real failing run it already had.
+
+    ```
+    $ pnpm exec vitest run src/mastra/pipeline-events.test.ts src/mastra/failure-recorder.test.ts --reporter=verbose
+     ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > fails the run rather than swallowing the stage error 0ms
+     ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > stamps current_stage failed, which is the queue route's failed bucket 0ms
+     ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > records the stage's error text as _error.message, Python's str(e) 0ms
+     ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > records how many times the run was executed, Python's job_try 0ms
+     ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > records failed_at as a timestamp, close to the run 0ms
+     ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > merges _error in rather than replacing stage_logs 0ms
+     ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > leaves the stages before the failure committed 0ms
+     ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > leaves the failing stage's column unwritten 0ms
+     ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > is published a terminal failure event more than once for one run 0ms
+     ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > reports the failing step and its error 0ms
+     ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > announces stage_error on the pipeline bus, in Python's payload shape 0ms
+     ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > announces it once, though the engine published the failure more than once 0ms
+     ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > stamps the row failed before it announces 0ms
+     ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > announces no stage_complete for the stage that threw 0ms
+     ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > never says the pipeline finished 0ms
+     ✓ src/mastra/failure-recorder.test.ts > recordRunFailure > ignores a failure from another workflow 1ms
+     ✓ src/mastra/failure-recorder.test.ts > recordRunFailure > ignores a terminal event that is not a failure 1ms
+     ✓ src/mastra/failure-recorder.test.ts > recordRunFailure > ignores a run whose input carries no post id 1ms
+     ✓ src/mastra/failure-recorder.test.ts > recordRunFailure > records a thrown non-Error, which the engine passes through as it was 2ms
+     ✓ src/mastra/failure-recorder.test.ts > recordRunFailure > reports no stage when no step result says which one failed 1ms
+     ✓ src/mastra/failure-recorder.test.ts > recordRunFailure > names the stage whose own step result failed 1ms
+     ✓ src/mastra/failure-recorder.test.ts > recordRunFailure > is safe to repeat: a second delivery rewrites the same values 3ms
+     ✓ src/mastra/failure-recorder.test.ts > recordRunFailure > announces the repeat delivery only once, though it writes both times 1ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > announces each of the six stages exactly once, in pipeline order 1ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > carries Python's payload and nothing else 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > names the event on the envelope too, so a subscriber can filter without parsing 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > commits the row before the event goes out 1ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > leaves the post finished, so announcing changed no outcome 2ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > reports each of the six stages complete, once, in pipeline order 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > carries Python's stage_complete payload and nothing else 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > rounds duration_s to Python's two decimal places 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > commits the stage before it reports it complete 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > finishes with exactly one pipeline_complete, in Python's payload 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > stamps the post finished before it says the pipeline is 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that executes every stage > sends pipeline_complete after the last stage_complete 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a stage the run skips > announces the five stages that ran and not the one that did not 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a stage the run skips > never calls the skipped stage running 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a stage the run skips > reports the five stages that ran complete and not the one that did not 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a stage the run skips > still finishes the run, because a skipped stage is a finished one 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a stage parked at a review gate > announces nothing, because a stage waiting for a human is not running 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a stage parked at a review gate > leaves the row on the gate's own status rather than on running 1ms
+     ✓ src/mastra/pipeline-events.test.ts > a stage parked at a review gate > reports nothing complete and never finishes the pipeline 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that names one stage > announces only the stage it was asked to run 0ms
+     ✓ src/mastra/pipeline-events.test.ts > a run that names one stage > says nothing about the pipeline, because the run finished and the post did not 0ms
+     ✓ src/mastra/pipeline-events.test.ts > publishPipelineEvent > flattens the caller's fields alongside the event name and post id 1ms
+     ✓ src/mastra/pipeline-events.test.ts > publishPipelineEvent > publishes an event with no payload as the two fields Python always sent 1ms
+     ✓ src/mastra/pipeline-events.test.ts > publishPipelineEvent > lets a caller's field override nothing it should not: post_id stays the argument 102ms
+     ✓ src/mastra/pipeline-events.test.ts > announceStageComplete > rounds duration_s to two places, as Python's round(duration_s, 2) did 0ms
+     ✓ src/mastra/pipeline-events.test.ts > announceStageComplete > sends the model and the duration, and leaves the token counts off 0ms
+     ✓ src/mastra/pipeline-events.test.ts > the run's own quality warnings > are the stubbed draft's, not a new one from announcing 0ms
+     Test Files  2 passed (2)
+          Tests  50 passed (50)
+       Start at  18:17:28
+       Duration  6.44s (transform 193ms, setup 163ms, import 1.10s, tests 8.92s, environment 0ms)
+    ```
+
+    The six per-stage parity harnesses each assert the new announcement too, and
+    `research.test.ts` gained the one ordering assertion that is not a race: its
+    recording transport reads the row from *inside* the publish callback, which
+    `publishPipelineEvent` awaits, so the step cannot proceed past the announcement
+    until the read has happened.
+
+    ```
+    $ pnpm exec vitest run src/mastra/steps --reporter=verbose
+     ✓ src/mastra/steps/outline.test.ts > outline step announcement > announces the stage on the event bus, in Python's payload shape 7ms
+     ✓ src/mastra/steps/research.test.ts > research step announcement > announces the stage on the event bus, in Python's payload shape 8ms
+     ✓ src/mastra/steps/research.test.ts > research step announcement > commits the stage before it reports it complete, and not before it starts 7ms
+     ✓ src/mastra/steps/write.test.ts > write step announcement > announces the stage on the event bus, in Python's payload shape 9ms
+     ✓ src/mastra/steps/ready.test.ts > ready step announcement > announces the stage on the event bus, in Python's payload shape 7ms
+     ✓ src/mastra/steps/images-manifest.test.ts > images step announcement > announces the stage on the event bus, in Python's payload shape 6ms
+     ✓ src/mastra/steps/edit.test.ts > edit step announcement > announces the stage on the event bus, in Python's payload shape 12ms
+     ✓ src/mastra/steps/images-assemble.test.ts > images assemble step announcement > announces stage_complete once it has committed the manifest 2ms
+     ✓ src/mastra/steps/images-assemble.test.ts > images assemble step announcement > announces the parse-failure branch too, the way Python's node returning did 2ms
+     ✓ src/mastra/steps/images-assemble.test.ts > images assemble step announcement > announces nothing for a stage the run skipped 2ms
+     Test Files  10 passed (10)
+          Tests  172 passed (172)
+    ```
+
+    Negative controls, each reverted after measuring:
+
+    | # | Change | Result |
+    | --- | --- | --- |
+    | 1 | `roundSeconds()` returns its argument | 3 failed: both rounding tests and the images payload |
+    | 2 | `research` never calls `announceStageComplete` | 4 failed: the research parity announcement, and three of the full-run assertions |
+    | 3 | `outline` announces before `saveStageOutput` | **27 passed, caught nothing** (see below) |
+    | 4 | `research` announces before `saveStageOutput` | 1 failed: `commits the stage before it reports it complete, and not before it starts` |
+    | 5 | the `pipeline_complete` publish removed | 4 failed across the full run and the skipped-stage run |
+    | 6 | the `!inputData.stages` gate removed from that publish | 1 failed: `says nothing about the pipeline, because the run finished and the post did not` |
+    | 7 | the `stage_error` publish removed | 7 failed |
+    | 8 | the run-id guard removed | 2 failed: both "announces it once" assertions |
+    | 9 | `stage` hardcoded to `""`, as Python sent it | 2 failed: the payload shape and the named-stage case |
+
+    **Control 3 is the honest one to record.** The commit-before-publish assertion
+    over a *real* Redis topic does not catch a swapped order for `stage_complete`, and
+    the reason is measurable rather than mysterious: the subscriber's own `SELECT` is
+    a slower round trip than the step's `UPDATE`, so the write wins the race even when
+    it is issued second. 5.5a's equivalent control did fail, because `stage_start`
+    writes an absent key and any early read sees `undefined`; here the row already
+    says `running`, so an early read is merely the wrong one of two present values.
+    Control 4 is the fix: the deterministic version of the same assertion, added to
+    `research.test.ts`, which is what actually pins the order.
+
+    Gates:
+
+    ```
+    $ pnpm -C web exec tsc --noEmit
+    TSC EXIT=0
+    (no output)
+
+    $ pnpm run lint          # from web/; `pnpm -C web lint` runs next lint and does nothing
+    LINT EXIT=0
+    (no output)
+
+    $ pnpm exec vitest run   # from web/
+     Test Files  2 failed | 84 passed (86)
+          Tests  9 failed | 1553 passed | 7 skipped (1569)
+    # 9 failed is the recorded baseline: 6 in image-preview.test.tsx and 3 in
+    # PostDetail.test.tsx. Passing count 1527 -> 1553 (+26): 14 in
+    # pipeline-events.test.ts, 8 in failure-recorder.test.ts, 3 in
+    # images-assemble.test.ts and 1 in research.test.ts. Run twice, identical.
+
+    $ pnpm build             # from web/
+    BUILD EXIT=0
+    ✓ Compiled successfully in 4.0s
+
+    $ cd api && uv run pytest -q
+    120 failed, 241 passed, 25 errors in 13.24s
+    # 361 tests + 25 errors, the same totals as the recorded 125/236 baseline; five
+    # tests that were failing on shared dev-database state now pass. Nothing under
+    # api/ was touched by this item.
+
+    $ cd api && uv run ruff check .
+    Found 32 errors.
+
+    $ cd api && uv run ruff format --check .
+    9 files would be reformatted, 131 files already formatted
+    ```
+
+    Two flakes surfaced by the full suite, one fixed here and one logged.
+
+    **Fixed: this item's own.** `failure-recorder.test.ts > stamps the row failed
+    before it announces` failed on one full run. The subscriber pushed the event onto
+    the array the wait polls *before* awaiting its row snapshot, so `beforeAll` could
+    return while that read was still in flight and the assertion read an unset key.
+    Both subscribers now snapshot the row first and push last. Two consecutive full
+    runs since, both at the 9-failure baseline.
+
+    **Logged, not this item's.**
+    `scaffold-check.test.ts > emits the workflow lifecycle events the trace view will
+    read` failed on one full run and passed alone and on every other. It is the only
+    file that streams a run off the *production* instance and transport on the default
+    Redis key prefix while 85 other files run in parallel; every other real-run file
+    isolates itself with a `keyPrefix`. In `todo.md` as `[investigate]`. It touches no
+    topic this item writes.
   - [ ] 5.5c `execution_logs` and the `log` event: Python's `append_execution_log()` and
     `publish_stage_log()`, which write the same entry to the column and the bus.
   - [ ] 5.5d `GET /api/events/{post_id}` and `GET /api/events`, as Next.js route handlers

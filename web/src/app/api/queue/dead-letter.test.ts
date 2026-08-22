@@ -32,7 +32,8 @@ import { outlineAgent } from "@/mastra/agents/outline"
 import { readyAgent } from "@/mastra/agents/ready"
 import { researchAgent } from "@/mastra/agents/research"
 import { writeAgent } from "@/mastra/agents/write"
-import { pubsub as productionPubsub, workerEvents } from "@/mastra/index"
+import { createWorkerEvents } from "@/mastra/failure-recorder"
+import { pubsub as productionPubsub } from "@/mastra/index"
 import { imagesWorkflow } from "@/mastra/workflows/images"
 import { pipelineWorkflow } from "@/mastra/workflows/pipeline"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
@@ -89,7 +90,7 @@ const testMastra = new Mastra({
   // exactly as it does in the worker service. Item 5.4d-iii made that key the
   // acknowledgement that keeps an entry in the queue, so a suite that skipped
   // it would be listing runs the production handler would not.
-  events: workerEvents,
+  events: createWorkerEvents(pubsub),
   agents: {
     research: researchAgent,
     outline: outlineAgent,
