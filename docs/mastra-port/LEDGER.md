@@ -2362,11 +2362,106 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   tests. No `api/` file was touched, so the pytest and ruff baselines are unchanged by
   construction.
 
-- [ ] 3.1c `research` **step**: `createStep` with Zod input/output schemas, prompt
-  assembled by `buildStagePrompt` (item 3.1a), the meta-response retry loop from
-  `research_node` (`_REFUSAL_PATTERNS`, `_EXPECTED_SECTIONS`, `MAX_RESEARCH_ATTEMPTS`,
-  `_reinforced_prompt`), output persisted to `research_content` via
-  `STAGE_CONTENT_MAP`, and the parity test against the golden fixtures.
+- [x] 3.1c-i Shared posts-table bridge: `stateFromPost()` (ported from
+  `state_from_post()` in `api/src/pipeline/state.py`) and `saveStageOutput()` (ported
+  from `save_stage_output()` in `api/src/pipeline/helpers.py`), which all six steps
+  read and write through.
+
+  **Split rationale.** 3.1c bundled four separable things: the posts-table bridge, the
+  meta-response retry loop, the `createStep` wiring and the parity test. The bridge is
+  shared by all six stages rather than specific to `research`, and it is the piece the
+  crash-resume gate (item 4.5) actually depends on, so it is worth proving on its own
+  against the real database before any stage is built on it. Item 3.1c-ii is the
+  `research` step itself.
+
+  **What was built.** `web/src/mastra/post-state.ts`:
+  - `pipelineStateSchema` / `PipelineState`: `pipelineContextSchema` extended with the
+    identity and run-control fields (`postId`, `slug`, `profileId`, `imageStyle`,
+    `imageBrandColors`, `imageExclude`, `finalHtml`, `currentStage`, `stageSettings`,
+    `stageStatus`). `api_keys` stays out, unlike Python's `PipelineState`, so a
+    credential cannot ride into a provider payload inside the prompt-input object.
+  - `stateFromPost(post, internalLinks)`: column-for-column port, including Python's
+    falsy coalescing (`or`, not `??`, so `word_count` 0 becomes 2000) and the three
+    defaults `2000` / `"Conversational and friendly"` / `"markdown"` plus the
+    all-six-stages-`auto` `stage_settings` fallback.
+  - `saveStageOutput(postId, stage, content, stageStatus?)`: writes the stage's column,
+    advances `current_stage`, and replaces `stage_status` only when the caller supplies
+    one. The drizzle property for each stage's column is resolved at import time from
+    `getTableColumns(posts)` by the database column name in `STAGE_CONTENT_MAP`, so the
+    two maps cannot drift into writing the wrong column.
+
+  **Two behaviours found in the Python original that a naive port would have lost.**
+  1. `save_stage_output()` runs through SQLAlchemy's Core `update()`, so
+     `TimestampMixin.updated_at`'s `onupdate` fired on every stage write. Postgres has
+     no trigger doing this, so the TypeScript version stamps `updatedAt` explicitly.
+     Negative control 3 below is the proof that the database does not do it for us.
+  2. `stage_settings` differs by writer, as recorded under item 1.4: the fixtures'
+     all-`auto` six-stage value came from the SQLAlchemy model default, which happens to
+     equal `stateFromPost`'s NULL fallback, while a drizzle insert would get the
+     database's five-stage all-`review` default. The parity test inserts NULL so the
+     fallback branch is the one under test.
+
+  **Parity oracle.** The golden fixtures' `state_input` block is a verbatim dump of the
+  state the Python pipeline ran on. The test inserts a row built from `post_spec` into
+  the real Alembic-owned dev database, reads it back through drizzle, and asserts
+  `stateFromPost(row, links)` deep-equals `state_input` with keys camelized and
+  `api_keys` dropped. Keys are camelized generically rather than by a listed mapping, so
+  a field the port forgot to map surfaces as a missing key instead of being silently
+  excluded from the comparison.
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm exec vitest run src/mastra/post-state.test.ts
+   RUN  v4.0.18 /Users/cody/.../web
+
+   ✓ src/mastra/post-state.test.ts (6 tests) 35ms
+
+   Test Files  1 passed (1)
+        Tests  6 passed (6)
+  ```
+
+  **Negative controls** (each reverted immediately):
+  1. `wordCount: post.wordCount || DEFAULT_WORD_COUNT` -> `?? `: `× coalesces a zero
+     word count to Python's 2000, not to zero`, `AssertionError: expected +0 to be 2000`.
+     Proves the test pins Python's falsy coalescing rather than any coalescing.
+  2. Deleted the `articleType` mapping: both fixture parity tests red with
+     `- "articleType": "how-to",` and `- "articleType": "listicle",` in the diff. Proves
+     the generic camelization really does catch an unmapped field.
+  3. Deleted the explicit `updatedAt: new Date()`: `AssertionError: expected
+     1787366289626 to be greater than 1787366289626`. The two timestamps being identical
+     is the evidence that Postgres does not stamp `updated_at` on its own, so the
+     explicit stamp is load bearing and not decoration.
+  4. Renamed `STAGE_CONTENT_MAP.research` to `reserch_content`: import-time
+     `Error: posts has no column 'reserch_content' for stage 'research'`, `Tests no
+     tests`. Proves the column resolver fails loudly instead of writing nowhere.
+
+  **Gates**
+
+  ```
+  $ cd web && pnpm exec tsc --noEmit
+  tsc exit=0
+
+  $ cd web && pnpm lint
+  lint exit=0
+
+  $ cd web && NO_COLOR=1 pnpm test
+   Test Files  2 failed | 25 passed (27)
+        Tests  9 failed | 276 passed | 1 skipped (286)
+
+  $ cd web && pnpm build
+  build exit=0
+  ```
+
+  Failures held at the established baseline of 9 (`image-preview.test.tsx` and
+  `PostDetail.test.tsx`); passes moved 270 -> 276, which is the 6 new tests. `lint`
+  reports zero problems. No `api/` file was touched, so the pytest and ruff baselines
+  are unchanged by construction.
+
+- [ ] 3.1c-ii `research` **step**: `createStep` with Zod input/output schemas, prompt
+  assembled by `buildStagePrompt` (item 3.1a), the agent from item 3.1b, the
+  meta-response retry loop from `research_node` (`_REFUSAL_PATTERNS`,
+  `_EXPECTED_SECTIONS`, `MAX_RESEARCH_ATTEMPTS`, `_reinforced_prompt`), output persisted
+  to `research_content` through `saveStageOutput` (item 3.1c-i), and the parity test
+  against the golden fixtures.
 - [ ] 3.2 `outline`
 - [ ] 3.3 `write`
 - [ ] 3.4 `edit`
