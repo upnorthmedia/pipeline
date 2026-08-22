@@ -70,7 +70,17 @@ function loadFixture(slug: string): Fixture {
 
 const db = getDb()
 const fixtures = FIXTURE_SLUGS.map(loadFixture)
-const fixtureIds = fixtures.map((f) => String(f.post_spec.id))
+/**
+ * Every stage's parity test seeds the same golden-fixture posts, so left under
+ * the fixture's own id these files collide on the posts primary key whenever
+ * vitest runs them in parallel. A post id never reaches a rendered prompt, so
+ * each file namespaces its rows by rewriting the fixture id's second-to-last
+ * byte, keeping the last one so the two fixtures stay distinct inside the file.
+ */
+const ID_NAMESPACE = "a1"
+const fixtureIds = fixtures.map(
+  (f) => String(f.post_spec.id).slice(0, -3) + ID_NAMESPACE + String(f.post_spec.id).slice(-1),
+)
 
 /** One replayed provider response, shaped like the agent's `generate` result. */
 function replayOf(fixture: Fixture) {
@@ -125,10 +135,10 @@ async function runStep(postId: string, replies: Replay[]) {
 }
 
 async function insertFixturePosts() {
-  for (const fixture of fixtures) {
+  for (const [index, fixture] of fixtures.entries()) {
     const spec = fixture.post_spec
     await db.insert(posts).values({
-      id: spec.id,
+      id: fixtureIds[index],
       slug: spec.slug,
       topic: spec.topic,
       targetAudience: spec.target_audience,

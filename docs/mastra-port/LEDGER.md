@@ -2799,7 +2799,191 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   3. The `system`-as-block-list and `url`-override discrepancies recorded under item
      3.2 apply unchanged here; they are properties of the shared Anthropic path, not
      of this stage.
-- [ ] 3.4 `edit`
+- [ ] 3.4 `edit`. Split, because `edit_node` is the only stage that computes prompt content
+  from two services the port does not yet have: `compute_analytics` (which reaches into
+  `textstat` for sentence counts and Flesch reading ease) and `validate_links`. Both feed
+  numbers straight into the rendered prompt, so byte-exact prompt parity for this stage
+  cannot be reached without porting them first.
+  - [x] 3.4a `textstat` readability primitives (`count_words`, `count_sentences`,
+    `count_syllables`, `words_per_sentence`, `syllables_per_word`, `flesch_reading_ease`)
+    ported to TypeScript, including the `pyphen` hyphenator and the CMU pronouncing
+    dictionary they read, with exhaustive parity against the installed Python
+    implementation.
+
+    **Why this is its own item**
+
+    `compute_analytics` calls two textstat entry points, `sentence_count()` and
+    `flesch_reading_ease()`, and prints both numbers into the edit prompt
+    (`- **Flesch Reading Ease:** {analytics.flesch_reading_ease}`). Byte-exact
+    prompt parity therefore needs textstat's arithmetic reproduced exactly, and
+    that arithmetic bottoms out in two data sets: the CMU pronouncing dictionary
+    (reached through `nltk`) and `pyphen`'s `hyph_en_US.dic` TeX patterns, which
+    `count_syllables` falls back to for out-of-vocabulary words. The usual
+    JavaScript syllable heuristics disagree with the CMU dictionary on ordinary
+    words, and one syllable across a 2,000 word draft moves the Flesch score by
+    enough to change the rendered digit, so an approximation is not usable here.
+
+    **What was built**
+
+    - `api/scripts/export_textstat_data.py`: freezes what Python reads into
+      `web/src/mastra/textstat/data/`. It writes `cmudict-syllables.txt.gz`
+      (`word -> syllables in the first pronunciation`, 123,455 entries, 388 KB
+      gzipped), copies `hyph_en_US.dic` and its licence notice verbatim out of the
+      installed `pyphen`, and writes `textstat-parity.json`, the oracle. The data
+      files are frozen rather than pulled from npm because no JavaScript package
+      guarantees the same revision of either data set, and because both vanish
+      from this repo when `api/` is deleted in Phase 7.
+    - `web/src/mastra/textstat/hyphenator.ts`: port of `pyphen`'s `HyphDict` and
+      `Pyphen.positions`, at `left=2` / `right=2` (pyphen's constructor defaults,
+      which it applies in preference to the `LEFTHYPHENMIN` / `RIGHTHYPHENMIN`
+      directives inside the dictionary file). Only `positions()` is ported;
+      `iterate`, `wrap` and `inserted` have no consumer in `count_syllables`.
+    - `web/src/mastra/textstat/index.ts`: `pythonSplit`, `removePunctuation`,
+      `listWords`, `countWords`, `countSentences`, `cmuSyllables`,
+      `countSyllables`, `wordsPerSentence`, `syllablesPerWord`,
+      `fleschReadingEase`.
+    - `web/src/mastra/textstat/textstat.test.ts`: 52 parity tests.
+
+    **How the parity is proved**
+
+    The centrepiece is a SHA-256 over an exhaustive table rather than a sample:
+    every CMU dictionary word with its syllable count and its `pyphen` hyphenation
+    positions, `<word>\t<syllables>\t<comma-joined positions>` per line, sorted,
+    joined by `\n`. Python writes the digest, TypeScript rebuilds the table from
+    the two frozen files and compares. That proves the port over 123,455 real
+    words from a 20 KB assertion. Recording positions rather than their count
+    means a port that reaches the right count for the wrong reason still fails.
+
+    On top of the digest: the 400 golden-fixture words that miss the CMU
+    dictionary (the only words that reach the hyphenator in real content), a
+    150-word readable sample so a digest mismatch is debuggable, and 41 whole-text
+    expectations, 29 of which are the real research documents, outlines, drafts
+    and final markdown captured in `docs/mastra-port/golden/`.
+
+    ```
+    $ cd web && pnpm vitest run src/mastra/textstat/textstat.test.ts
+     RUN  v4.0.18 /Users/cody/.../objective-port-jena-46c1e6-1/web
+
+     v src/mastra/textstat/textstat.test.ts (52 tests) 522ms
+
+     Test Files  1 passed (1)
+          Tests  52 passed (52)
+       Start at  22:23:11
+       Duration  909ms
+    ```
+
+    **Negative controls** (each applied, run, reverted)
+
+    1. `LEFT_HYPHEN_MIN` 2 -> 1 in `hyphenator.ts`: `Tests  34 failed | 18 passed`.
+       The digest, the sample, the out-of-vocabulary words and every text carrying
+       an out-of-vocabulary word all go red.
+    2. `PY_WHITESPACE` replaced by JavaScript's `\s`:
+       `Tests  1 failed | 51 passed`, on the assertion that pins Python's
+       whitespace set against JavaScript's.
+    3. The Unicode word-boundary emulation in `SENTENCE` replaced by JavaScript's
+       `\b`: `Tests  1 failed | 51 passed`, on
+       `unicode-initial-single-letter-word`.
+    4. `countSyllables` forced down the hyphenator path, ignoring the CMU
+       dictionary: `Tests  30 failed | 21 passed`.
+
+    Control 3 initially passed, which was informative: the golden fixtures and the
+    first set of hand-written cases never place a non-ASCII letter where the two
+    engines' `\b` disagree, so the emulation was untested. A case was added to the
+    exporter (`"A" ist gut. Das war alles was wir sagen wollten.` with a leading
+    single-letter umlaut word) where Python counts 2 sentences and JavaScript's
+    `\b` counts 1, and the control then failed as it should.
+
+    One control was applied and did **not** fail, and the code was corrected rather
+    than the control discarded: dropping the trailing zero-length pair from
+    `parsePattern` (Python's `re.findall` emits one at end of string) changes
+    nothing, because that pair only ever appends a zero value and the caller chops
+    trailing zeros. The pair is kept for readability against `re.findall`, and its
+    comment now says it is not load-bearing instead of claiming it is.
+
+    **Recorded discrepancies**
+
+    1. Python's `\w` and Node's `\p{L}\p{N}_` come from different Unicode
+       revisions: 4,382 code points (for example `U+1C89`, `U+A7CB`, the
+       `U+105C0` block) are word characters to Node and not to Python 3.13.
+       Measured by enumerating both classes over the full code point range. None is
+       reachable from a blog draft.
+    2. Python's `\s` (identical to `str.isspace()`, verified by enumerating both
+       over the full range) covers `\x1c`-`\x1f` and `\x85`, which JavaScript's
+       `\s` does not, and omits `U+FEFF`, which JavaScript's includes. Spelled out
+       as `PY_WHITESPACE` rather than borrowed, and pinned by a test.
+    3. `analytics.py` wraps these numbers in Python's `round()`, which is
+       round-half-to-even and unlike JavaScript's `Math.round`. That belongs to
+       item 3.4b, not here; this module returns the unrounded score, matching
+       textstat, whose own rounding is off by default (`__round_points is None`).
+    4. The data files are read with `readFileSync` relative to `process.cwd()`,
+       the same assumption `rulesDir()` already makes. `next build`'s output file
+       tracing does not follow that, so both need handling before the Phase 7
+       Railway deploy. Logged in `todo.md` rather than solved here.
+
+    **One defect fixed in passing**, because it made an honest gate reading
+    impossible: `research`, `outline` and `write` step tests each seeded the
+    golden fixtures' posts under the fixtures' own ids, so vitest running the three
+    files in parallel raced on the `posts` primary key. It surfaced as
+    `duplicate key value violates unique constraint "posts_pkey"` and
+    `post ... not found`, 6 to 9 extra failures depending on scheduling, and it was
+    present before this iteration's files existed (verified by moving
+    `src/mastra/textstat/` aside and re-running: `Tests  16 failed | 303 passed`).
+    Each file now namespaces its rows by rewriting the fixture id's second-to-last
+    byte, which no rendered prompt reads.
+
+    ```
+    $ cd web && pnpm vitest run src/mastra/steps
+     v src/mastra/steps/research.test.ts (9 tests) 63ms
+     v src/mastra/steps/write.test.ts (6 tests) 79ms
+     Test Files  3 passed (3)
+          Tests  20 passed (20)
+    ```
+
+    **Gates**
+
+    ```
+    $ cd web && pnpm tsc --noEmit ; echo "tsc exit=$?"
+    tsc exit=0
+
+    $ cd web && pnpm lint ; echo "lint exit=$?"
+    lint exit=0
+
+    $ cd web && pnpm test
+     Test Files  2 failed | 31 passed (33)
+          Tests  9 failed | 362 passed | 3 skipped (374)
+
+    $ cd web && pnpm build ; echo "build exit=$?"
+    build exit=0
+
+    $ cd api && uv run ruff check scripts/export_textstat_data.py ; echo "exit=$?"
+    All checks passed!
+    exit=0
+
+    $ cd api && uv run ruff format --check scripts/export_textstat_data.py ; echo "exit=$?"
+    1 file already formatted
+    exit=0
+
+    $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test uv run pytest -q
+    125 failed, 236 passed, 25 errors in 14.92s
+    ```
+
+    `pnpm test` is 9 failed / 362 passed, which is the recorded failure baseline
+    (6 in `image-preview.test.tsx`, 3 in `PostDetail.test.tsx`) unchanged, with
+    passes moving 310 -> 362: the 52 new tests. Run three times with identical
+    results, where before the step-test fix the same command returned 15, 16 and 18
+    failures on consecutive runs. `pytest` is at the Phase 0 baseline of
+    125 failed / 235-236 passed / 25 errors; the repo-wide `ruff check .` and
+    `ruff format --check .` baselines (41 errors, 10 files) are untouched, and the
+    one file this iteration added to `api/` passes both.
+  - [ ] 3.4b `compute_analytics` (`api/src/services/analytics.py`): `_strip_markdown`,
+    keyword density, the SEO checklist, and Python's rounding, with a parity test against
+    the golden fixtures' draft content.
+  - [ ] 3.4c `validate_links` (`api/src/services/link_validator.py`).
+  - [ ] 3.4d `edit` **agent**: system message, model id, `max_tokens`, wire-payload parity
+    against the golden fixtures' recorded Anthropic request.
+  - [ ] 3.4e `edit` **step**: `createStep`, the analytics section appended to the prompt,
+    the post-edit validation warnings, persistence to `final_md`, and the prompt-parity
+    test against both golden fixtures.
 - [ ] 3.5 `images` (identical `image_manifest` JSONB shape; `.foreach()` for per-image generation)
 - [ ] 3.6 `ready`
 

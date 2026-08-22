@@ -36,3 +36,9 @@
   six-stage all-`"auto"` `stage_settings`, while the database has `'both'` and a five-stage
   all-`"review"` map. Rows created through SQLAlchemy and rows created by raw SQL therefore
   get different defaults.
+
+- [confirmed] 2026-08-21 `next build`'s output file tracing does not know about the two
+  runtime data files under `web/src/mastra/textstat/data/`, which the port reads with
+  `readFileSync` relative to `process.cwd()`. `rules/*.md` has the same shape of dependency
+  through `rulesDir()`. Both need to be resolved before the Phase 7 Railway deploy, either by
+  copying them into the standalone output or by moving them somewhere the tracer follows.
