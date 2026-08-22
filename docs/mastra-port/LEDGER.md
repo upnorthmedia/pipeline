@@ -3134,7 +3134,193 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
     3. `tsconfig.json` targets ES2017, where BigInt *literals* (`0n`) are a type
        error even though `lib: esnext` provides the type. `pythonRound` names its
        constants through `BigInt(...)` rather than raising the app-wide target.
-  - [ ] 3.4c `validate_links` (`api/src/services/link_validator.py`).
+  - [x] 3.4c `validate_links` (`api/src/services/link_validator.py`).
+
+    **Why this needed its own oracle shape**
+
+    `link_validator` is the only service in the pipeline that reaches the
+    network, so it cannot be pinned by a table of inputs and outputs the way
+    `analytics-parity.json` pins `compute_analytics`. The oracle is therefore
+    split in two, both halves written by one script:
+
+    1. **Network cases.** Python stands up a local HTTP server whose routes
+       return exactly the status codes the stripper cares about (404, 410 and
+       451 strip; 200, 418 and 500 keep), plus a 301 to a 410, a 302 to a 200, a
+       refused connection on a closed port, and a route that sleeps past
+       `_REQUEST_TIMEOUT`. It runs the real `validate_links` against them and
+       records the resulting content and `removed` list with the base URL
+       templated back to `{BASE}`. The vitest file stands up the equivalent
+       server in Node on its own port and runs the TypeScript port against it.
+       Nothing is mocked on either side: both implementations open real sockets
+       to a real server.
+    2. **Extraction and strip cases.** `_MD_LINK_RE.findall` and the `re.sub`
+       loop are pure, so they are exported as plain input/output tables. The
+       eight golden cases carry a pointer into `docs/mastra-port/golden/`
+       instead of a copy of the text, so the test reads the real captured stage
+       content rather than a transcription made for its benefit.
+
+    **What was built**
+
+    - `web/src/mastra/links/index.ts`: `validateLinks`, plus `findMarkdownLinks`
+      and `stripDeadLinks` exported because they are the pure half of the module
+      and therefore the half a test can pin exactly. `CONCURRENCY_LIMIT` and
+      `REQUEST_TIMEOUT_MS` mirror `_SEMAPHORE_LIMIT` and `_REQUEST_TIMEOUT`.
+    - `api/scripts/export_link_validator_parity.py`: writes
+      `web/src/mastra/links/data/link-validator-parity.json` (16 KB): 22 network
+      cases, 22 extraction cases, 9 strip cases.
+    - `web/src/mastra/links/links.test.ts`: 57 tests.
+
+    **Four details that do not survive a naive translation**
+
+    1. `re.escape` escapes a superset of what a JavaScript regex needs, but the
+       two agree on every character that is actually special outside a character
+       class, so `escapeRegExp` escapes the JavaScript set and the `u` flag is
+       never used. Under `u`, `\&` is a SyntaxError rather than an identity
+       escape, so escaping Python's full set would not even compile.
+    2. `re.sub`'s replacement `\1` inserts the captured text verbatim.
+       `String.prototype.replace` with `"$1"` also inserts it verbatim, but a
+       `$&`, `$1`, `` $` `` or `$'` *inside the captured link text* is a
+       replacement special only if the text is used as the replacement pattern.
+       It is not, and a dedicated test pins that.
+    3. `str.startswith(("http://", "https://"))` is case-sensitive, so a link
+       written `HTTP://...` is never checked and never stripped. Pinned by the
+       `uppercase-scheme` case.
+    4. Python iterates `dead_urls`, a `set`, whose iteration order is
+       hash-randomised per process. The substitutions are independent for every
+       URL, so the order is unobservable for any content this pipeline produces;
+       the port substitutes in first-appearance order so it is deterministic at
+       all. The `removed` list's order is *not* arbitrary in Python (it comes
+       from the `results` dict, which is insertion-ordered), and the port
+       reproduces it, pinned by `two-dead-out-of-order` and `mixed`.
+
+    **Recorded discrepancies**
+
+    1. `httpx`'s `timeout=10` is a per-phase budget (connect, read, write, pool
+       each get 10s); `AbortSignal.timeout(10_000)` is a deadline over the whole
+       request. A server that dribbles a response for more than 10s total
+       without ever stalling 10s in one phase is answered by Python and aborted
+       here. Both branches keep the link unless the slow answer was a 404, so
+       the divergence is in the conservative direction. Not reachable through
+       the fixtures.
+    2. `validate_links` calls `logger.warning(f"Dead link ({status}): {url}")`
+       per dead URL. The port logs nothing: `edit_node` separately publishes a
+       `Stripped N dead link(s): ...` SSE line from the returned `removed` list,
+       and that line is item 3.4e's business, for the same reason recorded under
+       item 3.1c-ii.
+    3. `strip_dead_links_html` is deliberately not ported. It has no caller
+       anywhere in the repo outside its own pytest:
+
+       ```
+       $ grep -rn "strip_dead_links_html" --include='*.py' --include='*.ts' --include='*.tsx' . | grep -v node_modules
+       api/tests/phase9/test_link_validator.py:8:    strip_dead_links_html,
+       api/tests/phase9/test_link_validator.py:138:def test_strip_dead_links_html():
+       api/tests/phase9/test_link_validator.py:140:    result = strip_dead_links_html(html, {"https://dead.com"})
+       api/tests/phase9/test_link_validator.py:147:    result = strip_dead_links_html(html, {"https://dead.com"})
+       api/src/services/link_validator.py:110:def strip_dead_links_html(html: str, dead_urls: set[str]) -> str:
+       ```
+
+       The WordPress HTML path (`wp_html.py`) does not use it. Porting it would
+       be speculative; if a caller appears before Phase 7 deletes `api/`, the
+       Python source is the reference.
+
+    **The concurrency probe, and why the first reading was wrong**
+
+    `_SEMAPHORE_LIMIT` is pinned by a case with 12 links to a route that sleeps
+    0.3s, with the server recording the highest number of simultaneous in-flight
+    requests. The first Python run reported 6 for a limit of 5, from two
+    separate measurement bugs rather than from `asyncio.Semaphore`:
+
+    - counting a request as in flight across the response *write* leaves the
+      handler thread counted after the client has already been answered and
+      released its slot, so the next request overlaps it. Fixed by releasing the
+      counter before responding.
+    - the `/hang` route sleeps 12s but the client gives up at 10s, so its
+      handler thread was still holding a slot open during the case that ran
+      next. Fixed by not counting `/hang` at all.
+
+    With both fixed the reading is exactly 5, twice in a row, and the Node
+    server reproduces the same 5.
+
+    **Test run**
+
+    ```
+    $ cd web && npx vitest run src/mastra/links/links.test.ts
+     RUN  v4.0.18 /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+
+     ✓ src/mastra/links/links.test.ts (57 tests) 10954ms
+         ✓ matches Python for timeout  10003ms
+         ✓ matches Python for semaphore-probe  914ms
+
+     Test Files  1 passed (1)
+          Tests  57 passed (57)
+       Start at  22:53:48
+       Duration  11.18s (transform 27ms, setup 129ms, import 19ms, tests 10.95s, environment 0ms)
+    ```
+
+    The 10s case is the real `REQUEST_TIMEOUT_MS` elapsing against a route that
+    never answers. It asserts both that the link survives and that the wait
+    ended at the deadline rather than at the server's 12s sleep, so a port with
+    no timeout at all fails it.
+
+    **Negative controls, each applied then reverted**
+
+    ```
+    $ # DEAD_STATUSES gains 500
+    FAIL  matches Python for kept-500
+    $ # redirect: "manual" instead of "follow"
+    FAIL  matches Python for redirect-to-dead
+    $ # url.toLowerCase().startsWith(...) instead of url.startsWith(...)
+    FAIL  matches Python for uppercase-scheme
+    $ # escapeRegExp returns its argument unchanged
+    FAIL  matches Python for regex-special-url
+    FAIL  matches re.sub for regex-special
+    $ # CONCURRENCY_LIMIT raised from 5 to 8
+    FAIL  matches Python for semaphore-probe
+    FAIL  admits exactly CONCURRENCY_LIMIT requests at a time
+    $ # the AbortSignal.timeout line deleted
+    FAIL  matches Python for timeout
+    $ # the per-URL text list deduplicated through a Set
+    FAIL  matches Python for duplicate-url-same-text
+    $ # urls checked in .sort() order instead of first-appearance order
+    FAIL  matches Python for mixed
+    FAIL  matches Python for two-dead-out-of-order
+    ```
+
+    The Set control is the informative one: it *passed* against the original
+    case list, because `duplicate-url` used two different link texts for the
+    same URL and a Set therefore collapsed nothing. Two cases were added to the
+    oracle to close that hole (`duplicate-url-same-text`, which repeats both the
+    URL and the text, and `two-dead-out-of-order`, whose two dead URLs are in
+    reverse alphabetical order), and the control fails against them.
+
+    **Gates**
+
+    ```
+    $ cd web && npx tsc --noEmit
+    tsc exit=0
+    $ cd web && pnpm lint
+    > content-pipeline-dashboard@0.1.0 lint
+    > eslint
+    (no output)
+    $ cd web && pnpm test
+     Test Files  2 failed | 33 passed (35)
+          Tests  9 failed | 465 passed | 3 skipped (477)
+    $ cd web && pnpm build
+    (succeeded; route table printed)
+    $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test .venv/bin/pytest -q
+    125 failed, 236 passed, 25 errors in 15.15s
+    $ cd api && .venv/bin/ruff check scripts/export_link_validator_parity.py
+    All checks passed!
+    $ cd api && .venv/bin/ruff format --check scripts/export_link_validator_parity.py
+    1 file already formatted
+    ```
+
+    `pnpm test` is 9 failed, the recorded failure baseline (6 in
+    `image-preview.test.tsx`, 3 in `PostDetail.test.tsx`) unchanged, with passes
+    moving 408 -> 465: the 57 new tests. `pytest` is at the Phase 0 baseline of
+    125 failed / 236 passed / 25 errors. The repo-wide `ruff check .` baseline of
+    32 errors is untouched; the one file this iteration added to `api/` passes
+    both ruff gates.
   - [ ] 3.4d `edit` **agent**: system message, model id, `max_tokens`, wire-payload parity
     against the golden fixtures' recorded Anthropic request.
   - [ ] 3.4e `edit` **step**: `createStep`, the analytics section appended to the prompt,

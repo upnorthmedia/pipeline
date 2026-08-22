@@ -1,0 +1,612 @@
+{
+  "generated_by": "api/scripts/export_link_validator_parity.py",
+  "source": "api/src/services/link_validator.py",
+  "python_version": "3.13.12",
+  "hang_seconds": 12.0,
+  "slow_seconds": 0.3,
+  "closed_port": 9,
+  "network_cases": [
+    {
+      "name": "no-links",
+      "template": "Plain text with no links at all.",
+      "expected_template": "Plain text with no links at all.",
+      "expected_removed": [],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "relative-and-anchor",
+      "template": "See [page](/about) and [jump](#overview) here.",
+      "expected_template": "See [page](/about) and [jump](#overview) here.",
+      "expected_removed": [],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "uppercase-scheme",
+      "template": "A [link]({BASE_UPPER}/notfound) with an upper scheme.",
+      "expected_template": "A [link]({BASE_UPPER}/notfound) with an upper scheme.",
+      "expected_removed": [],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "alive-200",
+      "template": "Check [Example]({BASE}/ok) here.",
+      "expected_template": "Check [Example]({BASE}/ok) here.",
+      "expected_removed": [],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "dead-404",
+      "template": "Click [Dead Link]({BASE}/notfound) now.",
+      "expected_template": "Click Dead Link now.",
+      "expected_removed": [
+        {
+          "url": "{BASE}/notfound",
+          "status": 404,
+          "text": "Dead Link"
+        }
+      ],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "dead-410",
+      "template": "See [Gone]({BASE}/gone) for details.",
+      "expected_template": "See Gone for details.",
+      "expected_removed": [
+        {
+          "url": "{BASE}/gone",
+          "status": 410,
+          "text": "Gone"
+        }
+      ],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "dead-451",
+      "template": "Blocked [Legal]({BASE}/unavailable) notice.",
+      "expected_template": "Blocked Legal notice.",
+      "expected_removed": [
+        {
+          "url": "{BASE}/unavailable",
+          "status": 451,
+          "text": "Legal"
+        }
+      ],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "kept-500",
+      "template": "A [Server Error]({BASE}/error) stays put.",
+      "expected_template": "A [Server Error]({BASE}/error) stays put.",
+      "expected_removed": [],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "kept-418",
+      "template": "A [Teapot]({BASE}/teapot) stays put.",
+      "expected_template": "A [Teapot]({BASE}/teapot) stays put.",
+      "expected_removed": [],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "redirect-to-dead",
+      "template": "Follow [Moved]({BASE}/moved) to a 410.",
+      "expected_template": "Follow Moved to a 410.",
+      "expected_removed": [
+        {
+          "url": "{BASE}/moved",
+          "status": 410,
+          "text": "Moved"
+        }
+      ],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "redirect-to-alive",
+      "template": "Follow [Found]({BASE}/found) to a 200.",
+      "expected_template": "Follow [Found]({BASE}/found) to a 200.",
+      "expected_removed": [],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "connection-refused",
+      "template": "Try [Down](http://127.0.0.1:9/nope) later.",
+      "expected_template": "Try [Down](http://127.0.0.1:9/nope) later.",
+      "expected_removed": [],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "mixed",
+      "template": "Visit [Good]({BASE}/ok) and [Dead1]({BASE}/notfound) and [Dead2]({BASE}/gone) links.",
+      "expected_template": "Visit [Good]({BASE}/ok) and Dead1 and Dead2 links.",
+      "expected_removed": [
+        {
+          "url": "{BASE}/notfound",
+          "status": 404,
+          "text": "Dead1"
+        },
+        {
+          "url": "{BASE}/gone",
+          "status": 410,
+          "text": "Dead2"
+        }
+      ],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "duplicate-url",
+      "template": "First [one]({BASE}/notfound), then [two]({BASE}/notfound), then [three]({BASE}/ok).",
+      "expected_template": "First one, then two, then [three]({BASE}/ok).",
+      "expected_removed": [
+        {
+          "url": "{BASE}/notfound",
+          "status": 404,
+          "text": "one"
+        },
+        {
+          "url": "{BASE}/notfound",
+          "status": 404,
+          "text": "two"
+        }
+      ],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "duplicate-url-same-text",
+      "template": "Read [more]({BASE}/notfound) and [more]({BASE}/notfound) too.",
+      "expected_template": "Read more and more too.",
+      "expected_removed": [
+        {
+          "url": "{BASE}/notfound",
+          "status": 404,
+          "text": "more"
+        },
+        {
+          "url": "{BASE}/notfound",
+          "status": 404,
+          "text": "more"
+        }
+      ],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "two-dead-out-of-order",
+      "template": "[zeta]({BASE}/notfound) before [alpha]({BASE}/gone).",
+      "expected_template": "zeta before alpha.",
+      "expected_removed": [
+        {
+          "url": "{BASE}/notfound",
+          "status": 404,
+          "text": "zeta"
+        },
+        {
+          "url": "{BASE}/gone",
+          "status": 410,
+          "text": "alpha"
+        }
+      ],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "empty-link-text",
+      "template": "An [](({BASE}/ok)) and an []({BASE}/notfound) here.",
+      "expected_template": "An [](({BASE}/ok)) and an  here.",
+      "expected_removed": [
+        {
+          "url": "{BASE}/notfound",
+          "status": 404,
+          "text": ""
+        }
+      ],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "regex-special-url",
+      "template": "A [Plus]({BASE}/notfound?a=1+2&b=c.d*e) link.",
+      "expected_template": "A Plus link.",
+      "expected_removed": [
+        {
+          "url": "{BASE}/notfound?a=1+2&b=c.d*e",
+          "status": 404,
+          "text": "Plus"
+        }
+      ],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "bare-url-alongside",
+      "template": "See [Dead]({BASE}/notfound) and the bare {BASE}/notfound too.",
+      "expected_template": "See Dead and the bare {BASE}/notfound too.",
+      "expected_removed": [
+        {
+          "url": "{BASE}/notfound",
+          "status": 404,
+          "text": "Dead"
+        }
+      ],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "same-url-in-html",
+      "template": "Markdown [Dead]({BASE}/notfound) and <a href=\"{BASE}/notfound\">html</a>.",
+      "expected_template": "Markdown Dead and <a href=\"{BASE}/notfound\">html</a>.",
+      "expected_removed": [
+        {
+          "url": "{BASE}/notfound",
+          "status": 404,
+          "text": "Dead"
+        }
+      ],
+      "max_in_flight": 0,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "timeout",
+      "template": "Visit [Slow]({BASE}/hang) site.",
+      "expected_template": "Visit [Slow]({BASE}/hang) site.",
+      "expected_removed": [],
+      "max_in_flight": 0,
+      "elapsed_s": 10.0
+    },
+    {
+      "name": "semaphore-probe",
+      "template": "[n0]({BASE}/slow?i=0) [n1]({BASE}/slow?i=1) [n2]({BASE}/slow?i=2) [n3]({BASE}/slow?i=3) [n4]({BASE}/slow?i=4) [n5]({BASE}/slow?i=5) [n6]({BASE}/slow?i=6) [n7]({BASE}/slow?i=7) [n8]({BASE}/slow?i=8) [n9]({BASE}/slow?i=9) [n10]({BASE}/slow?i=10) [n11]({BASE}/slow?i=11)",
+      "expected_template": "[n0]({BASE}/slow?i=0) [n1]({BASE}/slow?i=1) [n2]({BASE}/slow?i=2) [n3]({BASE}/slow?i=3) [n4]({BASE}/slow?i=4) [n5]({BASE}/slow?i=5) [n6]({BASE}/slow?i=6) [n7]({BASE}/slow?i=7) [n8]({BASE}/slow?i=8) [n9]({BASE}/slow?i=9) [n10]({BASE}/slow?i=10) [n11]({BASE}/slow?i=11)",
+      "expected_removed": [],
+      "max_in_flight": 5,
+      "elapsed_s": 0.9
+    }
+  ],
+  "extraction_cases": [
+    {
+      "name": "empty",
+      "text": "",
+      "matches": []
+    },
+    {
+      "name": "plain",
+      "text": "No links here.",
+      "matches": []
+    },
+    {
+      "name": "simple",
+      "text": "A [text](https://example.com/a) link.",
+      "matches": [
+        {
+          "text": "text",
+          "url": "https://example.com/a"
+        }
+      ]
+    },
+    {
+      "name": "empty-text",
+      "text": "An []( https://example.com/b ) link.",
+      "matches": [
+        {
+          "text": "",
+          "url": " https://example.com/b "
+        }
+      ]
+    },
+    {
+      "name": "no-url",
+      "text": "An [text]() link.",
+      "matches": []
+    },
+    {
+      "name": "nested-brackets",
+      "text": "A [[nested]](https://example.com/c) link.",
+      "matches": []
+    },
+    {
+      "name": "paren-in-url",
+      "text": "A [text](https://example.com/(d)) link.",
+      "matches": [
+        {
+          "text": "text",
+          "url": "https://example.com/(d"
+        }
+      ]
+    },
+    {
+      "name": "bracket-in-text",
+      "text": "A [te]xt](https://example.com/e) link.",
+      "matches": []
+    },
+    {
+      "name": "adjacent",
+      "text": "[a](https://example.com/1)[b](https://example.com/2)",
+      "matches": [
+        {
+          "text": "a",
+          "url": "https://example.com/1"
+        },
+        {
+          "text": "b",
+          "url": "https://example.com/2"
+        }
+      ]
+    },
+    {
+      "name": "multiline",
+      "text": "A [text](https://example.com/f)\nand [more](/relative)\n",
+      "matches": [
+        {
+          "text": "text",
+          "url": "https://example.com/f"
+        },
+        {
+          "text": "more",
+          "url": "/relative"
+        }
+      ]
+    },
+    {
+      "name": "image",
+      "text": "An ![alt](https://cdn.example.com/g.png) image.",
+      "matches": [
+        {
+          "text": "alt",
+          "url": "https://cdn.example.com/g.png"
+        }
+      ]
+    },
+    {
+      "name": "newline-in-url",
+      "text": "A [text](https://example.com/\nh) link.",
+      "matches": [
+        {
+          "text": "text",
+          "url": "https://example.com/\nh"
+        }
+      ]
+    },
+    {
+      "name": "space-in-text",
+      "text": "A [ spaced text ](https://example.com/i) link.",
+      "matches": [
+        {
+          "text": " spaced text ",
+          "url": "https://example.com/i"
+        }
+      ]
+    },
+    {
+      "name": "unicode",
+      "text": "A [café ünicode](https://example.com/café) here.",
+      "matches": [
+        {
+          "text": "café ünicode",
+          "url": "https://example.com/café"
+        }
+      ]
+    },
+    {
+      "name": "golden:best-time-tracking-tools-for-agencies:research",
+      "golden": {
+        "slug": "best-time-tracking-tools-for-agencies",
+        "stage": "research",
+        "key": "research"
+      },
+      "matches": []
+    },
+    {
+      "name": "golden:best-time-tracking-tools-for-agencies:write",
+      "golden": {
+        "slug": "best-time-tracking-tools-for-agencies",
+        "stage": "write",
+        "key": "draft"
+      },
+      "matches": []
+    },
+    {
+      "name": "golden:best-time-tracking-tools-for-agencies:edit",
+      "golden": {
+        "slug": "best-time-tracking-tools-for-agencies",
+        "stage": "edit",
+        "key": "final_md"
+      },
+      "matches": [
+        {
+          "text": "SBA's guide to financial management",
+          "url": "https://www.sba.gov/business-guide/manage-your-business/manage-your-finances"
+        },
+        {
+          "text": "Bureau of Labor Statistics",
+          "url": "https://www.bls.gov/ooh/management/advertising-promotions-and-marketing-managers.htm"
+        },
+        {
+          "text": "Fair Labor Standards Act",
+          "url": "https://www.dol.gov/agencies/whd/flsa"
+        }
+      ]
+    },
+    {
+      "name": "golden:best-time-tracking-tools-for-agencies:ready",
+      "golden": {
+        "slug": "best-time-tracking-tools-for-agencies",
+        "stage": "ready",
+        "key": "ready"
+      },
+      "matches": [
+        {
+          "text": "SBA's guide to financial management",
+          "url": "https://www.sba.gov/business-guide/manage-your-business/manage-your-finances"
+        },
+        {
+          "text": "Bureau of Labor Statistics",
+          "url": "https://www.bls.gov/ooh/management/advertising-promotions-and-marketing-managers.htm"
+        },
+        {
+          "text": "Fair Labor Standards Act",
+          "url": "https://www.dol.gov/agencies/whd/flsa"
+        }
+      ]
+    },
+    {
+      "name": "golden:how-to-choose-a-crm-for-a-small-team:research",
+      "golden": {
+        "slug": "how-to-choose-a-crm-for-a-small-team",
+        "stage": "research",
+        "key": "research"
+      },
+      "matches": []
+    },
+    {
+      "name": "golden:how-to-choose-a-crm-for-a-small-team:write",
+      "golden": {
+        "slug": "how-to-choose-a-crm-for-a-small-team",
+        "stage": "write",
+        "key": "draft"
+      },
+      "matches": []
+    },
+    {
+      "name": "golden:how-to-choose-a-crm-for-a-small-team:edit",
+      "golden": {
+        "slug": "how-to-choose-a-crm-for-a-small-team",
+        "stage": "edit",
+        "key": "final_md"
+      },
+      "matches": [
+        {
+          "text": "U.S. Small Business Administration",
+          "url": "https://www.sba.gov/business-guide/manage-your-business"
+        },
+        {
+          "text": "Capterra",
+          "url": "https://www.capterra.com/customer-relationship-management-software/"
+        },
+        {
+          "text": "G2",
+          "url": "https://www.g2.com/categories/crm"
+        }
+      ]
+    },
+    {
+      "name": "golden:how-to-choose-a-crm-for-a-small-team:ready",
+      "golden": {
+        "slug": "how-to-choose-a-crm-for-a-small-team",
+        "stage": "ready",
+        "key": "ready"
+      },
+      "matches": [
+        {
+          "text": "sales pipeline basics",
+          "url": "https://example.com/blog/sales-pipeline-basics"
+        },
+        {
+          "text": "U.S. Small Business Administration",
+          "url": "https://www.sba.gov/business-guide/manage-your-business"
+        },
+        {
+          "text": "pricing page",
+          "url": "https://example.com/pricing"
+        },
+        {
+          "text": "Capterra",
+          "url": "https://www.capterra.com/customer-relationship-management-software/"
+        },
+        {
+          "text": "G2",
+          "url": "https://www.g2.com/categories/crm"
+        },
+        {
+          "text": "CRM data hygiene",
+          "url": "https://example.com/blog/crm-data-hygiene"
+        }
+      ]
+    }
+  ],
+  "strip_cases": [
+    {
+      "name": "single",
+      "content": "Click [Dead Link](https://dead.com/page) now.",
+      "dead_urls": [
+        "https://dead.com/page"
+      ],
+      "expected": "Click Dead Link now."
+    },
+    {
+      "name": "repeated",
+      "content": "[a](https://d.com/x) then [b](https://d.com/x) then [c](https://d.com/y)",
+      "dead_urls": [
+        "https://d.com/x"
+      ],
+      "expected": "a then b then [c](https://d.com/y)"
+    },
+    {
+      "name": "regex-special",
+      "content": "A [Plus](https://d.com/a+b?c=1&e=f.g*h) link.",
+      "dead_urls": [
+        "https://d.com/a+b?c=1&e=f.g*h"
+      ],
+      "expected": "A Plus link."
+    },
+    {
+      "name": "prefix-not-matched",
+      "content": "[a](https://d.com/x) and [b](https://d.com/xy)",
+      "dead_urls": [
+        "https://d.com/x"
+      ],
+      "expected": "a and [b](https://d.com/xy)"
+    },
+    {
+      "name": "empty-text",
+      "content": "An []( https://d.com/z ) and [](https://d.com/z) here.",
+      "dead_urls": [
+        "https://d.com/z"
+      ],
+      "expected": "An []( https://d.com/z ) and  here."
+    },
+    {
+      "name": "dollar-in-text",
+      "content": "A [$1 and $& and $`](https://d.com/q) link.",
+      "dead_urls": [
+        "https://d.com/q"
+      ],
+      "expected": "A $1 and $& and $` link."
+    },
+    {
+      "name": "backslash-in-text",
+      "content": "A [back\\1slash](https://d.com/r) link.",
+      "dead_urls": [
+        "https://d.com/r"
+      ],
+      "expected": "A back\\1slash link."
+    },
+    {
+      "name": "two-urls",
+      "content": "[a](https://d.com/1) [b](https://d.com/2) [c](https://d.com/3)",
+      "dead_urls": [
+        "https://d.com/1",
+        "https://d.com/3"
+      ],
+      "expected": "a [b](https://d.com/2) c"
+    },
+    {
+      "name": "not-dead",
+      "content": "[a](https://d.com/1) stays.",
+      "dead_urls": [],
+      "expected": "[a](https://d.com/1) stays."
+    }
+  ]
+}
