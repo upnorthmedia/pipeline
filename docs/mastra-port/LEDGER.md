@@ -9495,8 +9495,222 @@ three pieces are separately verifiable, so they are separate items.
         5.3c-iii-b-2 the Next.js workflow (HMAC signing preserved exactly) plus its branch
         and the trailing 400 for every other `output_format`. Item 5.9 and item 5.10 cover
         the two routers, not the publishing itself, so the workflows land here.
-  - [ ] 5.3d `GET /{post_id}/export/markdown`, `/export/html`, `/export/all`,
-    `/{post_id}/logs` and `/{post_id}/analytics`.
+  - [ ] 5.3d Exports, logs and analytics (split: five endpoints, and `/export/all`
+    needs a zip writer this repo does not have while `/analytics` needs the analytics
+    service wired to the route. Split into 5.3d-i the two plain exports, 5.3d-ii
+    `/export/all`, 5.3d-iii `/logs` and `/analytics`.)
+    - [x] 5.3d-i `GET /{post_id}/export/markdown` and `GET /{post_id}/export/html`,
+      plus the `strip_leading_h1` port both they and `/export/all` need.
+
+      Ported to `web/src/app/api/posts/[id]/export/markdown/route.ts` and
+      `web/src/app/api/posts/[id]/export/html/route.ts`. The two content
+      transformations live in `web/src/app/api/posts/export-content.ts`:
+      `stripLeadingH1()` (from `strip_leading_h1` in
+      `api/src/pipeline/helpers.py`, whose only callers were these endpoints) and
+      `rewriteMediaUrls()` (the `export_content.replace(f"/media/{post_id}/", "/")`
+      line). Ownership is the same inner join to `website_profiles` used by `GET
+      /api/posts/{post_id}`, so another user's post and a missing one are the same
+      404, and a post with a null `profile_id` is invisible.
+
+      **Three regex-dialect differences make a literal transcription wrong**, and
+      each is pinned by its own oracle case rather than argued:
+
+      - `re.MULTILINE` makes Python's `^` and `$` match around `\n` only;
+        JavaScript's `m` flag also matches around `\r`, ` ` and ` `. The
+        Python semantics are spelled out as `(?:^|(?<=\n))` and `(?=\n|$)`.
+      - Without `re.DOTALL` Python's `.` excludes `\n` alone; JavaScript's also
+        excludes `\r`, ` ` and ` `. `[^\n]` is used wherever Python wrote
+        a non-DOTALL `.`.
+      - `str.strip("\"'")` strips a *set* of characters from both ends until it
+        reaches one outside the set, which no `trim`-shaped JavaScript API does.
+
+      The oracle is `web/src/app/api/posts/data/strip-leading-h1-parity.json`,
+      written by `api/scripts/export_strip_leading_h1_parity.py` running the real
+      Python helper over 30 inputs (18 of which it modifies, 12 of which it returns
+      untouched, so a no-op implementation and an always-strip implementation both
+      fail).
+
+      ```
+      $ cd api && PYTHONPATH=. uv run python scripts/export_strip_leading_h1_parity.py
+      wrote 30 cases to /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web/src/app/api/posts/data/strip-leading-h1-parity.json (18 of them modified by the strip)
+      ```
+
+      Two smaller Python/JavaScript differences are left in place, deliberately, and
+      are the known gap in this item: Python's `\s` covers `\x1c`-`\x1f` and `\x85`
+      where JavaScript's does not and JavaScript's covers `﻿` where Python's
+      does not, and `str.lower()` and `String.toLowerCase()` disagree on a handful
+      of non-Latin characters. Closing either would mean hand-rolling a character
+      class in place of `\s` and a case-folding table in place of `toLowerCase()`,
+      inside a function whose input is YAML frontmatter written by an LLM. Neither
+      difference can change whether an H1 is stripped without a control character
+      inside a markdown heading.
+
+      Two behaviours worth naming because they look like bugs and are faithful:
+      `post.ready_content or post.final_md_content` treats an empty string as
+      absent, so a post whose `ready_content` is `""` exports `final_md_content`
+      (`??` fails that test); and the HTML export applies neither the H1 strip nor
+      the media rewrite, because those exist to make an MDX file portable into a
+      blog repository while the HTML is pasted into a CMS still serving images from
+      this app.
+
+      `str()` on the `uuid.UUID` FastAPI parsed is always the lowercase canonical
+      form, so an uppercase id in the request path still rewrote lowercase media
+      URLs. `rewriteMediaUrls()` lowercases the id to keep that.
+
+      Starlette appends `charset=utf-8` to any `text/*` media type, probed rather
+      than assumed, so both handlers spell the content type out in full:
+
+      ```
+      $ cd api && uv run python -c "..."
+      {'content-disposition': 'attachment; filename="a.mdx"', 'content-length': '1', 'content-type': 'text/markdown; charset=utf-8'}
+      {'content-disposition': 'attachment; filename="a.html"', 'content-length': '9', 'content-type': 'text/html; charset=utf-8'}
+      ```
+
+      52 tests in `web/src/app/api/posts/export.test.ts`: 30 oracle replays, a
+      guard that the oracle covers both outcomes, 3 for the media rewrite, and 18
+      handler tests against the real database and real BetterAuth sessions.
+
+      ```
+      $ pnpm -C web vitest run src/app/api/posts/export.test.ts --reporter=verbose
+       ✓ src/app/api/posts/export.test.ts > stripLeadingH1 against the Python oracle > covers both outcomes, so a no-op implementation cannot pass 1ms
+       ✓ ... > matches Python: empty 1ms
+       ✓ ... > matches Python: no frontmatter, leading h1 1ms
+       ✓ ... > matches Python: frontmatter without a title key 1ms
+       ✓ ... > matches Python: title matches h1 1ms
+       ✓ ... > matches Python: title does not match h1 1ms
+       ✓ ... > matches Python: match differs only by case 1ms
+       ✓ ... > matches Python: double-quoted title, bare h1 1ms
+       ✓ ... > matches Python: single-quoted title, bare h1 1ms
+       ✓ ... > matches Python: bare title, quoted h1 1ms
+       ✓ ... > matches Python: h1 preceded by blank lines 1ms
+       ✓ ... > matches Python: h1 indented by spaces 1ms
+       ✓ ... > matches Python: several blank lines after the h1 1ms
+       ✓ ... > matches Python: no blank line after the h1 1ms
+       ✓ ... > matches Python: h1 is the whole body, no trailing newline 1ms
+       ✓ ... > matches Python: h2 rather than h1 1ms
+       ✓ ... > matches Python: hash with no space 1ms
+       ✓ ... > matches Python: trailing spaces after the h1 text 1ms
+       ✓ ... > matches Python: trailing spaces after the title 1ms
+       ✓ ... > matches Python: two title keys, first wins 1ms
+       ✓ ... > matches Python: title key not at line start 1ms
+       ✓ ... > matches Python: body contains a later thematic break 1ms
+       ✓ ... > matches Python: frontmatter fence with trailing spaces 1ms
+       ✓ ... > matches Python: crlf line endings 1ms
+       ✓ ... > matches Python: title contains a colon 1ms
+       ✓ ... > matches Python: h1 text differs by trailing punctuation 1ms
+       ✓ ... > matches Python: body is empty 0ms
+       ✓ ... > matches Python: lone carriage return inside the title and the h1 1ms
+       ✓ ... > matches Python: title key preceded by a lone carriage return 1ms
+       ✓ ... > matches Python: line separator inside the title and the h1 1ms
+       ✓ ... > matches Python: media urls survive the strip 0ms
+       ✓ src/app/api/posts/export.test.ts > rewriteMediaUrls > rewrites every occurrence, not just the first 1ms
+       ✓ ... > rewriteMediaUrls > lowercases the id, because FastAPI handed the handler a parsed UUID 1ms
+       ✓ ... > rewriteMediaUrls > leaves another post's media directory alone 1ms
+       ✓ ... > GET /api/posts/{post_id}/export/markdown > 401s without a session 6ms
+       ✓ ... > 422s on a malformed uuid 11ms
+       ✓ ... > 404s on a post that does not exist 4ms
+       ✓ ... > 404s on another user's post, with the same body as a missing one 4ms
+       ✓ ... > 404s on a post with no profile, because the ownership join is inner 3ms
+       ✓ ... > 404s with its own detail when neither content column holds anything 4ms
+       ✓ ... > prefers ready_content over final_md_content 4ms
+       ✓ ... > falls through to final_md_content when ready_content is empty, matching `or` 4ms
+       ✓ ... > serves the body as a .mdx attachment named after the slug 4ms
+       ✓ ... > strips the duplicated H1 and rewrites every media URL 4ms
+       ✓ ... > rewrites media URLs for an uppercase id in the path 4ms
+       ✓ ... > GET /api/posts/{post_id}/export/html > 401s without a session 2ms
+       ✓ ... > 422s on a malformed uuid 2ms
+       ✓ ... > 404s on another user's post, with the same body as a missing one 3ms
+       ✓ ... > 404s with its own detail when final_html_content is empty 3ms
+       ✓ ... > ignores ready_content: the HTML export reads one column only 3ms
+       ✓ ... > serves the body as an .html attachment named after the slug 3ms
+       ✓ ... > applies no H1 strip and no media rewrite, unlike the markdown export 3ms
+
+       Test Files  1 passed (1)
+            Tests  52 passed (52)
+      ```
+
+      Six negative controls, each reverted immediately after:
+
+      ```
+      NC1  literal transcription of all three Python regexes (m flag, bare `.`)
+           -> 3 failed | 49 passed
+           x matches Python: lone carriage return inside the title and the h1
+           x matches Python: title key preceded by a lone carriage return
+           x matches Python: line separator inside the title and the h1
+      NC2  `.trim()` in place of `str.strip("\"'")`
+           -> 1 failed | 51 passed
+           x matches Python: bare title, quoted h1
+      NC3  `replace()` in place of `replaceAll()`
+           -> 2 failed | 50 passed
+           x rewrites every occurrence, not just the first
+           x strips the duplicated H1 and rewrites every media URL
+      NC4  no `toLowerCase()` on the path id
+           -> 2 failed | 50 passed
+           x lowercases the id, because FastAPI handed the handler a parsed UUID
+           x rewrites media URLs for an uppercase id in the path
+      NC5  `??` in place of Python's `or` for ready_content
+           -> 1 failed | 51 passed
+           x falls through to final_md_content when ready_content is empty, matching `or`
+      NC7  HTML export routed through stripLeadingH1
+           -> 1 failed | 51 passed
+           x applies no H1 strip and no media rewrite, unlike the markdown export
+      ```
+
+      NC1 is the reason the last three oracle cases exist: before they were added,
+      the literal transcription passed all 49 tests, so the careful implementation
+      was unpinned. The three added inputs put a lone `\r` or a ` ` inside the
+      title and the H1, which is exactly where the two dialects part.
+
+      Frontend gates, all from `web/`:
+
+      ```
+      $ pnpm tsc --noEmit
+      TSC_EXIT=0
+
+      $ pnpm lint
+      LINT_EXIT=0
+
+      $ pnpm test
+      TEST_EXIT=1
+       Test Files  2 failed | 73 passed (75)
+            Tests  9 failed | 1305 passed | 7 skipped (1321)
+      # 6 image-preview.test.tsx + 3 PostDetail.test.tsx, the recorded baseline.
+
+      $ pnpm build
+      BUILD_EXIT=0
+      ✓ Compiled successfully in 3.6s
+      ✓ Generating static pages using 15 workers (30/30) in 245.4ms
+      Route (app)
+      ├ ƒ /api/posts/[id]/export/html
+      ├ ƒ /api/posts/[id]/export/markdown
+      ```
+
+      Backend gates, unchanged from their baseline:
+
+      ```
+      $ cd api && set -a && . ../.env && set +a && uv run pytest -q
+      125 failed, 236 passed, 25 errors in 12.95s
+
+      $ uv run ruff check .
+      Found 32 errors.
+
+      $ uv run ruff format --check .
+      9 files would be reformatted, 130 files already formatted
+      ```
+    - [ ] 5.3d-ii `GET /{post_id}/export/all` (the zip). Needs a zip writer:
+      `web/` has no zip dependency and Node has no zip API, so the iteration that
+      picks this up has to either add a small library (`fflate`, `jszip`) or write
+      the archive format by hand, and should argue the choice. It also has to
+      decide what replaces `StreamingResponse` over a `BytesIO`. The content
+      transformations it needs (`stripLeadingH1`, `rewriteMediaUrls`) and the media
+      directory path (`postMediaDir()` in `web/src/mastra/images/media-dir.ts`) are
+      already in place from 5.3d-i and 5.3b-ii.
+    - [ ] 5.3d-iii `GET /{post_id}/logs` and `GET /{post_id}/analytics`. `/logs` is
+      three in-memory filters over the `execution_logs` jsonb column, with `level`
+      as a repeated query parameter (`list[str]`, so `getAll()` here, not the
+      last-wins `.at(-1)` from 5.3c-i). `/analytics` is a thin wrapper over
+      `compute_analytics`, already ported to `web/src/mastra/analytics/index.ts`,
+      so the work is the keyword extraction and the seven-key response shape.
 - [ ] 5.4 `queue`
 - [ ] 5.5 `events` (SSE keeps `web/src/hooks/use-sse.ts`'s existing message shape; sourced from
   the Redis Streams pub/sub topic, not an in-process stream; uses Mastra resumable-stream
