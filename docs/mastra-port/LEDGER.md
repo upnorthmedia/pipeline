@@ -1296,8 +1296,158 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
 
 ## Phase 2: Mastra scaffold
 
-- [ ] 2.1 Install Mastra, the Postgres storage adapter, and `@mastra/redis-streams` in `web/`.
+- [x] 2.1 Install Mastra, the Postgres storage adapter, and `@mastra/redis-streams` in `web/`.
   Record installed versions and any API discrepancies against the objective's description.
+
+  **Installed (exact-pinned, no caret, so the port cannot silently drift mid-phase):**
+
+  ```
+  $ cd web && pnpm add @mastra/core@1.61.0 @mastra/pg@1.21.1 \
+      @mastra/redis-streams@0.4.0 @mastra/loggers@1.2.0 zod
+  Packages: +101 -12
+  dependencies:
+  + @mastra/core 1.61.0
+  + @mastra/loggers 1.2.0
+  + @mastra/pg 1.21.1
+  + @mastra/redis-streams 0.4.0
+  + zod 4.4.3
+  Done in 3.2s using pnpm v10.26.2
+
+  $ cd web && pnpm add -D mastra@1.26.0
+   WARN  Issues with peer dependencies found
+  .
+  └─┬ mastra 1.26.0
+    └─┬ @mastra/deployer 1.61.0
+      └─┬ @hono/node-ws 1.3.1
+        └── ✕ unmet peer @hono/node-server@^1.19.11: found 1.19.9
+  devDependencies:
+  + mastra 1.26.0
+  Done in 3.8s using pnpm v10.26.2
+  ```
+
+  Resolved versions read back out of `node_modules`:
+
+  ```
+  $ cd web && node -e "for (const p of ['@mastra/core','@mastra/pg','@mastra/redis-streams','@mastra/loggers','mastra','zod','pg']) console.log(p, require('./node_modules/'+p+'/package.json').version)"
+  @mastra/core 1.61.0
+  @mastra/pg 1.21.1
+  @mastra/redis-streams 0.4.0
+  @mastra/loggers 1.2.0
+  mastra 1.26.0
+  zod 4.4.3
+  pg 8.20.0
+
+  $ cd web && pnpm exec mastra --version
+  1.26.0
+  ```
+
+  `zod` was not previously a direct dependency of `web/`; `@mastra/core` declares it as a peer
+  (`^3.25.0 || ^4.0.0`), so it is now direct at 4.4.3. Three zod copies coexist in the store
+  (`zod@3.25.76`, `zod@4.3.6`, `zod@4.4.3`) because other packages pin their own; only 4.4.3 is
+  hoisted to `web/node_modules/zod`, which is what step schemas will compile against.
+  `@mastra/loggers` was added beyond the three named in this item because the Mastra instance in
+  2.2 requires a logger and `PinoLogger` lives there.
+
+  **Runtime symbol check** (imports actually resolve, not just typings). Scratch file run from
+  inside `web/` and deleted afterwards:
+
+  ```
+  $ cd web && node ./mastra-smoke.scratch.mjs
+  ok      @mastra/core -> Mastra (function)
+  ok      @mastra/core/workflows -> createWorkflow (function)
+  ok      @mastra/core/workflows -> createStep (function)
+  ok      @mastra/core/workflows -> createWorkflowStateReader (function)
+  ok      @mastra/pg -> PostgresStore (function)
+  ok      @mastra/redis-streams -> RedisStreamsPubSub (function)
+  ok      @mastra/loggers -> PinoLogger (function)
+  exit=0
+  ```
+
+  **API surface confirmed against the installed `.d.ts` files** (every symbol the objective's
+  section 2 names exists):
+
+  - `createWorkflow` / `createStep` / `createWorkflowStateReader`, all re-exported from
+    `@mastra/core/workflows` (`dist/workflows/create.d.ts:24`, `dist/workflows/workflow.d.ts:62`,
+    `dist/workflows/state-reader.d.ts:32`).
+  - Workflow control flow: `.then()` (`workflow.d.ts:214`), `.parallel()` (`:320`),
+    `.branch()` (`:325`), `.foreach()` (`:337`), `.commit()` (`:348`),
+    `.getWorkflowRunById()` (`:424`). `.dowhile()` / `.dountil()` also exist (`:331`, `:334`).
+  - `run.resume({ step, resumeData })` (`workflow.d.ts:669`) matches the documented shape;
+    `step` accepts a `Step`, an array of steps, a string id, or an array of string ids.
+  - `run.stream()` returns `WorkflowRunOutput` (`dist/stream/RunOutput.d.ts:7`) with
+    `get status(): WorkflowRunStatus`, `get result(): Promise<TResult>` and
+    `get usage(): Promise<LanguageModelV2Usage>`.
+  - `stream.usage` resolves to exactly the shape the objective states:
+    `inputTokens`, `outputTokens`, `totalTokens` (each `number | undefined`) plus optional
+    `reasoningTokens` and `cachedInputTokens`
+    (`dist/_types/@internal_ai-sdk-v5/dist/index.d.ts:4390-4408`). Phase 8's cost view can be
+    driven from it directly.
+  - Stream event type literals are exactly `workflow-start`, `workflow-step-start`,
+    `workflow-step-output`, `workflow-step-result`, `workflow-finish`
+    (`dist/stream/types.d.ts:933,958,994,1012,938`).
+  - `new Mastra({ ... })` accepts `agents`, `workflows`, `storage`, `logger` and `pubsub`
+    (`dist/mastra/index.d.ts:84,106,91,102,213`). `storage` is typed `MastraCompositeStore` and
+    `PostgresStore extends MastraCompositeStore`
+    (`@mastra/pg/dist/storage/index.d.ts:67`), so the Postgres adapter drops straight in.
+  - `RedisStreamsPubSub` is a class in `@mastra/redis-streams`
+    (`dist/index.d.ts:73`), `extends PubSub implements LeaseProvider`, matching the `pubsub`
+    slot on the Mastra config.
+
+  **Discrepancies against the objective's description, to carry into 2.2-2.4 and Phase 8:**
+
+  1. `run.stream()`'s return value is async-iterable, but `[Symbol.asyncIterator]()` on it is
+     marked `@deprecated` in favour of `stream.fullStream`
+     (`dist/stream/RunOutput.d.ts:63-77`). `cancel()`, `getReader()`, `tee()`, `pipeTo()` and
+     `pipeThrough()` on the object itself are deprecated the same way. Consume `fullStream`, not
+     the object, or every Phase 8 stream reader ships a deprecation.
+  2. `stream.status` is a **synchronous getter**, not a promise. Item 2.3's
+     `stream.status === 'success'` assertion is only meaningful after the stream has been drained
+     or `await stream.result` has settled; asserting it immediately after calling `stream()` would
+     read the in-flight status.
+  3. The engine entry point for cross-process execution is `createEventedWorkflow`
+     (`dist/workflows/create.d.ts:31`), a sibling of `createWorkflow` the objective does not
+     mention, and there is a separate `@mastra/core/workflows/evented` export path. Phase 4's
+     "worker consumes the event off Redis Streams" almost certainly runs through this rather than
+     through plain `createWorkflow`; 2.3 should build the trivial workflow with the plain
+     constructor and 4.4 should re-check which constructor the evented path requires.
+  4. Runs are created with `workflow.createRun()` (`workflow.d.ts:359`), not `createRunAsync()`.
+  5. `@mastra/pg` exports storage under a single root entry (`"exports": { ".", "./package.json" }`).
+     There is no `@mastra/pg/storage` subpath; import `PostgresStore` from `@mastra/pg`.
+  6. The `mastra` CLI's own dependency tree has an unmet peer
+     (`@hono/node-ws@1.3.1` wants `@hono/node-server@^1.19.11`, tree has `1.19.9`). It is internal
+     to `@mastra/deployer` and `pnpm exec mastra --version` works, but if `mastra dev` fails to
+     boot its server in 2.5, this is the first thing to check.
+  7. `@mastra/core`, `@mastra/pg`, `@mastra/redis-streams` and `@mastra/loggers` all declare
+     `engines.node >= 22.13.0`. This machine runs v24.12.0, and the Railway services in 7.2 must
+     pin a Node major at or above 22.13.
+
+  **Gates after install** (all four unchanged against the established baseline; run with
+  `docker compose up -d db redis` first, since `pnpm test` needs the live database):
+
+  ```
+  $ cd web && pnpm exec tsc --noEmit
+  tsc exit=0
+
+  $ cd web && pnpm lint
+  > content-pipeline-dashboard@0.1.0 lint
+  > eslint
+  lint exit=0
+
+  $ cd web && NO_COLOR=1 pnpm test
+   Test Files  2 failed | 17 passed (19)
+        Tests  9 failed | 221 passed (230)
+     Duration  5.70s
+  test exit=1
+
+  $ cd web && pnpm build
+  ✓ Compiled successfully in 3.2s
+  ✓ Generating static pages using 15 workers (25/25) in 327.9ms
+  build exit=0
+  ```
+
+  The 9 failures are the established pre-existing baseline (6 in `image-preview.test.tsx` plus
+  3 others recorded in 0.1); pass count held at 221, so the install added no failure. No `api/`
+  file was touched, so the pytest and ruff baselines are unchanged by construction.
 - [ ] 2.2 Configure `web/src/mastra/index.ts`: Postgres storage against the existing
   `content_pipeline` database, `RedisStreamsPubSub` against the existing Redis, and a logger.
   Keep it importable without `next/*`.
