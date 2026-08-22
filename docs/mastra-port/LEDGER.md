@@ -7385,10 +7385,171 @@ enqueuing `crawl_profile_sitemap`, an ARQ job with no TypeScript equivalent yet.
   Python API on :8055 and flips to same-origin once Phase 5 finishes, not per
   router.
 
-- [ ] 5.2b `profiles`: the three write endpoints (`POST /api/profiles`,
+- [x] 5.2b `profiles`: the three write endpoints (`POST /api/profiles`,
   `PATCH /api/profiles/{profile_id}`, `DELETE /api/profiles/{profile_id}`),
   including encrypting `wp_app_password` and `nextjs_webhook_secret` with the
   crypto port from item 1.3 and the `exclude_unset` semantics of `ProfileUpdate`
+
+  `POST` landed in `web/src/app/api/profiles/route.ts`, `PATCH` and `DELETE` in
+  `web/src/app/api/profiles/[id]/route.ts`, over two new shared modules:
+  `validation.ts` (the `ProfileCreate`/`ProfileUpdate` port and FastAPI's 422
+  body) and `secrets.ts` (the two encrypted columns). All three scope by the
+  session user, and the session user is also the only source of `user_id` on a
+  create.
+
+  **Two Python behaviours that a naive port gets wrong, both settled by probing
+  the real thing rather than by reading it.**
+
+  *1. `DELETE` is not a `DELETE`.* `session.delete(profile)` cascades over the
+  two relationships on `WebsiteProfile` first: `links` carries
+  `cascade="all, delete-orphan"`, and `posts` carries no delete cascade, so
+  SQLAlchemy disassociates the posts by nulling `posts.profile_id`. A throwaway
+  test against the real ORM and the real test database, run and then removed:
+
+  ```
+  $ cd api && uv run pytest tests/phase2/test_tmp_delete_parity.py -q -s
+  PROBE posts=1 post.profile_id=[None] links=0
+  .
+  1 passed in 0.11s
+  ```
+
+  This matters because `posts_profile_id_fkey` has no `ON DELETE` action, so a
+  plain `DELETE FROM website_profiles` would have raised a foreign key violation
+  on any profile with posts, which is every profile that has ever been used. The
+  handler nulls the posts inside the same transaction, after settling ownership
+  so that a request for someone else's profile cannot touch that owner's posts.
+  `internal_links_profile_id_fkey` does have `ON DELETE CASCADE`, so those rows
+  need no help.
+
+  *2. pydantic's 422 body, and its lax integer coercion.* Read straight off the
+  real `ProfileCreate`, with the `url` key stripped:
+
+  ```
+  $ cd api && uv run python -c "...ProfileCreate(**payload) for five payloads..."
+  [{"type": "missing", "loc": ["name"], "msg": "Field required", "input": {"website_url": "https://example.com"}}]
+  [{"type": "int_parsing", "loc": ["word_count"], "msg": "Input should be a valid integer, unable to parse string as an integer", "input": "lots"}]
+  [{"type": "list_type", "loc": ["related_keywords"], "msg": "Input should be a valid list", "input": "no"}]
+  [{"type": "dict_type", "loc": ["nextjs_frontmatter_map"], "msg": "Input should be a valid dictionary", "input": 5}]
+  [{"type": "string_type", "loc": ["name"], "msg": "Input should be a valid string", "input": 5}]
+  [{"type": "int_type", "loc": ["word_count"], "msg": "Input should be a valid integer", "input": null}]
+  [{"type": "int_type", "loc": ["word_count"], "msg": "Input should be a valid integer", "input": [1]}]
+  OK 2500   # word_count=" 2500 "
+  OK 2500   # word_count=2500.0
+  ```
+
+  Three things fall out of that. `missing` reports the **containing object** as
+  its `input`, not the absent value. A string that is not an integer is
+  `int_parsing`, with a longer message, while a wrong type is `int_type`, so the
+  two cannot be collapsed. And lax mode really does coerce `" 2500 "`, so the
+  port coerces an integral string too rather than narrowing to JSON numbers.
+
+  **Discrepancy with the installed types.** `z.core.$ZodIssue` declares `input`,
+  but zod 4.4 strips it when it finalises the issues it hangs off `ZodError`:
+  only `code`, `expected`, `path` and `message` survive. The first attempt read
+  `issue.input`, got `undefined` for a wrong-typed field, and mislabelled it
+  `missing`. `unprocessableBody()` now walks the value out of the raw body by
+  `issue.path` instead, which is also what makes the `missing` case able to
+  report its parent.
+
+  Other decisions, each stated in a comment at the point it applies:
+
+  - `POST` writes the full `model_dump()` of `ProfileCreate`, so pydantic's
+    defaults are materialised rather than the column's. The two disagree for
+    `output_format` ("markdown" against the column's "both") and
+    `default_stage_settings` (six `"auto"` stages against the column's five
+    `"review"` ones), and pydantic's is what the Python stack wrote.
+  - `PATCH` reproduces `exclude_unset=True` through zod's `.partial()`: an
+    absent key is absent from the parse output and never reaches the `set`,
+    while a key sent as `null` clears the column. An empty body takes a read
+    path, because Drizzle rejects an empty `set` where SQLAlchemy simply
+    flushed nothing.
+  - `updated_at` is stamped by hand, standing in for
+    `TimestampMixin.onupdate`. One accepted difference: SQLAlchemy skipped the
+    UPDATE entirely when every submitted value already equalled the stored one,
+    leaving `updated_at` alone, whereas this issues it and bumps the timestamp.
+    Attribute level dirty tracking is not worth reproducing for a timestamp no
+    caller branches on.
+  - Both write paths encrypt on truthiness, not on presence, exactly as Python
+    did, so a `null` or an empty string is written through rather than becoming
+    a Fernet token over nothing.
+
+  Thirty one new tests, all against the real database and real BetterAuth
+  sessions:
+
+  ```
+  $ pnpm -C web vitest run src/app/api/profiles/route.test.ts --reporter=verbose
+   ✓ POST /api/profiles > 401s without a session
+   ✓ POST /api/profiles > creates the profile and returns it with a 201
+   ✓ POST /api/profiles > fills in the ProfileCreate defaults for a minimal body
+   ✓ POST /api/profiles > owns the row by the session user, not by anything in the body
+   ✓ POST /api/profiles > 422s when name is missing
+   ✓ POST /api/profiles > 422s when website_url is missing
+   ✓ POST /api/profiles > 422s with pydantic's own error type and message on a bad integer
+   ✓ POST /api/profiles > 422s with int_type, not int_parsing, when the integer is the wrong type
+   ✓ POST /api/profiles > 422s with list_type and dict_type for the collection fields
+   ✓ POST /api/profiles > coerces an integral string the way pydantic's lax mode did
+   ✓ POST /api/profiles > 422s on a body that is not JSON
+   ✓ POST /api/profiles > drops unknown fields instead of rejecting them
+   ✓ POST /api/profiles > stores the two credential fields encrypted and never echoes them
+   ✓ POST /api/profiles > writes an empty credential through rather than encrypting nothing
+   ✓ PATCH /api/profiles/[id] > 401s without a session
+   ✓ PATCH /api/profiles/[id] > updates the submitted fields and preserves the rest
+   ✓ PATCH /api/profiles/[id] > clears a column when the key is sent as null
+   ✓ PATCH /api/profiles/[id] > leaves a column alone when its key is absent, matching exclude_unset
+   ✓ PATCH /api/profiles/[id] > returns the row untouched for an empty body
+   ✓ PATCH /api/profiles/[id] > re-encrypts a credential on update
+   ✓ PATCH /api/profiles/[id] > clears a credential sent as null without encrypting it
+   ✓ PATCH /api/profiles/[id] > accepts the save payload the profile detail page sends
+   ✓ PATCH /api/profiles/[id] > 404s for an id that does not exist
+   ✓ PATCH /api/profiles/[id] > 404s for another user's profile and leaves it unchanged
+   ✓ PATCH /api/profiles/[id] > 422s on a malformed uuid
+   ✓ DELETE /api/profiles/[id] > 401s without a session
+   ✓ DELETE /api/profiles/[id] > deletes the profile and returns 204 with no body
+   ✓ DELETE /api/profiles/[id] > orphans the profile's posts and deletes its internal links
+   ✓ DELETE /api/profiles/[id] > 404s for an id that does not exist
+   ✓ DELETE /api/profiles/[id] > 404s for another user's profile and leaves their posts attached
+   ✓ DELETE /api/profiles/[id] > 422s on a malformed uuid
+   Test Files  1 passed (1)
+        Tests  42 passed (42)
+  ```
+
+  The last of those replays the exact `data` object
+  `web/src/app/profiles/[id]/page.tsx` sends on save, explicit nulls and all, so
+  the contract the dashboard actually depends on is asserted rather than
+  inferred.
+
+  Gates:
+
+  ```
+  $ pnpm -C web tsc --noEmit
+  (no output, exit 0)
+
+  $ pnpm -C web lint
+  > eslint
+  (no output, exit 0)
+
+  $ pnpm -C web test
+   Test Files  2 failed | 61 passed (63)
+        Tests  9 failed | 957 passed | 7 skipped (973)
+
+  $ pnpm -C web build
+  ├ ƒ /api/profiles
+  ├ ƒ /api/profiles/[id]
+  (exit 0)
+  ```
+
+  The 9 failures are the same two files as the Phase 0 baseline
+  (`PostDetail.test.tsx` and `image-preview.test.tsx`), still 9, still the
+  ceiling. Passing went from 926 to 957, which is the 31 added here.
+
+  `api/` was not touched (`git status --short api/` is empty; the delete probe
+  above was removed again), so its gates are unchanged from the 5.1b-ii record.
+
+  **Not covered by this item**, carried into 5.2c: the `crawl_profile_sitemap`
+  job that `POST` enqueued on success. Python wrapped that enqueue in a bare
+  `except` so a dead queue still returned a 201, meaning the response is
+  identical either way and only the follow-up crawl is missing until 5.2c wires
+  up the mechanism.
 - [ ] 5.2c `profiles`: `POST /api/profiles/{profile_id}/crawl` and the
   `crawl_profile_sitemap` job it enqueues, which today is ARQ and has no
   TypeScript equivalent; the auto-enqueue on create in 5.2b's `POST` depends on
