@@ -3,14 +3,17 @@
  * `ProfileCreate` and `ProfileUpdate` in `api/src/models/schemas.py`.
  *
  * Field by field this mirrors pydantic in its default (lax) mode, including its
- * coercion of an integral string to an `int`, and its 422 body down to the
- * error `type` and `msg` strings. Every shape asserted here was read off the
- * real `ProfileCreate`/`ProfileUpdate` rather than assumed. Extra keys are
- * dropped rather than rejected, which is pydantic's default `extra="ignore"`.
+ * coercion of an integral string to an `int`. Every shape asserted here was
+ * read off the real `ProfileCreate`/`ProfileUpdate` rather than assumed. Extra
+ * keys are dropped rather than rejected, which is pydantic's default
+ * `extra="ignore"`. The lax coercions and the 422 body itself are shared with
+ * the other ported routers in `../pydantic.ts`.
  */
 import { z } from "zod"
 
 import type { StageSettingsJson, websiteProfiles } from "@/db"
+
+import { jsonObject, pydanticInt } from "../pydantic"
 
 /** `ProfileBase.default_stage_settings`, spelled exactly as pydantic spelled it. */
 const DEFAULT_STAGE_SETTINGS: StageSettingsJson = {
@@ -21,28 +24,6 @@ const DEFAULT_STAGE_SETTINGS: StageSettingsJson = {
   images: "auto",
   ready: "auto",
 }
-
-/**
- * Both `dict` fields are unconstrained on the Python side and land in a jsonb
- * or json column, so the value shape is not narrowed here either. The `$type`
- * on the column is a convention the writers follow, not a check the database
- * makes.
- */
-const jsonObject = z.record(z.string(), z.unknown())
-
-/**
- * pydantic's lax mode parses an `int` out of a string that holds nothing but an
- * optionally signed run of digits, surrounding whitespace allowed, and rejects
- * anything else. A float is accepted only when it is integral, which
- * `z.number().int()` already enforces.
- */
-const INTEGRAL_STRING = /^[+-]?\d+$/
-
-const pydanticInt = z.preprocess(
-  (value) =>
-    typeof value === "string" && INTEGRAL_STRING.test(value.trim()) ? Number(value) : value,
-  z.number().int(),
-)
 
 /** One entry per field, in `ProfileCreate`'s declaration order. */
 const FIELDS = {
@@ -175,82 +156,4 @@ export function toColumns(body: ProfileCreateInput | ProfileUpdateInput): Profil
   return columns as ProfileInsert
 }
 
-/**
- * FastAPI's 422 body. Only the `type`/`loc`/`msg`/`input` keys are reproduced,
- * matching the choice already made for the malformed-UUID response in
- * `[id]/route.ts`; pydantic's `ctx` and `url` keys are not, and nothing in
- * `web/src/lib/api.ts` reads them.
- */
-export interface ValidationErrorDetail {
-  type: string
-  loc: (string | number)[]
-  msg: string
-  input: unknown
-}
-
-/** pydantic's error type and message for each type zod reports as `expected`. */
-const TYPE_ERRORS: Record<string, { type: string; msg: string }> = {
-  string: { type: "string_type", msg: "Input should be a valid string" },
-  number: { type: "int_type", msg: "Input should be a valid integer" },
-  array: { type: "list_type", msg: "Input should be a valid list" },
-  record: { type: "dict_type", msg: "Input should be a valid dictionary" },
-}
-
-/** pydantic separates a string it could not read as an int from a wrong type. */
-const INT_PARSING = {
-  type: "int_parsing",
-  msg: "Input should be a valid integer, unable to parse string as an integer",
-}
-
-/**
- * The submitted value a zod issue points at. Zod 4 drops `input` from the
- * finalised issues it exposes on `ZodError`, keeping only `code`, `expected`,
- * `path` and `message`, so the value has to be walked out of the body instead.
- */
-function valueAt(body: unknown, path: readonly PropertyKey[]): unknown {
-  let value = body
-  for (const segment of path) {
-    if (value === null || typeof value !== "object") return undefined
-    value = (value as Record<PropertyKey, unknown>)[segment]
-  }
-  return value
-}
-
-function detailFor(issue: z.core.$ZodIssue, body: unknown): ValidationErrorDetail {
-  const loc = ["body", ...issue.path.map((segment) => segment as string | number)]
-  if (issue.code === "invalid_type") {
-    if (valueAt(body, issue.path) === undefined) {
-      // pydantic reports the containing object as the input of a missing key.
-      return {
-        type: "missing",
-        loc,
-        msg: "Field required",
-        input: valueAt(body, issue.path.slice(0, -1)),
-      }
-    }
-    const input = valueAt(body, issue.path)
-    if (issue.expected === "number" && typeof input === "string") {
-      return { ...INT_PARSING, loc, input }
-    }
-    const expected = TYPE_ERRORS[issue.expected]
-    if (expected) return { ...expected, loc, input }
-  }
-  return { type: "value_error", loc, msg: issue.message, input: valueAt(body, issue.path) }
-}
-
-/** FastAPI's `RequestValidationError` response for a set of zod issues. */
-export function unprocessableBody(issues: readonly z.core.$ZodIssue[], body: unknown): Response {
-  return Response.json({ detail: issues.map((issue) => detailFor(issue, body)) }, { status: 422 })
-}
-
-/**
- * FastAPI answered a body that is not JSON with a 422 carrying a single
- * `json_invalid` entry, not a 400, so a client cannot tell a malformed body
- * from an invalid one by status alone.
- */
-export function invalidJsonBody(): Response {
-  return Response.json(
-    { detail: [{ type: "json_invalid", loc: ["body", 0], msg: "JSON decode error", input: {} }] },
-    { status: 422 },
-  )
-}
+export { invalidJsonBody, unprocessableBody } from "../pydantic"
