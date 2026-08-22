@@ -316,3 +316,32 @@ export async function loadPipelineState(postId: string): Promise<PipelineState> 
   if (!post) throw new Error(`post ${postId} not found`)
   return stateFromPost(post, await loadInternalLinks(post.profileId))
 }
+
+/**
+ * Take a post out of the dead-letter queue and back to the front of the
+ * pipeline, ported from the post-writing half of `retry_dead_letter()` in
+ * `api/src/api/queue.py:190`: `current_stage = "pending"` and
+ * `logs.pop("_error", None)`.
+ *
+ * The pop is done in SQL, as `stage_logs - '_error'`, for the reason
+ * `mergeStageStatus` gives: Python read the map, mutated the copy and wrote the
+ * whole thing back, which erases anything a concurrently running stage logged
+ * between the read and the write. `-` on the column removes one key and leaves
+ * the rest of the map as the statement finds it.
+ *
+ * `stage_status` is deliberately untouched. Python left it alone too, and it is
+ * what makes the retried run resume rather than restart: the run started after
+ * this write executes the stages `stage_status` does not already call complete.
+ */
+export async function retryFailedPost(postId: string): Promise<void> {
+  await getDb()
+    .update(posts)
+    .set({
+      // The column's own default, and the value the queue status route counts
+      // in its `pending` bucket.
+      currentStage: "pending",
+      stageLogs: sql`coalesce(${posts.stageLogs}, '{}'::jsonb) - '_error'`,
+      updatedAt: new Date(),
+    })
+    .where(eq(posts.id, postId))
+}

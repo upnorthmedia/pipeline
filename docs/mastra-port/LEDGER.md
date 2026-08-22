@@ -11154,10 +11154,190 @@ three pieces are separately verifiable, so they are separate items.
       $ cd api && uv run ruff format --check .
       9 files would be reformatted, 131 files already formatted
       ```
-    - [ ] 5.4d-iii `POST /api/queue/dead-letter/{post_id}/retry` and
-      `DELETE /api/queue/dead-letter`: the retry resets `current_stage`, pops `_error`
-      and starts a run; the clear needs a decision about what "cleared" means when the
-      record is Mastra's own run row rather than a list this app owns.
+    - [x] 5.4d-iii-a The acknowledgement rule, and
+      `POST /api/queue/dead-letter/{post_id}/retry`.
+
+      Split out of 5.4d-iii because the two endpoints share one design decision and
+      the retry is what makes it observable: 5.4d-iii-a settles what "in the queue"
+      means and ports the retry, 5.4d-iii-b ports `DELETE /api/queue/dead-letter` on
+      top of it.
+
+      **The decision.** Python's DLQ was an operator inbox: an entry sat in the Redis
+      list until someone retried it or cleared the list. 5.4d-ii's `listFailedRuns()`
+      has no such dimension, because a Mastra run row is a permanent record of a run;
+      every failure that ever happened is on it forever, so nothing in it can be
+      "removed" without deleting the run history Studio and the trace view read.
+
+      The acknowledgement is read off the post instead, from the `_error` entry
+      `markPipelineFailed()` merges into `stage_logs`. That is not an invented marker.
+      `retry_dead_letter()` pops exactly that key as part of a retry:
+
+      ```
+      $ sed -n '189,195p' api/src/api/queue.py
+          # Reset post status and re-enqueue
+          post.current_stage = "pending"
+          # Clear error from stage_logs
+          logs = dict(post.stage_logs or {})
+          logs.pop("_error", None)
+          post.stage_logs = logs
+          await session.commit()
+      ```
+
+      So `_error` was already Python's own per-post record of an unhandled failure; it
+      kept a second copy in Redis and this port keeps one. An entry is now a failed
+      `pipeline` run whose post the caller owns *and* whose post still carries
+      `_error`, which `listDeadLetterEntries()` in `web/src/mastra/dead-letter.ts`
+      expresses as one extra predicate on the join 5.4d-ii already did:
+
+      ```ts
+      sql`jsonb_exists(coalesce(${posts.stageLogs}, '{}'::jsonb), '_error')`
+      ```
+
+      `jsonb_exists(...)` rather than the `?` operator, which Drizzle would hand to
+      node-postgres inside a statement that also carries `$n` placeholders.
+
+      The rejected alternative was deleting the run row on retry (the storage domain
+      does expose `deleteWorkflowRunById`, checked in
+      `node_modules/@mastra/core/dist/storage/domains/workflows/base.d.ts`). It matches
+      Python's removal exactly and costs the failed run's history, which is the
+      observability this whole port is for.
+
+      **The retry.** `web/src/app/api/queue/dead-letter/[post_id]/retry/route.ts` is
+      Python's handler minus the Redis list: the post is looked up, the entry is
+      required, `retryFailedPost()` in `post-state.ts` writes `current_stage = 'pending'`
+      and `stage_logs - '_error'` in one statement, and `startPipeline(postId)` starts a
+      full pipeline, which is what `enqueue_job("run_pipeline_stage", str(post.id))`
+      with no stage meant to ARQ. Both of Python's 404 texts are kept apart: "Post not
+      found" for a post the caller has none of, "Post not found in dead letter queue"
+      for one that exists with no unacknowledged failed run. The pop is done in SQL
+      rather than as Python's read-modify-write for the reason `mergeStageStatus`
+      records: the whole-map write erases anything a concurrent stage logged in between.
+
+      Deviations from Python, all recorded rather than smoothed over:
+
+      - **The post is looked up scoped to the caller.** Python used a bare
+        `session.get(Post, post_id)`, the hole `todo.md` carries, so any authenticated
+        user could reset any other user's post and start a run that spends the owner's
+        provider credits. Another user's post now answers 404, as in every
+        `/api/posts/{post_id}` handler.
+      - **A malformed id answers 422**, not a database error. Python annotated the
+        parameter `str`, so FastAPI did not parse it and the raw string reached a `uuid`
+        column.
+      - **A post that fails, is retried, and fails again reports two entries** where
+        Python reported one, because it has two failed run rows and one `_error`. The
+        entries are the runs that really failed, which is the more honest answer, and
+        the alternative is the run-row deletion rejected above.
+      - **5.4d-ii's `GET` changes with it**: a retired entry drops out of the list. Its
+        suite was updated in the same commit, `insertPost` now seeds `_error` for the
+        fixtures that back *persisted* run rows (no recorder ever ran for them), and
+        `testMastra` now registers `events: workerEvents` so the real failing run gets
+        its `_error` from the recorder rather than from the test. One test was added
+        for the exclusion.
+
+      ```
+      $ pnpm -C web exec vitest run src/app/api/queue/dead-letter-retry.test.ts --reporter=verbose
+       ✓ ... a real failed run > the run really failed and really reached the dead-letter list
+       ✓ ... a real failed run > answers 202 with Python's body
+       ✓ ... a real failed run > resets current_stage to 'pending'
+       ✓ ... a real failed run > pops _error out of stage_logs, as Python's logs.pop('_error') did
+       ✓ ... a real failed run > removes only that key, leaving the rest of stage_logs as it found it
+       ✓ ... a real failed run > leaves stage_status alone, so the retried run resumes rather than restarts
+       ✓ ... a real failed run > leaves the stages that did complete in their columns
+       ✓ ... a real failed run > starts a full pipeline, which is what an unnamed stage meant to ARQ
+       ✓ ... a real failed run > drops the post out of the dead-letter list
+       ✓ ... a real failed run > answers 404 the second time, because the entry is gone
+       ✓ ... requests that cannot retry > rejects a request with no session
+       ✓ ... requests that cannot retry > answers 422 for an id that is not a UUID, where Python reached the database
+       ✓ ... requests that cannot retry > answers 404 for a post that does not exist
+       ✓ ... requests that cannot retry > answers 404 for another user's dead-letter entry, which Python retried
+       ✓ ... requests that cannot retry > answers 404 for an owned post with no failed run
+       ✓ ... requests that cannot retry > answers 404 for a failed run whose _error was already popped
+       ✓ ... requests that cannot retry > answers 404 for a dead-letter entry whose post has no profile, so no owner
+       ✓ ... the run it starts > publishes workflow.start for the post with no stages named
+
+       Test Files  1 passed (1)
+            Tests  18 passed (18)
+
+      $ pnpm -C web exec vitest run src/app/api/queue/dead-letter-retry.test.ts src/app/api/queue/dead-letter.test.ts
+       Test Files  2 passed (2)
+            Tests  39 passed (39)
+      ```
+
+      The first suite is the round trip the endpoint exists for, end to end: the real
+      workflow on a real evented engine over real Redis Streams fails inside `write`,
+      the failure recorder stamps `_error`, `GET /dead-letter` reports the entry, the
+      retry resets the post, and the entry is gone. Only the two provider boundaries
+      the run reaches are stubbed. `startPipeline` is recorded rather than executed
+      everywhere but one test, because a retry starts a *full* pipeline and a live
+      provider call on a bus a dev worker may be consuming is not something a test
+      should put there; the one real start uses a post whose `stage_status` already
+      calls every stage complete, so the run it starts executes nothing.
+
+      Negative controls, each reverted after measuring:
+
+      | Control | Result |
+      | --- | --- |
+      | Drop the `jsonb_exists` predicate from `listDeadLetterEntries` | 4 failed: the list still shows the retried post, the second retry answers 202, an already-popped entry is retryable, and 5.4d-ii's retired-entry test |
+      | `retryFailedPost` sets `pending` without popping `_error` | 3 failed: the pop, the list, the second retry |
+      | Look the post up unscoped, as Python's `session.get` did | 1 failed: another user's entry is retried. The orphan-post test still passed, because the inner join excludes a null `profile_id` on its own |
+      | `startPipeline(postId, ["write"])` instead of a full pipeline | 2 failed: the recorded call and the real `workflow.start` payload |
+      | Drop the dead-letter membership check | 3 failed: the second retry, a post with no failed run, a post whose `_error` was popped |
+
+      One thing the tests do not pin: nothing asserts the retried run *resumes* from
+      `stage_status` rather than restarting, because the retry only writes the post and
+      the resumption is the workflow's own behaviour, already covered by the Phase 4
+      suites. The write side of it is pinned (`stage_status` and the completed stages'
+      columns are untouched).
+
+      Two facts found while writing the suite and worth carrying forward:
+
+      - Both `Mastra` constructors call `__registerMastra` on the same
+        `pipelineWorkflow` object and the last one wins, so in a test file that builds
+        its own instance, `startPipeline` publishes through *that* transport. A
+        subscription on the production key prefix sees nothing. The observer had to
+        move onto the file's own `pubsub`.
+      - `waitForStart` needs an explicit `it(..., 30_000)`; vitest's 5 s default fires
+        before a 15 s wait can.
+
+      ```
+      $ pnpm -C web exec tsc --noEmit
+      (exit 0, no output)
+
+      $ pnpm -C web lint
+      (exit 0, no output)
+
+      $ pnpm -C web test
+       Test Files  2 failed | 82 passed (84)
+            Tests  9 failed | 1490 passed | 7 skipped (1506)
+      ```
+
+      9 failed is the recorded baseline: the 6 `image-preview` failures and the 3
+      `PostDetail` failures, and 1490 passed is 1471 plus this iteration's 19. An
+      earlier run of the same command failed `scaffold-check.test.ts`'s
+      `workflow-step-result` assertion for 10 failed; that file passes on its own
+      (`5 passed`) and it is the flake already logged in `todo.md`.
+
+      ```
+      $ pnpm -C web build
+      ✓ Compiled successfully in 3.6s
+      ├ ƒ /api/queue/dead-letter
+      ├ ƒ /api/queue/dead-letter/[post_id]/retry
+
+      $ (set -a; . ./.env; set +a; cd api && uv run pytest -q)
+      125 failed, 236 passed, 25 errors in 14.38s
+
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 131 files already formatted
+      ```
+    - [ ] 5.4d-iii-b `DELETE /api/queue/dead-letter`. Python returned
+      `{status: "cleared", count}` where `count` was `llen(DLQ_KEY)` before the delete,
+      unscoped. On the 5.4d-iii-a rule, clearing is popping `_error` off the caller's
+      posts that currently have entries, which retires them without touching
+      `current_stage` (so the `failed` bucket 5.4a reports is unchanged) and without
+      deleting a run row.
 - [ ] 5.5 `events` (SSE keeps `web/src/hooks/use-sse.ts`'s existing message shape; sourced from
   the Redis Streams pub/sub topic, not an in-process stream; uses Mastra resumable-stream
   replay; test disconnects and reconnects mid-run and asserts no gap in the event sequence)

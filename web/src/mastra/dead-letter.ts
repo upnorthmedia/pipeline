@@ -24,6 +24,9 @@
  * installation ever accumulates failures at a scale where that stops holding,
  * the fix is a `resourceId` on the run so the storage query can scope itself.
  */
+import { and, eq, inArray, sql } from "drizzle-orm"
+
+import { getDb, posts, websiteProfiles } from "../db"
 import { mastra } from "./index"
 import { pipelineWorkflow } from "./workflows/pipeline"
 import { STAGES, type Stage } from "./state"
@@ -149,4 +152,52 @@ export async function listFailedRuns(): Promise<FailedRun[]> {
     })
   }
   return entries
+}
+
+/**
+ * Which of a caller's failed runs are still dead-letter entries.
+ *
+ * Python's DLQ was an operator inbox: an entry sat in the Redis list until
+ * someone retried it or cleared the list. `listFailedRuns` has no such
+ * dimension, because a run row is a permanent record of a run and not an
+ * inbox; every failure that ever happened is on it forever.
+ *
+ * The acknowledgement is read off the post instead, from the `_error` entry
+ * `markPipelineFailed()` merges into `stage_logs`. That is not an invented
+ * marker: `retry_dead_letter()` in `api/src/api/queue.py:193` pops exactly this
+ * key as part of a retry, so `_error` was already Python's own per-post record
+ * of an unhandled failure. It kept a second copy in Redis; this port keeps one.
+ *
+ * So an entry is a failed `pipeline` run whose post the caller owns *and*
+ * whose post still carries `_error`. Popping `_error` retires the entry, which
+ * is what `POST /dead-letter/{post_id}/retry` does, and the run row survives
+ * for Studio and for the run history.
+ *
+ * One divergence follows and is deliberate. A post that fails, is retried, and
+ * fails again carries `_error` once but has two failed run rows, so it reports
+ * two entries where Python reported one (the retry had deleted the first). The
+ * entries are the runs that really failed, which is the more honest answer, and
+ * the alternative (deleting the engine's run row on retry) trades the run
+ * history away to get it.
+ */
+export async function listDeadLetterEntries(userId: string): Promise<FailedRun[]> {
+  const runs = await listFailedRuns()
+  if (runs.length === 0) return []
+
+  const open = await getDb()
+    .select({ id: posts.id })
+    .from(posts)
+    .innerJoin(websiteProfiles, eq(posts.profileId, websiteProfiles.id))
+    .where(
+      and(
+        eq(websiteProfiles.userId, userId),
+        inArray(posts.id, [...new Set(runs.map((run) => run.postId))]),
+        // `jsonb_exists(...)` rather than the `?` operator, which Drizzle would
+        // hand to node-postgres inside a statement that also carries `$n`
+        // placeholders.
+        sql`jsonb_exists(coalesce(${posts.stageLogs}, '{}'::jsonb), '_error')`,
+      ),
+    )
+  const mine = new Set(open.map((row) => row.id))
+  return runs.filter((run) => mine.has(run.postId))
 }

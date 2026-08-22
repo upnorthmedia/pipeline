@@ -32,7 +32,7 @@ import { outlineAgent } from "@/mastra/agents/outline"
 import { readyAgent } from "@/mastra/agents/ready"
 import { researchAgent } from "@/mastra/agents/research"
 import { writeAgent } from "@/mastra/agents/write"
-import { pubsub as productionPubsub } from "@/mastra/index"
+import { pubsub as productionPubsub, workerEvents } from "@/mastra/index"
 import { imagesWorkflow } from "@/mastra/workflows/images"
 import { pipelineWorkflow } from "@/mastra/workflows/pipeline"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
@@ -85,6 +85,11 @@ const testMastra = new Mastra({
   storage,
   pubsub,
   workflows: { pipeline: pipelineWorkflow, images: imagesWorkflow },
+  // The failure recorder, so the real failing run stamps `_error` on its post
+  // exactly as it does in the worker service. Item 5.4d-iii made that key the
+  // acknowledgement that keeps an entry in the queue, so a suite that skipped
+  // it would be listing runs the production handler would not.
+  events: workerEvents,
   agents: {
     research: researchAgent,
     outline: outlineAgent,
@@ -112,7 +117,16 @@ async function createProfile(userId: string): Promise<string> {
   return profile.id
 }
 
-async function insertPost(owner: string | null): Promise<string> {
+/**
+ * A post carrying an unacknowledged failure.
+ *
+ * `stage_logs._error` is seeded here because these fixtures back *persisted*
+ * run rows rather than real runs, so no failure recorder ever ran for them.
+ * `listDeadLetterEntries` requires the key, so without it the run row exists
+ * and the entry does not. The real failing run in the first suite gets its
+ * `_error` from the recorder, not from here.
+ */
+async function insertPost(owner: string | null, failed = true): Promise<string> {
   const [row] = await db
     .insert(posts)
     .values({
@@ -131,7 +145,9 @@ async function insertPost(owner: string | null): Promise<string> {
         ready: "auto",
       },
       stageStatus: {},
-      stageLogs: {},
+      stageLogs: failed
+        ? { _error: { message: BOOM, attempts: 1, failed_at: new Date().toISOString() } }
+        : {},
     })
     .returning({ id: posts.id })
   return row.id
@@ -197,6 +213,17 @@ async function listEntries(cookie: string): Promise<{ entries: Entry[]; count: n
   return (await response.json()) as { entries: Entry[]; count: number }
 }
 
+/** Resolves once the failure recorder has stamped `_error`, which lags `run.start()`. */
+async function waitForError(postId: string, timeoutMs = 30_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const [row] = await db.select({ logs: posts.stageLogs }).from(posts).where(eq(posts.id, postId))
+    if (row?.logs && "_error" in row.logs) return
+    if (Date.now() > deadline) throw new Error(`post ${postId} never recorded _error`)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+}
+
 /** Only the fixtures this file owns; the shared database holds other failures. */
 function forPost(entries: Entry[], postId: string): Entry[] {
   return entries.filter((entry) => entry.post_id === postId)
@@ -234,6 +261,7 @@ beforeAll(async () => {
   const run = await pipelineWorkflow.createRun()
   const result = await run.start({ inputData: { postId: realPostId } })
   expect(result.status).toBe("failed")
+  await waitForError(realPostId)
 }, 180_000)
 
 afterAll(async () => {
@@ -328,6 +356,13 @@ describe("GET /api/queue/dead-letter, run rows the caller must not see", () => {
     await persistRun({ postId: orphan, failedStage: "edit" })
 
     expect(forPost((await listEntries(user.cookie)).entries, orphan)).toHaveLength(0)
+  })
+
+  it("excludes a run whose post no longer carries _error, the retired entry", async () => {
+    const acknowledged = await insertPost(profileId, false)
+    await persistRun({ postId: acknowledged, failedStage: "write" })
+
+    expect(forPost((await listEntries(user.cookie)).entries, acknowledged)).toHaveLength(0)
   })
 
   it("excludes a run whose input carries no post id", async () => {
