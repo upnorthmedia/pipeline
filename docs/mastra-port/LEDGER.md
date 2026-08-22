@@ -9495,10 +9495,13 @@ three pieces are separately verifiable, so they are separate items.
         5.3c-iii-b-2 the Next.js workflow (HMAC signing preserved exactly) plus its branch
         and the trailing 400 for every other `output_format`. Item 5.9 and item 5.10 cover
         the two routers, not the publishing itself, so the workflows land here.
-  - [ ] 5.3d Exports, logs and analytics (split: five endpoints, and `/export/all`
+  - [x] 5.3d Exports, logs and analytics (split: five endpoints, and `/export/all`
     needs a zip writer this repo does not have while `/analytics` needs the analytics
     service wired to the route. Split into 5.3d-i the two plain exports, 5.3d-ii
-    `/export/all`, 5.3d-iii `/logs` and `/analytics`.)
+    `/export/all`, 5.3d-iii `/logs` and `/analytics`.) Closed by 5.3d-iii: all three
+    sub-items are checked with their own evidence, and the five endpoints
+    `GET /{post_id}/export/markdown`, `/export/html`, `/export/all`, `/logs` and
+    `/analytics` are all served from `web/src/app/api/posts/[id]/`.
     - [x] 5.3d-i `GET /{post_id}/export/markdown` and `GET /{post_id}/export/html`,
       plus the `strip_leading_h1` port both they and `/export/all` need.
 
@@ -9893,12 +9896,262 @@ three pieces are separately verifiable, so they are separate items.
       $ uv run ruff format --check .
       9 files would be reformatted, 130 files already formatted
       ```
-    - [ ] 5.3d-iii `GET /{post_id}/logs` and `GET /{post_id}/analytics`. `/logs` is
-      three in-memory filters over the `execution_logs` jsonb column, with `level`
-      as a repeated query parameter (`list[str]`, so `getAll()` here, not the
-      last-wins `.at(-1)` from 5.3c-i). `/analytics` is a thin wrapper over
-      `compute_analytics`, already ported to `web/src/mastra/analytics/index.ts`,
-      so the work is the keyword extraction and the seven-key response shape.
+    - [x] 5.3d-iii `GET /{post_id}/logs` and `GET /{post_id}/analytics`.
+
+      `web/src/app/api/posts/[id]/logs/route.ts` ports `get_execution_logs` and
+      `web/src/app/api/posts/[id]/analytics/route.ts` ports `post_analytics`. Both are
+      thin, and both hide a decision a reading gets wrong, so both are pinned by an
+      oracle: `api/scripts/export_post_logs_analytics_parity.py` drives the two real
+      endpoint coroutines with a stubbed session standing in for `_get_user_post()`, the
+      same technique the create-post oracle used in 5.3b-i, and writes
+      `web/src/app/api/posts/data/logs-analytics-parity.json`.
+
+      ```
+      $ cd api && PYTHONPATH=. uv run python scripts/export_post_logs_analytics_parity.py
+      wrote 19 log cases and 15 analytics cases to .../web/src/app/api/posts/data/logs-analytics-parity.json
+      ```
+
+      **`/logs`: three filters, and each one is falsy-guarded rather than
+      absent-guarded.** `if level:`, `if stage:` and `if since:` all test truthiness, so
+      an empty value skips its filter entirely rather than matching nothing. That splits
+      three ways once the query string is involved:
+
+      - `?level=` parses to `[""]`, a non-empty list holding the empty string, so it
+        filters and matches nothing;
+      - `?stage=` and `?since=` parse to `""`, which is falsy, so they do not filter;
+      - `level` absent parses to `None` in FastAPI and `[]` from `getAll()` here, and
+        both are falsy, so the two agree without a special case.
+
+      `level` is the only repeated parameter (`list[str] | None = Query(None)`), so it is
+      `getAll()`; `stage` and `since` are scalars and Starlette's `QueryParams` keeps the
+      last occurrence of each, which is the same `.at(-1)` recorded in 5.3c-i.
+
+      **`since` is a string comparison, not a date one.** Python evaluates
+      `entry.get("ts", "") > since`, so an entry with no `ts` compares as `""` and loses
+      to any non-empty `since`, and a bare `"2026-08"` filters just as well as a full
+      timestamp. The oracle pins both:
+
+      ```
+      an entry with no ts defaults to the empty string and loses -> 0 entries
+      since is not parsed as a date, so a bare word filters       -> 6 entries
+      since is a strict string comparison                         -> 3 entries
+      ```
+
+      JavaScript's `>` on strings compares UTF-16 code units where Python compares code
+      points, and the two disagree once an astral character meets one in
+      `U+E000`-`U+FFFF`, so the comparison is spelled out as `pythonGreater()` rather
+      than left to the operator. Only `ts` values reach it and `append_execution_log`
+      writes an ISO timestamp, but `since` is client-supplied.
+
+      **`/analytics`: `ready_content` is deliberately not consulted.** The content is
+      `final_md_content or draft_content or ""`, unlike every export endpoint, which
+      prefers `ready_content`. So the numbers describe the edited draft rather than the
+      assembled article. Pinned by the "ready_content is not consulted" case.
+
+      **The two keyword rules differ.** `related_keywords[0]` is the primary only when it
+      is a string, otherwise the primary is empty; `related_keywords[1:]` becomes the
+      secondaries with the non-strings dropped. A list starting with a number therefore
+      loses its head without promoting the next entry, which the obvious
+      "filter to strings, take the first" rewrite gets wrong (negative control 5 below).
+
+      The computation itself is `computeAnalytics` from `web/src/mastra/analytics`,
+      already ported and pinned by its own parity data in Phase 3; these tests re-verify
+      it end to end on a fresh article, including the rounding and the substring-based
+      internal/external link split.
+
+      Two oracle cases the Python allows and the database does not, so they are not in
+      the file: `execution_logs` and `topic` are both `NOT NULL` in `posts`, so
+      `post.execution_logs or []` and `post.topic or ""` can only ever see the empty list
+      and the empty string, never a null.
+
+      ```
+      $ PGPASSWORD=... psql -h localhost -p 5435 -U pipeline -d content_pipeline \
+          -c "select column_name, is_nullable from information_schema.columns
+              where table_name='posts'
+                and column_name in ('topic','website_url','related_keywords','execution_logs');"
+         column_name    | is_nullable
+      ------------------+-------------
+       related_keywords | YES
+       execution_logs   | NO
+       topic            | NO
+       website_url      | YES
+      (4 rows)
+      ```
+
+      **Deviation: two crash paths become empty answers.** `entry.get(...)` on a
+      non-dict raised `AttributeError`, and `entry.get("ts", "") > since` with a
+      non-string `ts` raised `TypeError`; both surfaced as a 500. A non-object entry is
+      treated here as one with no keys and a non-string `ts` as absent, which removes
+      both error paths rather than adding one. Nothing can write such an entry:
+      `append_execution_log` in `api/src/pipeline/helpers.py` is the only writer and it
+      appends a five-string dict.
+
+      **Contract note, logged in `todo.md` rather than changed here.**
+      `PostAnalytics.seo_checklist` in `web/src/lib/api.ts` is typed
+      `Record<string, boolean>`, but `_seo_checklist` has always returned
+      `internal_link_count` and `external_link_count` alongside the seven booleans, so
+      the real shape is `Record<string, boolean | number>`. The oracle shows it:
+
+      ```
+      "seo_checklist": {
+       "keyword_in_title": false,
+       "keyword_in_first_100_words": true,
+       "keyword_in_h2": false,
+       "has_h2_headings": true,
+       "has_internal_links": true,
+       "has_external_links": true,
+       "internal_link_count": 2,
+       "external_link_count": 1,
+       "has_meta_description": true
+      }
+      ```
+
+      Unlike the `thread_id` disagreement in 5.3a, correcting this one is not confined to
+      `api.ts`: `SeoChecklist` in `web/src/components/analytics-bar.tsx` maps over every
+      entry and renders the two counts as SEO checks, so the fix is a UI decision that
+      belongs to Phase 8. `api.ts` is left alone and the endpoint reproduces the mixed
+      map exactly. `api.ts` also has no client for `/logs` and never did; the endpoint is
+      ported for parity and has no dashboard caller.
+
+      The 52 tests are in `web/src/app/api/posts/logs-analytics.test.ts`, against the
+      real database and real BetterAuth sessions:
+
+      ```
+      $ pnpm -C web vitest run src/app/api/posts/logs-analytics.test.ts --reporter=verbose
+       v GET /api/posts/{post_id}/logs > rejects an unauthenticated request 3ms
+       v GET /api/posts/{post_id}/logs > answers a malformed path uuid with FastAPI's 422 12ms
+       v GET /api/posts/{post_id}/logs > answers a post that does not exist with a 404 4ms
+       v GET /api/posts/{post_id}/logs > answers another user's post with the same 404 6ms
+       v GET /api/posts/{post_id}/logs > answers a post whose profile_id is null with a 404 3ms
+       v GET /api/posts/{post_id}/logs > returns a bare array, not an envelope 5ms
+       v ... > matches the Python filters > empty list 5ms
+       v ... > matches the Python filters > no filters returns every entry in order 3ms
+       v ... > matches the Python filters > single level 4ms
+       v ... > matches the Python filters > two levels 3ms
+       v ... > matches the Python filters > level matching nothing 4ms
+       v ... > matches the Python filters > empty level list is falsy, so no filter 3ms
+       v ... > matches the Python filters > level of the empty string filters, matching nothing 3ms
+       v ... > matches the Python filters > an entry with no level key never matches a level filter 3ms
+       v ... > matches the Python filters > a non-string level is compared by equality, not by str() 3ms
+       v ... > matches the Python filters > stage 3ms
+       v ... > matches the Python filters > stage matching nothing 3ms
+       v ... > matches the Python filters > empty stage is falsy, so no filter 3ms
+       v ... > matches the Python filters > a null stage value never matches 3ms
+       v ... > matches the Python filters > since is a strict string comparison 3ms
+       v ... > matches the Python filters > since before everything 3ms
+       v ... > matches the Python filters > since after everything 3ms
+       v ... > matches the Python filters > an entry with no ts defaults to the empty string and loses 3ms
+       v ... > matches the Python filters > since is not parsed as a date, so a bare word filters 3ms
+       v ... > matches the Python filters > all three filters compose 3ms
+       v GET /api/posts/{post_id}/logs > collects every occurrence of level, unlike the scalar parameters 3ms
+       v GET /api/posts/{post_id}/logs > keeps the last occurrence of stage, matching Starlette's QueryParams 3ms
+       v GET /api/posts/{post_id}/logs > keeps the last occurrence of since 3ms
+       v GET /api/posts/{post_id}/logs > treats a valueless level as the empty string, which matches nothing 3ms
+       v GET /api/posts/{post_id}/logs > treats a valueless stage as absent, since the empty string is falsy in Python 3ms
+       v GET /api/posts/{post_id}/logs > compares since by code point, where JavaScript's > compares UTF-16 code units 3ms
+       v GET /api/posts/{post_id}/analytics > rejects an unauthenticated request 1ms
+       v GET /api/posts/{post_id}/analytics > answers a malformed path uuid with FastAPI's 422 1ms
+       v GET /api/posts/{post_id}/analytics > answers a post that does not exist with a 404 2ms
+       v GET /api/posts/{post_id}/analytics > answers another user's post with the same 404 3ms
+       v GET /api/posts/{post_id}/analytics > answers a post whose profile_id is null with a 404 2ms
+       v GET /api/posts/{post_id}/analytics > emits exactly the seven keys PostAnalytics declares, in order 32ms
+       v ... > matches the Python wiring > no content at all 4ms
+       v ... > matches the Python wiring > draft only 4ms
+       v ... > matches the Python wiring > final_md_content wins over draft_content 3ms
+       v ... > matches the Python wiring > empty final_md_content falls through to draft 3ms
+       v ... > matches the Python wiring > ready_content is not consulted 3ms
+       v ... > matches the Python wiring > no keywords 3ms
+       v ... > matches the Python wiring > empty keyword list 3ms
+       v ... > matches the Python wiring > one keyword is the primary and there are no secondaries 3ms
+       v ... > matches the Python wiring > the first keyword is primary and the rest are secondary 3ms
+       v ... > matches the Python wiring > a non-string first keyword yields an empty primary 3ms
+       v ... > matches the Python wiring > non-string keywords are dropped from the secondaries 3ms
+       v ... > matches the Python wiring > topic feeds the title check 3ms
+       v ... > matches the Python wiring > an empty topic is an empty title 3ms
+       v ... > matches the Python wiring > website_url decides which links count as internal 3ms
+       v ... > matches the Python wiring > a null website_url leaves the domain empty 3ms
+       Test Files  1 passed (1)
+            Tests  52 passed (52)
+         Start at  14:40:51
+         Duration  924ms (transform 63ms, setup 119ms, import 460ms, tests 223ms, environment 0ms)
+      ```
+
+      Negative controls, each reverted after measuring:
+
+      ```
+      # 1. compare since with JavaScript's own > instead of pythonGreater()
+      Tests  1 failed | 51 passed (52)
+        x compares since by code point, where JavaScript's > compares UTF-16 code units
+
+      # 2. level.includes(String(value)) instead of a string-typed equality
+      Tests  1 failed | 51 passed (52)
+        x a non-string level is compared by equality, not by str()
+
+      # 3. read level with .slice(-1), the last-wins rule the scalar parameters use
+      Tests  2 failed | 50 passed (52)
+        x two levels
+        x collects every occurrence of level, unlike the scalar parameters
+
+      # 4. prefer readyContent in the analytics content fallback
+      Tests  1 failed | 51 passed (52)
+        x ready_content is not consulted
+
+      # 5. filter related_keywords to strings first, then take the head as primary
+      Tests  1 failed | 51 passed (52)
+        x a non-string first keyword yields an empty primary
+
+      # 6. drop the website_profiles join and match on posts.id alone, in both handlers
+      Tests  4 failed | 48 passed (52)
+        x answers another user's post with the same 404          (logs)
+        x answers a post whose profile_id is null with a 404     (logs)
+        x answers another user's post with the same 404          (analytics)
+        x answers a post whose profile_id is null with a 404     (analytics)
+      ```
+
+      Gates:
+
+      ```
+      $ pnpm -C web tsc --noEmit
+      TSC EXIT=0
+      (no output)
+
+      $ pnpm -C web lint
+      LINT EXIT=0
+      (no output)
+
+      $ pnpm -C web test
+       Test Files  2 failed | 75 passed (77)
+            Tests  9 failed | 1378 passed | 7 skipped (1394)
+      # 9 failed is the recorded baseline: 6 in image-preview.test.tsx and 3 in
+      # PostDetail.test.tsx, both pre-existing. Passing count 1326 -> 1378 (+52).
+
+      $ pnpm -C web build
+      BUILD EXIT=0
+      v Compiled successfully in 3.5s
+      |- f /api/posts/[id]/analytics
+      |- f /api/posts/[id]/logs
+      # The BetterAuth "default secret" lines are the pre-existing, environment-driven
+      # warning recorded under item 1.2.
+
+      $ cd api && set -a && . ../.env && set +a && uv run pytest -q
+      125 failed, 236 passed, 25 errors in 13.10s
+
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 131 files already formatted
+      ```
+
+      All three Python numbers are the recorded baseline; the new oracle script is
+      ruff-clean and ruff-formatted, which is why the format line reads 131 already
+      formatted rather than 130. Measured by moving the script aside and re-running:
+      `Found 32 errors` / `9 files would be reformatted, 130 files already formatted` /
+      `4 failed, 205 passed, 177 errors` at HEAD without it. **Note the pytest run needs
+      `../.env` sourced first**: without it the suite reports `4 failed, 205 passed,
+      177 errors` because `POSTGRES_HOST_PORT` is 5435 in this checkout, not the 5433
+      compose default. That is the trap recorded in the project memory, and it is easy to
+      mistake for a regression.
 - [ ] 5.4 `queue`
 - [ ] 5.5 `events` (SSE keeps `web/src/hooks/use-sse.ts`'s existing message shape; sourced from
   the Redis Streams pub/sub topic, not an in-process stream; uses Mastra resumable-stream
