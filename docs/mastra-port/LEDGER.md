@@ -1186,7 +1186,113 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
   Pass count rises 200 -> 216 with the pre-existing failure count held at exactly 9, so the
   item 0.1 baseline holds. No `api/` source file was touched, so the pytest and ruff
   baselines are unchanged by construction.
-- [ ] 1.4 A TS script reads and writes a Post round-trip against the real dev database.
+- [x] 1.4 A TS script reads and writes a Post round-trip against the real dev database.
+
+  `web/src/db/index.ts` is the database client the rest of the port builds on: a lazily
+  created `pg` Pool wrapped in drizzle, cached on `globalThis` so Next.js dev reloads do not
+  leak pools, with no `next/*` import so the Phase 2 worker can import it. It normalises the
+  `postgresql+asyncpg://` prefix the repo-root `.env` uses, which `pg` does not understand.
+
+  `web/src/db/post-roundtrip.test.ts` is the round-trip: it inserts a profile and a post,
+  reads them back through drizzle, checks the defaults the database applies, updates a stage
+  content column plus `stage_status` and `image_manifest` (the Phase 3 persistence contract),
+  re-reads through a second independent connection to prove the write committed, then deletes.
+
+  ```
+  $ cd web && NO_COLOR=1 pnpm vitest run src/db/post-roundtrip.test.ts
+
+   RUN  v4.0.18 /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+
+   ✓ src/db/post-roundtrip.test.ts (5 tests) 45ms
+
+   Test Files  1 passed (1)
+        Tests  5 passed (5)
+  ```
+
+  **Negative control.** The test really reaches Postgres rather than drizzle's own type
+  layer: renaming one column in `schema.ts` (`research_content` -> `research_contents`) turns
+  all five tests red with a server-side error, and the rename was reverted afterwards
+  (`git diff --stat src/db/schema.ts` is empty).
+
+  ```
+  $ sed -i '' 's|text("research_content")|text("research_contents")|' src/db/schema.ts
+  $ NO_COLOR=1 pnpm vitest run src/db/post-roundtrip.test.ts
+  ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+  Error: Failed query: insert into "posts" (... "research_contents" ...)
+  Caused by: error: column "research_contents" of relation "posts" does not exist
+  Caused by: error: column "research_contents" does not exist
+    hint: 'Perhaps you meant to reference the column "posts.research_content".'
+  $ sed -i '' 's|text("research_contents")|text("research_content")|' src/db/schema.ts   # reverted
+  ```
+
+  **Cross-language proof (not committed, reproduced ad hoc).** The Python stack is still
+  running, so the round-trip also has to hold across languages. TypeScript wrote a post with
+  drizzle and SQLAlchemy read it back:
+
+  ```
+  TS inserted post: fe09fec1-50d5-4226-8cf8-3d6f3da40cdb ts-crosslang-post [ 'alpha', 'beta' ] 2026-08-22T01:32:40.206Z
+
+  SQLAlchemy read: fe09fec1-50d5-4226-8cf8-3d6f3da40cdb ts-crosslang-post
+    topic           : Written by TypeScript, read by SQLAlchemy
+    related_keywords: ['alpha', 'beta'] list
+    stage_status    : {'research': 'complete'} dict
+    word_count      : 1234 int
+    research_content: '## Research\n\nWritten from drizzle.'
+    created_at      : 2026-08-22T01:32:40.206995+00:00 datetime
+    current_stage   : pending
+    stage_settings  : {'edit': 'review', 'write': 'review', 'images': 'review', 'outline': 'review', 'research': 'review'}
+    execution_logs  : []
+  ```
+
+  And the reverse: SQLAlchemy wrote a post, drizzle read it back.
+
+  ```
+  SQLAlchemy inserted post: 22da4bf3-c3c2-4e1b-8fe3-fd514e854c32 py-crosslang-post
+
+  drizzle read: 22da4bf3-c3c2-4e1b-8fe3-fd514e854c32 py-crosslang-post
+    topic           : Written by SQLAlchemy, read by drizzle
+    relatedKeywords : [ 'gamma', 'delta' ]
+    imageManifest   : {"images":[{"filename":"hero.webp"}]}
+    wordCount       : 4321 number
+    createdAt       : 2026-08-22T01:33:01.977Z Date
+    currentStage    : pending
+    stageSettings   : {"edit":"auto","ready":"auto","write":"auto","images":"auto","outline":"auto","research":"auto"}
+    outputFormat    : markdown
+  ```
+
+  Note the divergence in the last two lines, which confirms the defect logged in `todo.md`
+  under 1.1 from the other direction: the row TypeScript inserted took the database defaults
+  (`output_format` `both`, five-stage all-`review` `stage_settings`) while the row SQLAlchemy
+  inserted took the model defaults (`markdown`, six-stage all-`auto`). The two stacks are
+  writing different defaults for the same table today. This is pre-existing and out of scope
+  for the port, which must not change schema shape; the TypeScript side deliberately matches
+  the database, so a Phase 5 handler will produce `both`/`review` where FastAPI produced
+  `markdown`/`auto` unless the handler sets them explicitly. Recorded so Phase 5 sets them.
+
+  All four frontend gates after the change:
+
+  ```
+  $ cd web && pnpm tsc --noEmit ; echo EXIT=$?
+  EXIT=0
+
+  $ cd web && pnpm lint ; echo EXIT=$?
+  EXIT=0
+
+  $ cd web && NO_COLOR=1 pnpm test
+   Test Files  2 failed | 17 passed (19)
+        Tests  9 failed | 221 passed (230)
+
+  $ cd web && pnpm build ; echo EXIT=$?
+  EXIT=0
+  ```
+
+  Pass count rises 216 -> 221 with the pre-existing failure count held at exactly 9, so the
+  item 0.1 baseline holds. No `api/` source file was touched, so the pytest and ruff
+  baselines are unchanged by construction. Both cross-language rows and their profile were
+  deleted afterwards (`select count(*) from posts` and `from website_profiles` both return 0).
+
+  **Phase 1 exit reached:** the parity check passes (1.2), the crypto interop test passes
+  (1.3), and TypeScript now reads and writes a Post against the real dev database (1.4).
 
 ## Phase 2: Mastra scaffold
 
