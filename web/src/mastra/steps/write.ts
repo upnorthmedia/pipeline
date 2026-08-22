@@ -13,6 +13,7 @@ import { loadPipelineState, saveStageOutput } from "../post-state"
 import { buildStagePrompt, loadRules } from "../prompts"
 import { STATUS_COMPLETE } from "../state"
 import {
+  markRerunComplete,
   skippedStageOutput,
   shouldRunStage,
   stageStepInputSchema,
@@ -39,6 +40,7 @@ export const writeStep = createStep({
       ...state.stageStatus,
       write: STATUS_COMPLETE,
     })
+    await markRerunComplete(inputData)
 
     return {
       postId,

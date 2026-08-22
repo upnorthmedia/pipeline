@@ -22,6 +22,7 @@ import { STATUS_COMPLETE } from "../state"
 import { pythonTruthy } from "./images-manifest"
 import type { JsonValue } from "./images-manifest"
 import {
+  markRerunComplete,
   skippedStageOutput,
   shouldRunStage,
   stageStepInputSchema,
@@ -130,6 +131,7 @@ export const readyStep = createStep({
       ...state.stageStatus,
       ready: STATUS_COMPLETE,
     })
+    await markRerunComplete(inputData)
 
     return {
       postId,

@@ -22,7 +22,7 @@ import { loadPipelineState, saveStageOutput } from "../post-state"
 import { STATUS_COMPLETE, STATUS_FAILED } from "../state"
 import { generatedImageSchema } from "./images-generate"
 import { imageManifestSchema, imagesManifestStep } from "./images-manifest"
-import { skippedStageOutput, stageStepOutputSchema } from "./stage-io"
+import { markRerunComplete, skippedStageOutput, stageStepOutputSchema } from "./stage-io"
 
 /** `_stage_meta_gemini`: the image spend, reported separately from Claude's. */
 export const geminiStageMetaSchema = z.object({
@@ -127,6 +127,8 @@ export const imagesAssembleStep = createStep({
         ...state.stageStatus,
         images: STATUS_FAILED,
       })
+      // No rerun completion check here: the stage just marked itself failed, so
+      // the "every stage complete" it would ask about cannot be true.
       return {
         ...claudeMeta,
         durationS: 0,
@@ -145,6 +147,7 @@ export const imagesAssembleStep = createStep({
       ...state.stageStatus,
       images: STATUS_COMPLETE,
     })
+    await markRerunComplete({ postId, stages })
 
     // Python seeds `gemini_model` with the requested id and overwrites it with
     // whatever each successful call reported, so a stage that billed nothing

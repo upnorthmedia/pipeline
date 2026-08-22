@@ -14,7 +14,13 @@
 import { eq, getTableColumns } from "drizzle-orm"
 
 import { getDb, internalLinks, posts } from "../db"
-import { STAGE_CONTENT_MAP, STAGES, pipelineContextSchema } from "./state"
+import {
+  CURRENT_STAGE_COMPLETE,
+  STAGE_CONTENT_MAP,
+  STAGES,
+  STATUS_COMPLETE,
+  pipelineContextSchema,
+} from "./state"
 import type { InternalLink, Stage } from "./state"
 import { z } from "zod"
 
@@ -153,6 +159,32 @@ export async function saveStageOutput(
   if (stageStatus !== undefined) values.stageStatus = stageStatus
 
   await getDb().update(posts).set(values).where(eq(posts.id, postId))
+}
+
+/**
+ * Promote `current_stage` to `"complete"` if `stage_status` now calls every
+ * stage complete, ported from the single-stage rerun check in
+ * `api/src/worker.py`. Returns whether it promoted.
+ *
+ * The status map is re-read from the table rather than taken from the caller
+ * because the caller only knows the stage it just wrote; the question here is
+ * what the other five say once that write committed.
+ */
+export async function markCompleteIfAllStagesComplete(postId: string): Promise<boolean> {
+  const [row] = await getDb()
+    .select({ stageStatus: posts.stageStatus })
+    .from(posts)
+    .where(eq(posts.id, postId))
+  if (!row) return false
+
+  const stageStatus = (row.stageStatus ?? {}) as Record<string, string>
+  if (!STAGES.every((stage) => stageStatus[stage] === STATUS_COMPLETE)) return false
+
+  await getDb()
+    .update(posts)
+    .set({ currentStage: CURRENT_STAGE_COMPLETE, updatedAt: new Date() })
+    .where(eq(posts.id, postId))
+  return true
 }
 
 /**

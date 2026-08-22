@@ -20,6 +20,7 @@
  */
 import { z } from "zod"
 
+import { markCompleteIfAllStagesComplete } from "../post-state"
 import { STAGES, STATUS_COMPLETE } from "../state"
 import type { Stage } from "../state"
 
@@ -75,6 +76,27 @@ export function shouldRunStage(
 ): boolean {
   if (input.stages) return input.stages.includes(stage)
   return stageStatus[stage] !== STATUS_COMPLETE
+}
+
+/**
+ * Python's single-stage rerun completion check, run by every stage right after
+ * it commits its column.
+ *
+ * A full run ends at a completion hook that settles `current_stage` for it. A
+ * run that names its stages never reaches that hook, so Python re-read
+ * `stage_status` after each named stage and promoted `current_stage` the moment
+ * the selection filled the last gap. Without it, rerunning `edit` on an
+ * otherwise finished post would leave the row reading `current_stage = "edit"`
+ * for good and the dashboard would keep calling the post unfinished.
+ *
+ * The gate is the selection, not the stage: a full run promotes nothing here,
+ * because promoting `current_stage` without the hook's `completed_at` and
+ * publish queueing would leave the post half-finished in a way no reader could
+ * tell apart from finished.
+ */
+export async function markRerunComplete(input: StageStepInput): Promise<boolean> {
+  if (!input.stages) return false
+  return await markCompleteIfAllStagesComplete(input.postId)
 }
 
 /** The output of a stage that was skipped: the chain's fields and nothing else. */

@@ -53,6 +53,15 @@ export const STAGE_OUTPUT_KEY: Record<Stage, keyof PipelineContext> = {
   ready: "ready",
 }
 
+/**
+ * The value `current_stage` carries once every stage is complete.
+ *
+ * Spelled the same as `STATUS_COMPLETE` but it belongs to a different column's
+ * vocabulary: `current_stage` otherwise holds a stage name, so a rename of one
+ * must not silently rename the other.
+ */
+export const CURRENT_STAGE_COMPLETE = "complete"
+
 export const STATUS_PENDING = "pending"
 export const STATUS_RUNNING = "running"
 export const STATUS_COMPLETE = "complete"

@@ -5082,12 +5082,91 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   $ cd api && uv run ruff format --check .
   9 files would be reformatted, 126 files already formatted
   ```
-- [ ] 4.2b Single-stage rerun completion check: after a run with an explicit `stages`
+- [x] 4.2b Single-stage rerun completion check: after a run with an explicit `stages`
   selection, if `stage_status` now calls every stage complete, set `current_stage` to
   `"complete"` (`api/src/worker.py:234`). Deliberately left out of 4.2a: the full-pipeline
   path reaches the same end state through `_post_completion_hook`, which also stamps
   `completed_at` and queues publishing, so the two want deciding together rather than
   bolting the single-stage half onto every step.
+
+  `markCompleteIfAllStagesComplete()` (`web/src/mastra/post-state.ts`) re-reads
+  `stage_status` from the row and promotes `current_stage` to `CURRENT_STAGE_COMPLETE`
+  when every stage calls itself complete. `markRerunComplete()`
+  (`web/src/mastra/steps/stage-io.ts`) is the rule around it: it returns without touching
+  the row unless the run named its stages, which is Python's `if not is_full_pipeline`.
+  All six stages call it immediately after committing their column, `images` from
+  `images-assemble` because that is where its column is written.
+
+  Three decisions worth recording:
+
+  - The full-pipeline path deliberately still does **not** promote. Python's promotion for
+    that path lives in `_post_completion_hook`, which also stamps `completed_at` and queues
+    WordPress / Next.js publishing; promoting `current_stage` here alone would leave a post
+    that reads finished with `completed_at` still null. The hook is its own future item.
+  - `images-assemble`'s parse-failure branch does not call the check, where Python's loop
+    would have. That branch has just written `stage_status.images = "failed"`, so the
+    "every stage complete" question it would ask can never be true. A comment marks it.
+  - `CURRENT_STAGE_COMPLETE` is a new constant in `state.ts` rather than a reuse of
+    `STATUS_COMPLETE`. Same spelling, different column vocabulary: `current_stage`
+    otherwise holds a stage name.
+
+  Four real evented runs against live Postgres and Redis, one per branch of the rule, with
+  only the six agents and the Gemini call stubbed:
+
+  ```
+  $ cd web && npx vitest run src/mastra/workflows/rerun-completion.test.ts
+   ✓ src/mastra/workflows/rerun-completion.test.ts (10 tests) 5603ms
+   Test Files  1 passed (1)
+        Tests  10 passed (10)
+  ```
+
+  The promotion assertion was written first and failed for the right reason, alone:
+
+  ```
+   × promotes current_stage to complete rather than leaving it on the stage
+  AssertionError: expected 'edit' to be 'complete' // Object.is equality
+   Test Files  1 failed (1)
+        Tests  1 failed | 6 passed (7)
+  ```
+
+  Negative controls, each applied to the implementation and reverted:
+
+  | Mutation | Result |
+  | --- | --- |
+  | drop `if (!input.stages) return false` in `markRerunComplete` | Tests 1 failed \| 9 passed (10), the full run promotes |
+  | `STAGES.every` -> `STAGES.some` in `markCompleteIfAllStagesComplete` | Tests 1 failed \| 9 passed (10), a post with `ready` outstanding promotes |
+  | drop the call from `steps/edit.ts` | Tests 1 failed \| 9 passed (10) |
+  | drop the call from `steps/images-assemble.ts` | Tests 1 failed \| 9 passed (10), the nested workflow's own path |
+  | `CURRENT_STAGE_COMPLETE` -> `"finished"` | Tests 2 failed \| 8 passed (10) |
+
+  Frontend gates:
+
+  ```
+  $ cd web && npx tsc --noEmit
+  (no output, exit 0)
+  $ cd web && pnpm lint
+  (no output, exit 0)
+  $ cd web && pnpm test
+   Test Files  2 failed | 48 passed (50)
+        Tests  9 failed | 768 passed | 8 skipped (785)
+  $ cd web && pnpm build
+  ✓ Compiled successfully in 3.3s
+  ```
+
+  The 9 failures are the recorded baseline: 6 in `image-preview.test.tsx` and 3 in
+  `PostDetail.test.tsx`, the same set and count as item 4.2a's rerun, none of them in a
+  file this item touched.
+
+  Backend gates, unchanged at the Phase 0 baseline (no Python touched):
+
+  ```
+  $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test NO_COLOR=1 uv run pytest -q
+  125 failed, 236 passed, 25 errors in 15.19s
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 126 files already formatted
+  ```
 - [ ] 4.3 Review gates via `suspend()` / `resume()` with typed `suspendSchema` / `resumeSchema`.
   Suspend/resume test passes.
 - [ ] 4.4 Execution moves to the `worker` process: `web` starts a run and returns immediately,
