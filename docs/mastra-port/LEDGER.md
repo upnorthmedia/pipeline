@@ -9352,7 +9352,149 @@ three pieces are separately verifiable, so they are separate items.
       $ cd api && uv run ruff format --check .
       9 files would be reformatted, 129 files already formatted
       ```
-    - [ ] 5.3c-iii `POST /{post_id}/pause` and `POST /{post_id}/publish`.
+    - [ ] 5.3c-iii `POST /{post_id}/pause` and `POST /{post_id}/publish` (split: `/pause`
+      writes one column, `/publish` enqueues two ARQ jobs whose Mastra equivalents do not
+      exist yet. Split into 5.3c-iii-a pause, 5.3c-iii-b publish.)
+      - [x] 5.3c-iii-a `POST /{post_id}/pause`.
+
+        `web/src/app/api/posts/[id]/pause/route.ts` ports `pause_post()`. It is the
+        smallest handler in the router and the only pipeline-control endpoint that
+        enqueues nothing: Python read the post through `_get_user_post()`, assigned
+        `current_stage = "paused"` and committed.
+
+        What "paused" actually means, read off the Python rather than assumed:
+
+        ```
+        $ grep -rn "paused" api/src
+        api/src/api/queue.py:43:        "paused": counts.get("paused", 0),
+        api/src/api/queue.py:105:        post.current_stage = "paused"
+        api/src/api/queue.py:108:    return {"status": "paused", "count": count}
+        api/src/api/queue.py:117:    """Resume all paused posts."""
+        api/src/api/queue.py:122:        .where(Post.current_stage == "paused")
+        api/src/api/posts.py:467:    post.current_stage = "paused"
+        api/src/api/posts.py:470:    return {"status": "paused", "post_id": str(post_id)}
+        ```
+
+        Nothing in `api/src/worker.py` or `api/src/pipeline/` reads the value, so it is a
+        label, not a control signal: a stage already executing runs to completion and the
+        next stage still starts. What the flag does is move the post out of the in-flight
+        buckets on the posts list and the queue counts, and give `POST /api/queue/resume-all`
+        something to find. The port keeps that exactly, including the fact that the stage
+        the post was on is overwritten rather than remembered, which is why `resume-all`
+        has to recover the next stage from `stage_status`.
+
+        Two behaviours that look like oversights and are preserved:
+
+        - the per-post endpoint has no stage guard, so it will pause a `complete` post,
+          while `POST /api/queue/pause-all` restricts itself to `["pending", *STAGES]`;
+        - pausing an already paused post is a plain second write, not a 409.
+
+        Deviation, the same one recorded under 5.2b and 5.3b-ii: `updated_at` is
+        hand-stamped on every call, where SQLAlchemy's `onupdate` compared the assigned
+        value against the loaded one at flush time and emitted no `UPDATE` at all when
+        they matched. So pausing an already paused post bumps `updated_at` here and did
+        not in Python. Nothing in `web/src/lib/api.ts` sorts or filters on `updated_at`
+        for this flow.
+
+        The lookup and the write are one statement, as in the crawl endpoint from
+        5.2c-iii: the ownership predicate is `ownedByCaller()` extracted in 5.3c-ii, and
+        zero rows returned is the same 404 `_get_user_post()` raised. That keeps the
+        inner-join consequence intact, proven by its own test: a post whose `profile_id`
+        is null is invisible.
+
+        The ten tests are in `web/src/app/api/posts/run-control.test.ts`, which now covers
+        all five per-post pipeline-control endpoints, against the real database and real
+        BetterAuth sessions:
+
+        ```
+        $ pnpm -C web vitest run src/app/api/posts/run-control.test.ts --reporter=verbose
+         ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/pause > rejects an unauthenticated request 1ms
+         ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/pause > answers a malformed path uuid with FastAPI's 422 2ms
+         ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/pause > answers a post that does not exist with a 404 2ms
+         ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/pause > answers another user's post with the same 404, pausing nothing 4ms
+         ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/pause > answers a post whose profile_id is null with a 404 3ms
+         ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/pause > writes current_stage = paused and answers 200 4ms
+         ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/pause > enqueues nothing, unlike every other pipeline-control endpoint 3ms
+         ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/pause > overwrites the stage the post was on rather than remembering it 4ms
+         ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/pause > pauses a finished post too, since the endpoint filters on no stage 4ms
+         ✓ src/app/api/posts/run-control.test.ts > POST /api/posts/{post_id}/pause > is idempotent: pausing an already paused post answers 200 again 4ms
+         Test Files  1 passed (1)
+              Tests  53 passed (53)
+           Start at  14:04:49
+           Duration  2.50s (transform 189ms, setup 96ms, import 882ms, tests 1.39s, environment 0ms)
+        ```
+
+        The 43 tests already in the file are the four other control endpoints from 5.3c-i
+        and 5.3c-ii, unchanged.
+
+        Negative controls, each reverted after measuring:
+
+        ```
+        # 1. replace ownedByCaller(id, user.id) with eq(posts.id, id)
+        Tests  2 failed | 8 passed | 43 skipped (53)
+          x answers another user's post with the same 404, pausing nothing
+          x answers a post whose profile_id is null with a 404
+
+        # 2. drop the zero-rows 404 and echo the path id back instead
+        Tests  3 failed | 7 passed | 43 skipped (53)
+          x answers a post that does not exist with a 404
+          x answers another user's post with the same 404, pausing nothing
+          x answers a post whose profile_id is null with a 404
+        ```
+
+        Gates:
+
+        ```
+        $ pnpm -C web tsc --noEmit
+        TSC EXIT=0
+        (no output)
+
+        $ pnpm -C web lint
+        LINT EXIT=0
+        (no output)
+
+        $ pnpm -C web test
+         Test Files  2 failed | 72 passed (74)
+              Tests  9 failed | 1253 passed | 7 skipped (1269)
+        # 9 failed is the recorded baseline: 6 in image-preview.test.tsx and 3 in
+        # PostDetail.test.tsx, both pre-existing and both re-measured at HEAD in 5.3c-ii.
+        # Passing count 1243 -> 1253 (+10).
+
+        $ pnpm -C web build
+        BUILD EXIT=0
+        v Compiled successfully in 4.3s
+        |- f /api/posts/[id]/pause
+        # The 15 BetterAuth "default secret" lines are the pre-existing, environment-driven
+        # warning recorded under item 1.2: one per page-data worker ("Collecting page data
+        # using 15 workers"), and BETTER_AUTH_SECRET is set nowhere in the repo .env.
+
+        $ cd api && uv run pytest -q
+        125 failed, 236 passed, 25 errors in 15.39s
+
+        $ cd api && uv run ruff check .
+        Found 32 errors.
+
+        $ cd api && uv run ruff format --check .
+        9 files would be reformatted, 129 files already formatted
+        ```
+
+      - [ ] 5.3c-iii-b `POST /{post_id}/publish`.
+
+        Blocked on work Phase 5's later items own, and deliberately left for after them:
+        `publish_post()` is a two-line status write around
+        `enqueue_job("publish_to_wordpress" | "publish_to_nextjs", post_id)`, and neither
+        ARQ job has a Mastra equivalent yet. `api/src/pipeline/publish.py`,
+        `api/src/services/wordpress.py` (160 lines) and
+        `api/src/services/nextjs_publish.py` (188 lines) are all still Python-only, which
+        is the same gap `web/src/mastra/workflows/pipeline.ts` already records for the
+        auto-publish half of its completion hook. Starting a run for a workflow that does
+        not exist is not a port.
+
+        When it is picked up it should be split again, one publish path per iteration:
+        5.3c-iii-b-1 the WordPress workflow plus the `output_format == "wordpress"` branch,
+        5.3c-iii-b-2 the Next.js workflow (HMAC signing preserved exactly) plus its branch
+        and the trailing 400 for every other `output_format`. Item 5.9 and item 5.10 cover
+        the two routers, not the publishing itself, so the workflows land here.
   - [ ] 5.3d `GET /{post_id}/export/markdown`, `/export/html`, `/export/all`,
     `/{post_id}/logs` and `/{post_id}/analytics`.
 - [ ] 5.4 `queue`

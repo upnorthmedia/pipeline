@@ -1,8 +1,9 @@
 // @vitest-environment node
 /**
- * `POST /api/posts/{post_id}/run` and `POST /api/posts/{post_id}/run-all`.
+ * The five pipeline-control endpoints on a single post: `/run`, `/run-all`,
+ * `/rerun`, `/restart` and `/pause`.
  *
- * Both run against the real database and real BetterAuth sessions, so the
+ * They run against the real database and real BetterAuth sessions, so the
  * `website_profiles.user_id` scoping is exercised for real, and the enqueues
  * are read back off the real Redis Streams bus rather than asserted against a
  * spy.
@@ -36,6 +37,7 @@ import { closeDb, getDb, posts, websiteProfiles } from "@/db"
 import { STAGE_CONTENT_MAP } from "@/mastra/state"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
+import { POST as pausePost } from "./[id]/pause/route"
 import { POST as restartPipeline } from "./[id]/restart/route"
 import { POST as rerunStage } from "./[id]/rerun/route"
 import { POST as runStage } from "./[id]/run/route"
@@ -138,6 +140,12 @@ function all(id: string, cookie?: string) {
 
 function rerun(id: string, cookie?: string) {
   return rerunStage(apiRequest(`${URL_BASE}/${id}/rerun`, { cookie, method: "POST" }), {
+    params: Promise.resolve({ id }),
+  })
+}
+
+function pause(id: string, cookie?: string) {
+  return pausePost(apiRequest(`${URL_BASE}/${id}/pause`, { cookie, method: "POST" }), {
     params: Promise.resolve({ id }),
   })
 }
@@ -740,5 +748,102 @@ describe("POST /api/posts/{post_id}/restart", () => {
     const event = await waitForStart(post.id)
     expect(event.type).toBe("workflow.start")
     expect((event.data?.prevResult?.output as { stages?: unknown }).stages).toBeUndefined()
+  })
+})
+
+// --- POST /api/posts/{post_id}/pause ----------------------------------------
+
+describe("POST /api/posts/{post_id}/pause", () => {
+  it("rejects an unauthenticated request", async () => {
+    const response = await pause(MISSING_ID)
+    expect(response.status).toBe(401)
+  })
+
+  it("answers a malformed path uuid with FastAPI's 422", async () => {
+    const response = await pause("not-a-uuid", user.cookie)
+    expect(response.status).toBe(422)
+    expect(await response.json()).toMatchObject({
+      detail: [{ type: "uuid_parsing", loc: ["path", "post_id"] }],
+    })
+  })
+
+  it("answers a post that does not exist with a 404", async () => {
+    const response = await pause(MISSING_ID, user.cookie)
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ detail: "Post not found" })
+  })
+
+  it("answers another user's post with the same 404, pausing nothing", async () => {
+    const post = await insertPost(other.userId, { currentStage: "write" })
+    const response = await pause(post.id, user.cookie)
+
+    expect(response.status).toBe(404)
+    expect((await readPost(post.id)).currentStage).toBe("write")
+  })
+
+  it("answers a post whose profile_id is null with a 404", async () => {
+    // The inner join in `_get_user_post()` makes an orphan post invisible.
+    const [orphan] = await db
+      .insert(posts)
+      .values({ slug: `${PREFIX}${randomUUID()}`, topic: "Orphan", currentStage: "write" })
+      .returning()
+
+    expect((await pause(orphan.id, user.cookie)).status).toBe(404)
+    expect((await readPost(orphan.id)).currentStage).toBe("write")
+  })
+
+  it("writes current_stage = paused and answers 200", async () => {
+    const post = await insertPost(user.userId, { currentStage: "write" })
+    const response = await pause(post.id, user.cookie)
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ status: "paused", post_id: post.id })
+    expect((await readPost(post.id)).currentStage).toBe("paused")
+  })
+
+  it("enqueues nothing, unlike every other pipeline-control endpoint", async () => {
+    const post = await insertPost(user.userId, { currentStage: "write" })
+    await pause(post.id, user.cookie)
+
+    expect(start.calls).toEqual([])
+  })
+
+  it("overwrites the stage the post was on rather than remembering it", async () => {
+    // Python stored no "stage before pause", so `/api/queue/resume-all` has to
+    // recover the next stage from `stage_status`. Nothing else is touched.
+    const post = await insertPost(user.userId, {
+      currentStage: "edit",
+      stageStatus: { research: "complete", outline: "complete", write: "complete" } as never,
+    })
+    await pause(post.id, user.cookie)
+
+    const row = await readPost(post.id)
+    expect(row.currentStage).toBe("paused")
+    expect(row.stageStatus).toEqual({
+      research: "complete",
+      outline: "complete",
+      write: "complete",
+    })
+    expect(row.stageSettings).toEqual(GATED_STAGE_SETTINGS)
+  })
+
+  it("pauses a finished post too, since the endpoint filters on no stage", async () => {
+    // `POST /api/queue/pause-all` restricts to `["pending", *STAGES]`; the
+    // per-post endpoint has no such guard.
+    const post = await insertPost(user.userId, {
+      currentStage: "complete",
+      stageStatus: ALL_COMPLETE,
+    })
+    const response = await pause(post.id, user.cookie)
+
+    expect(response.status).toBe(200)
+    expect((await readPost(post.id)).currentStage).toBe("paused")
+  })
+
+  it("is idempotent: pausing an already paused post answers 200 again", async () => {
+    const post = await insertPost(user.userId, { currentStage: "paused" })
+
+    expect((await pause(post.id, user.cookie)).status).toBe(200)
+    expect((await readPost(post.id)).currentStage).toBe("paused")
   })
 })
