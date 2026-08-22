@@ -48,3 +48,9 @@
   three consecutive runs) while passing when run alone. Suspect shared state across suites:
   they swap `globalThis.fetch` and read the same `settings` rows. Makes the failure baseline
   unreliable, so it is worth pinning down before Phase 5 adds more DB-backed suites.
+
+- [confirmed] 2026-08-21 The agent test files' `beforeAll`/`afterAll` key save-and-restore
+  makes the placeholder key permanent: a run captures whatever is in `settings.api_keys`,
+  writes `sk-ant-not-a-real-key`, then restores what it captured, so once an interrupted run
+  leaves the placeholder behind every later run restores it. Found the row still present at
+  the start of iteration 31 and deleted it. The restore should skip rows it wrote itself.

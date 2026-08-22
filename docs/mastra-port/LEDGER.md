@@ -3928,9 +3928,130 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
     formatted file than the last recorded run because
     `export_optimize_parity.py` is new and formatted; the would-reformat count is
     unchanged at 9.
-  - [ ] 3.5c `images` **agent**: the Claude half of the stage (model id, system message,
+  - [x] 3.5c `images` **agent**: the Claude half of the stage (model id, system message,
     `max_tokens`, the resolved `thinking` budget) with system-message and prompt parity
     against both golden fixtures and a live call confirming the model id resolves.
+
+    **What was built**
+
+    - `web/src/mastra/agents/images.ts`: `imagesAgent`, the provider half of step 1
+      of `images_node`. `IMAGES_SYSTEM_MESSAGE` reproduces Python's four adjacent
+      string literals, `IMAGES_MAX_TOKENS` is Python's 8000, the credential is
+      resolved per call through `requireApiKey`, and extended thinking comes from
+      the shared `claudeStageOptions`.
+    - `imagesAgent` registered on the Mastra instance as `agents.images`.
+    - `web/src/mastra/agents/images.test.ts`: 12 tests (11 credential-free).
+
+    **Why this stage is not just another copy of `outline`**
+
+    `images_node` is the only node that calls two providers, so the fixture's
+    `provider_calls` list has an Anthropic entry followed by five or six Gemini
+    entries. A test asserts that shape rather than assuming `provider_calls[0]`
+    is the manifest call, because items 3.5d and 3.5e read the rest of the list.
+
+    Its `max_tokens=8000` is below the extended-thinking floor, so 11024 is what
+    reaches Anthropic. `outline` shares that branch, but the assertion here is
+    pinned against `images.json`'s own recorded `max_tokens`, not against
+    `OUTLINE_MAX_TOKENS`, so the two stages cannot drift into agreeing with each
+    other while both disagreeing with Python.
+
+    **Finding: the fenced-block branch of `parseManifest` has no fixture coverage**
+
+    The system message ends `Output ONLY valid JSON, no code fences.` and both
+    recorded answers obey it: each `text` block opens at `{`. Item 3.5a's
+    fenced-block branch is therefore exercised only by that item's synthetic
+    corpus, never by a real recorded response. A test asserts the fence-free
+    property directly, so a future prompt change that makes Claude start fencing
+    shows up as a failing test rather than as silently-live parsing code.
+
+    Both recorded responses carry a `thinking` block ahead of the `text` block,
+    so the test extracts the manifest text the way Python's `ClaudeClient.chat()`
+    does (text blocks only) rather than reading `response.content` as a string.
+
+    ### Item test
+
+    ```
+    $ cd web && NO_COLOR=1 pnpm vitest run src/mastra/agents/images.test.ts
+     OK src/mastra/agents/images.test.ts (12 tests | 1 skipped) 95ms
+
+     Test Files  1 passed (1)
+          Tests  11 passed | 1 skipped (12)
+    ```
+
+    ### Live Anthropic call confirming the model id resolves
+
+    The key is read out of the developer `.env` and never written to the repo; the
+    test encrypts it into the `settings` table with a throwaway Fernet key for the
+    duration of the call and deletes the row afterwards.
+
+    ```
+    $ cd web && ANTHROPIC_API_KEY=<redacted> NO_COLOR=1 pnpm vitest run \
+        src/mastra/agents/images.test.ts -t "live smoke"
+     OK src/mastra/agents/images.test.ts (12 tests | 11 skipped) 2514ms
+         OK reaches Anthropic and reports back the configured model id  2495ms
+
+     Test Files  1 passed (1)
+          Tests  1 passed | 11 skipped (12)
+    ```
+
+    The assertion inside it is `response.modelId === "claude-opus-4-6"`, which is
+    the model id Anthropic reported back for the request, plus a non-empty text
+    and a non-zero `usage.outputTokens`.
+
+    ### Negative controls
+
+    Each mutation was applied to `agents/images.ts` (or `index.ts` for control 7),
+    the item test run, then the file restored from a copy taken before the first
+    mutation. `images.ts` is new and untracked this iteration, so
+    `git checkout` would not have restored it.
+
+    | # | Mutation | Result |
+    | --- | --- | --- |
+    | 1 | `IMAGES_MAX_TOKENS` 8000 -> 16000 | 3 failed |
+    | 2 | `IMAGES_MODEL_ID` -> `anthropic/claude-sonnet-4-5` | 4 failed |
+    | 3 | Space dropped at the first literal boundary | 4 failed |
+    | 4 | Fourth literal (`Output ONLY valid JSON...`) dropped | 5 failed |
+    | 5 | `defaultOptions: claudeStageOptions(...)` removed | 2 failed |
+    | 6 | `instructions` removed from the Agent | 3 failed |
+    | 7 | `images: imagesAgent` removed from the Mastra instance | 1 failed |
+    | 8 | Sentence join turned into a newline | 4 failed |
+
+    ```
+    $ # after reverting all eight
+          Tests  11 passed | 1 skipped (12)
+    ```
+
+    ### Gates
+
+    ```
+    $ cd web && NO_COLOR=1 pnpm tsc --noEmit
+    tsc exit=0
+    $ cd web && NO_COLOR=1 pnpm lint
+    lint exit=0
+    $ cd web && NO_COLOR=1 pnpm test
+     Test Files  2 failed | 38 passed (40)
+          Tests  9 failed | 593 passed | 5 skipped (607)
+    $ cd web && NO_COLOR=1 pnpm build
+    (built; route table printed, exit 0)
+    ```
+
+    Failures hold at the Phase 0 baseline of 9 (6 `image-preview`, 3 `PostDetail`).
+    Totals moved 595 -> 607, which is the 12 new tests, and skips moved 4 -> 5,
+    which is the new live smoke test. The suite was run twice with identical
+    counts, because iteration 30 recorded the three agent test files failing
+    intermittently under a full run.
+
+    ```
+    $ cd api && set -a && . ../.env && set +a && NO_COLOR=1 uv run pytest -q
+    125 failed, 236 passed, 25 errors in 15.19s
+    $ cd api && uv run ruff check .
+    Found 32 errors.
+    $ cd api && uv run ruff format --check .
+    9 files would be reformatted, 123 files already formatted
+    ```
+
+    All three at the Phase 0 baseline. No file under `api/` was touched this
+    iteration.
   - [ ] 3.5d Gemini image-generation client ported: `generate_image` with `aspect_ratio`,
     `image_size` and `response_modalities`, plus the token accounting the stage sums into
     `_stage_meta_gemini`, and a live smoke test.
