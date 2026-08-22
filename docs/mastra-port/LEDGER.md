@@ -1005,8 +1005,90 @@ Phase order is fixed. `api/` is deleted only in Phase 7.
   ```
 
   No Python file was touched, so the backend gates are unchanged from item 0.4.
-- [ ] 1.2 Write a schema-parity check that fails if any table or column known to Alembic is
+- [x] 1.2 Write a schema-parity check that fails if any table or column known to Alembic is
   missing from the TS schema, or vice versa.
+
+  The check lives in `web/src/db/schema-parity.ts` (pure comparison helpers) and
+  `web/src/db/schema-parity.test.ts` (vitest, real database). It describes both sides in
+  the same shape and diffs them in both directions:
+
+  - Alembic side: read from the live `content_pipeline` catalog via `pg_attribute` /
+    `format_type`, so the type spelling is Postgres' own, not `information_schema`'s
+    split `data_type` + `character_maximum_length`.
+  - TypeScript side: every `pgTable` exported from `schema.ts`, read with
+    `getTableConfig` and `column.getSQLType()`.
+  - Compared per column: type, `NOT NULL`, and whether a default exists.
+  - `isAlembicOwned()` excludes the `public` tables Alembic does not own, so the "vice
+    versa" direction still reports genuinely unexpected tables: `auth_*` and
+    `subscription` (BetterAuth and its Stripe plugin, `web/src/lib/auth.ts`) and
+    `mastra_*` (the Phase 2 Postgres storage adapter).
+  - A separate assertion pins `alembic_version` to `011`, so the comparison can never
+    silently run against a database behind head.
+
+  ```
+  $ docker compose up -d db redis
+  $ cd web && NO_COLOR=1 pnpm exec vitest run src/db/schema-parity.test.ts ; echo "exit=$?"
+
+   RUN  v4.0.18 /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+
+   ✓ src/db/schema-parity.test.ts (9 tests) 21ms
+
+   Test Files  1 passed (1)
+        Tests  9 passed (9)
+     Start at  20:24:57
+     Duration  406ms (transform 32ms, setup 126ms, import 182ms, tests 21ms, environment 0ms)
+  exit=0
+  ```
+
+  **Negative control.** A green parity check proves nothing unless it can go red, so the
+  live-database test was re-run with one invented column added to `posts` in `schema.ts`
+  (`invented: text("invented_column")`) and reverted immediately afterwards:
+
+  ```
+  $ pnpm exec vitest run src/db/schema-parity.test.ts   # with the invented column present
+   FAIL  src/db/schema-parity.test.ts > schema.ts against the live Alembic database > describes every Alembic table and column, and no others
+  AssertionError: expected [ Array(1) ] to deeply equal []
+  +   "posts.invented_column: in schema.ts, missing from database",
+        Tests  1 failed | 8 passed (9)
+
+  $ git diff --stat web/src/db/schema.ts   # after reverting
+  (no output: schema.ts unchanged)
+  ```
+
+  The five non-database tests in the file cover the other diff directions with synthetic
+  input (column missing from `schema.ts`, column missing from the database, a table
+  missing from each side, and type / nullability / default drift), so each branch of
+  `diffSchemas` is exercised rather than only the happy path.
+
+  `web/vitest.config.ts` now loads the repo-root `.env` into `test.env`, because vitest
+  runs from `web/` and the only copy of `DATABASE_URL_SYNC` lives at the repo root. This
+  makes `docker compose up -d db redis` a prerequisite for `pnpm test`; the objective
+  already requires database tests to hit a real database, and every later phase needs it.
+
+  Gates after the change (frontend only; no Python file was touched, so the item 0.4
+  backend gates are unchanged):
+
+  ```
+  $ cd web && pnpm exec tsc --noEmit ; echo "tsc exit=$?"
+  tsc exit=0
+
+  $ pnpm lint ; echo "lint exit=$?"
+  lint exit=0
+
+  $ pnpm test ; echo "test exit=$?"
+   Test Files  2 failed | 15 passed (17)
+        Tests  9 failed | 200 passed (209)
+  test exit=1
+
+  $ pnpm build ; echo "build exit=$?"
+  build exit=0
+  ```
+
+  Pass count rises 191 -> 200 with the pre-existing failure count held at exactly 9
+  (`image-preview.test.tsx` and `PostDetail.test.tsx`), so the item 0.1 baseline holds.
+  `pnpm build` prints two pre-existing BetterAuth warnings (base URL undeterminable,
+  default secret) from `src/lib/auth.ts`; they are not new here, since the only files this
+  item added live under `src/db/` and nothing in the app imports them.
 - [ ] 1.3 Port `api/src/services/crypto.py` to TypeScript and prove with a test that a value
   encrypted by the Python implementation decrypts correctly in TypeScript.
 - [ ] 1.4 A TS script reads and writes a Post round-trip against the real dev database.
