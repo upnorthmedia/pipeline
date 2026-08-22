@@ -4256,7 +4256,172 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
     All three at the Phase 0 baseline. `ruff format --check`'s "already formatted"
     count moved 123 -> 124, which is the new script; the reformat count is
     unchanged.
-  - [ ] 3.5e `images` **step**: `createStep` with Zod schemas, `.foreach()` for per-image
+  - [x] 3.5e Per-image generation unit (`generateOneImage`) ported, against a parity
+    corpus captured by driving the real `images_node` with both providers intercepted.
+
+    **Why this splits off from the step**
+
+    `_generate_one` is a closure inside `images_node`, and everything
+    interesting about the `images` stage that is not the manifest, the WebP
+    encoder or the Gemini wire format lives inside it: which aspect ratio and
+    image size reach Gemini, which optimize width applies, what the written
+    filename is, what URL is recorded, and which keys the returned image spec
+    carries in the success and both failure shapes. Those are the fields that
+    end up in the `image_manifest` JSONB column, so they need their own oracle
+    and their own negative controls. The remaining half (prompt assembly, the
+    `.foreach()` fan-out, the manifest-parse failure branch, `_stage_meta` /
+    `_stage_meta_gemini` and `saveStageOutput`) is item 3.5f.
+
+    **What was ported**
+
+    `web/src/mastra/images/generate-one.ts` is `_generate_one`, the closure
+    inside `images_node`: the aspect-ratio and image-size decision including the
+    featured overrides, the 1920-vs-1200 optimize width, `Path(filename).stem`,
+    the featured filename rewrite, the disk write and the
+    `/media/<post_id>/<filename>` URL, plus the success and both failure shapes
+    of the manifest entry. `ensureMediaDir` is the stage's one
+    `media_dir.mkdir(parents=True, exist_ok=True)`.
+
+    **The oracle**
+
+    `api/scripts/export_image_generation_parity.py` runs the real Python stage
+    with `ClaudeClient` and `GeminiClient` replaced, a frozen
+    `datetime.now(UTC)` and a frozen `random.randint`, and a temporary media
+    directory. Everything between the two providers ran for real over there, so
+    `web/src/mastra/images/data/image-generation-parity.json` records what
+    Python actually stored, wrote and billed: 16 manifest entries covering every
+    branch, the 14 Gemini calls they produced with the exact arguments sent, the
+    9 files that survived on disk with their dimensions and (where no resize
+    happened) Pillow's sha256, the `_stage_meta_gemini` totals, and a 15-case
+    direct oracle for `Path(...).stem`.
+
+    Two inputs are used: a 64x48 PNG, narrow enough that `optimize_image` never
+    resizes, so its WebP bytes are byte-identical across Pillow and sharp (item
+    3.5b) and the committed sha256 is an equality rather than a tolerance; and a
+    2400x1600 PNG, which is the only thing that can tell the 1920 branch from
+    the 1200 one. The two resized files are compared on dimensions only, because
+    Pillow's Lanczos convolution and libvips' reduce do not agree byte for byte.
+
+    **What the corpus exposed**
+
+    1. The featured aspect-ratio and image-size overrides key off
+       `placement == "featured"`, a *string*, while `is_featured`, which picks
+       the optimize width and the filename rewrite, also accepts
+       `type == "featured"`. Both golden fixtures show Claude writing
+       `placement` as an object (`{location, after_section}`), so on real
+       manifests the overrides never fire and the width and filename rules
+       always do. Three of the corpus cases exist only to cover the string form.
+    2. The overrides rewrite the local variables, never the entry, so a stored
+       manifest entry can read `image_size: "1K"` for a call made at `2K`, or
+       carry no `aspect_ratio` at all for a call made at `16:9`. Logged in
+       `todo.md`.
+    3. A Gemini call that succeeded is billed even when `optimize_image` then
+       rejects the bytes: Python accumulates `gemini_tokens_in/out` immediately
+       after the call and the optimizer runs inside the same `try`. The port
+       reports usage separately from success so the sum can be reproduced;
+       reporting only successes would under-report spend.
+    4. Every featured entry gets the same filename, so four featured entries in
+       the corpus produced one file: the last write wins and all four entries
+       record the same URL. Latent on real manifests (one featured image each),
+       1-in-90 otherwise. Logged in `todo.md`.
+    5. An empty `filename` writes the dotfile `.webp`. Logged in `todo.md`.
+    6. `Path("..png").stem` is `"."` and `Path("...").stem` is `"..."`, because
+       the rule is `0 < i < len(name) - 1` rather than "strip after the last
+       dot", and `Path(".").name` is `""` while `Path("..").name` is `".."`.
+       `pathStem` reimplements the rule rather than approximating it, which is
+       also what flattens `sub/dir/nested.png` to `nested.webp` and keeps a
+       manifest entry from writing outside the media directory.
+
+    **Known divergence, recorded not fixed.** Python reads `aspect_ratio`,
+    `image_size` and `filename` with `dict.get(key, default)`, which returns an
+    explicit JSON `null` rather than the default. The port treats a non-string
+    as absent. No rule asks the model for a null there and no fixture has one,
+    so the `None` behaviour would have to be invented rather than observed.
+    Logged in `todo.md` for a decision before Phase 7.
+
+    ```
+    $ cd api && uv run python scripts/export_image_generation_parity.py
+    wrote web/src/mastra/images/data/image-generation-parity.json
+      images: 16
+      gemini calls: 14
+      files written: 9
+    ```
+
+    ```
+    $ pnpm -C web exec vitest run src/mastra/images/generate-one.test.ts
+     ✓ src/mastra/images/generate-one.test.ts (30 tests) 2228ms
+
+     Test Files  1 passed (1)
+          Tests  30 passed (30)
+       Duration  2.51s
+    ```
+
+    **Negative controls.** Eleven mutations applied to
+    `generate-one.ts` one at a time and reverted; every one failed the suite,
+    with the failure count in brackets:
+
+    | mutation | failures |
+    | --- | --- |
+    | `DEFAULT_ASPECT_RATIO` `"4:3"` -> `"3:4"` | 1 |
+    | featured override forces 16:9 unconditionally | 1 |
+    | override keyed off `isFeatured` instead of the string `placement` | 1 |
+    | optimize width always `CONTENT_MAX_WIDTH` | 1 |
+    | `pathStem`'s `dot > 0` relaxed to `dot >= 0` | 1 |
+    | `featuredFilename` renders `DDMMYY` instead of `MMDDYY` | 3 |
+    | usage recorded only after the optimizer succeeds | 2 |
+    | empty prompt string treated as usable | 5 |
+    | default filename `image-<index>.png` -> `image.png` | 2 |
+    | featured filename rewrite applied to every image | 3 |
+    | (control) unmodified file | 0 |
+
+    The fourth is the one that justified adding the 2400x1600 input: with only
+    the 64x48 PNG it passed, because nothing was ever wide enough to resize.
+
+    **Gates.**
+
+    ```
+    $ pnpm -C web tsc --noEmit
+    (exit 0, no output)
+
+    $ pnpm -C web lint
+    (exit 0, no output)
+
+    $ pnpm -C web test
+     ❯ src/components/__tests__/image-preview.test.tsx (9 tests | 6 failed) 42ms
+     ❯ src/app/posts/PostDetail.test.tsx (15 tests | 3 failed) 3475ms
+
+     Test Files  2 failed | 40 passed (42)
+          Tests  9 failed | 659 passed | 7 skipped (675)
+
+    $ pnpm -C web build
+    ✓ Compiled successfully
+    ```
+
+    9 failures is the standing baseline (6 `image-preview` from Phase 0 plus the
+    3 `PostDetail` timeouts). Both were re-confirmed on a clean tree this
+    iteration: with this iteration's work stashed,
+    `vitest run src/app/posts/PostDetail.test.tsx` still reported
+    `3 failed | 12 passed (15)`. Passing tests move 629 -> 659, which is the 30
+    added here.
+
+    ```
+    $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test uv run pytest -q
+    125 failed, 236 passed, 25 errors in 15.09s
+
+    $ cd api && uv run ruff check .
+    Found 32 errors.
+
+    $ cd api && uv run ruff format --check .
+    9 files would be reformatted, 125 files already formatted
+    ```
+
+    All three at the Phase 0 baseline; the `already formatted` count moves
+    124 -> 125 for the new script. `TEST_DATABASE_URL` has to be passed
+    explicitly because `api/tests/conftest.py` defaults to port 5433 while this
+    worktree's compose project publishes postgres on 5435; without it every
+    database test errors with `InvalidPasswordError` against whatever is
+    listening on 5433.
+  - [ ] 3.5f `images` **step**: `createStep` with Zod schemas, `.foreach()` for per-image
     generation, the `image_manifest` JSONB shape preserved byte for byte, both `_stage_meta`
     and `_stage_meta_gemini` returned, and the persistence contract via `saveStageOutput`.
 - [ ] 3.6 `ready`

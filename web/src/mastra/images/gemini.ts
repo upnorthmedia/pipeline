@@ -4,7 +4,7 @@
  * The `images` stage is the only one that talks to a second provider, and this
  * is that half: prompt in, image bytes plus the token counts the stage sums
  * into `_stage_meta_gemini` out. Prompt assembly, the `.foreach()` fan-out and
- * the manifest are the step's job (item 3.5e).
+ * the manifest are the step's job (item 3.5f).
  *
  * **Why this calls `generateContent` directly instead of `@google/genai`.**
  * Every Gemini call in the golden fixtures is a 429, so the fixtures pin the

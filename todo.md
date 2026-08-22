@@ -57,3 +57,24 @@
   writes `sk-ant-not-a-real-key`, then restores what it captured, so once an interrupted run
   leaves the placeholder behind every later run restores it. Found the row still present at
   the start of iteration 31 and deleted it. The restore should skip rows it wrote itself.
+
+- [confirmed] 2026-08-22 `_generate_one` gives every featured image the same filename,
+  `featured-<MMDDYY>-<randint(10,99)>.webp`, so two featured entries in one manifest collide:
+  the later write overwrites the earlier file and both manifest entries record the same URL.
+  Proven by `api/scripts/export_image_generation_parity.py`, where four featured entries
+  produced one file. Real manifests carry a single featured image, so this is latent, but the
+  collision odds for a second one are 1 in 90. A per-image suffix would fix it.
+- [confirmed] 2026-08-22 The featured overrides in `_generate_one` rewrite the local
+  `aspect_ratio` / `image_size` without touching the manifest entry, so a stored entry can say
+  `image_size: "1K"` for a call that was actually made at `2K`, or omit `aspect_ratio`
+  entirely for a call made at `16:9`. Anything reading `image_manifest` to report what was
+  generated is reading the request that was not sent.
+- [confirmed] 2026-08-22 An image spec whose `filename` is the empty string writes a dotfile,
+  `<media_dir>/<post_id>/.webp`, and records `/media/<post_id>/.webp`. Hidden from directory
+  listings and unservable by most static handlers.
+- [investigate] 2026-08-22 Python reads `aspect_ratio`, `image_size` and `filename` out of the
+  manifest with `dict.get(key, default)`, which returns an explicit JSON `null` rather than
+  the default: `None` then reaches the Gemini SDK, or `Path(None)` raises `TypeError` and the
+  image is recorded as failed. `web/src/mastra/images/generate-one.ts` treats a non-string as
+  absent instead. No rule asks the model for a null there and no fixture contains one, so the
+  divergence is unobserved rather than tested; decide the intended behaviour before Phase 7.
