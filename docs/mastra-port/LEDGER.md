@@ -3583,7 +3583,7 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
 
     Both at the Phase 0 baseline; no file under `api/` was touched this
     iteration.
-- [ ] 3.5 `images` (identical `image_manifest` JSONB shape; `.foreach()` for per-image
+- [x] 3.5 `images` (identical `image_manifest` JSONB shape; `.foreach()` for per-image
   generation). Split, because `images_node` is the only stage that talks to two providers
   in one step and writes files to disk: Claude produces a manifest, a JSON parser has to
   recover it from prose, a Node image library has to reproduce PIL's WebP output, and
@@ -4421,7 +4421,7 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
     worktree's compose project publishes postgres on 5435; without it every
     database test errors with `InvalidPasswordError` against whatever is
     listening on 5433.
-  - [ ] 3.5f `images` **step**: `createStep` with Zod schemas, `.foreach()` for per-image
+  - [x] 3.5f `images` **step**: `createStep` with Zod schemas, `.foreach()` for per-image
     generation, the `image_manifest` JSONB shape preserved byte for byte, both `_stage_meta`
     and `_stage_meta_gemini` returned, and the persistence contract via `saveStageOutput`.
     Split, because `.foreach()` is a *workflow* operator, not something a step can call:
@@ -4568,12 +4568,156 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
       ```
 
       All three at the Phase 0 baseline; no Python file was touched this iteration.
-    - [ ] 3.5f-ii `images` **workflow**: the `.map()` that turns manifest entries into
+    - [x] 3.5f-ii `images` **workflow**: the `.map()` that turns manifest entries into
       per-image jobs, `.foreach(generateImageStep, { concurrency: 3 })` reproducing
       Python's `asyncio.Semaphore(3)`, the assembling step that folds the results back
       into the manifest (`total_generated` / `total_failed`, JSONB shape byte for byte),
       both `_stage_meta` (with `duration_s: 0` on the parse-failure branch) and
       `_stage_meta_gemini`, and the single `saveStageOutput` write.
+
+      **What was built**
+
+      - `web/src/mastra/steps/images-generate.ts`: `imagesGenerateStep`, the Mastra
+        shell around item 3.5e's `generateOneImage`. It resolves the Gemini
+        credential itself, per image, rather than taking it on the job, because a
+        job is serialised into the workflow snapshot Postgres persists *and* into
+        the Redis event that hands the step to the worker.
+      - `web/src/mastra/steps/images-assemble.ts`: `imagesAssembleStep`, the stage's
+        only writer, plus `foldManifest` as a separate pure function so the folded
+        document's key order is assertable.
+      - `web/src/mastra/workflows/images.ts`: `imagesWorkflow`, registered on the
+        Mastra instance as `images`.
+      - `web/src/mastra/images/generate-one.ts` gains `mediaRoot()`, the port of
+        `settings.media_dir` with the same `MEDIA_DIR` override `rulesDir()` has.
+
+      The committed graph is exactly the shape item 3.5f predicted, read back off
+      `imagesWorkflow.serializedStepGraph`:
+
+      ```
+      [ { "type": "step",    "step": { "id": "images-manifest" } },
+        { "type": "mapping", "id": "mapping_images_0" },
+        { "type": "foreach", "step": { "step": { "id": "images-generate" } },
+                             "opts": { "concurrency": 3 } },
+        { "type": "step",    "step": { "id": "images-assemble" } } ]
+      ```
+
+      **The oracles**
+
+      1. Both golden fixtures. Every recorded Gemini call was a 429, so
+         `stage_output.image_manifest` is a whole failed stage and
+         `_stage_meta_gemini` records one that billed nothing while still naming a
+         model. Feeding the stored entries back through the fold reproduces the
+         stored document, both totals, `stage_status` and both meta records.
+      2. `images/data/image-generation-parity.json` (item 3.5e), where 12 of 16
+         entries succeeded. Its `stage_meta_gemini` is `tokens_in: 225`,
+         `tokens_out: 1395` over 14 calls, and re-deriving those sums from the
+         exporter's own token schedule only works if the `BADBYTES` entry is
+         billed: it is stored as failed and paid for all the same.
+      3. A real run of the workflow through the evented engine against the live
+         Postgres and Redis, with only the two provider calls stubbed. sharp
+         encodes, the files land on disk, and the manifest is read back out of the
+         `posts` row.
+
+      **Recorded divergences**
+
+      - Postgres `jsonb` sorts object keys by length and then bytes, so the key
+        order Python's dict carried does not survive the write and cannot be
+        asserted on the row. "JSONB shape byte for byte" therefore means the key
+        and value set, not the order. The order is still what every in-process
+        reader sees between the fold and the write, so it is pinned on
+        `foldManifest`'s return value instead.
+      - Python acquires the semaphore *inside* `_generate_one`, after the
+        no-prompt check, so an entry with no prompt never takes a slot; here the
+        whole step occupies one. Invisible in the stored manifest.
+      - Python assigns `gemini_model` as each call returns, so on a mixed-model
+        response the last *completed* call wins; this port takes the last call in
+        manifest order. Both golden fixtures and the 3.5e corpus report one model
+        for every call, so the two cannot disagree on any recorded data.
+      - `.map()`'s parse-failure short-circuit is not redundant even though the
+        manifest step already returns `images: []` on that branch: without it the
+        stage would still check the Gemini key and create the media directory,
+        which Python does not because it returns before both. The test asserts the
+        directory's absence, which is the only observable difference.
+
+      **Item tests.**
+
+      ```
+      $ NO_COLOR=1 npx vitest run src/mastra/steps/images-assemble.test.ts src/mastra/workflows/images.test.ts
+       ✓ src/mastra/steps/images-assemble.test.ts (19 tests) 100ms
+       ✓ src/mastra/workflows/images.test.ts (8 tests) 3402ms
+           ✓ fans nothing out and bills nothing when the manifest never parses  1116ms
+
+       Test Files  2 passed (2)
+            Tests  27 passed (27)
+         Duration  4.24s
+      exit=0
+      ```
+
+      **Negative controls.** Each mutation was applied to the file named, both
+      suites re-run, and the file restored from a pre-mutation copy (`diff`
+      reports `restored identical` for all twelve).
+
+      | mutation | result |
+      | --- | --- |
+      | `foldManifest` appends `images` after the totals | Tests 1 failed \| 26 passed (27) |
+      | parse failure reports the measured duration | Tests 2 failed \| 25 passed (27) |
+      | parse failure marks the stage complete | Tests 2 failed \| 25 passed (27) |
+      | parse failure still reports a Gemini record | Tests 2 failed \| 25 passed (27) |
+      | only generated entries are billed | Tests 1 failed \| 26 passed (27) |
+      | Gemini model falls back to `""` not the requested id | Tests 2 failed \| 25 passed (27) |
+      | duration measured in the assembling step, not from the stage start | Tests 5 failed \| 22 passed (27) |
+      | `stage_status` not advanced on the success path | Tests 4 failed \| 23 passed (27) |
+      | fan-out concurrency raised from 3 to 5 | Tests 1 failed \| 26 passed (27) |
+      | jobs all carry `index: 0` | Tests 1 failed \| 26 passed (27) |
+      | media directory never created | Tests 5 failed \| 22 passed (27) |
+      | parse failure still runs the mapping body | Tests 1 failed \| 26 passed (27) |
+
+      The last one passed at first: the manifest step already returns `images: []`
+      on that branch, so mapping over nothing produced the same jobs. It only
+      became a control once the test asserted that no media directory is created
+      for the unparseable post.
+
+      **`no-next-imports.test.ts`'s allowlist was updated, deliberately.**
+      Registering `imagesWorkflow` makes the stage steps reachable from the entry
+      point for the first time, so its transitive package set legitimately grows by
+      `node:fs` (reading `rules/*.md`), `node:fs/promises` and `node:path` (writing
+      images), `sharp` (encoding them) and `node:zlib` (the textstat dictionaries
+      the `edit` analytics gunzip). The `next/*` assertion the file exists for is
+      unchanged and still passes.
+
+      **Gates.**
+
+      ```
+      $ cd web && npx tsc --noEmit
+      tsc exit=0
+      $ NO_COLOR=1 pnpm lint
+      (no output, exit 0)
+      $ NO_COLOR=1 pnpm test --run
+       Test Files  2 failed | 43 passed (45)
+            Tests  9 failed | 704 passed | 7 skipped (720)
+      $ NO_COLOR=1 pnpm build
+      build exit=0
+      ```
+
+      Failures are back to the 9-test baseline exactly (6 in
+      `image-preview.test.tsx`, 3 in `PostDetail.test.tsx`); the first full run of
+      this iteration also hit the shared-`settings`-row flake in
+      `write.test.ts` logged in `todo.md`, which the second run did not.
+      Totals moved 693 -> 720, which is the 27 new tests; skips unchanged at 7.
+      `next build` emits one BetterAuth base-URL warning; it was confirmed
+      pre-existing by building `git show HEAD:web/src/mastra/index.ts` in place
+      and seeing the same line, then restoring the file.
+
+      ```
+      $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test NO_COLOR=1 uv run pytest -q
+      125 failed, 236 passed, 25 errors in 15.11s
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 125 files already formatted
+      ```
+
+      All three at the Phase 0 baseline; no Python file was touched this iteration.
 - [ ] 3.6 `ready`
 
 ## Phase 4: Workflow assembly, gates, durable execution

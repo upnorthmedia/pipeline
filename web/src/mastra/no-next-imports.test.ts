@@ -76,7 +76,16 @@ describe("mastra entry point", () => {
       "drizzle-orm/node-postgres",
       "drizzle-orm/pg-core",
       "node:crypto",
+      // Registering the `images` workflow makes the stage steps reachable from
+      // the entry point for the first time: `rules/*.md` is read from disk,
+      // generated images are written to disk, sharp encodes them, and the
+      // textstat dictionaries the `edit` analytics need are gunzipped.
+      "node:fs",
+      "node:fs/promises",
+      "node:path",
+      "node:zlib",
       "pg",
+      "sharp",
       "zod",
     ])
   })
