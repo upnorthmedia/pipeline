@@ -75,6 +75,9 @@ describe("mastra entry point", () => {
       "drizzle-orm",
       "drizzle-orm/node-postgres",
       "drizzle-orm/pg-core",
+      // The `sitemap-crawl` workflow reaches the sitemap parser, which is the
+      // only XML in the graph.
+      "fast-xml-parser",
       "node:crypto",
       // Registering the `images` workflow makes the stage steps reachable from
       // the entry point for the first time: `rules/*.md` is read from disk,

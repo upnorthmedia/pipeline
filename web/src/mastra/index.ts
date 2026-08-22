@@ -31,6 +31,7 @@ import { writeAgent } from "./agents/write"
 import { imagesWorkflow } from "./workflows/images"
 import { pipelineWorkflow } from "./workflows/pipeline"
 import { scaffoldCheckWorkflow } from "./workflows/scaffold-check"
+import { sitemapCrawlWorkflow } from "./workflows/sitemap-crawl"
 
 function redisUrl(): string {
   const url = process.env.REDIS_URL
@@ -117,10 +118,14 @@ export const mastra = new Mastra({
   // `images` stays registered in its own right because it is a workflow rather
   // than a step (its fan-out is `.foreach()`, which only exists at workflow
   // level) and because a single stage can be rerun on its own.
+  // `sitemapCrawl` is not part of a pipeline run: it is the ARQ
+  // `crawl_profile_sitemap` job, started per profile by the crawl route and by
+  // the nightly re-crawl check.
   workflows: {
     pipeline: pipelineWorkflow,
     images: imagesWorkflow,
     scaffoldCheck: scaffoldCheckWorkflow,
+    sitemapCrawl: sitemapCrawlWorkflow,
   },
   agents: {
     research: researchAgent,

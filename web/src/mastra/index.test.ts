@@ -21,6 +21,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getPool, toNodePostgresUrl } from "../db"
 import { logger, mastra, pubsub, storage } from "./index"
+import { sitemapCrawlWorkflow } from "./workflows/sitemap-crawl"
 
 /** An independent connection, so the assertions do not read through the pool under test. */
 let probe: Pool
@@ -56,6 +57,25 @@ describe("mastra instance", () => {
 
   it("shares the one pg pool the rest of the TypeScript stack uses", () => {
     expect(storage.pool).toBe(getPool())
+  })
+
+  /**
+   * The crawl job's registration (item 5.2c-ii-1). It is asserted here rather
+   * than beside the run in `workflows/sitemap-crawl.test.ts`, because importing
+   * this module rebinds the workflow to this instance and a run started in that
+   * file would then publish to a topic whose worker is not running.
+   */
+  it("registers the sitemap crawl as a one-step workflow", () => {
+    expect(mastra.getWorkflow("sitemapCrawl")).toBe(sitemapCrawlWorkflow)
+    expect(Object.keys(mastra.listWorkflows())).toContain("sitemapCrawl")
+    expect(sitemapCrawlWorkflow.id).toBe("sitemap-crawl")
+
+    const graph = sitemapCrawlWorkflow.serializedStepGraph as {
+      type: string
+      step?: { id?: string }
+    }[]
+    expect(graph.map((entry) => entry.type)).toEqual(["step"])
+    expect(graph[0].step?.id).toBe("sitemap-crawl")
   })
 })
 

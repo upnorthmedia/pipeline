@@ -187,3 +187,13 @@
   signed with a publicly known key. Setting one invalidates existing sessions, which is free now
   (`auth_users` was empty when the tables were created) and expensive later. Belongs with the
   Phase 7 env documentation, item 7.4.
+- [investigate] 2026-08-22 `scaffold-check.test.ts > emits the workflow lifecycle events the
+  trace view will read` failed once in a full `pnpm -C web test` run with
+  `expected [ 'workflow-start', ...(5) ] to include 'workflow-step-start'`, then passed in the
+  two runs after (and passes standalone). It is the only test file besides
+  `crossprocess-events.test.ts` that starts workers on the *shared* Mastra instance, i.e. on the
+  default Redis key prefix, so a second process consuming that prefix would take its step
+  messages. Suspected trigger is another file importing `web/src/mastra/index.ts` concurrently;
+  found while adding item 5.2c-ii-1 and worked around there by keeping the new registration
+  assertion inside `index.test.ts`. Worth pinning properly: a keyPrefix of its own for
+  `scaffold-check` would settle it.
