@@ -10453,6 +10453,201 @@ three pieces are separately verifiable, so they are separate items.
     that Python's `active_jobs` count here is *not* user-scoped, unlike every other
     query in this router.
 
+    Split, because two of the three replacements come free from the transport's own
+    bookkeeping and the third needs a writer in the worker plus a decision about which
+    runs count as "completed": 5.4c-i the liveness and backlog reads, 5.4c-ii the
+    last-completed writer and the route handler itself.
+
+    - [x] 5.4c-i The Redis Streams replacements for `worker_alive` and `queued_jobs`.
+
+      `web/src/mastra/worker-health.ts` exposes `readWorkerHealth()`, which answers
+      both from the consumer group Mastra's orchestration worker already joins. There
+      is no heartbeat writer, on purpose: a worker process that is consuming the
+      orchestration topic *is* a registered consumer in that topic's group, and Redis
+      tracks how long ago it last interacted. That is a liveness signal the worker
+      cannot forget to emit and cannot emit while wedged, which a separate `SET key EX
+      n` loop cannot claim.
+
+      **Python's `worker_alive` is always `False`, and this port does not reproduce
+      that.** `worker_status()` scans `arq:worker:*` and skips
+      `WORKER_LAST_COMPLETED_KEY` (`"arq:worker:last_completed"`), which is the only
+      key that pattern can match, because ARQ writes its heartbeat under
+      `<queue_name>:health-check`:
+
+      ```
+      $ api/.venv/bin/python -c "
+      from arq.constants import default_queue_name, health_check_key_suffix
+      print('default_queue_name=', default_queue_name)
+      print('health_check_key_suffix=', health_check_key_suffix)
+      print('computed health key=', default_queue_name + health_check_key_suffix)
+      "
+      default_queue_name= arq:queue
+      health_check_key_suffix= :health-check
+      computed health key= arq:queue:health-check
+      ```
+
+      `api/src/worker.py`'s `WorkerSettings` does not set `health_check_key`, so the
+      scan pattern and the key ARQ writes never intersect. Transcribing that faithfully
+      would mean shipping a health endpoint that reports every worker as dead. Nothing
+      consumes the endpoint (`web/src/lib/api.ts`'s `queue` namespace declares only
+      `status`, `pauseAll` and `resumeAll`), so there is no behaviour to preserve here,
+      only an intent, and the intent is a liveness check.
+
+      Deviations from the Python, both deliberate:
+
+      1. `worker_alive` is real rather than always false, per the paragraph above.
+      2. `queued_jobs` changes unit. ARQ's `ZCARD arq:queue` counted whole jobs waiting
+         to be picked up. The nearest Mastra artefact is the orchestration topic's
+         undelivered backlog, which counts *events* (a run start, and each step's run
+         and end), so one pipeline run contributes many entries over its life. The
+         module names the field `queuedEvents` rather than `queuedJobs` so the
+         difference is not smuggled in under the old name.
+
+      The two constants the module needs, `TOPIC_WORKFLOWS = "workflows"` and
+      `DEFAULT_GROUP = "mastra-orchestration"`, are internal to `@mastra/core` and not
+      exported, so they are restated in `worker-health.ts` and pinned by a test that
+      starts a real worker and reads the group back out of Redis:
+
+      ```
+      $ grep -n 'const TOPIC_WORKFLOWS' node_modules/@mastra/core/dist/pull-transport-C-gk1xyp.js
+      29:const TOPIC_WORKFLOWS = "workflows";
+
+      $ grep -n 'const DEFAULT_GROUP' node_modules/@mastra/core/dist/worker-BeL6789j.js
+      113:const DEFAULT_GROUP = "mastra-orchestration";
+      ```
+
+      **The 15 s liveness threshold is measured, not guessed.** A threshold is
+      unavoidable because nothing in the transport ever runs `XGROUP DELCONSUMER`, so
+      every worker process that has ever run leaves its consumer entry behind forever
+      (the live dev Redis lists hundreds). The risk that makes the number matter is the
+      opposite one: if a consumer stops polling while a step executes, a *busy* worker
+      is reported dead. A probe sampled `XINFO CONSUMERS` every 2 s for 110 s across a
+      100 s step, under the production `reclaimIdleMs` of 15 minutes:
+
+      ```
+      idle series: [912,859,813,777,717,680,619,568,527,474,415,357,313,269,44,179,
+      142,85,34,1018,971,917,862,782,737,693,638,588,559,80,497,462,426,391,328,288,
+      219,161,84,24,1005,966,895,858,119,746,714,677,620,112,7,981,927,872,815]
+      max idle during/after a 100s step: 1018
+      ```
+
+      The sawtooth is the `XREADGROUP ... BLOCK 1000` poll: the read loop keeps polling
+      while a step executes, so a busy worker looks exactly as alive as a quiet one.
+      15 s allows fifteen missed polls, ~14x the observed worst case, and still calls a
+      killed worker dead inside a dashboard refresh. `WORKER_ALIVE_IDLE_LIMIT_MS`
+      carries that derivation in its doc comment.
+
+      Third detail, found at runtime rather than in the types: `XINFO GROUPS` returns a
+      nil `lag` when Redis cannot determine the backlog (after entries are deleted from
+      the middle of a stream), but the installed `@redis/client@5.12.1` typings declare
+      `lag: NumberReply<number>` with no null. Runtime wins, so `queuedEvents` is
+      `number | null` and reports the unknown case rather than flattening it to 0.
+      "No backlog" and "backlog unknown" are different answers and only one of them is
+      reassuring. When no group exists at all, `XLEN` is the exact backlog rather than
+      an estimate of it, because nothing has been delivered.
+
+      `redis@5.12.1` added as a direct dependency of `web/`, pinned to the version
+      `@mastra/redis-streams` already resolves, because the transport keeps its clients
+      private and exposes no `XINFO`.
+
+      ```
+      $ pnpm -C web exec vitest run src/mastra/worker-health.test.ts --reporter=verbose
+       ✓ src/mastra/worker-health.test.ts > orchestrationStreamKey > is the transport's `<keyPrefix>:<topic>` 0ms
+       ✓ src/mastra/worker-health.test.ts > readWorkerHealth arithmetic > reports a cold system rather than throwing when the stream does not exist 0ms
+       ✓ src/mastra/worker-health.test.ts > readWorkerHealth arithmetic > counts every entry as queued when no worker has ever created the group 0ms
+       ✓ src/mastra/worker-health.test.ts > readWorkerHealth arithmetic > reports the group's lag once the group exists but has consumed nothing 0ms
+       ✓ src/mastra/worker-health.test.ts > readWorkerHealth arithmetic > drops the delivered entry out of the backlog and counts its consumer 0ms
+       ✓ src/mastra/worker-health.test.ts > readWorkerHealth arithmetic > separates live from stale consumers by idle time, not by existence 1ms
+       ✓ src/mastra/worker-health.test.ts > readWorkerHealth arithmetic > reports an unknown backlog as null rather than as zero 0ms
+       ✓ src/mastra/worker-health.test.ts > against a real Mastra worker > finds the orchestration group under the name and stream key this module assumes 1ms
+       ✓ src/mastra/worker-health.test.ts > against a real Mastra worker > reports a worker that is subscribed and waiting as alive 0ms
+       ✓ src/mastra/worker-health.test.ts > against a real Mastra worker > reports a worker 20s into a step as alive, not as dead 0ms
+       ✓ src/mastra/worker-health.test.ts > against a real Mastra worker > reports a stopped worker as dead even though Redis still lists its consumer 0ms
+
+       Test Files  1 passed (1)
+            Tests  11 passed (11)
+         Duration  38.78s
+      ```
+
+      Negative controls, each reverted immediately:
+
+      ```
+      # count consumers instead of filtering by idle
+      -  const liveWorkers = consumers.filter((c) => Number(c.idle) < idleLimitMs).length
+      +  const liveWorkers = consumers.length
+            Tests  2 failed | 9 passed (11)
+      #   x separates live from stale consumers by idle time, not by existence
+      #   x reports a stopped worker as dead even though Redis still lists its consumer
+
+      # flatten an unknown lag to 0
+      -  const queuedEvents = rawLag === null || rawLag === undefined ? null : Number(rawLag)
+      +  const queuedEvents = Number(rawLag ?? 0)
+            Tests  1 failed | 10 passed (11)
+      #   x reports an unknown backlog as null rather than as zero
+
+      # report 0 instead of XLEN when no group exists
+      -    return { workerAlive: false, liveWorkers: 0, queuedEvents: await client.xLen(streamKey) }
+      +    return { workerAlive: false, liveWorkers: 0, queuedEvents: 0 }
+            Tests  1 failed | 10 passed (11)
+      #   x counts every entry as queued when no worker has ever created the group
+
+      # wrong consumer-group constant
+      -  export const ORCHESTRATION_GROUP = "mastra-orchestration"
+      +  export const ORCHESTRATION_GROUP = "mastra-orchestrator"
+            Tests  4 failed | 7 passed (11)
+      #   the whole "against a real Mastra worker" suite
+      ```
+
+      The last control is why the group-name test asserts a literal on both sides
+      (`expect(groupNames).toContain("mastra-orchestration")` *and*
+      `expect(ORCHESTRATION_GROUP).toBe("mastra-orchestration")`) and why the
+      post-stop consumer read tolerates a missing group: the first version of the test
+      compared the constant to itself and the suite skipped rather than failed.
+
+      ```
+      $ pnpm -C web exec tsc --noEmit
+      # exit 0
+
+      $ pnpm -C web exec eslint
+      # exit 0
+
+      $ pnpm -C web exec vitest run
+       Test Files  2 failed | 78 passed (80)
+            Tests  9 failed | 1420 passed | 7 skipped (1436)
+      # 9 failed is the recorded baseline: 6 in image-preview.test.tsx and 3 in
+      # PostDetail.test.tsx. 1409 -> 1420 passed is exactly this iteration's 11.
+
+      $ pnpm -C web exec next build
+      # exit 0
+      ├ ƒ /api/queue
+      ├ ƒ /api/queue/pause-all
+      ├ ƒ /api/queue/resume-all
+
+      $ cd api && uv run pytest -q
+      125 failed, 236 passed, 25 errors in 12.99s
+      # the recorded baseline, unchanged. Requires `set -a; . ./.env; set +a` first.
+
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 131 files already formatted
+      ```
+
+    - [ ] 5.4c-ii The `last_completed` writer and the `GET /api/queue/worker-status`
+      route handler.
+
+      `_record_job_completed()` writes an ISO timestamp to
+      `WORKER_LAST_COMPLETED_KEY` at `api/src/worker.py:313`, inside `_run_pipeline`'s
+      `try` and after the `if is_full_pipeline:` block, so it fires for every run that
+      reaches the end without raising, single-stage runs included. The Mastra
+      equivalent needs a writer in the worker process (the natural home is
+      `steps/pipeline-complete.ts`, but that step only runs on a *full* pipeline, so
+      the placement needs checking against the Python's scope before it is copied) and
+      then the handler, which also carries `active_jobs`: a `current_stage IN (STAGES)`
+      count that Python leaves un-scoped by user, unlike every other query in this
+      router (already logged in `todo.md`).
+
   - [ ] 5.4d `GET /api/queue/dead-letter`, `POST /api/queue/dead-letter/{post_id}/retry`
     and `DELETE /api/queue/dead-letter`.
 

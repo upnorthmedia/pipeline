@@ -44,6 +44,7 @@
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0",
     "recharts": "2.15.4",
+    "redis": "5.12.1",
     "remark-gfm": "^4.0.1",
     "resend": "^6.9.3",
     "sharp": "^0.35.3",
