@@ -6022,7 +6022,8 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   9 files would be reformatted, 126 files already formatted
   ```
 
-- [ ] 4.7 Full workflow runs end to end against the real database.
+- [x] 4.7 Full workflow runs end to end against the real database. Split; the evidence is
+  under 4.7a, 4.7b and 4.7c below, all four of which are now checked.
 
   Split. The first attempt at the run itself (the procedure is
   `web/src/mastra/scripts/full-pipeline.mjs`, committed under 4.7a) found three defects: one
@@ -6337,7 +6338,7 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
   Unchanged from the baseline recorded under 4.5b, 4.6 and 4.7a; nothing in this item touches
   `api/`.
 
-- [ ] 4.7c Full workflow runs end to end against the real database: green run of
+- [x] 4.7c Full workflow runs end to end against the real database: green run of
   `web/src/mastra/scripts/full-pipeline.mjs` with its output pasted here. Image generation is
   bounded by the Gemini key's quota (see 4.7a finding 2).
 
@@ -6494,7 +6495,7 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
      logged `todo.md` defect about `pytest` writing real images into the repo, not something
      this item introduced; they were deleted before committing.
 
-- [ ] 4.7c-ii **Image generation, which this environment's Gemini key cannot execute.** All four
+- [x] 4.7c-ii **Image generation, which this environment's Gemini key cannot execute.** All four
   manifest entries failed with the same live error, recorded per entry in `image_manifest` and
   quoted here from the database:
 
@@ -6567,6 +6568,115 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
 
   Until then this is a real gap and belongs in `SUMMARY.md` (item 9.2), and it also bounds item
   7.6, whose exit criterion is a post reaching `ready` *with images* through the UI.
+
+  **The success path, proven the way the item said it would be.**
+  `web/src/mastra/steps/images-generate.test.ts` drives the production `imagesGenerateStep`
+  against a recorded Gemini 200 and follows the bytes all the way to the `ready` prompt.
+  Everything downstream of the socket is production code and real: the real `gemini.ts` parsing
+  the recorded envelope, the real sharp optimizer, real files on a real disk, the production
+  `imagesAssembleStep` writing the real `image_manifest` column of a real Postgres row, and the
+  production `buildReadyPrompt` reading it back out of that row.
+
+  ```
+  $ cd web && pnpm exec vitest run src/mastra/steps/images-generate.test.ts --reporter=verbose
+   RUN  v4.0.18 .../web
+
+   ✓ imagesGenerateStep against a recorded Gemini success > sends the entry's aspect ratio and size to the incumbent model with the resolved key 1ms
+   ✓ imagesGenerateStep against a recorded Gemini success > writes the content image at the content width, and its manifest entry names it 1ms
+   ✓ imagesGenerateStep against a recorded Gemini success > writes the featured image at the featured width under a rewritten filename 1ms
+   ✓ imagesGenerateStep against a recorded Gemini success > bills each generated image with the counts the response reported 0ms
+   ✓ imagesGenerateStep against a recorded Gemini success > records an entry with no prompt as failed without calling or billing the provider 0ms
+   ✓ the generated images reach the stored manifest and the ready prompt > stores every entry with the totals the fan-out produced 0ms
+   ✓ the generated images reach the stored manifest and the ready prompt > claims a byte count for each generated entry that matches the file on disk 0ms
+   ✓ the generated images reach the stored manifest and the ready prompt > embeds the generated urls in the ready prompt and drops the failed entry 0ms
+
+   Test Files  1 passed (1)
+        Tests  8 passed (8)
+  ```
+
+  **Where the recorded response comes from.** The 200 envelope is the `usage-reported` case of
+  `images/data/gemini-parity.json`, captured under item 3.5d from the real Python
+  `GeminiClient` with `httpx` intercepted, and it is used verbatim. Only the base64 payload is
+  swapped, because the recorded one is a 1x1 pixel and the point here is to watch the optimizer
+  resize; the substitute is `wide_png_base64` from `images/data/image-generation-parity.json`,
+  the 2400x1600 PNG the item 3.5e exporter fed the real Python stage. Nothing in either corpus
+  was authored for this test.
+
+  **What the eight tests establish.** The request: one POST per prompted entry to
+  `.../models/gemini-3.1-flash-image-preview:generateContent`, carrying the entry's own prompt,
+  `responseModalities: ["IMAGE"]`, and the entry's `aspect_ratio` / `image_size` untouched
+  (`4:3` / `1K` for the content entry, `16:9` / `2K` for the featured one, because `placement`
+  is an object and so the featured overrides never fire: the 3.5e divergence, still holding).
+  The `x-goog-api-key` header carries the value the step resolved through `requireApiKey`.
+
+  The disk: the content image lands at `1200x800` and the featured one at `1920x1280`, both
+  `webp`, both truncated heights, from one 2400x1600 source. Their sizes are 28,384 and 108,032
+  bytes respectively, and the assertion is not against those constants but against the file:
+  `spec.size_bytes` is compared to `stat()` on the written path, so a manifest that claims a
+  byte count the file does not have fails. The content entry keeps its declared filename with
+  the extension rewritten (`how-a-crm-pipeline-works.png` becomes
+  `/media/<post>/how-a-crm-pipeline-works.webp`); the featured entry's `hero.png` is discarded
+  for `featured-<MMDDYY>-<NN>.webp`.
+
+  The manifest and `ready`: the three entries fold to `total_generated: 2`, `total_failed: 1` on
+  the real row, every generated entry's stored `size_bytes` still matches its file, and the
+  prompt `buildReadyPrompt` renders from that row contains both `/media/...` urls under
+  `## Image Manifest (generated images only)` while the promptless entry's id and its
+  `no prompt` error are absent.
+
+  **Negative control**, so this is not eight assertions passing on nothing. Swapping the stub's
+  reply for a 429 with the recorded `RESOURCE_EXHAUSTED` body, which is what this environment's
+  key actually returns, fails five of the eight:
+
+  ```
+  $ # fetch stub temporarily returns 429 RESOURCE_EXHAUSTED instead of the recorded 200
+  $ cd web && pnpm exec vitest run src/mastra/steps/images-generate.test.ts
+  AssertionError: expected false to be true            (content generated)
+  AssertionError: expected false to be true            (featured generated)
+  AssertionError: expected null to deeply equal { tokensIn: 37, tokensOut: 1290, ... }
+  AssertionError: expected +0 to be 2                  (total_generated)
+  AssertionError: expected '# Blog Ready Stage ...' to contain 'undefined'   (no url to embed)
+
+   Test Files  1 failed (1)
+        Tests  5 failed | 3 passed (8)
+  ```
+
+  The three that still pass are the request-shape test, the promptless-entry test and the
+  byte-count test (which has no generated entry left to check), which is the correct split: they
+  do not depend on the provider succeeding.
+
+  **The one stub, and why.** `requireApiKey` is stubbed to a literal. The `api_keys` settings
+  row is a process-global singleton with no user scoping, and `api-keys.test.ts` already claims
+  it exclusively (it saves the row, overwrites it, and restores it in `afterAll`). Seeding it
+  from a second file that vitest may schedule on a parallel worker would make both files flaky.
+  The lookup itself is proven against the real row and the real Fernet ciphertext under item
+  3.1b, and asserting the stub's value on the outbound header proves the step reads the
+  credential from that function rather than from anywhere else.
+
+  **What is still not proven, and cannot be here.** That Gemini's own bytes are a usable image.
+  Every assertion above is downstream of the base64 payload, so a live key would additionally
+  prove that the model honours `aspectRatio`, `imageSize` and the style, brand-colour and
+  exclusion constraints in `rules/blog-images.md`. That evaluation needs a billed key and stays
+  on the gap list for `SUMMARY.md` (item 9.3) and as the bound on item 7.6.
+
+  Gates, unchanged against the baseline recorded under 4.7c-i:
+
+  ```
+  $ cd web && pnpm exec tsc --noEmit
+  (exit 0, no output)
+  $ cd web && pnpm lint
+  (exit 0, no output)
+  $ cd web && pnpm test
+  Test Files  2 failed | 56 passed (58)
+       Tests  9 failed | 839 passed | 8 skipped (856)
+  $ cd web && pnpm build
+  ✓ Compiled successfully in 3.4s
+  (exit 0)
+  ```
+
+  The 9 failures are the Phase 0 baseline exactly, in the same two files (6 in
+  `image-preview.test.tsx`, 3 in `PostDetail.test.tsx`). The totals moved by exactly this
+  item's 8 new tests in 1 new file. `api/` is untouched, so its gates are unchanged from 4.7c-i.
 
 ## Phase 5: Route handlers (one router per iteration)
 
