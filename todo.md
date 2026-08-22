@@ -273,3 +273,15 @@
   `keyPrefix`. Suspicion is cross-file interference on the shared `workflows` topic rather
   than a defect in the workflow. Found while verifying item 5.5b, which touches no topic
   that file reads. Fix is probably to give it its own instance and prefix like the others.
+  Recurred once more on the first full run of item 5.5c-i and passed on the rerun, which
+  strengthens the cross-file reading over a defect in the workflow.
+- [confirmed] 2026-08-22 The `cost_usd` on every `stage_complete` execution log entry is
+  priced at Anthropic Opus rates regardless of provider. `api/src/worker.py:244` hardcodes
+  15.0 / 75.0 per million tokens and ignores `MODEL_COSTS` in
+  `api/src/pipeline/helpers.py`, so the `research` stage's Perplexity tokens and the
+  `images` stage's Gemini tokens are both billed as Opus in what
+  `GET /api/analytics/logs` reports. Reproduced verbatim in the TypeScript port
+  (`stageCostUsd` in `web/src/mastra/execution-log.ts`) because the analytics endpoint
+  serves these entries straight through and correcting it during the port would make a
+  run's reported cost jump at the cutover. Found while porting item 5.5c-i. Worth fixing
+  once `MODEL_COSTS` has a TypeScript home, which is Phase 6's per-stage model config.

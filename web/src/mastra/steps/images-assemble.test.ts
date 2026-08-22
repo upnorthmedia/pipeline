@@ -326,7 +326,16 @@ describe("images assemble step against the golden fixtures", () => {
         JSON.stringify(after[key as keyof typeof after]) !==
         JSON.stringify(before[key as keyof typeof before]),
     )
-    expect(changed.sort()).toEqual(["currentStage", "imageManifest", "stageStatus", "updatedAt"])
+    // `executionLogs` joined this list with item 5.5c-i: the stage's
+    // `stage_complete` entry is written from `announceStageComplete`, beside
+    // the event, exactly as Python wrote it beside its own publish.
+    expect(changed.sort()).toEqual([
+      "currentStage",
+      "executionLogs",
+      "imageManifest",
+      "stageStatus",
+      "updatedAt",
+    ])
   })
 
   it("reads the manifest back through getStepResult on the manifest step", async () => {

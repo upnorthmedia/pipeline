@@ -1,7 +1,8 @@
 // @vitest-environment node
 /**
- * Items 5.5a and 5.5b: the pipeline event bus, and the four events a run
- * publishes about itself. 5.5a added `stage_start` and the `"running"` write in
+ * Items 5.5a, 5.5b and 5.5c-i: the pipeline event bus, the four events a run
+ * publishes about itself, and the `execution_logs` entries written beside three
+ * of them. 5.5a added `stage_start` and the `"running"` write in
  * front of it; 5.5b adds `stage_complete` after each stage commits its column
  * and `pipeline_complete` after the run stamps the post.
  *
@@ -517,8 +518,9 @@ describe("announceStageComplete", () => {
   })
 
   it("sends the model and the duration, and leaves the token counts off", async () => {
-    // Python's payload was `{stage, model, duration_s}`. The tokens went to the
-    // execution log, which is item 5.5c, not onto this event.
+    // Python's payload was `{stage, model, duration_s}`. The tokens go to the
+    // `execution_logs` entry written alongside it, not onto this event; the
+    // suite below reads them off the row.
     expect(await announce(1)).toEqual({
       event: "stage_complete",
       post_id: WIRE_POST_ID,
@@ -526,6 +528,92 @@ describe("announceStageComplete", () => {
       model: "stub-edit",
       duration_s: 1,
     })
+  })
+})
+
+/**
+ * Item 5.5c-i, on the same four runs: what the row recorded about them.
+ *
+ * The SSE suites above ask what a browser watching the run was told. These ask
+ * what a browser that was not open can read afterwards, which is a different
+ * question with a different answer: the log carries the token counts and the
+ * priced estimate that the event deliberately leaves off.
+ */
+async function logsFor(postId: string): Promise<Record<string, unknown>[]> {
+  const row = await readPost(postId)
+  return (row?.executionLogs ?? []) as Record<string, unknown>[]
+}
+
+describe("what a run writes to execution_logs", () => {
+  it("records a start and a complete for each of the six stages, then the run", async () => {
+    const entries = await logsFor(FULL_POST_ID)
+    expect(entries.map((entry) => [entry.event, entry.stage])).toEqual([
+      ...STAGES.flatMap((stage) => [
+        ["stage_start", stage],
+        ["stage_complete", stage],
+      ]),
+      // Python passed `""` for the two run-level entries, so filtering the log
+      // by stage skips them.
+      ["pipeline_complete", ""],
+    ])
+  })
+
+  it("carries Python's stage_complete data, including the tokens the event omits", async () => {
+    const entries = await logsFor(FULL_POST_ID)
+    for (const entry of entries.filter((item) => item.event === "stage_complete")) {
+      expect(entry).toMatchObject({
+        level: "info",
+        message: `Stage ${entry.stage} complete`,
+        data: {
+          model: `stub-${entry.stage}`,
+          // The stub reports 100 in and 20 out for every agent call.
+          tokens_in: 100,
+          tokens_out: 20,
+          duration_s: expect.any(Number),
+          // round((100/1e6 * 15) + (20/1e6 * 75), 6), Python's hardcoded rates.
+          cost_usd: 0.003,
+        },
+      })
+    }
+  })
+
+  it("records the same duration the event carried, rounded the same way", async () => {
+    const entries = await logsFor(FULL_POST_ID)
+    for (const event of eventsFor(FULL_POST_ID, "stage_complete")) {
+      const logged = entries.find(
+        (entry) => entry.event === "stage_complete" && entry.stage === event.data.stage,
+      )
+      expect((logged?.data as Record<string, unknown>).duration_s).toBe(event.data.duration_s)
+    }
+  })
+
+  it("stamps every entry with a timestamp that sorts against Python's", async () => {
+    const entries = await logsFor(FULL_POST_ID)
+    const stamps = entries.map((entry) => entry.ts as string)
+    for (const ts of stamps) {
+      expect(ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+00:00$/)
+    }
+    expect([...stamps].sort()).toEqual(stamps)
+  })
+
+  it("says nothing about a stage the run skipped", async () => {
+    const entries = await logsFor(SKIP_POST_ID)
+    expect(entries.some((entry) => entry.stage === "research")).toBe(false)
+    expect(entries.filter((entry) => entry.event === "stage_start")).toHaveLength(STAGES.length - 1)
+  })
+
+  it("says nothing at all about a run parked at its first gate", async () => {
+    // The gate fires before `announceStageStart`, and nothing else in the port
+    // writes here yet: `pipeline_start` is 5.5c-ii.
+    expect(await logsFor(GATE_POST_ID)).toEqual([])
+  })
+
+  it("records only the named stage for a rerun, and nothing about the pipeline", async () => {
+    const entries = await logsFor(RERUN_POST_ID)
+    expect(entries.map((entry) => [entry.event, entry.stage])).toEqual([
+      ["stage_start", "edit"],
+      ["stage_complete", "edit"],
+    ])
   })
 })
 

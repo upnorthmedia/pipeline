@@ -33,10 +33,15 @@
  * `skipped: true` and bills nothing, which is the `continue` in Python's stage
  * loop. See `steps/stage-io.ts`.
  *
- * Deliberately not here yet: the per-stage `running` status, execution logs and
- * SSE events the Python runner published around each call, and the auto-publish
- * half of the completion hook. All four need the transport and the routers
- * Phase 5's `events`, `wordpress` and `nextjs` items own.
+ * The runner's bookkeeping around each call now lives in the steps themselves:
+ * the `"running"` write, the `stage_start` / `stage_complete` / `pipeline_complete`
+ * events on the shared topic, and the matching `execution_logs` entries.
+ *
+ * Deliberately not here yet: the run-level `pipeline_start` log entry, the
+ * failure entries the exception branch wrote, the per-stage `log` events the
+ * stage nodes published, and the auto-publish half of the completion hook. The
+ * first three are the rest of Phase 5's `events` item; the last needs the
+ * `wordpress` and `nextjs` routers.
  */
 import { createWorkflow } from "@mastra/core/workflows/evented"
 

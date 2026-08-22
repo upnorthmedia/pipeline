@@ -11945,6 +11945,234 @@ three pieces are separately verifiable, so they are separate items.
     topic this item writes.
   - [ ] 5.5c `execution_logs` and the `log` event: Python's `append_execution_log()` and
     `publish_stage_log()`, which write the same entry to the column and the bus.
+
+    Split, because it is two writers with different call sites and different failure
+    behaviour. `append_execution_log()` is a database statement with nine call sites, six
+    in `api/src/worker.py`, two in `api/src/pipeline/publish.py` and one inside
+    `publish_stage_log()` itself; `publish_stage_log()` is a module-level context
+    (`set_event_context` / `clear_event_context`) wrapped around a publish plus a
+    swallowed call to the first, with 28 call sites, all of them inside the six stage
+    nodes. Porting them together would be one iteration that touches every stage file.
+
+    - [x] 5.5c-i `appendExecutionLog()`, plus the three entries the runner wrote from
+      code the port already has: `stage_start`, `stage_complete` and `pipeline_complete`.
+
+      `web/src/mastra/execution-log.ts` is the writer. The three entries go in beside
+      the three events 5.5a and 5.5b published, in the positions Python's own
+      `append_execution_log` calls occupied relative to them: `stage_start` inside
+      `announceStageStart` between the `"running"` write and the publish,
+      `stage_complete` inside `announceStageComplete` before the publish, and
+      `pipeline_complete` inside the completion step between the stamp and the publish.
+
+      **The writer's shape is fixed by two readers that already exist**, not chosen
+      here: `GET /api/posts/{id}/logs` (ported, item 5.3d-iii) filters on `level`,
+      `stage` and a string comparison against `ts`, and `GET /api/analytics/logs`
+      (item 5.8, still Python) does the same in SQL with
+      `ORDER BY log_entry->>'ts' DESC`.
+
+      A real entry pair, written through `announceStageStart` and
+      `announceStageComplete` against the real database and read back off the column:
+
+      ```
+      [
+        {
+          "ts": "2026-08-22T23:47:11.468+00:00",
+          "event": "stage_start",
+          "level": "info",
+          "stage": "write",
+          "message": "Starting write..."
+        },
+        {
+          "ts": "2026-08-22T23:47:11.469+00:00",
+          "data": {
+            "model": "claude-opus-4-6",
+            "cost_usd": 0.355995,
+            "tokens_in": 8213,
+            "duration_s": 41.83,
+            "tokens_out": 3104
+          },
+          "event": "stage_complete",
+          "level": "info",
+          "stage": "write",
+          "message": "Stage write complete"
+        }
+      ]
+      ```
+
+      Both numbers in that `data` are Python's, checked against Python rather than
+      derived twice from the same source:
+
+      ```
+      $ python3 -c "
+      print(round((8213/1_000_000*15.0)+(3104/1_000_000*75.0),6))
+      print(round(41.8271,2))
+      print(round((100/1_000_000*15.0)+(20/1_000_000*75.0),6))
+      print(round(0.125,2), round(0.375,2))
+      "
+      0.355995
+      41.83
+      0.003
+      0.12 0.38
+      ```
+
+      **Decision 1: `cost_usd` keeps Python's hardcoded Opus rates.** The entry at
+      `api/src/worker.py:244` prices every stage at 15.0 / 75.0 per million tokens,
+      including the Perplexity call in `research` and the Gemini calls in `images`, and
+      it ignores `MODEL_COSTS` in `api/src/pipeline/helpers.py` entirely. That is wrong
+      as a bill and it is reproduced anyway: `GET /api/analytics/logs` serves these
+      entries straight through, so correcting it would make a run's reported cost jump
+      at the cutover for a reason no operator could account for. Logged in `todo.md` as
+      `[confirmed]` instead.
+
+      **Decision 2: the timestamp keeps Python's `+00:00` offset and loses its
+      microseconds.** `toISOString()` ends in `Z`, and both readers compare `ts` as a
+      plain string: `Z` (U+005A) sorts above `+` (U+002B) and above every digit, so a
+      `Z` entry would sort after every `+00:00` entry recorded in the same second, and
+      the analytics `until` bound would exclude it. The suffix is rewritten. The
+      fractional part is left at JavaScript's three digits rather than padded to
+      Python's six, because padding would claim precision the runtime does not have and
+      its only effect on the comparison is to move an entry within the millisecond it
+      was already in.
+
+      **Decision 3: `updated_at` is deliberately not stamped.** Python issued this as
+      raw `text(...)` SQL, which bypasses SQLAlchemy's `onupdate`, so appending a log
+      line was never a change to the post. Stamping it here would reorder the posts
+      list twice per stage. Pinned by its own test.
+
+      **Fix in the path of the change: `roundSeconds` now uses `pythonRound`.** The
+      same measured duration is written twice, into the `stage_complete` event and into
+      the `stage_complete` log entry, and the two must not disagree.
+      `Math.round(value * 100) / 100` breaks ties upward where Python breaks them to
+      even, and a duration is milliseconds over 1000, so `0.125` and `0.375` are exact
+      ties: Python renders `0.12` and `0.38` (above), `Math.round` renders `0.13` and
+      `0.38`. `pythonRound` already existed for the analytics port.
+
+      **Two committed tests were updated, not to make them pass but because the row
+      they assert on changed.** `images-manifest.test.ts`'s "writes only the running
+      marker" and `images-assemble.test.ts`'s "touches nothing else on the row" both
+      compare the whole row before and after; `execution_logs` is now one of the
+      columns a stage writes, so both now name it. The manifest one asserts the entry
+      itself, which its frozen clock makes exact.
+
+      Writer tests, against the real database:
+
+      ```
+      $ (cd web && npx vitest run src/mastra/execution-log.test.ts --reporter=verbose)
+       RUN  v4.0.18 .../web
+
+       ✓ src/mastra/execution-log.test.ts > appendExecutionLog > stores Python's five keys and stamps the timestamp itself 18ms
+       ✓ src/mastra/execution-log.test.ts > appendExecutionLog > writes the timestamp in the offset form Python's isoformat() produced 3ms
+       ✓ src/mastra/execution-log.test.ts > appendExecutionLog > stores `data` when there is any and omits the key when there is not 3ms
+       ✓ src/mastra/execution-log.test.ts > appendExecutionLog > appends in call order rather than replacing 3ms
+       ✓ src/mastra/execution-log.test.ts > appendExecutionLog > keeps every entry when six stages append at once 9ms
+       ✓ src/mastra/execution-log.test.ts > appendExecutionLog > leaves `updated_at` where it was, as Python's raw SQL did 3ms
+       ✓ src/mastra/execution-log.test.ts > appendExecutionLog > writes nothing and raises nothing for a post that does not exist 2ms
+       ✓ src/mastra/execution-log.test.ts > appendExecutionLog > stores an entry the logs route's filters can read back 2ms
+       ✓ src/mastra/execution-log.test.ts > stageCostUsd > prices both token counts at Python's hardcoded Opus rates 1ms
+       ✓ src/mastra/execution-log.test.ts > stageCostUsd > rounds to six places the way Python's round() does 1ms
+
+       Test Files  1 passed (1)
+            Tests  10 passed (10)
+         Duration  370ms (transform 36ms, setup 85ms, import 173ms, tests 46ms, environment 0ms)
+      ```
+
+      The "keeps every entry when six stages append at once" case is why the append is
+      done in SQL rather than as a read-modify-write, and the last case reads the stored
+      entry back through the three expressions `api/src/api/analytics.py` applies, so
+      the shape is checked by a reader rather than by its author.
+
+      Seven more assertions folded into the four real workflow runs
+      `pipeline-events.test.ts` already drives (real evented engine, real Redis Streams
+      transport, real database, only the provider boundaries stubbed):
+
+      ```
+      $ (cd web && npx vitest run src/mastra/pipeline-events.test.ts --reporter=verbose)
+       ✓ ... > what a run writes to execution_logs > records a start and a complete for each of the six stages, then the run 1ms
+       ✓ ... > what a run writes to execution_logs > carries Python's stage_complete data, including the tokens the event omits 1ms
+       ✓ ... > what a run writes to execution_logs > records the same duration the event carried, rounded the same way 1ms
+       ✓ ... > what a run writes to execution_logs > stamps every entry with a timestamp that sorts against Python's 1ms
+       ✓ ... > what a run writes to execution_logs > says nothing about a stage the run skipped 1ms
+       ✓ ... > what a run writes to execution_logs > says nothing at all about a run parked at its first gate 1ms
+       ✓ ... > what a run writes to execution_logs > records only the named stage for a rerun, and nothing about the pipeline 1ms
+
+       Test Files  1 passed (1)
+            Tests  34 passed (34)
+         Duration  6.83s (transform 127ms, setup 82ms, import 601ms, tests 6.08s, environment 0ms)
+      ```
+
+      Four negative controls, each reverted after it was measured:
+
+      ```
+      # 1. nowIso() returns toISOString() unchanged (the `Z` form)
+      × writes the timestamp in the offset form Python's isoformat() produced
+      Tests  1 failed | 9 passed (10)
+
+      # 2. `if (entry.data)` instead of Python's `if data:` (empty dict stored)
+      × stores `data` when there is any and omits the key when there is not
+      Tests  1 failed | 9 passed (10)
+
+      # 3. the stage_start and pipeline_complete entries removed
+      × records a start and a complete for each of the six stages, then the run
+      × says nothing about a stage the run skipped
+      × records only the named stage for a rerun, and nothing about the pipeline
+      Tests  3 failed | 31 passed (34)
+
+      # 4. the stage_complete entry's token counts zeroed
+      × carries Python's stage_complete data, including the tokens the event omits
+      Tests  1 failed | 33 passed (34)
+      ```
+
+      Gates. Frontend from `web/`, with `set -a; . ./.env; set +a` first:
+
+      ```
+      $ pnpm tsc --noEmit
+      TSC EXIT=0
+
+      $ pnpm lint
+      LINT EXIT=0
+
+      $ pnpm test
+       Test Files  2 failed | 85 passed (87)
+            Tests  9 failed | 1570 passed | 7 skipped (1586)
+         Duration  78.68s
+
+      $ pnpm build
+      BUILD EXIT=0
+      ✓ Compiled successfully in 3.4s
+      ```
+
+      The 9 failures are the recorded baseline unchanged: 6 in `image-preview.test.tsx`
+      and 3 in `PostDetail.test.tsx`. 1570 passed against the previous item's 1553, which
+      is the 17 tests above. `scaffold-check.test.ts`'s "emits the workflow lifecycle
+      events the trace view will read" failed once under full-suite load and passed on
+      the rerun; logged in `todo.md` as `[investigate]` rather than chased.
+
+      Python, unchanged because nothing Python was touched:
+
+      ```
+      $ cd api && uv run pytest -q
+      120 failed, 241 passed, 25 errors in 13.11s
+
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 131 files already formatted
+      ```
+
+    - [ ] 5.5c-ii `pipeline_start`: the run-level entry Python wrote before the stage
+      loop, gated on `is_full_pipeline`. Needs a head step on the chain, symmetric with
+      `pipeline-complete`, because the structural rule keeps run logic in a Mastra
+      primitive rather than in the route handler that starts the run.
+    - [ ] 5.5c-iii The failure entries from Python's exception branch: the `warning` /
+      `retry` entry while attempts remain and the `error` / `stage_error` entry once
+      they are spent. These go beside the `stage_error` publish in
+      `web/src/mastra/failure-recorder.ts`, and the retry half has to be settled against
+      the evented engine's `retryConfig` rather than transcribed from ARQ's `job_try`.
+    - [ ] 5.5c-iv `publishStageLog()` and the `log` event: the 28 call sites inside the
+      six stage nodes, and the module-level `set_event_context` /
+      `clear_event_context` they read, which has no equivalent in a step that already
+      receives `mastra`.
   - [ ] 5.5d `GET /api/events/{post_id}` and `GET /api/events`, as Next.js route handlers
     serving `text/event-stream` in `use-sse.ts`'s named-event shape, subscribed to the
     topic rather than to an in-process stream.

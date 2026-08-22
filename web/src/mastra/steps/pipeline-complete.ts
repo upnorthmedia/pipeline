@@ -29,6 +29,7 @@
  */
 import { createStep } from "@mastra/core/workflows/evented"
 
+import { appendExecutionLog } from "../execution-log"
 import { publishPipelineEvent } from "../pipeline-events"
 import { markPipelineComplete } from "../post-state"
 import { recordRunCompleted } from "../worker-health"
@@ -46,6 +47,16 @@ export const pipelineCompleteStep = createStep({
     // rerun from the dashboard.
     if (!inputData.stages) {
       await markPipelineComplete(inputData.postId)
+      // The row's own record of the same fact, from inside Python's database
+      // block and before the publish. `stage` is `""`, as it was there: this
+      // entry is about the run, not about any one stage, and `GET /logs`
+      // filtering by stage is meant to skip it.
+      await appendExecutionLog(inputData.postId, {
+        stage: "",
+        level: "info",
+        event: "pipeline_complete",
+        message: "Pipeline finished",
+      })
       // Python's `pipeline_complete` publish, from inside the same
       // `if is_full_pipeline:` block and after the stamp, because the dashboard
       // refetches the post on this event and must read the finished row.

@@ -21,6 +21,8 @@
 import type { PubSub } from "@mastra/core/events"
 import { z } from "zod"
 
+import { pythonRound } from "../analytics/python-round"
+import { appendExecutionLog, stageCostUsd } from "../execution-log"
 import { publishPipelineEvent } from "../pipeline-events"
 import {
   markCompleteIfAllStagesComplete,
@@ -223,10 +225,21 @@ export async function announceStageStart(
   stage: Stage,
   input: StageStepInput,
 ): Promise<void> {
+  const message = `Starting ${stage}...`
   await markStageRunning(input.postId, stage)
+  // Python wrote the row's audit entry inside the same session block as the
+  // `"running"` write and before the publish, so the entry a browser goes
+  // looking for after the event is already on the row. The message is the one
+  // string, shared with the event rather than written out twice.
+  await appendExecutionLog(input.postId, {
+    stage,
+    level: "info",
+    event: "stage_start",
+    message,
+  })
   await publishPipelineEvent(mastra.pubsub, input.postId, "stage_start", {
     stage,
-    message: `Starting ${stage}...`,
+    message,
   })
 }
 
@@ -236,9 +249,17 @@ export async function announceStageStart(
  * The event carries a rounded number rather than the raw float because
  * `debug-log-panel.tsx` renders `duration_s` straight into the log line, and a
  * measured elapsed time is fifteen significant figures wide.
+ *
+ * `pythonRound` rather than `Math.round(value * 100) / 100`, because the same
+ * measurement is now written twice: once into the event and once into the
+ * `stage_complete` execution log entry. The two disagree on ties, and a
+ * duration is milliseconds divided by 1000, so `0.125` and `0.375` are exact
+ * ties that Python renders as `0.12` and `0.38` while `Math.round` renders as
+ * `0.13` and `0.38`. Sharing one function keeps the number a browser is shown
+ * and the number the row records from drifting apart.
  */
 function roundSeconds(value: number): number {
-  return Math.round(value * 100) / 100
+  return pythonRound(value, 2)
 }
 
 /**
@@ -255,8 +276,9 @@ function roundSeconds(value: number): number {
  *
  * Takes the output the step is about to return rather than the fields
  * separately, so what a browser is told and what the next step receives cannot
- * drift apart. `model` and `durationS` are the only two Python sent; the token
- * counts stayed in the execution log, which is item 5.5c.
+ * drift apart. `model` and `durationS` are the only two Python sent over SSE;
+ * the token counts and the priced estimate go to the row's execution log, which
+ * is the entry Python wrote from inside the same database block.
  *
  * A skipped stage announces nothing, because Python's `continue` jumped over
  * the publish along with the rest of the loop body. That is a property of where
@@ -266,10 +288,27 @@ export async function announceStageComplete(
   mastra: { pubsub: PubSub },
   output: StageStepOutput,
 ): Promise<void> {
+  const durationS = roundSeconds(output.durationS)
+  await appendExecutionLog(output.postId, {
+    stage: output.stage,
+    level: "info",
+    event: "stage_complete",
+    message: `Stage ${output.stage} complete`,
+    // Python's five keys, from `_stage_meta`. This is the only place the token
+    // counts are recorded against the post: the SSE payload never carried them,
+    // so a browser that was not open while the run executed reads them here.
+    data: {
+      model: output.model,
+      tokens_in: output.tokensIn,
+      tokens_out: output.tokensOut,
+      duration_s: durationS,
+      cost_usd: stageCostUsd(output.tokensIn, output.tokensOut),
+    },
+  })
   await publishPipelineEvent(mastra.pubsub, output.postId, "stage_complete", {
     stage: output.stage,
     model: output.model,
-    duration_s: roundSeconds(output.durationS),
+    duration_s: durationS,
   })
 }
 

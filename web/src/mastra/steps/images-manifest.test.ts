@@ -311,6 +311,20 @@ describe("images manifest step output", () => {
       currentStage: "images",
       stageStatus: { ...(before.stageStatus as Record<string, string>), images: "running" },
       updatedAt: new Date(fixture.captured_at),
+      // Item 5.5c-i added the row's own record of the same announcement, which
+      // Python wrote in the same block as the `"running"` value above. The
+      // timestamp is the frozen clock's, in the offset form Python's
+      // `isoformat()` produced.
+      executionLogs: [
+        ...(before.executionLogs ?? []),
+        {
+          ts: new Date(fixture.captured_at).toISOString().replace("Z", "+00:00"),
+          stage: "images",
+          level: "info",
+          event: "stage_start",
+          message: "Starting images...",
+        },
+      ],
     })
   })
 
