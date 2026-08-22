@@ -31,7 +31,7 @@ import path from "node:path"
 import { englishHyphenator, textstatDataDir } from "./hyphenator"
 
 /** Python's `\s` for `str` patterns, which is also `str.isspace()`'s set. */
-const PY_WHITESPACE = "\\t\\n\\v\\f\\r\\x1c-\\x1f \\x85\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000"
+export const PY_WHITESPACE = "\\t\\n\\v\\f\\r\\x1c-\\x1f \\x85\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000"
 /** Python's `\w` for `str` patterns. */
 const PY_WORD = "\\p{L}\\p{N}_"
 
@@ -61,11 +61,19 @@ const FRE_SENTENCE_LENGTH = 1.015
 const FRE_SYLL_PER_WORD = 84.6
 
 /**
+ * Python's `str.strip()` with no argument, over Python's whitespace class
+ * rather than JavaScript's.
+ */
+export function pythonStrip(text: string): string {
+  return text.replace(LEADING_WHITESPACE, "").replace(TRAILING_WHITESPACE, "")
+}
+
+/**
  * Python's `str.split()` with no argument: split on runs of whitespace, with
  * leading and trailing whitespace producing no empty fields.
  */
 export function pythonSplit(text: string): string[] {
-  const trimmed = text.replace(LEADING_WHITESPACE, "").replace(TRAILING_WHITESPACE, "")
+  const trimmed = pythonStrip(text)
   if (trimmed === "") return []
   return trimmed.split(WHITESPACE_RUN)
 }

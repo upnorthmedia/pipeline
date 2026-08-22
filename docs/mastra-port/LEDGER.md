@@ -2975,9 +2975,165 @@ Python-rendered prompt (whitespace normalized only) and the output validates aga
     125 failed / 235-236 passed / 25 errors; the repo-wide `ruff check .` and
     `ruff format --check .` baselines (41 errors, 10 files) are untouched, and the
     one file this iteration added to `api/` passes both.
-  - [ ] 3.4b `compute_analytics` (`api/src/services/analytics.py`): `_strip_markdown`,
+  - [x] 3.4b `compute_analytics` (`api/src/services/analytics.py`): `_strip_markdown`,
     keyword density, the SEO checklist, and Python's rounding, with a parity test against
     the golden fixtures' draft content.
+
+    **Why the fixtures are the primary oracle here**
+
+    The captured edit prompts already contain the numbers Python produced, as
+    literals: `- **Word Count:** 2128 (target: 1800)`,
+    `- **Flesch Reading Ease:** 65.7 (target: 60-70; ...)`,
+    `- **Avg Sentence Length:** 15.1 words (target: <20)` and one
+    `- **<keyword>:** <density>% (target: 1-2%)` line per keyword, plus a
+    `[PASS]` / `[FAIL]` line per boolean check. Nothing in this repo generated
+    those digits for the benefit of the test, so the strongest assertion
+    available is to recompute them in TypeScript and look them up in the
+    captured prompt. That is `describe("golden fixture edit prompts")`, and it
+    covers both fixtures.
+
+    **What was built**
+
+    - `web/src/mastra/analytics/index.ts`: `computeAnalytics`, `seoChecklist`,
+      `stripMarkdown` and `urlNetloc`, a statement-for-statement port of
+      `compute_analytics`, `_seo_checklist` and `_strip_markdown`. The SEO
+      checklist keeps Python's insertion order and its mixed value type
+      (booleans for the checks, integers for `internal_link_count` and
+      `external_link_count`), because `edit_node` renders the dict in order and
+      filters on `isinstance(passed, bool)`.
+    - `web/src/mastra/analytics/python-round.ts`: `pythonRound`, Python's
+      `round(float, ndigits)` in `BigInt` arithmetic over the double's exact
+      binary value.
+    - `api/scripts/export_analytics_parity.py`: writes
+      `web/src/mastra/analytics/data/analytics-parity.json`, the second oracle,
+      covering what the fixtures cannot reach.
+    - `web/src/mastra/textstat/index.ts`: `pythonStrip` and `PY_WHITESPACE`
+      exported so the analytics port spells Python's whitespace class the same
+      way rather than re-deriving it; `pythonSplit` now calls `pythonStrip`.
+
+    **Three Python primitives that do not survive a naive translation**
+
+    1. `round()` is round-half-to-even over the double's *exact binary value*.
+       JavaScript has no equivalent: `Math.round` breaks ties upward and
+       `Number.prototype.toFixed` breaks them away from zero. This is reachable
+       from real data, not just theory: `avg_sentence_length` is
+       `word_count / sentence_count`, so a 405 word draft with 20 sentences is
+       exactly `20.25`, and Python prints `20.2` where `toFixed(1)` prints
+       `20.3`. A double is an exact tie at `n` decimals only when it is
+       `odd / 2**k` with `k <= n + 1`, so `pythonRound` compares the true
+       remainder in `BigInt` rather than re-parsing a decimal approximation.
+       Verified against 52 exported `round()` results including every tie of
+       that form at 1 and 2 decimals.
+    2. `re.MULTILINE`'s `^` matches only after `\n`. JavaScript's `m` flag also
+       matches after `\r`, `U+2028` and `U+2029`. Every multiline anchor in the
+       port is written `(?:^|(?<=\n))` and the `m` flag is never used, so
+       `Carriage return\r## not a heading in Python` stays body text in both
+       stacks.
+    3. Python's `.` excludes `\n` alone; JavaScript's excludes `\r`, `U+2028`
+       and `U+2029` too. Written as `[^\n]`. This one is not observable through
+       `compute_analytics`'s output (the H2 captures only feed substring tests
+       and a count), and it is ported faithfully anyway.
+
+    Also ported rather than approximated: `str.count` is non-overlapping, and
+    `urlparse(url).netloc` is empty for a URL with no `//`, so a profile whose
+    `website_url` is a bare `example.com` classifies every link as external.
+    Both are pinned by tests, the second against 17 exported `urlparse` results.
+
+    **Test run**
+
+    ```
+    $ cd web && pnpm vitest run src/mastra/analytics/analytics.test.ts
+     RUN  v4.0.18 /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+
+     ✓ src/mastra/analytics/analytics.test.ts (46 tests) 48ms
+
+     Test Files  1 passed (1)
+          Tests  46 passed (46)
+    ```
+
+    46 tests: 4 on `pythonRound`, 1 comparing `urlNetloc` against all 17
+    exported `urlparse` results, 17 comparing `computeAnalytics` against the
+    exported `compute_analytics` results, 16 comparing `stripMarkdown` against
+    the exported `_strip_markdown` output, 2 reading the analytics literals back
+    out of the captured edit prompts, 5 pinning the Python primitives above, and
+    1 asserting the oracle file is the one this test expects.
+
+    **Oracle regeneration**
+
+    ```
+    $ cd api && uv run python scripts/export_analytics_parity.py
+    wrote web/src/mastra/analytics/data/analytics-parity.json: 17 cases, 52 round cases, 17 netloc cases
+    ```
+
+    **Four negative controls, applied and reverted**
+
+    ```
+    == NC1: toFixed instead of round-half-even ==
+          Tests  2 failed | 44 passed (46)
+    == NC2: JavaScript m flag for the multiline anchors ==
+          Tests  4 failed | 42 passed (46)
+    == NC3: overlapping substring count ==
+          Tests  1 failed | 45 passed (46)
+    == NC4: permissive netloc (bare host treated as authority) ==
+          Tests  3 failed | 43 passed (46)
+    == reverted ==
+          Tests  46 passed (46)
+    ```
+
+    NC1 is the honest one to read carefully: swapping `pythonRound` for
+    `Number(value.toFixed(ndigits))` fails only the two dedicated tie tests and
+    leaves all 17 fixture and golden cases green. The captured drafts never land
+    on an exact tie, which is precisely why the 52 exported `round()` results
+    exist rather than trusting the fixtures to cover it.
+
+    **Gates**
+
+    ```
+    $ cd web && pnpm tsc --noEmit          # exit 0, no output
+    $ cd web && pnpm lint                  # exit 0, no output
+    $ cd web && pnpm test
+     Test Files  2 failed | 32 passed (34)
+          Tests  9 failed | 408 passed | 3 skipped (420)
+    $ cd web && pnpm build
+    ✓ Compiled successfully in 3.1s
+    ```
+
+    `pnpm test` is 9 failed, the recorded failure baseline (6 in
+    `image-preview.test.tsx`, 3 in `PostDetail.test.tsx`) unchanged, with passes
+    moving 362 -> 408: the 46 new tests. The 3 skipped are the live-provider
+    smoke tests, which need keys this worktree does not carry. `db` and `redis`
+    must be up for an honest reading: with them down the same command reports
+    15 failed files and 73 skipped tests, which is a missing datastore and not a
+    regression.
+
+    ```
+    $ cd api && TEST_DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5435/content_pipeline_test uv run pytest -q
+    125 failed, 236 passed, 25 errors in 15.08s
+    $ cd api && uv run ruff check scripts/export_analytics_parity.py
+    All checks passed!
+    $ cd api && uv run ruff format --check scripts/export_analytics_parity.py
+    1 file already formatted
+    ```
+
+    `pytest` is at the Phase 0 baseline. The repo-wide `ruff check .` and
+    `ruff format --check .` baselines are untouched; the one file this iteration
+    added to `api/` passes both.
+
+    **Discrepancies recorded, not fixed**
+
+    1. `edit_node` renders the floats with an f-string, so `str(float)` always
+       carries a decimal point and a density of exactly zero prints `0.0%` where
+       JavaScript's `String(0)` gives `0%`. The golden fixture
+       `how-to-choose-a-crm-for-a-small-team` contains
+       `- **crm comparison:** 0.0%`, so item 3.4e needs a production
+       `str(float)` shim; this item's test carries a local one.
+    2. Python's `str.lower()` and JavaScript's `toLowerCase()` are not the same
+       function for every code point. Both fixtures' keywords and headings are
+       ASCII, so nothing here discriminates between them. If a non-ASCII keyword
+       ever appears, this is the first place to look.
+    3. `tsconfig.json` targets ES2017, where BigInt *literals* (`0n`) are a type
+       error even though `lib: esnext` provides the type. `pythonRound` names its
+       constants through `BigInt(...)` rather than raising the app-wide target.
   - [ ] 3.4c `validate_links` (`api/src/services/link_validator.py`).
   - [ ] 3.4d `edit` **agent**: system message, model id, `max_tokens`, wire-payload parity
     against the golden fixtures' recorded Anthropic request.
