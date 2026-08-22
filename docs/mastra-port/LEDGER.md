@@ -10981,11 +10981,179 @@ three pieces are separately verifiable, so they are separate items.
       9 files would be reformatted, 131 files already formatted
       ```
 
-    - [ ] 5.4d-ii `GET /api/queue/dead-letter`: the caller's permanently failed runs,
-      read from Mastra's run rows (`status: "failed"`) joined to their posts, in the
-      `{entries, count}` shape with `post_id`, `stage`, `error`, `attempts` and
-      `failed_at` per entry. The `stage` Python could not record for a full pipeline is
-      available from the run's `stepResults`.
+    - [x] 5.4d-ii `GET /api/queue/dead-letter`.
+
+      `web/src/app/api/queue/dead-letter/route.ts` answers Python's
+      `{entries, count}` shape, newest first, with `post_id`, `stage`, `error`,
+      `attempts` and `failed_at` per entry. `web/src/mastra/dead-letter.ts` is the
+      reader: `listFailedRuns()` calls the workflow storage domain's
+      `listWorkflowRuns({workflowName: "pipeline", status: "failed"})` and parses each
+      snapshot.
+
+      **Why the storage API and not a hand-written query.** `@mastra/pg` indexes exactly
+      this read; it creates the index itself:
+
+      ```
+      $ grep -n "snapshot ->> 'status'" web/node_modules/@mastra/pg/dist/index.js
+      20468: * listWorkflowRuns() status filters can use an index instead of scanning every snapshot.
+      20474: })} (workflow_name, (snapshot ->> 'status'), "createdAt" DESC)`;
+      ```
+
+      and its `ORDER BY "createdAt" DESC` is the newest-first order `LPUSH` plus
+      `LRANGE 0 -1` gave Python, so the ordering is the adapter's rather than a sort
+      bolted on afterwards.
+
+      **The snapshot really does carry all five fields.** Read off a real failed run in
+      the dev database rather than assumed, which is what settled the field mapping:
+
+      ```
+      $ psql -tA -c "select jsonb_pretty(snapshot) from mastra_workflow_snapshot
+                     where run_id='624d1ea0-38f4-4e4c-91d9-c623d7d0707a';"
+      {
+          "error": { "name": "Error", "message": "provider exploded mid-draft" },
+          "status": "failed",
+          "context": {
+              "input":    { "postId": "00000000-0000-4000-8000-0000000005d1" },
+              "write":    { "status": "failed", "error": {...}, "endedAt": 1787432235685 },
+              "outline":  { "status": "success", ... },
+              "research": { "status": "success", ... }
+          },
+          ...
+      }
+      ```
+
+      So `post_id` is `context.input.postId`, `error` is the top-level `error.message`,
+      `stage` is the one stage id in `context` whose own `status` is `"failed"`, and
+      `failed_at` is the row's `updatedAt`. `attempts` is not in the snapshot and is
+      derived from `pipelineWorkflow.retryConfig` the same way 5.4d-i derives it.
+
+      **Two deliberate deviations from Python, both closing holes rather than
+      transcribing them:**
+
+      1. **The list is scoped to the caller.** Python's DLQ had no user dimension at all
+         (`dead_letter_queue()` takes a `user` dependency and never reads it), so every
+         authenticated user was shown every tenant's failures, post ids and error text
+         included. The entries are joined to `posts` through `website_profiles.user_id`
+         here, the way every other Phase 5 handler scopes. A run whose post has been
+         deleted, or whose post has no profile and so no owner, is therefore not
+         reported either.
+      2. **`stage` is populated for a full pipeline run.** Python set it to
+         `target_stages[0] if len(target_stages) == 1 else ""`, so the common case
+         recorded nothing. The snapshot names the step that threw, and the real-run test
+         asserts `"write"` for a run started with no `stages`.
+
+      **One defensive guard with a real failure behind it.** `postIdOf` requires the
+      UUID shape rather than merely a non-empty string, because the handler feeds these
+      into a `posts.id IN (...)` predicate. Negative control 4 below is what that guard
+      is for: a single snapshot carrying a non-UUID takes the whole endpoint down with
+      `invalid input syntax for type uuid`.
+
+      **The cost of the unpaginated read, measured rather than waved at.** The call
+      materialises every failed `pipeline` run in the installation before the caller's
+      are picked out, because nothing on a run row carries the owning user, so
+      pagination cannot be applied before the scoping. The rows are small: a stage's
+      step output is counters and a model id, not the article.
+
+      ```
+      $ psql -tA -c "select count(*), pg_size_pretty(sum(pg_column_size(snapshot)))
+                     from mastra_workflow_snapshot
+                     where workflow_name='pipeline' and snapshot->>'status'='failed';"
+      442|487 kB
+
+      $ # temporary test calling listFailedRuns() against the same database
+      DLQ_TIMING runs=430 elapsed_ms=40
+      ```
+
+      **Not wired to the dashboard, and not wired now.** `web/src/lib/api.ts`'s `queue`
+      namespace still declares only `status`, `pauseAll` and `resumeAll`; the port keeps
+      the contract as it was, so no caller changed.
+
+      **One branch is deliberately untested:** `parseSnapshot`'s string arm.
+      `WorkflowRun.snapshot` is typed `WorkflowRunState | string`, but `@mastra/pg`
+      already runs `JSON.parse` on a string column before returning the row, so the arm
+      cannot be reached through the adapter. It exists to satisfy the declared type.
+
+      **Tests.** `web/src/app/api/queue/dead-letter.test.ts`, 20 of them. The first
+      suite is a real failed run: the real workflow on a real evented engine over real
+      Redis Streams writing a real snapshot, with `research`/`outline` stubbed to return
+      text and `write` stubbed to throw. That is what proves the parsing matches what
+      the engine writes rather than what the test thinks it writes. The other two suites
+      persist snapshots through the same storage adapter to reach the branches one
+      failing run cannot produce.
+
+      ```
+      $ pnpm -C web exec vitest run src/app/api/queue/dead-letter.test.ts --reporter=verbose
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, a real failed run > reports the run 29ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, a real failed run > names the step that threw, which Python left empty for a full pipeline 10ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, a real failed run > carries the failing stage's error text, Python's str(e) 9ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, a real failed run > reports how many times the run executed, Python's attempts 9ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, a real failed run > reports failed_at as a timestamp close to the run 9ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, a real failed run > carries exactly the five keys Python's DLQ entry had 9ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, a real failed run > counts the entries it returned 9ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, a real failed run > reports the failing step and its error 0ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, run rows the caller must not see > rejects a request with no session 0ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, run rows the caller must not see > excludes another user's failed run, which Python showed to everyone 20ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, run rows the caller must not see > excludes a run whose post has been deleted 11ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, run rows the caller must not see > excludes a run whose post has no profile, so no owner 10ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, run rows the caller must not see > excludes a run whose input carries no post id 15ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, run rows the caller must not see > survives a run whose post id is not a UUID rather than failing the query 15ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, run rows the caller must not see > excludes a failed run of a workflow that is not the pipeline 8ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, run rows the caller must not see > excludes a pipeline run that did not fail 8ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, entry contents > reports the nested images workflow's id when image generation dies 8ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, entry contents > reports a null stage when no step recorded a failure 8ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, entry contents > reports a thrown non-Error, which the engine passes through as it was 8ms
+       ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, entry contents > orders entries newest first, as LPUSH plus LRANGE did 9ms
+
+       Test Files  1 passed (1)
+            Tests  20 passed (20)
+         Duration  2.05s
+      ```
+
+      **Negative controls**, each applied and reverted:
+
+      - dropped the `.filter((run) => mine.has(run.postId))` scoping: `3 failed | 17
+        passed`, the other user's run, the deleted post and the orphan post.
+      - dropped `status: "failed"` from the storage query: `1 failed | 19 passed`,
+        "excludes a pipeline run that did not fail".
+      - dropped `workflowName` from the storage query: `1 failed | 19 passed`,
+        "excludes a failed run of a workflow that is not the pipeline".
+      - replaced the UUID test in `postIdOf` with Python-style `.length > 0`: `18 failed
+        | 2 passed`, with `Caused by: error: invalid input syntax for type uuid:
+        "not-a-uuid"`. One bad row breaks every request, which is the whole point of the
+        guard.
+      - relaxed `failedStageOf` from `step?.status === "failed"` to `step` (any recorded
+        step): `3 failed | 17 passed`, both stage assertions and the null-stage case.
+
+      **Gates.**
+
+      ```
+      $ pnpm -C web exec tsc --noEmit
+      tsc exit=0
+
+      $ pnpm -C web lint
+      (no output) lint exit=0
+
+      $ pnpm -C web test
+       Test Files  2 failed | 81 passed (83)
+            Tests  9 failed | 1471 passed | 7 skipped (1487)
+      ```
+
+      9 failed is the recorded baseline: the 6 `image-preview` failures and the 3
+      `PostDetail` failures. 1471 passed is 1451 plus this item's 20.
+
+      ```
+      $ pnpm -C web build
+      ✓ Compiled successfully in 3.6s
+
+      $ (set -a; . ./.env; set +a; cd api && uv run pytest -q)
+      125 failed, 236 passed, 25 errors in 13.02s
+
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 131 files already formatted
+      ```
     - [ ] 5.4d-iii `POST /api/queue/dead-letter/{post_id}/retry` and
       `DELETE /api/queue/dead-letter`: the retry resets `current_stage`, pops `_error`
       and starts a run; the clear needs a decision about what "cleared" means when the

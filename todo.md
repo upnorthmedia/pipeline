@@ -248,10 +248,11 @@
   dependency and then ignore it entirely, returning and clearing the whole shared list.
   `GET /api/queue/worker-status` had a milder version, its `active_jobs` count querying every
   post in the database rather than the caller's; that one is closed, the ported handler scopes
-  it through `website_profiles.user_id` (item 5.4c-ii). Found while splitting item 5.4; recorded
-  there too. The port should close the other three the way 5.3b-iii closed the batch profile
-  lookup, which means the DLQ needs a user dimension it does not currently have, so it is a
-  design decision rather than a one-line predicate.
+  it through `website_profiles.user_id` (item 5.4c-ii). `GET /api/queue/dead-letter` is closed
+  too: the ported handler joins each failed run's post through `website_profiles.user_id`
+  (item 5.4d-ii), which is the user dimension the Redis list never had. Found while splitting
+  item 5.4; recorded there too. That leaves `retry_dead_letter()` and
+  `DELETE /api/queue/dead-letter`, both for item 5.4d-iii.
 - [investigate] 2026-08-22 Mastra's engine logs step failures to a logger the app cannot
   configure. `MastraBase`'s constructor gives every primitive its own `ConsoleLogger`
   (`base-BeUQ6mLP.js:12`) and only adopts the Mastra instance's logger in
