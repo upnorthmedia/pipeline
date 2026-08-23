@@ -97,13 +97,13 @@ describe("useSSE", () => {
   it("connects to global SSE endpoint when no postId", async () => {
     renderHook(() => useSSE());
     await waitFor(() => expect(instances).toHaveLength(1));
-    expect(instances[0].url).toBe("http://localhost:8055/api/events");
+    expect(instances[0].url).toBe("/api/events");
   });
 
   it("connects to post-specific SSE endpoint", async () => {
     renderHook(() => useSSE("post-123"));
     await waitFor(() => expect(instances).toHaveLength(1));
-    expect(instances[0].url).toBe("http://localhost:8055/api/events/post-123");
+    expect(instances[0].url).toBe("/api/events/post-123");
   });
 
   it("sets connected to true on open", async () => {
@@ -244,7 +244,7 @@ describe("useSSE replay anchor", () => {
   const ANCHOR_A = "1755859200000-11111111-2222-3333-4444-555555555555";
   const ANCHOR_B = "1755859200500-66666666-7777-8888-9999-aaaaaaaaaaaa";
   const ANCHOR_C = "1755859201000-bbbbbbbb-cccc-dddd-eeee-ffffffffffff";
-  const GLOBAL_URL = "http://localhost:8055/api/events";
+  const GLOBAL_URL = "/api/events";
 
   /**
    * Lets the mock's open-on-next-microtask fire inside `act()`, so the
@@ -310,7 +310,7 @@ describe("useSSE replay anchor", () => {
     await reconnect();
 
     expect(instances[1].url).toBe(
-      `http://localhost:8055/api/events/post-123?last_event_id=${encodeURIComponent(ANCHOR_B)}`
+      `/api/events/post-123?last_event_id=${encodeURIComponent(ANCHOR_B)}`
     );
   });
 
@@ -375,7 +375,7 @@ describe("useSSE replay anchor", () => {
     await settle();
 
     expect(instances[instances.length - 1].url).toBe(
-      "http://localhost:8055/api/events/post-2"
+      "/api/events/post-2"
     );
   });
 });

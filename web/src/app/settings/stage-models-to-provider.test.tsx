@@ -126,16 +126,22 @@ function anthropicSuccess(): string {
  * `fetch` for the whole file: dashboard calls go into the route handlers with
  * the session cookie attached, provider calls are recorded and answered.
  *
- * Routing is by hostname and path rather than by the client's API base, so the
- * file does not have to agree with `NEXT_PUBLIC_API_URL` to work. Anything it
- * does not recognise throws instead of reaching the network, which is what
- * keeps an unnoticed second call from silently hitting a real provider.
+ * Routing is by hostname and path, with the dashboard's own origin-relative
+ * paths resolved against a placeholder origin first. Anything the router does
+ * not recognise throws instead of reaching the network, which is what keeps an
+ * unnoticed second call from silently hitting a real provider.
  */
+/** The origin the dashboard's own origin-relative paths resolve against. */
+const DASHBOARD_ORIGIN = "http://dashboard.test"
+
 function installRouter(cookie: string) {
   const real = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
-    const url = new URL(href)
+    const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+    // The dashboard client addresses its own origin, so its paths arrive
+    // relative and need a base before either `new URL` or `new Request`.
+    const url = new URL(raw, DASHBOARD_ORIGIN)
+    const href = url.href
     const method = (init?.method ?? "GET").toUpperCase()
 
     if (url.hostname === "api.anthropic.com") {

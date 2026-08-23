@@ -648,3 +648,11 @@
   OpenAI-compatible `/chat/completions` shape, so research calls stop working after that
   date unless the stage moves to Perplexity's Agent API. Found while verifying model IDs
   for ledger item 6.1; out of scope there, but it has a hard deadline.
+- [confirmed] 2026-08-23 The Playwright suite (`pnpm -C web test:e2e`) is stale. A full run
+  during ledger item 7.1b ended `4 passed (7.4m)` with failures listed across all four spec
+  files. The failures are expectation drift, not a regression from the port: the one
+  reproduced in isolation, `navigation.test.ts > sidebar navigation items are visible`,
+  waits for a sidebar item named "Monitor" while the sidebar renders "Observability", and
+  the page itself loaded fine. No baseline for this gate was ever recorded in Phase 0, so
+  there is nothing to compare against; item 9.1 needs it green, which means auditing every
+  spec against the current UI and giving the ones that need data a real session.

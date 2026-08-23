@@ -1,5 +1,3 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8055";
-
 // --- Types ---
 
 export type StageMode = "auto";
@@ -367,8 +365,12 @@ class ApiError extends Error {
   }
 }
 
+/**
+ * Every path is origin-relative: the route handlers live in this same Next.js
+ * app, so there is no API base URL to configure.
+ */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(path, {
     ...init,
     credentials: "include",
     headers: {
@@ -543,9 +545,9 @@ export const posts = {
     request<{ status: string }>(`/api/posts/${id}/publish`, { method: "POST" }),
 
   // Export
-  exportMarkdown: (id: string) => `${API_BASE}/api/posts/${id}/export/markdown`,
-  exportHtml: (id: string) => `${API_BASE}/api/posts/${id}/export/html`,
-  exportAll: (id: string) => `${API_BASE}/api/posts/${id}/export/all`,
+  exportMarkdown: (id: string) => `/api/posts/${id}/export/markdown`,
+  exportHtml: (id: string) => `/api/posts/${id}/export/html`,
+  exportAll: (id: string) => `/api/posts/${id}/export/all`,
 
   // Analytics
   analytics: (id: string) => request<PostAnalytics>(`/api/posts/${id}/analytics`),
@@ -682,6 +684,6 @@ export const analytics = {
 // --- SSE URL helpers ---
 
 export const sseUrl = {
-  post: (id: string) => `${API_BASE}/api/events/${id}`,
-  global: () => `${API_BASE}/api/events`,
+  post: (id: string) => `/api/events/${id}`,
+  global: () => `/api/events`,
 };

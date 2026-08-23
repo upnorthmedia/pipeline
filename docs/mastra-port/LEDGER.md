@@ -1292,8 +1292,18 @@ pages that use it work with the Python API stopped.
     every generated image through. `web/src/app/media/[...path]/route.ts`, 14 tests,
     10 of 11 mutations killed (the eleventh is equivalent).
     Evidence: [`evidence/phase-7.md` #7.1a](../mastra-port/evidence/phase-7.md)
-  - [ ] 7.1b Default the dashboard's `API_BASE` to its own origin instead of
+  - [x] 7.1b Default the dashboard's `API_BASE` to its own origin instead of
     `http://localhost:8055`, so no browser surface depends on the Python service.
+
+    `API_BASE` is removed rather than re-pointed: the dashboard and its route handlers
+    are one app, and `NEXT_PUBLIC_API_URL` is no longer read anywhere, so a stray `.env`
+    cannot reopen the channel. `api.ts` fetches, export links and SSE urls, plus both
+    image paths in `content-preview.tsx` and `image-preview.tsx`, are origin-relative;
+    the dead env var is dropped from `web/Dockerfile` and both compose files. Verified
+    live in a browser with `next dev` and no `NEXT_PUBLIC_API_URL` set at all: every
+    `fetch` and the `EventSource` resolve onto `localhost:3000` and return 200, with no
+    console errors. 8 new tests, 8 of 8 mutations killed.
+    Evidence: [`evidence/phase-7.md` #7.1b](../mastra-port/evidence/phase-7.md)
   - [ ] 7.1c Delete `api/` and rewrite `docker-compose.yml` and `docker-compose.prod.yml`
     onto the TypeScript `worker` service, keeping `db` and `redis`.
 - [ ] 7.2 Railway deployment configuration for `web` and `worker` from this repo, with start

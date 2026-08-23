@@ -82,8 +82,6 @@ services:
     build:
       context: ./web
       target: runner
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8055}
     expose:
       - "3000"
     depends_on:

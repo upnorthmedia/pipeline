@@ -97,7 +97,6 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8055
       DATABASE_URL_SYNC: postgresql://pipeline:pipeline@db:5432/content_pipeline
       BETTER_AUTH_URL: http://localhost:3000
     volumes:

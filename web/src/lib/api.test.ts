@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { posts, profiles, queue, settings, sseUrl } from "./api";
 
-const API_BASE = "http://localhost:8055";
+// The dashboard and its route handlers are one Next.js app, so every request
+// the client makes is origin-relative. There is no base URL to configure.
+const API_BASE = "";
 
 // Track all fetch calls
 let fetchCalls: { url: string; init?: RequestInit }[] = [];
@@ -252,6 +254,53 @@ describe("api client", () => {
       mockResponse.body = [];
       await settings.update({ api_keys: { value: { claude: "sk-xxx" } } });
       expect(fetchCalls[0].init?.method).toBe("PATCH");
+    });
+  });
+
+  describe("same-origin addressing", () => {
+    it("sends every request as an origin-relative path", async () => {
+      mockResponse.body = [];
+      await profiles.list();
+      await posts.list();
+      await queue.status();
+      await settings.list();
+      expect(fetchCalls).toHaveLength(4);
+      for (const call of fetchCalls) {
+        expect(call.url.startsWith("/api/")).toBe(true);
+      }
+    });
+
+    it("exposes origin-relative export and SSE urls", () => {
+      const urls = [
+        posts.exportMarkdown("post-1"),
+        posts.exportHtml("post-1"),
+        posts.exportAll("post-1"),
+        sseUrl.post("post-1"),
+        sseUrl.global(),
+      ];
+      for (const url of urls) {
+        expect(url.startsWith("/api/")).toBe(true);
+      }
+    });
+
+    it("cannot be pointed at another host by NEXT_PUBLIC_API_URL", async () => {
+      // The env var was how the dashboard used to reach the Python API. It is
+      // gone, and no browser surface may resolve back onto a separate service.
+      vi.stubEnv("NEXT_PUBLIC_API_URL", "http://localhost:8055");
+      vi.resetModules();
+      try {
+        const reloaded = await import("./api");
+        expect(reloaded.sseUrl.global()).toBe("/api/events");
+        expect(reloaded.posts.exportAll("post-1")).toBe(
+          "/api/posts/post-1/export/all"
+        );
+        mockResponse.body = [];
+        await reloaded.profiles.list();
+        expect(fetchCalls[0].url).toBe("/api/profiles");
+      } finally {
+        vi.unstubAllEnvs();
+        vi.resetModules();
+      }
     });
   });
 

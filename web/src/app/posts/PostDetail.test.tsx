@@ -33,13 +33,13 @@ vi.mock("@/lib/api", async () => {
       restart: vi.fn(),
       analytics: vi.fn(),
       publish: vi.fn(),
-      exportMarkdown: (id: string) => `http://localhost:8055/api/posts/${id}/export/markdown`,
-      exportHtml: (id: string) => `http://localhost:8055/api/posts/${id}/export/html`,
-      exportAll: (id: string) => `http://localhost:8055/api/posts/${id}/export/all`,
+      exportMarkdown: (id: string) => `/api/posts/${id}/export/markdown`,
+      exportHtml: (id: string) => `/api/posts/${id}/export/html`,
+      exportAll: (id: string) => `/api/posts/${id}/export/all`,
     },
     sseUrl: {
-      post: (id: string) => `http://localhost:8055/api/events/${id}`,
-      global: () => `http://localhost:8055/api/events`,
+      post: (id: string) => `/api/events/${id}`,
+      global: () => `/api/events`,
     },
   };
 });

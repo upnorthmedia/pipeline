@@ -231,3 +231,185 @@ $ npx vitest run --reporter=dot
 The 9 failures are the known pre-existing set on this tree: 6 in
 `components/__tests__/image-preview.test.tsx` and 3 in `PostDetail.test.tsx`, both recorded in
 earlier iterations and unchanged by this item.
+
+## 7.1b
+
+Default the dashboard's `API_BASE` to its own origin instead of `http://localhost:8055`.
+
+### What changed
+
+`API_BASE` is gone rather than re-pointed. The dashboard and its route handlers are one
+Next.js app, so there is no second origin left to name, and keeping the env var would keep a
+live channel back to the Python service that a stray `.env` could reopen.
+
+| File | Before | After |
+| --- | --- | --- |
+| `web/src/lib/api.ts` | `fetch(\`${API_BASE}${path}\`)`, export and SSE urls prefixed | `fetch(path)`, urls origin-relative |
+| `web/src/components/content-preview.tsx` | `resolveImageSrc()` prefixed `/media/...` | the markdown `img` uses `src` as written |
+| `web/src/components/image-preview.tsx` | `src={\`${API_BASE}${entry.url}\`}` | `src={entry.url}` |
+| `web/Dockerfile` | `ARG`/`ENV NEXT_PUBLIC_API_URL` | removed, nothing reads it |
+| `docker-compose.yml` | `NEXT_PUBLIC_API_URL: http://localhost:8055` on `web` | removed |
+| `docker-compose.prod.yml` | `NEXT_PUBLIC_API_URL` build arg on `web` | removed |
+
+`resolveImageSrc()` was deleted rather than reduced to an identity function: with no rewriting
+left to do it carried no meaning.
+
+The only remaining mention of the env var in the tree is the tripwire test that asserts it has
+no effect:
+
+```
+$ grep -rn "NEXT_PUBLIC_API_URL" --exclude-dir=node_modules --exclude-dir=.git \
+    --exclude-dir=.next --exclude-dir=.gnhf --exclude-dir=docs .
+web/src/lib/api.test.ts:286:    it("cannot be pointed at another host by NEXT_PUBLIC_API_URL", async () => {
+web/src/lib/api.test.ts:289:      vi.stubEnv("NEXT_PUBLIC_API_URL", "http://localhost:8055");
+```
+
+The `8055` references that remain in `docker-compose.yml` and `docker-compose.prod.yml` are the
+Python `api` service's own port and healthcheck, which 7.1c deletes, and `README.md`'s
+architecture diagram, which 7.4 rewrites.
+
+### Live evidence
+
+`next dev` started with the repo `.env` sourced and **no** `NEXT_PUBLIC_API_URL` set anywhere
+(the whole point: iteration 136 had to pass `NEXT_PUBLIC_API_URL=http://localhost:3000` by hand
+or every page threw load-failure toasts). A real BetterAuth session row was minted with
+`src/test/session.ts` and its signed cookie set in the browser, then the posts list opened:
+
+```
+$ npx -y chrome-devtools-axi open http://localhost:3000/
+page:
+  title: Content Crew
+  url: "http://localhost:3000/"
+uid=g1758:2_17 main
+  uid=g1758:2_18 heading "Posts" level="1"
+  uid=g1758:2_19 StaticText "0"
+  uid=g1758:2_20 StaticText " total posts"
+
+$ npx -y chrome-devtools-axi network --type fetch
+reqid=90 GET http://localhost:3000/api/auth/get-session [200]
+reqid=91 GET http://localhost:3000/api/posts [200]
+reqid=92 GET http://localhost:3000/api/profiles [200]
+reqid=93 GET http://localhost:3000/api/posts [200]
+reqid=94 GET http://localhost:3000/api/profiles [200]
+
+$ npx -y chrome-devtools-axi network --type eventsource
+reqid=96 GET http://localhost:3000/api/events [200]
+
+$ npx -y chrome-devtools-axi console
+msgid=10 [issue] A form field element should have an id or name attribute (count: 1)
+msgid=11 [log] [Fast Refresh] rebuilding (1 args)
+msgid=12 [log] [Fast Refresh] done in 427ms (1 args)
+```
+
+Every data request and the SSE stream resolve onto `localhost:3000`, the dashboard's own
+origin, and the list renders its real (empty, for a fresh user) result rather than an error.
+No console errors. The `0 total posts` is correct: the browser-check user owns no profiles.
+The session user was deleted afterwards (`leftover_browsercheck_users=0`) and the bridge
+stopped.
+
+### Tests
+
+```
+$ pnpm exec vitest run src/lib/api.test.ts \
+    src/components/__tests__/content-preview-media.test.tsx \
+    src/components/__tests__/image-preview.test.tsx \
+    src/hooks/use-sse.test.ts src/app/settings/
+ Test Files  1 failed | 6 passed (7)
+      Tests  6 failed | 87 passed (93)
+```
+
+The 6 failures are the known pre-existing `image-preview.test.tsx` set (a manifest-shape
+mismatch: those cases pass `{featured: {...}}` where the component reads `manifest.images`).
+They are unrelated to this item and are left as recorded.
+
+New coverage:
+
+| Test | What it pins |
+| --- | --- |
+| `api.test.ts > sends every request as an origin-relative path` | four namespaces, every url starts `/api/` |
+| `api.test.ts > exposes origin-relative export and SSE urls` | the five url-returning helpers |
+| `api.test.ts > cannot be pointed at another host by NEXT_PUBLIC_API_URL` | stubs the env var, re-imports the module, asserts request/export/SSE urls stay relative |
+| `content-preview-media.test.tsx > renders a /media image with an origin-relative src` | the markdown `img` mapping, with `react-markdown` **not** mocked |
+| `content-preview-media.test.tsx > leaves an absolute image url untouched` | a remote `https://` image is not rewritten |
+| `content-preview-media.test.tsx > cannot be pointed at another host ...` | env tripwire on the markdown image path |
+| `image-preview.test.tsx > renders a generated image with an origin-relative src` | the manifest `images[]` shape the stage actually writes |
+| `image-preview.test.tsx > cannot be pointed at another host ...` | env tripwire on the manifest image path |
+
+`content-preview.test.tsx` mocks `react-markdown` wholesale, which replaces the very component
+mapping that resolves an image source, so the media assertions needed their own file without
+that mock.
+
+Existing files updated: `use-sse.test.ts` (uses the real `sseUrl`, so its url assertions moved
+to relative), and `PostDetail.test.tsx` / `QueueMonitor.test.tsx` / `export-button.test.tsx`
+(their `@/lib/api` mocks hardcoded `:8055` urls, kept honest by moving them too).
+`stage-models-to-provider.test.tsx`'s fetch router now resolves the dashboard's relative paths
+against a placeholder origin before routing, since both `new URL()` and `new Request()` reject
+a bare path.
+
+### Negative controls
+
+Each mutation was applied, the suite run, then the file restored from a backup and re-read.
+Verdicts are by exit code (iteration 135's learning: grepping vitest's summary line reads
+`Failed Tests 1` as a pass). Controls: the unmutated selection exits 0, and for
+`image-preview.test.tsx`, whose 6 pre-existing failures make a whole-file exit code useless,
+the run is filtered with `-t "NEXT_PUBLIC_API_URL|origin-relative"` and that filtered control
+also exits 0.
+
+| # | Mutation | Result |
+| --- | --- | --- |
+| M1 | `request()` prefixes `http://localhost:8055` | KILLED |
+| M2 | `request()` reads `NEXT_PUBLIC_API_URL` again | KILLED |
+| M3 | `sseUrl.global()` returns an absolute url | KILLED |
+| M4 | `posts.exportAll()` reads `NEXT_PUBLIC_API_URL` again | KILLED |
+| M5 | markdown `img` prefixes `http://localhost:8055` | KILLED |
+| M6 | manifest `img` prefixes `http://localhost:8055` | KILLED |
+| M7 | markdown `img` reads `NEXT_PUBLIC_API_URL` again | KILLED |
+| M8 | manifest `img` reads `NEXT_PUBLIC_API_URL` again | KILLED |
+
+M2 survived the first sweep: the tripwire test only checked the two url-returning helpers, so
+a `request()` that read an unset env var still produced a relative path. The test now also
+drives a real `profiles.list()` under the stubbed env, which kills it. M7 and M8 did not exist
+until the same gap was found on the two image paths.
+
+M1 in full, as the representative:
+
+```
+$ pnpm exec vitest run src/lib/api.test.ts     # with fetch(`http://localhost:8055${path}`)
+       × sends GET requests with correct URL 3ms
+       × sends POST requests with JSON body 0ms
+       × sends PATCH requests with JSON body 0ms
+       × sends DELETE requests 0ms
+       × omits empty parameters 0ms
+       × creates a post 0ms
+       × duplicates a post 0ms
+       × runs next stage 0ms
+```
+
+### Gates
+
+```
+$ pnpm -C web tsc --noEmit
+tsc exit=0
+$ pnpm -C web lint
+lint exit=0
+$ pnpm -C web build
+✓ Compiled successfully in 3.7s
+$ pnpm -C web test
+ Test Files  2 failed | 131 passed (133)
+      Tests  9 failed | 4491 passed | 7 skipped (4507)
+```
+
+The 9 failures are the known pre-existing set on this tree: 6 in `image-preview.test.tsx` and
+3 in `PostDetail.test.tsx` (`Unable to find an element with the text: Final` / `Run Next` /
+`Execution Logs`, none url-related). An earlier full run in this iteration also tripped the
+known load-dependent flake in `mastra/workflows/scaffold-check.test.ts`, which passes alone
+(`5 passed`).
+
+`api/` was not touched by this item, so its gates are unchanged (`git status --porcelain`
+lists no path under `api/`).
+
+`pnpm -C web test:e2e` was run because this item changes every url the browser requests. It
+ended `4 passed (7.4m)` with failures across all four spec files. Reproduced in isolation, the
+first one is expectation drift, not a regression: it waits for a sidebar item named "Monitor"
+while the sidebar renders "Observability", and the page loaded normally. No Phase 0 baseline
+was ever recorded for this gate; logged in `todo.md` for item 9.1.

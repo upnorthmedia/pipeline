@@ -10,8 +10,6 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8055";
-
 interface ImageEntry {
   id?: string;
   type?: string;
@@ -178,7 +176,7 @@ export function ImagePreview({ manifest, className }: ImagePreviewProps) {
                   <div className="relative aspect-video rounded-md overflow-hidden bg-muted">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={`${API_BASE}${entry.url}`}
+                      src={entry.url}
                       alt={entry.alt_text || label}
                       className="object-cover w-full h-full"
                     />

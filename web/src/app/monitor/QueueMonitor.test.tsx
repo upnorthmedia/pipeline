@@ -23,8 +23,8 @@ vi.mock("@/lib/api", async () => {
       list: vi.fn().mockResolvedValue([]),
     },
     sseUrl: {
-      global: () => "http://localhost:8055/api/events",
-      post: (id: string) => `http://localhost:8055/api/events/${id}`,
+      global: () => "/api/events",
+      post: (id: string) => `/api/events/${id}`,
     },
   };
 });

@@ -5,14 +5,6 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8055";
-
-function resolveImageSrc(src: string | undefined): string {
-  if (!src) return "";
-  if (src.startsWith("/media/")) return `${API_BASE}${src}`;
-  return src;
-}
-
 const markdownComponents: Components = {
   h1: ({ children }) => (
     <h1 className="text-3xl font-bold tracking-tight mt-10 mb-4">{children}</h1>
@@ -71,7 +63,7 @@ const markdownComponents: Components = {
   img: ({ src, alt }) => (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={resolveImageSrc(typeof src === "string" ? src : undefined)}
+      src={typeof src === "string" ? src : ""}
       alt={alt || ""}
       className="rounded-lg my-8 w-full shadow-sm"
       loading="lazy"
