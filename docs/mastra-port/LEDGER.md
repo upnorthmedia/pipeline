@@ -11484,7 +11484,17 @@ three pieces are separately verifiable, so they are separate items.
 
       The three Python numbers are the recorded baseline, unchanged. Requires
       `set -a; . ./.env; set +a` first.
-- [ ] 5.5 `events` (SSE keeps `web/src/hooks/use-sse.ts`'s existing message shape; sourced from
+- [x] 5.5 `events` (all five sub-items done: 5.5a the bus plus `stage_start`, 5.5b
+  `stage_complete`/`pipeline_complete`/`stage_error`, 5.5c `execution_logs` and the `log`
+  event across all 31 Python call sites, 5.5d the two SSE route handlers, 5.5e resumable
+  replay end to end. `api/src/api/events.py` and `publish_event()` are fully ported: the
+  message shape `use-sse.ts` parses is unchanged, the source is the Redis Streams topic
+  rather than an in-process stream, and the replay is the anchor scheme in 5.5e rather
+  than Mastra's own resumable stream, which the transport does not expose to a
+  subscriber. What is not proven here is the dashboard running against these handlers in
+  a real browser with the Python API stopped; that is Phase 8's job and item 8.1 owns
+  it.)
+  (SSE keeps `web/src/hooks/use-sse.ts`'s existing message shape; sourced from
   the Redis Streams pub/sub topic, not an in-process stream; uses Mastra resumable-stream
   replay; test disconnects and reconnects mid-run and asserts no gap in the event sequence)
 
@@ -14678,8 +14688,13 @@ three pieces are separately verifiable, so they are separate items.
       `.env` first, every database test fails with
       `asyncpg.exceptions.InvalidPasswordError` and the run reports 177 errors instead
       of the baseline 25. That is the environment, not a regression.
-  - [ ] 5.5e Resumable replay: a browser that reconnects mid-run recovers the events it
+  - [x] 5.5e Resumable replay: a browser that reconnects mid-run recovers the events it
     missed. Test disconnects and reconnects mid-run and asserts no gap in the sequence.
+    (All three sub-items done: 5.5e-i the `id:` anchor on every frame, 5.5e-ii the
+    server-side skip-to-anchor replay in both handlers, 5.5e-iii the client that carries
+    the anchor across its own reconnect. The no-gap test the item asks for is
+    `it("resumes where the client stopped, with no gap across the disconnect")` in
+    `web/src/app/api/events/events.test.ts`, under 5.5e-ii.)
 
     Split, because the installed transport does not offer the resume primitive this item
     assumed and the replacement is three separable pieces. `SubscribeOptions` in
@@ -15107,9 +15122,162 @@ three pieces are separately verifiable, so they are separate items.
       $ cd api && uv run ruff format --check .
       9 files would be reformatted, 131 files already formatted
       ```
-    - [ ] 5.5e-iii `use-sse.ts` carries the anchor across the reconnect it performs
+    - [x] 5.5e-iii `use-sse.ts` carries the anchor across the reconnect it performs
       itself: record `MessageEvent.lastEventId` per delivered event and put it on the URL
       of the next `EventSource`, because a fresh `EventSource` sends no `Last-Event-ID`.
+
+      `web/src/hooks/use-sse.ts` now keeps `lastEventId` beside `source` inside the
+      effect, sets it from every delivered frame, and builds the next `EventSource`'s URL
+      with `?last_event_id=<anchor>` when it holds one. Four decisions in that sentence
+      are load-bearing:
+
+      - **The parameter name is imported, not spelled again.** The hook reads
+        `LAST_EVENT_ID_PARAM` from `web/src/app/api/events/anchor.ts`, the same constant
+        `requestAnchor()` looks the parameter up with. A literal in each file would be
+        two independent spellings of one wire contract, and a typo in either would fail
+        silently: the client would ask for a replay and the server would answer with a
+        live-only stream, which is exactly the pre-5.5e behaviour and so invisible.
+        `anchor.ts` has no server-only import and its single `@mastra/core/events` import
+        is `import type`, so the client bundle takes nothing but the two string constants
+        and the pure functions. `pnpm build` below is the proof it links.
+      - **The anchor is a plain `let` inside the effect, not a ref outside it.** A ref
+        would survive a `postId` change, and the two feeds are filters over one topic, so
+        an anchor carried from `post-1` into `post-2` would open the new page on every
+        retained `post-2` event since that timestamp. Negative control 1 below is that
+        exact mistake.
+      - **It advances before the JSON parse, not after.** The browser's own
+        `Last-Event-ID` buffer is set from the `id:` field regardless of what `data`
+        holds, and a frame this hook cannot read is still a frame the server does not
+        need to send again. Tracking inside the `try` would leave the anchor stuck behind
+        an unreadable frame and replay it on every future reconnect. Negative control 4.
+      - **An id-less frame leaves the anchor alone.** `eventAnchor()` omits `id:` for an
+        event the transport did not stamp (5.5e-i), so a frame with no id is not a
+        position; `MessageEvent.lastEventId` is `""` there, and overwriting with it would
+        throw away a real position and restart the replay from the beginning of the
+        retained stream. Negative control 3.
+
+      The client half now meets the server half: item 5.5e-ii's
+      `it("takes the query parameter, which is the path useSSE() will use")` asserts
+      `requestAnchor()` reads what this builds, and
+      `it("resumes where the client stopped, with no gap across the disconnect")` asserts
+      the handler answers it with the missed events and no gap.
+
+      **The seven tests failed first**, with the hook at `HEAD` and the new tests in
+      place. Five of the seven; the other two are guards that a correct implementation
+      and a missing implementation both pass, and negative controls 1 and 2 give them
+      their teeth:
+
+      ```
+      $ git show HEAD:web/src/hooks/use-sse.ts > web/src/hooks/use-sse.ts
+      $ cd web && pnpm vitest run src/hooks/use-sse.test.ts --no-color
+           x puts the last delivered event's id on the URL of the next EventSource 3ms
+           x takes the anchor from a named event too, not only from an unnamed one 1ms
+           x advances the anchor rather than accumulating parameters across two reconnects 1ms
+           x keeps the previous anchor when a frame arrives without an id 1ms
+           x advances the anchor on a frame whose data does not parse, as the browser's own buffer does 1ms
+       Test Files  1 failed (1)
+      ```
+
+      (`x` above transcribes the multiplication sign vitest prints for a failed test.)
+
+      ### `cd web && pnpm vitest run src/hooks/use-sse.test.ts --no-color --reporter=verbose` -> **exit 0**
+
+      ```
+       + src/hooks/use-sse.test.ts > useSSE > connects to global SSE endpoint when no postId 9ms
+       + src/hooks/use-sse.test.ts > useSSE > connects to post-specific SSE endpoint 2ms
+       + src/hooks/use-sse.test.ts > useSSE > sets connected to true on open 53ms
+       + src/hooks/use-sse.test.ts > useSSE > receives message events and updates lastEvent 54ms
+       + src/hooks/use-sse.test.ts > useSSE > receives named events and sets event type 5ms
+       + src/hooks/use-sse.test.ts > useSSE > calls onEvent callback for message events 53ms
+       + src/hooks/use-sse.test.ts > useSSE > reconnects after error 2ms
+       + src/hooks/use-sse.test.ts > useSSE > cleans up EventSource on unmount 2ms
+       + src/hooks/use-sse.test.ts > useSSE > reconnects with new EventSource when postId changes 2ms
+       + src/hooks/use-sse.test.ts > useSSE > ignores malformed JSON in messages 53ms
+       + src/hooks/use-sse.test.ts > useSSE replay anchor > opens the first connection with no anchor, because it has missed nothing 1ms
+       + src/hooks/use-sse.test.ts > useSSE replay anchor > puts the last delivered event's id on the URL of the next EventSource 1ms
+       + src/hooks/use-sse.test.ts > useSSE replay anchor > takes the anchor from a named event too, not only from an unnamed one 1ms
+       + src/hooks/use-sse.test.ts > useSSE replay anchor > advances the anchor rather than accumulating parameters across two reconnects 1ms
+       + src/hooks/use-sse.test.ts > useSSE replay anchor > keeps the previous anchor when a frame arrives without an id 1ms
+       + src/hooks/use-sse.test.ts > useSSE replay anchor > advances the anchor on a frame whose data does not parse, as the browser's own buffer does 1ms
+       + src/hooks/use-sse.test.ts > useSSE replay anchor > does not carry an anchor across a postId change, which is a different feed 1ms
+       Test Files  1 passed (1)
+            Tests  17 passed (17)
+      ```
+
+      (`+` above transcribes the check mark vitest prints for a passing test.)
+
+      **Six negative controls.** Each is one edit to the shipped hook, run against the
+      unmodified test file and reverted afterwards. Every one fails the test that
+      describes it and nothing else, except control 2, which is caught by two
+      pre-existing url assertions as well:
+
+      ```
+      --- anchor hoisted out of the effect, so it survives a postId change
+          x does not carry an anchor across a postId change, which is a different feed 3ms
+         Tests  1 failed | 16 passed (17)
+      --- parameter appended unconditionally, so the first connection asks for a replay
+          x connects to global SSE endpoint when no postId 9ms
+          x connects to post-specific SSE endpoint 3ms
+          x opens the first connection with no anchor, because it has missed nothing 1ms
+          x does not carry an anchor across a postId change, which is a different feed 1ms
+         Tests  4 failed | 13 passed (17)
+      --- anchor overwritten by an id-less frame
+          x keeps the previous anchor when a frame arrives without an id 3ms
+         Tests  1 failed | 16 passed (17)
+      --- anchor tracked after the JSON parse, so an unreadable frame does not advance it
+          x advances the anchor on a frame whose data does not parse, as the browser's own buffer does 3ms
+         Tests  1 failed | 16 passed (17)
+      --- named events not tracked, only unnamed ones
+          x takes the anchor from a named event too, not only from an unnamed one 3ms
+         Tests  1 failed | 16 passed (17)
+      --- parameter concatenated onto the effect's url instead of a fresh string
+          x advances the anchor rather than accumulating parameters across two reconnects 3ms
+         Tests  1 failed | 16 passed (17)
+      ```
+
+      **Test-output noise.** The seven new tests advance fake timers inside `act()`, so
+      none of them emits React's "not wrapped in act(...)" warning. One such warning
+      remains in this file, from the pre-existing `reconnects after error` test, which
+      advances its first timer outside `act()`. It is untouched and pre-existing:
+
+      ```
+      $ cd web && pnpm vitest run src/hooks/use-sse.test.ts 2>&1 | grep -c "not wrapped in act"
+      1
+      ```
+
+      ### Gates
+
+      ```
+      $ cd web && pnpm exec tsc --noEmit
+      tsc exit=0
+
+      $ cd web && pnpm lint
+      > content-pipeline-dashboard@0.1.0 lint
+      > eslint
+      lint exit=0
+
+      $ cd web && pnpm test
+       Test Files  2 failed | 92 passed (94)
+            Tests  9 failed | 1728 passed | 7 skipped (1744)
+
+      $ cd web && pnpm build
+      build exit=0
+
+      $ set -a && . ./.env && set +a && cd api && uv run pytest -q
+      120 failed, 241 passed, 25 errors in 14.98s
+      ```
+
+      `pnpm test`'s 9 failures are the Phase 0 baseline exactly (the 6 known
+      `image-preview` failures plus the 3 in the same pair of files); pytest matches
+      item 5.5e-ii's numbers to the test, which is expected because this iteration
+      changed no Python and no shared TypeScript: `git diff --stat` is
+      `web/src/hooks/use-sse.test.ts` and `web/src/hooks/use-sse.ts` only.
+
+      **Not covered.** No browser drives this. The proof is jsdom plus a mock
+      `EventSource`, which is the right level for "what URL does the second connection
+      use", but it does not prove a real Chrome reconnect recovers a real run's trace.
+      That check belongs to Phase 8, where item 8.1's run-trace view is exercised
+      against a live run with `chrome-devtools-axi`.
 - [ ] 5.6 `rules`
 - [ ] 5.7 `links`
 - [ ] 5.8 `analytics`
