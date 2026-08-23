@@ -505,3 +505,29 @@
   pastes a pytest count depends on the caller remembering to source `.env`, so the defaults
   in `conftest.py` should either match the compose file or be removed so a missing variable
   fails loudly instead of authenticating as the wrong user.
+- [confirmed] 2026-08-23 `GET /api/profiles/{profile_id}/wordpress/categories` and
+  `/authors` answer a 500 for every failure the WordPress install reports, because
+  `api/src/api/wordpress.py` catches no `WordPressError` in either handler. A profile with
+  an expired application password, a user without `list_users` capability, or a site behind
+  a login wall all surface in the dashboard's category and author pickers as a bare server
+  error with no reason attached, while `/test` on the same profile reports the real message.
+  The same two handlers also 500 on a WordPress payload missing `id`, `name` or `slug`,
+  because the projection subscripts rather than `.get`s. Both reproduced faithfully in
+  `web/src/app/api/profiles/[id]/wordpress/` while porting ledger item 5.9b; the fix is to
+  catch `WordPressError` and answer a 502 carrying `error.message`, which changes a
+  documented response shape and so belongs with the Phase 8 pass over the profile page.
+- [confirmed] 2026-08-23 `GET /api/profiles/{profile_id}/wordpress/test` answers a 500,
+  not `{connected: false}`, when the configured `wp_url` serves valid JSON that is not an
+  object at `/wp-json`: `info.get("name", "")` raises `AttributeError` and the handler's
+  `except WordPressError` does not cover it. A parked domain returning `[]` or `null` is the
+  realistic trigger. Reproduced in the port (ledger item 5.9b) with three oracle scenarios
+  so the behaviour is pinned rather than accidental; the one-line fix is to widen the
+  `except`, which changes the response for that input and needs a UI decision first.
+- [investigate] 2026-08-23 `src/mastra/workflows/scaffold-check.test.ts > emits the
+  workflow lifecycle events the trace view will read` fails intermittently inside a full
+  `pnpm test` run (asserting the collected event types contain `workflow-step-start`) and
+  passes 5/5 every time the file is run alone. Two consecutive full runs during ledger item
+  5.9b gave 10 failures and then the 9-failure baseline, with only this test differing.
+  Suspected cross-file contention on the shared Mastra instance or the Redis Streams topic
+  rather than a defect in the workflow; it inflates the frontend baseline and needs pinning
+  down before Phase 9 treats 9 as an exact number.

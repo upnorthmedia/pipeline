@@ -17171,9 +17171,12 @@ three pieces are separately verifiable, so they are separate items.
 
       Python counts unchanged from those recorded under 5.8a to 5.8d-i. No Python
       changed in this iteration.
-- [ ] 5.9 `wordpress` (split: three endpoints sitting on a REST client that has no
+- [x] 5.9 `wordpress` (split: three endpoints sitting on a REST client that has no
   TypeScript equivalent at all, so the client has to land before the handlers can.
-  Split into 5.9a the client's read half, 5.9b the three route handlers.)
+  Split into 5.9a the client's read half, 5.9b the three route handlers.) Closed by
+  5.9b: both sub-items are checked with their own evidence, and
+  `GET /api/profiles/{profile_id}/wordpress/{test,categories,authors}` are all served
+  from `web/src/app/api/profiles/[id]/wordpress/`.
   - [x] 5.9a The read half of `api/src/services/wordpress.py`, ported to TypeScript.
 
     Ported to `web/src/mastra/wordpress/index.ts`: `WordPressError`, the constructor's
@@ -17463,12 +17466,259 @@ three pieces are separately verifiable, so they are separate items.
     "pipeline"`, because `api/tests/conftest.py` falls back to defaults that no longer
     match the running container. Recorded in `todo.md` as `[investigate]`; every earlier
     ledger entry that pastes a pytest count depends on the caller remembering this.
-  - [ ] 5.9b The three route handlers,
+  - [x] 5.9b The three route handlers,
     `GET /api/profiles/{profile_id}/wordpress/{test,categories,authors}`, on top of
     5.9a's client. Includes `_get_wp_client`'s two 400s (missing credentials, and a
     `wp_app_password` that will not decrypt), `_get_user_profile`'s user-scoped 404, and
     the fact that `/test` swallows both of those into `{connected: false, error}` while
     `/categories` and `/authors` let them out as real 400s.
+
+    Ported to `web/src/app/api/profiles/[id]/wordpress/{test,categories,authors}/route.ts`
+    over `web/src/app/api/profiles/[id]/wordpress/client.ts`, which is
+    `_get_user_profile` and `_get_wp_client` folded into one lookup because both read
+    the same row. The order is unchanged: the profile is resolved against the caller
+    first, so another user's profile is a 404 and no request is made to their
+    WordPress install, and only then are the credentials examined.
+
+    `resolveWpClient` answers a three-way union rather than throwing, because the three
+    callers disagree about what the credential failures mean. `/test` reports both of
+    them, and every `WordPressError`, as a 200 carrying `{connected: false, error}`;
+    `/categories` and `/authors` catch nothing at all, so the same two failures are
+    400s and a `WordPressError` from the install escapes as a 500.
+
+    **The oracle is a live-server capture of the real endpoint coroutines.**
+    `api/scripts/export_wordpress_router_parity.py` drives `test_connection`,
+    `list_categories` and `list_authors` themselves, with a stubbed session standing in
+    for the `_get_user_profile` query and a local HTTP server standing in for the
+    WordPress install, and records per scenario the profile row, every request the
+    stand-in saw, and the value returned or the exception raised. `api/tests/phase10/`
+    has no coverage of this router at all, so all 36 scenarios are new on both sides.
+    The Fernet key in the oracle is a throwaway generated for the file (32 bytes of
+    0x07); no real credential is involved.
+
+    ```
+    $ cd api && uv run python scripts/export_wordpress_router_parity.py
+    local server on {BASE}
+      test-success: 1 request(s), returned {"connected": true, "site_name": "Test Site"}
+      test-success-name-absent: 1 request(s), returned {"connected": true, "site_name": ""}
+      test-success-name-null: 1 request(s), returned {"connected": true, "site_name": null}
+      test-success-name-not-a-string: 1 request(s), returned {"connected": true, "site_name": 1234}
+      test-success-through-stripped-wp-admin: 1 request(s), returned {"connected": true, "site_name": "Stripped"}
+      test-401-message-swallowed: 1 request(s), returned {"connected": false, "error": "WordPress API error: You are not curren
+      test-404-html-swallowed: 1 request(s), returned {"connected": false, "error": "WordPress API error: <html><body>nginx:
+      test-non-json-200-swallowed: 1 request(s), returned {"connected": false, "error": "WordPress returned non-JSON response \u
+      test-root-returns-json-array: 1 request(s), unhandled AttributeError: 'list' object has no attribute 'get'
+      test-root-returns-json-null: 1 request(s), unhandled AttributeError: 'NoneType' object has no attribute 'get'
+      test-root-returns-json-string: 1 request(s), unhandled AttributeError: 'str' object has no attribute 'get'
+      test-profile-not-found: 0 request(s), HTTPException 404: Profile not found
+      test-no-url: 0 request(s), returned {"connected": false, "error": "WordPress credentials not configured on
+      test-empty-url: 0 request(s), returned {"connected": false, "error": "WordPress credentials not configured on
+      test-no-username: 0 request(s), returned {"connected": false, "error": "WordPress credentials not configured on
+      test-empty-username: 0 request(s), returned {"connected": false, "error": "WordPress credentials not configured on
+      test-no-password: 0 request(s), returned {"connected": false, "error": "WordPress credentials not configured on
+      test-empty-password: 0 request(s), returned {"connected": false, "error": "WordPress credentials not configured on
+      test-undecryptable-password: 0 request(s), returned {"connected": false, "error": "Failed to decrypt WordPress app passwor
+      test-unset-encryption-key: 0 request(s), returned {"connected": false, "error": "Failed to decrypt WordPress app passwor
+      categories-success: 1 request(s), returned [{"id": 1, "name": "Uncategorized", "slug": "uncategorized", "count":
+      categories-count-absent-defaults-to-zero: 1 request(s), returned [{"id": 3, "name": "No Count", "slug": "no-count", "count": 0}]
+      categories-count-null-is-not-defaulted: 1 request(s), returned [{"id": 5, "name": "Null Count", "slug": "null-count", "count": null}]
+      categories-count-not-an-int-passes-through: 1 request(s), returned [{"id": 4, "name": "Stringy", "slug": "stringy", "count": "9"}]
+      categories-empty: 1 request(s), returned []
+      categories-missing-id-raises: 1 request(s), unhandled KeyError: 'id'
+      categories-401-escapes: 1 request(s), unhandled WordPressError: WordPress API error: Sorry, you are not allowed to do that.
+      categories-profile-not-found: 0 request(s), HTTPException 404: Profile not found
+      categories-no-credentials: 0 request(s), HTTPException 400: WordPress credentials not configured on this profile
+      categories-undecryptable-password: 0 request(s), HTTPException 400: Failed to decrypt WordPress app password [em dash] check WP_ENCRYPTION_KEY
+      authors-success: 1 request(s), returned [{"id": 1, "name": "Site Admin", "slug": "admin"}, {"id": 5, "name": "
+      authors-empty: 1 request(s), returned []
+      authors-missing-slug-raises: 1 request(s), unhandled KeyError: 'slug'
+      authors-403-escapes: 1 request(s), unhandled WordPressError: WordPress API error: Sorry, you are not allowed to list users.
+      authors-profile-not-found: 0 request(s), HTTPException 404: Profile not found
+      authors-no-password: 0 request(s), HTTPException 400: WordPress credentials not configured on this profile
+    wrote .../web/src/app/api/profiles/data/wordpress-router-parity.json (36 scenarios)
+    ```
+
+    (The one `[em dash]` above stands in for the literal character in the Python
+    detail string; the ledger keeps no em dashes, the code copies it verbatim.)
+
+    **Four decisions the Python forces, each pinned by its own scenario:**
+
+    - **`c.get("count", 0)` defaults an absent key and nothing else.** An explicit
+      `"count": null` comes back as `null`, and `"count": "9"` comes back as the
+      string. `count: "count" in item ? item.count : 0` reproduces both;
+      `item.count ?? 0` would not, and the `categories-count-null-is-not-defaulted`
+      scenario exists to make that distinguishable.
+    - **`c["id"]` is a subscript, not a `.get`.** Python raised `KeyError` for an item
+      missing `id`, `name` or `slug`, nothing caught it, and the request became a 500
+      with no partial list. JavaScript would read `undefined` and `Response.json`
+      would drop the key, answering 200 with items that do not match `WPCategory` or
+      `WPAuthor`, so `requireField()` reproduces the exception rather than the
+      expression.
+    - **`info.get("name", "")` is not a safe read either.** A `/wp-json` root that
+      answers with a JSON array, `null` or a string raised `AttributeError` in Python,
+      which `except WordPressError` did not catch. `siteName()` throws for the same
+      three inputs instead of quietly reporting `connected: true` with an empty name.
+      All three are captured as scenarios.
+    - **`if not profile.wp_url` treats an empty string as missing.** All three fields
+      are falsy tests, not null checks, so `""` is as unconfigured as `NULL`. Six
+      scenarios cover the null and empty spelling of each field.
+
+    **The two detail strings are copied byte for byte, em dash included**, because
+    `/test` hands them to the dashboard as `error` and `web/src/lib/api.ts` surfaces
+    the `detail` of the other two. The same precedent was set in 5.9a for
+    `"WordPress returned non-JSON response ... check that the site URL is correct"`.
+
+    **No deviations recorded.** Every one of the 36 scenarios matches, including the
+    two that end in an uncaught exception on both sides.
+
+    Failing first, with the three handlers replaced by 501 stubs:
+
+    ```
+    $ pnpm -C web vitest run 'src/app/api/profiles/[id]/wordpress/wordpress.test.ts' --reporter=dot
+     Test Files  1 failed (1)
+          Tests  70 failed | 15 passed (85)
+    ```
+
+    Passing, against the real database, real BetterAuth sessions and a real socket:
+
+    ```
+    $ pnpm -C web vitest run 'src/app/api/profiles/[id]/wordpress/wordpress.test.ts' --reporter=verbose
+     v .../wordpress.test.ts > the exported oracle > carries every scenario the export script ran 3ms
+     v 'test': 'test-success' > answers 200 with the value Python returned 28ms
+     v 'test': 'test-success' > issues the same requests Python's client issued 5ms
+     v 'test': 'test-success-name-absent' > answers 200 with the value Python returned 4ms
+     v 'test': 'test-success-name-null' > answers 200 with the value Python returned 4ms
+     v 'test': 'test-success-name-not-a-string' > answers 200 with the value Python returned 4ms
+     v 'test': 'test-success-through-stripped-wp-admin' > answers 200 with the value Python returned 4ms
+     v 'test': 'test-401-message-swallowed' > answers 200 with the value Python returned 3ms
+     v 'test': 'test-404-html-swallowed' > answers 200 with the value Python returned 3ms
+     v 'test': 'test-non-json-200-swallowed' > answers 200 with the value Python returned 3ms
+     v 'test': 'test-root-returns-json-array' > lets the AttributeError out, as Python did 3ms
+     v 'test': 'test-root-returns-json-null' > lets the AttributeError out, as Python did 3ms
+     v 'test': 'test-root-returns-json-string' > lets the AttributeError out, as Python did 3ms
+     v 'test': 'test-profile-not-found' > answers 404 with Python's detail 3ms
+     v 'test': 'test-no-url' > answers 200 with the value Python returned 3ms
+     v 'test': 'test-empty-url' > answers 200 with the value Python returned 3ms
+     v 'test': 'test-no-username' > answers 200 with the value Python returned 3ms
+     v 'test': 'test-empty-username' > answers 200 with the value Python returned 3ms
+     v 'test': 'test-no-password' > answers 200 with the value Python returned 3ms
+     v 'test': 'test-empty-password' > answers 200 with the value Python returned 3ms
+     v 'test': 'test-undecryptable-password' > answers 200 with the value Python returned 3ms
+     v 'test': 'test-unset-encryption-key' > answers 200 with the value Python returned 3ms
+     v 'categories': 'categories-success' > answers 200 with the value Python returned 9ms
+     v 'categories': 'categories-count-absent-defaults-to-z...' > answers 200 with the value Python returned 3ms
+     v 'categories': 'categories-count-null-is-not-defaulted' > answers 200 with the value Python returned 3ms
+     v 'categories': 'categories-count-not-an-int-passes-th...' > answers 200 with the value Python returned 3ms
+     v 'categories': 'categories-empty' > answers 200 with the value Python returned 3ms
+     v 'categories': 'categories-missing-id-raises' > lets the KeyError out, as Python did 3ms
+     v 'categories': 'categories-401-escapes' > lets the WordPressError out, as Python did 3ms
+     v 'categories': 'categories-profile-not-found' > answers 404 with Python's detail 2ms
+     v 'categories': 'categories-no-credentials' > answers 400 with Python's detail 2ms
+     v 'categories': 'categories-undecryptable-password' > answers 400 with Python's detail 3ms
+     v 'authors': 'authors-success' > answers 200 with the value Python returned 3ms
+     v 'authors': 'authors-empty' > answers 200 with the value Python returned 3ms
+     v 'authors': 'authors-missing-slug-raises' > lets the KeyError out, as Python did 3ms
+     v 'authors': 'authors-403-escapes' > lets the WordPressError out, as Python did 3ms
+     v 'authors': 'authors-profile-not-found' > answers 404 with Python's detail 2ms
+     v 'authors': 'authors-no-password' > answers 400 with Python's detail 2ms
+     v cases the oracle cannot reach > test rejects an unauthenticated request 1ms
+     v cases the oracle cannot reach > categories rejects an unauthenticated request 1ms
+     v cases the oracle cannot reach > authors rejects an unauthenticated request 1ms
+     v cases the oracle cannot reach > test answers a malformed path uuid with FastAPI's 422 1ms
+     v cases the oracle cannot reach > categories answers a malformed path uuid with FastAPI's 422 1ms
+     v cases the oracle cannot reach > authors answers a malformed path uuid with FastAPI's 422 3ms
+     v cases the oracle cannot reach > test answers a profile that does not exist with a 404 2ms
+     v cases the oracle cannot reach > categories answers a profile that does not exist with a 404 2ms
+     v cases the oracle cannot reach > authors answers a profile that does not exist with a 404 1ms
+     v cases the oracle cannot reach > test answers another user's fully configured profile with a 404, contacting nothing 2ms
+     v cases the oracle cannot reach > categories answers another user's profile with the same 404 as a missing one 2ms
+     v cases the oracle cannot reach > sends the Basic credential built from the decrypted app password 3ms
+
+     Test Files  1 passed (1)
+          Tests  85 passed (85)
+    ```
+
+    (Every scenario also has a second `issues the same requests Python's client issued`
+    test asserting the method, path, raw query string and `Authorization` header of
+    every request the stand-in saw; those 36 rows are elided above for length.)
+
+    **Negative controls.** Each mutation was applied to the implementation, checked
+    against a saved copy to prove it actually landed, the suite was run, and the file
+    was restored. 23 of 24 were caught.
+
+    | # | Mutation | Result |
+    | --- | --- | --- |
+    | 1 | drop the `user_id` predicate from the profile lookup | caught, 5 failed |
+    | 2 | treat an empty `wp_url` as configured (`=== null` instead of `!`) | caught, 1 failed |
+    | 3 | stop checking `wp_username` | caught, 4 failed |
+    | 4 | stop checking `wp_app_password` | caught, 3 failed |
+    | 5 | change the missing-credentials detail | caught, 8 failed |
+    | 6 | replace the em dash in the decrypt detail with a hyphen | caught, 3 failed |
+    | 7 | let a decrypt failure escape instead of becoming a 400 | caught, 3 failed |
+    | 8 | read a missing projection key as `undefined` instead of raising | caught, 2 failed |
+    | 9 | drop the `.limit(1)` on the profile lookup | **passed** |
+    | 10 | answer the credential 400s from `/test` instead of reporting them | caught, 8 failed |
+    | 11 | always report an empty `site_name` | caught, 7 failed |
+    | 12 | use `?? ""` instead of a key test for `site_name` | caught, 1 failed |
+    | 13 | swallow every error from `/test`, not just `WordPressError` | caught, 6 failed |
+    | 14 | accept a JSON array as the site root | caught, 1 failed |
+    | 15 | let `WordPressError` escape `/test` instead of reporting it | caught, 3 failed |
+    | 16 | skip the path uuid check on `/test` | caught, 1 failed |
+    | 17 | drop the authentication check on `/categories` | caught, 1 failed |
+    | 18 | always report a category `count` of zero | caught, 3 failed |
+    | 19 | default an absent category `count` to `null` rather than 0 | caught, 1 failed |
+    | 20 | return the credential failure as a 200 body from `/categories` | caught, 2 failed |
+    | 21 | pass the whole WordPress category through instead of projecting | caught, 2 failed |
+    | 22 | add a `count` to the author projection | caught, 1 failed |
+    | 23 | ask for every role rather than the default three | caught, 6 failed |
+    | 24 | answer a missing profile from `/authors` with a 400 instead of a 404 | caught, 2 failed |
+
+    **Control 9 is genuinely redundant, not untested code.** `website_profiles.id` is
+    the primary key (`id: uuid().defaultRandom().primaryKey().notNull()` in
+    `web/src/db/schema.ts`), so the predicate matches at most one row and `rows[0]`
+    picks it whether or not the planner is told to stop at one. The `.limit(1)` stays
+    for consistency with the other profile-scoped handlers, but no behaviour rests on
+    it. Controls 12 and 19 are the pair that only bite because the oracle carries the
+    `null` scenarios added for exactly that purpose; without them both mutations pass.
+
+    `NEXT_PUBLIC_API_URL` still points the dashboard at the Python API on :8055, so
+    there is no per-router UI check here either; it flips to same-origin once Phase 5
+    finishes, as recorded under 5.1b.
+
+    Gates, both stacks:
+
+    ```
+    $ pnpm -C web tsc --noEmit
+    TSC EXIT=0
+
+    $ pnpm -C web lint
+    LINT EXIT=0
+
+    $ pnpm -C web test
+     Test Files  2 failed | 101 passed (103)
+          Tests  9 failed | 2186 passed | 7 skipped (2202)
+    (the Phase 0 baseline: 6 in image-preview.test.tsx and 3 in PostDetail.test.tsx.
+    An earlier run of the same suite also failed
+    `scaffold-check.test.ts > emits the workflow lifecycle events the trace view will
+    read` for a total of 10; that file passes 5/5 in isolation and this change touches
+    nothing under `src/mastra/workflows/`. Logged in todo.md as a flake.)
+
+    $ pnpm -C web build
+    BUILD EXIT=0
+    v Compiled successfully in 4.3s
+    |- f /api/profiles/[id]/wordpress/authors
+    |- f /api/profiles/[id]/wordpress/categories
+    |- f /api/profiles/[id]/wordpress/test
+
+    $ cd api && uv run pytest -q          # with the repo .env sourced
+    120 failed, 241 passed, 25 errors in 15.06s
+
+    $ cd api && uv run ruff check .
+    Found 32 errors.
+
+    $ cd api && uv run ruff format --check .
+    9 files would be reformatted, 133 files already formatted
+    ```
 - [ ] 5.10 `nextjs` (HMAC signing from `hmac_signing.py` and the webhook contract with
   `packages/create-mdx-blog` preserved exactly)
 

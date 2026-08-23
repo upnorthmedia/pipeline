@@ -1,0 +1,932 @@
+{
+  "app_password": "abcd EFGH 1234 ijkl",
+  "encryption_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+  "generated_by": "api/scripts/export_wordpress_router_parity.py",
+  "profile_id": "22222222-2222-4222-8222-222222222222",
+  "python_version": "3.13.12",
+  "scenarios": [
+    {
+      "endpoint": "test",
+      "expected": {
+        "returned": {
+          "connected": true,
+          "site_name": "Test Site"
+        }
+      },
+      "name": "test-success",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7evwWEKkTfMfFd4i06-OwBMqiVHP41jBgkMdrtbHv6VTQjn5RFkkR6i2QGlB_iSktWBWiIeN0JQ536QJSaBvwbLJOyRahRKaFed-up0TP4TkU=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "{\"name\": \"Test Site\", \"description\": \"Just another site\"}",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "returned": {
+          "connected": true,
+          "site_name": ""
+        }
+      },
+      "name": "test-success-name-absent",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7e5qnZTq32vFOlUin4rMtolCm0F2bk5VjReFIIUknPXYzBuH1rzWcdU41_ArgTIlOXIX2_aiR8wBW__syYpdvKxwCYickm7NSKKrwVr9W8KTA=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "{\"description\": \"No name here\"}",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "returned": {
+          "connected": true,
+          "site_name": null
+        }
+      },
+      "name": "test-success-name-null",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7eGeO7-WRywdB08RSPxfUD_5qG8O2PgHtRiVRf1RCyvwQgGuaVwEMKOCTBKEVAA9jQWEjBrS4lJXFPWpzw7UT3UusIza5zvaQVXoyYL1oeI4Q=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "{\"name\": null}",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "returned": {
+          "connected": true,
+          "site_name": 1234
+        }
+      },
+      "name": "test-success-name-not-a-string",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7emcscX8eCgvjOfzvJMXTd_dD2eBIOmPGDgVmFTCOpsOrheDKgfPZLLgJ5l67v4-NzjoI3KM9F9LfkSKkWWYzkLX4RSxXWCzzdJAvrqKVXeeI=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "{\"name\": 1234}",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "returned": {
+          "connected": true,
+          "site_name": "Stripped"
+        }
+      },
+      "name": "test-success-through-stripped-wp-admin",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7eQrNgZ0wIaCHxHJymi2UPbdsBpiF5XZuODf7pEjnzBPUyOZ7m6No03zLPD29WuIBUJO4y7SZeCkvCt_JUxmWeJBSytQBbf2z3qe7GgjEkqYQ=",
+        "wp_url": "{BASE}/wp-admin",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "{\"name\": \"Stripped\"}",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "WordPress API error: You are not currently logged in."
+        }
+      },
+      "name": "test-401-message-swallowed",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7eAkoBQqBpGsj5zoAHu7vIHbYg_qNnVS8UfMP-cIfPzTvNPkiqwZMkdw_LIPOGwCbn9zKSKwMXDylZxAfPu9xofXCxwrt6wauajX9UXRJHsxM=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "{\"code\": \"rest_not_logged_in\", \"message\": \"You are not currently logged in.\", \"data\": {\"status\": 401}}",
+          "content_type": "application/json",
+          "status": 401
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "WordPress API error: <html><body>nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: n"
+        }
+      },
+      "name": "test-404-html-swallowed",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7eLr6DZWi4pCDyaQg8GUOZ3Un6OAs6np_nkSteYB3jAVZV-v3OAwJIueNT4hBxV1Ifo2xEbHuxXnD713Yj9lQuNqnbl4ntY_SEo-EH8G8XPGo=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "<html><body>nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. nginx: not found. </body></html>",
+          "content_type": "text/html",
+          "status": 404
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "WordPress returned non-JSON response \u2014 check that the site URL is correct"
+        }
+      },
+      "name": "test-non-json-200-swallowed",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7eiHyToUJK3Wn-nX4kFJlt6vV0qnOx1XOVQr5ZM40uEL9BTZNwNvZTOh4Uen9wdoGn2M7FbHx3sC57r9Nb-nbZe9Cuv5_UdTYgODSqHrwdvj4=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "<html>a parked domain</html>",
+          "content_type": "text/html",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "message": "'list' object has no attribute 'get'",
+        "unhandled": "AttributeError"
+      },
+      "name": "test-root-returns-json-array",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7evE7acIlvjFbQyEL0PdgfGqlX3xFYxtdem6lZpUN2EENC5_UYBySSmJHuI_Ki_FUyNlWXlnlL6IQ0-ICX0vixvorOGhVEryttjEGLEQEVhtM=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "[{\"name\": \"not a site\"}]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "message": "'NoneType' object has no attribute 'get'",
+        "unhandled": "AttributeError"
+      },
+      "name": "test-root-returns-json-null",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7e6kC2o6PuEscxSLmlcgj3MGqBvAkgFl9L66dfKB8Zl5uAUevvZDRd-NneLInrRBAX80jimPE6Brju8-j7yvDhl_CmqXJ5HJjLYgv_C0Dq7d8=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "null",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "message": "'str' object has no attribute 'get'",
+        "unhandled": "AttributeError"
+      },
+      "name": "test-root-returns-json-string",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7em7VzV74Xw_98d87vYrgWkWbIwsO61ub8LcyIo0RKtL3tBpnXHJAmTw2Wqp7Vw_VhEXwS8d5518dZUmhoY5yw6avqM7leS_mniPeed1kIUtM=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "\"just a string\"",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "detail": "Profile not found",
+        "http_status": 404
+      },
+      "name": "test-profile-not-found",
+      "profile": null,
+      "requests": [],
+      "routes": {},
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "WordPress credentials not configured on this profile"
+        }
+      },
+      "name": "test-no-url",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7eYDrBhl3Az3nBMjOo9nZMCHez2IC-z5mgGhovvFZWOKVjVYvfqqrWth4JIJyJqIrM0PqORiwmIpbc5Vz5o7VxXjqIFp7E1-L676hh-iUrIkE=",
+        "wp_url": null,
+        "wp_username": "wp-user"
+      },
+      "requests": [],
+      "routes": {},
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "WordPress credentials not configured on this profile"
+        }
+      },
+      "name": "test-empty-url",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7e45obIpgz4c7KVh4uDb9py4b6DQ4ZO6Hh6L26HKXNweBN04MQFxBNoN2KDelTVEMp5ykobyP-iplq7n3A5PwlQ5uQ71hoQ4njbYvS6gIwMPk=",
+        "wp_url": "",
+        "wp_username": "wp-user"
+      },
+      "requests": [],
+      "routes": {},
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "WordPress credentials not configured on this profile"
+        }
+      },
+      "name": "test-no-username",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7eTTUdT59R-qQRUHuoWTAl5rrgeXm748X-nC9dbP-7P-GuMlODqDEKd1KONBw6uaryVxsYesHYGfNJTFSDdErjUawrcIo18kKFUFUfdTicwAo=",
+        "wp_url": "{BASE}",
+        "wp_username": null
+      },
+      "requests": [],
+      "routes": {},
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "WordPress credentials not configured on this profile"
+        }
+      },
+      "name": "test-empty-username",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7ey-9Ba8AuJxEk72N-XKak243ogh0iVBGEZaqYnULWxk27kkd8DzuaNflet_Xhj6Pn1PF5sYDzy-hMz_rLWw0Nl_wbsIF8BM5pUaqZKtNBoN8=",
+        "wp_url": "{BASE}",
+        "wp_username": ""
+      },
+      "requests": [],
+      "routes": {},
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "WordPress credentials not configured on this profile"
+        }
+      },
+      "name": "test-no-password",
+      "profile": {
+        "wp_app_password": null,
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [],
+      "routes": {},
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "WordPress credentials not configured on this profile"
+        }
+      },
+      "name": "test-empty-password",
+      "profile": {
+        "wp_app_password": "",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [],
+      "routes": {},
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Failed to decrypt WordPress app password \u2014 check WP_ENCRYPTION_KEY"
+        }
+      },
+      "name": "test-undecryptable-password",
+      "profile": {
+        "wp_app_password": "not-a-fernet-token",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [],
+      "routes": {},
+      "unset_key": false
+    },
+    {
+      "endpoint": "test",
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Failed to decrypt WordPress app password \u2014 check WP_ENCRYPTION_KEY"
+        }
+      },
+      "name": "test-unset-encryption-key",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7eO_0f50ciJ04BimU3WW-29X9oagoCCBu0ffqmTTaWegY_q2cHyOXu26Zo4-HL9-a4pHq7nuja-ESl-Nj-8AjHoIgHVTdE_AFb5Z0RVIUlStc=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [],
+      "routes": {},
+      "unset_key": true
+    },
+    {
+      "endpoint": "categories",
+      "expected": {
+        "returned": [
+          {
+            "count": 12,
+            "id": 1,
+            "name": "Uncategorized",
+            "slug": "uncategorized"
+          },
+          {
+            "count": 0,
+            "id": 7,
+            "name": "Espresso & Milk",
+            "slug": "espresso-milk"
+          }
+        ]
+      },
+      "name": "categories-success",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7e5352rDgNKmhGssn4E7V6ASfrFiIdvNTvlIIKzcENCtUTYOo_FV3ZKy8E6BlVg1AbHYEkqS81TVpk4HeHSfbxBVq1x6J2MuvFejKUqa7SMCg=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/categories",
+          "query": "per_page=100&page=1"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/categories?page=1&per_page=100": {
+          "body": "[{\"id\": 1, \"name\": \"Uncategorized\", \"slug\": \"uncategorized\", \"count\": 12, \"description\": \"dropped by the projection\", \"parent\": 0}, {\"id\": 7, \"name\": \"Espresso & Milk\", \"slug\": \"espresso-milk\", \"count\": 0}]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "categories",
+      "expected": {
+        "returned": [
+          {
+            "count": 0,
+            "id": 3,
+            "name": "No Count",
+            "slug": "no-count"
+          }
+        ]
+      },
+      "name": "categories-count-absent-defaults-to-zero",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7eNF85L8Sq-yDwuGD5X_zdnocF6IqeoCKDNDzRAlik7O1Av5l0eq8Y6ahwzjPv1bgSdDMjaDaHAr-nISY5rn4nuLReyLJjBheXmifpEMWNUGQ=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/categories",
+          "query": "per_page=100&page=1"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/categories?page=1&per_page=100": {
+          "body": "[{\"id\": 3, \"name\": \"No Count\", \"slug\": \"no-count\"}]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "categories",
+      "expected": {
+        "returned": [
+          {
+            "count": null,
+            "id": 5,
+            "name": "Null Count",
+            "slug": "null-count"
+          }
+        ]
+      },
+      "name": "categories-count-null-is-not-defaulted",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7elD2tQy-7181Ur0Drk8Vb-M3btrYo8357o3lXa4_ZadvGvQYaVfIUC8g0yailKxN5txzWEVWi-3An7P6KwGuFnFDOhTP41p_YJp-sJG6q9KU=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/categories",
+          "query": "per_page=100&page=1"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/categories?page=1&per_page=100": {
+          "body": "[{\"id\": 5, \"name\": \"Null Count\", \"slug\": \"null-count\", \"count\": null}]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "categories",
+      "expected": {
+        "returned": [
+          {
+            "count": "9",
+            "id": 4,
+            "name": "Stringy",
+            "slug": "stringy"
+          }
+        ]
+      },
+      "name": "categories-count-not-an-int-passes-through",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7e45ECSbcZ3wuUax-6PRZLVU4__joHPjMNL1P7qBNvQFxmt_lD1W_GxO5RrJM6OIf-VDQApVEd7bQ_Dtn0k5arLTUl5cUywnBjGCbOlcc5bws=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/categories",
+          "query": "per_page=100&page=1"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/categories?page=1&per_page=100": {
+          "body": "[{\"id\": 4, \"name\": \"Stringy\", \"slug\": \"stringy\", \"count\": \"9\"}]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "categories",
+      "expected": {
+        "returned": []
+      },
+      "name": "categories-empty",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7edU0SJyHr7esDhTr2ay-hRuLUgghifN0clsa3NMqF_C2Y36LfGzu9FNpL8hi0Zp8urIoRITlmOc3JshUu8HbPwNsJiqs-7TBnELVmbuK8MeQ=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/categories",
+          "query": "per_page=100&page=1"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/categories?page=1&per_page=100": {
+          "body": "[]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "categories",
+      "expected": {
+        "message": "'id'",
+        "unhandled": "KeyError"
+      },
+      "name": "categories-missing-id-raises",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7ebgl20iCNdU5FtAeV_NsE0rL86XZyhX_3ON0IlWtA2KbwPEer-1xmiQGONOOxa6T5L2fZIE1bHki4IL64Jc5U7qgwEHL5yCl-386RhGbBDd4=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/categories",
+          "query": "per_page=100&page=1"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/categories?page=1&per_page=100": {
+          "body": "[{\"name\": \"No Id\", \"slug\": \"no-id\", \"count\": 1}]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "categories",
+      "expected": {
+        "message": "WordPress API error: Sorry, you are not allowed to do that.",
+        "status_code": 401,
+        "unhandled": "WordPressError"
+      },
+      "name": "categories-401-escapes",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7eoEl4m1LW2kDrdweJ0Xf39QypQ2WuRl0o6eCM-Bufft0FzbRMvioHiILnHgR1uNPMDpbi54zppkFEgNCngPGYb28LviVzRxM0b_dERXd80lA=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/categories",
+          "query": "per_page=100&page=1"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/categories?page=1&per_page=100": {
+          "body": "{\"message\": \"Sorry, you are not allowed to do that.\"}",
+          "content_type": "application/json",
+          "status": 401
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "categories",
+      "expected": {
+        "detail": "Profile not found",
+        "http_status": 404
+      },
+      "name": "categories-profile-not-found",
+      "profile": null,
+      "requests": [],
+      "routes": {},
+      "unset_key": false
+    },
+    {
+      "endpoint": "categories",
+      "expected": {
+        "detail": "WordPress credentials not configured on this profile",
+        "http_status": 400
+      },
+      "name": "categories-no-credentials",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7eIFM6jTu-_t5k7Ycvu1ajz-XtcK8jKgnpXpofj0hJsn5JxWbAs2ZLMVh_uWS9A3sKMYmaRZWA5_t5mvrAfODX2MojZqrrV7PIoKOlcfalK8o=",
+        "wp_url": null,
+        "wp_username": "wp-user"
+      },
+      "requests": [],
+      "routes": {},
+      "unset_key": false
+    },
+    {
+      "endpoint": "categories",
+      "expected": {
+        "detail": "Failed to decrypt WordPress app password \u2014 check WP_ENCRYPTION_KEY",
+        "http_status": 400
+      },
+      "name": "categories-undecryptable-password",
+      "profile": {
+        "wp_app_password": "not-a-fernet-token",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [],
+      "routes": {},
+      "unset_key": false
+    },
+    {
+      "endpoint": "authors",
+      "expected": {
+        "returned": [
+          {
+            "id": 1,
+            "name": "Site Admin",
+            "slug": "admin"
+          },
+          {
+            "id": 5,
+            "name": "Guest Writer",
+            "slug": "guest-writer"
+          }
+        ]
+      },
+      "name": "authors-success",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7e528O9awIpjlCDezJMFGkFU42K_Vftqvd8EwwWsu9oSOZxV8aRac0xzHfmrISpQwNIrYSxEG4dYGjLQzm2WzB9hkwkNz6WhnpfvBZIq31O3c=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/users",
+          "query": "per_page=100&page=1&roles=administrator%2Ceditor%2Cauthor"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/users?page=1&per_page=100&roles=administrator,editor,author": {
+          "body": "[{\"id\": 1, \"name\": \"Site Admin\", \"slug\": \"admin\", \"link\": \"dropped by the projection\", \"description\": \"\"}, {\"id\": 5, \"name\": \"Guest Writer\", \"slug\": \"guest-writer\"}]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "authors",
+      "expected": {
+        "returned": []
+      },
+      "name": "authors-empty",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7eahdrmBcWvkSPQh3r3vb4WEZk3iQkLZmGGU4b26rrRZ6fS_y39jN7ioZSPYyFzFO4BBHp5zGm0MDZUX0496hP6vZHvM9cglh3I4m_imkhOmI=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/users",
+          "query": "per_page=100&page=1&roles=administrator%2Ceditor%2Cauthor"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/users?page=1&per_page=100&roles=administrator,editor,author": {
+          "body": "[]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "authors",
+      "expected": {
+        "message": "'slug'",
+        "unhandled": "KeyError"
+      },
+      "name": "authors-missing-slug-raises",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7e8JIt-im9eatnDXhKJ1EyOpi8H5gjrVmN2JOoiaBaZvSzWY3pyZWb6GuW7UVfw8GAwHb1JiLay3IJ5apBrzpaqzjntGhsyX6pP06ReLxR_F4=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/users",
+          "query": "per_page=100&page=1&roles=administrator%2Ceditor%2Cauthor"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/users?page=1&per_page=100&roles=administrator,editor,author": {
+          "body": "[{\"id\": 2, \"name\": \"No Slug\"}]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "authors",
+      "expected": {
+        "message": "WordPress API error: Sorry, you are not allowed to list users.",
+        "status_code": 403,
+        "unhandled": "WordPressError"
+      },
+      "name": "authors-403-escapes",
+      "profile": {
+        "wp_app_password": "gAAAAABqip7e6s-VvT9N8B_A6L72NI1kYAD52jEtm9lH9HqG-O277S3eN6s-tQX2ds85KxNWZguHx_AQEY8biC7FTr_arAaxQc5aUdicb6dMeFOYmufmzFg=",
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [
+        {
+          "authorization": "Basic d3AtdXNlcjphYmNkIEVGR0ggMTIzNCBpamts",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/users",
+          "query": "per_page=100&page=1&roles=administrator%2Ceditor%2Cauthor"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/users?page=1&per_page=100&roles=administrator,editor,author": {
+          "body": "{\"message\": \"Sorry, you are not allowed to list users.\"}",
+          "content_type": "application/json",
+          "status": 403
+        }
+      },
+      "unset_key": false
+    },
+    {
+      "endpoint": "authors",
+      "expected": {
+        "detail": "Profile not found",
+        "http_status": 404
+      },
+      "name": "authors-profile-not-found",
+      "profile": null,
+      "requests": [],
+      "routes": {},
+      "unset_key": false
+    },
+    {
+      "endpoint": "authors",
+      "expected": {
+        "detail": "WordPress credentials not configured on this profile",
+        "http_status": 400
+      },
+      "name": "authors-no-password",
+      "profile": {
+        "wp_app_password": null,
+        "wp_url": "{BASE}",
+        "wp_username": "wp-user"
+      },
+      "requests": [],
+      "routes": {},
+      "unset_key": false
+    }
+  ],
+  "source": "api/src/api/wordpress.py"
+}
