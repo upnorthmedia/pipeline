@@ -12304,6 +12304,186 @@ three pieces are separately verifiable, so they are separate items.
       they are spent. These go beside the `stage_error` publish in
       `web/src/mastra/failure-recorder.ts`, and the retry half has to be settled against
       the evented engine's `retryConfig` rather than transcribed from ARQ's `job_try`.
+
+      Split, because settling the retry half is not an `execution_logs` change at all.
+      Python's two entries look like one branch with two arms, but only the second arm
+      is reachable from where the port records a failure: the evented engine keeps its
+      retries inside the run, republishing `workflow.step.run` with `retryCount + 1`
+      and only publishing `workflow.fail` once the policy is spent
+      (`node_modules/@mastra/core/dist/workflow-event-processor-Dp87-e6z.js:3434`):
+
+      ```
+      if (stepResult.status === "failed") if (retryCount >= (getEntryRetries(leaf) ??
+        workflow.retryConfig.attempts ?? 0) || stepResult.nonRetryable)
+          await this.mastra.pubsub.publish("workflows", { type: "workflow.step.end", ...
+      else return this.mastra.pubsub.publish("workflows", { type: "workflow.step.run",
+        ..., retryCount: retryCount + 1, ... })
+      ```
+
+      So a `workflows-finish` listener sees exhaustion and never sees a retry, and the
+      retry entry needs both a retry policy on the workflow (`retryConfig` is the engine
+      default `{attempts: 0}` today, recorded under 5.4d-i) and a writer inside the step,
+      where `retryCount` and the thrown error are both in hand. That is a workflow-level
+      change with its own blast radius: it re-bills a stage's provider call on retry and
+      moves the `attempts` every dead-letter test asserts. 5.5c-iii-a is the entry that
+      is reachable now; 5.5c-iii-b is that decision.
+
+      - [x] 5.5c-iii-a The `error` / `stage_error` entry once the attempts are spent.
+
+        `recordRunFailure()` in `web/src/mastra/failure-recorder.ts` already ported the
+        two other things Python's `except` block did (stamp the row, publish
+        `stage_error`); this adds the third, `api/src/worker.py:348`:
+
+        ```python
+        await append_execution_log(
+            session, post_id, failed_stage, "error", "stage_error",
+            f"Pipeline failed after {job_try} attempts: {e}",
+            data={"error": str(e), "attempts": job_try, "moved_to_dlq": True},
+        )
+        ```
+
+        Three decisions, none of them transcription:
+
+        1. **Position: after the publish.** Every other pair in this port writes the row
+           first and announces second, and 5.5c-i put each log entry where Python's own
+           `append_execution_log` call sat relative to the publish. Python's exception
+           branch is the one place that publishes first and appends afterwards
+           (`api/src/worker.py:321` then `:348`), so the append follows the publish here.
+        2. **Inside the run-id guard.** `markPipelineFailed` is safe to repeat because it
+           rewrites the same values, and the engine publishes `workflow.fail` more than
+           once per failed run (measured under 5.4d-i). `appendExecutionLog` is an
+           append, so an unguarded call leaves two copies of the entry on the row for
+           `GET /api/posts/{id}/logs` to serve. The existing announcement guard now
+           guards both reports and was renamed `firstReportOf` to say so.
+        3. **`moved_to_dlq: true` kept, and still true.** The Redis list the key names is
+           not ported, but 5.4d-iii-a made `stage_logs._error` the port's definition of
+           being in the dead-letter queue, and `markPipelineFailed` has just written it.
+           Nothing outside `api/src/worker.py` reads the key:
+
+           ```
+           $ grep -rn "moved_to_dlq" api/src web/src
+           api/src/worker.py:358:                        "moved_to_dlq": True,
+           ```
+
+        `stage` on the entry is the step whose own result failed, not Python's `""` for a
+        full run, which is the same choice 5.4d-i and 5.5b already recorded for `_error`
+        and for the `stage_error` event. `attempts` is `executionsBeforeFailure()`, the
+        one already derived from `pipelineWorkflow.retryConfig`, so the entry and
+        `_error.attempts` cannot disagree.
+
+        The entry as actually stored, read back off the row after a real
+        `workflow.fail`:
+
+        ```
+        $ npx vitest run src/mastra/tmp-entry-dump.test.ts   # temporary, not committed
+        STORED [
+          {
+            "ts": "2026-08-23T00:12:30.332+00:00",
+            "data": {
+              "error": "provider exploded mid-draft",
+              "attempts": 1,
+              "moved_to_dlq": true
+            },
+            "event": "stage_error",
+            "level": "error",
+            "stage": "write",
+            "message": "Pipeline failed after 1 attempts: provider exploded mid-draft"
+          }
+        ]
+        ```
+
+        `Pipeline failed after 1 attempts` reads oddly and is Python's own string with
+        the attempt count this engine makes true; 5.5c-iii-b is where that count moves.
+
+        Seven new tests. Four are assertions on the file's existing real failing run (a
+        real evented engine, real Redis Streams, the real database, with `research` and
+        `outline` stubbed and `write` throwing), including the whole run's log read back
+        as an ordered trail; three drive `recordRunFailure` directly for the repeat and
+        ignored-event cases a single run cannot produce.
+
+        ```
+        $ npx vitest run src/mastra/failure-recorder.test.ts --reporter=verbose
+         ✓ a pipeline run that fails > fails the run rather than swallowing the stage error 0ms
+         ✓ a pipeline run that fails > stamps current_stage failed, which is the queue route's failed bucket 0ms
+         ✓ a pipeline run that fails > records the stage's error text as _error.message, Python's str(e) 0ms
+         ✓ a pipeline run that fails > records how many times the run was executed, Python's job_try 0ms
+         ✓ a pipeline run that fails > records failed_at as a timestamp, close to the run 0ms
+         ✓ a pipeline run that fails > merges _error in rather than replacing stage_logs 0ms
+         ✓ a pipeline run that fails > leaves the stages before the failure committed 0ms
+         ✓ a pipeline run that fails > leaves the failing stage's column unwritten 0ms
+         ✓ a pipeline run that fails > is published a terminal failure event more than once for one run 0ms
+         ✓ a pipeline run that fails > reports the failing step and its error 0ms
+         ✓ a pipeline run that fails > announces stage_error on the pipeline bus, in Python's payload shape 0ms
+         ✓ a pipeline run that fails > announces it once, though the engine published the failure more than once 0ms
+         ✓ a pipeline run that fails > stamps the row failed before it announces 0ms
+         ✓ a pipeline run that fails > announces no stage_complete for the stage that threw 0ms
+         ✓ a pipeline run that fails > writes Python's error entry to execution_logs, once 0ms
+         ✓ a pipeline run that fails > timestamps the error entry in the offset form the analytics query sorts on 0ms
+         ✓ a pipeline run that fails > closes the log with the failure, after the stages that did complete 0ms
+         ✓ a pipeline run that fails > writes no pipeline_complete entry for a run that died 0ms
+         ✓ a pipeline run that fails > never says the pipeline finished 0ms
+         ✓ recordRunFailure > ignores a failure from another workflow 1ms
+         ✓ recordRunFailure > ignores a terminal event that is not a failure 1ms
+         ✓ recordRunFailure > ignores a run whose input carries no post id 1ms
+         ✓ recordRunFailure > records a thrown non-Error, which the engine passes through as it was 2ms
+         ✓ recordRunFailure > reports no stage when no step result says which one failed 1ms
+         ✓ recordRunFailure > names the stage whose own step result failed 1ms
+         ✓ recordRunFailure > is safe to repeat: a second delivery rewrites the same values 3ms
+         ✓ recordRunFailure > announces the repeat delivery only once, though it writes both times 2ms
+         ✓ recordRunFailure > appends the error entry naming the stage it announced, with Python's data keys 2ms
+         ✓ recordRunFailure > appends nothing for a repeat delivery, because an append is not idempotent 3ms
+         ✓ recordRunFailure > appends nothing for an event it ignores 1ms
+         Test Files  1 passed (1)
+              Tests  30 passed (30)
+           Duration  3.04s (transform 147ms, setup 117ms, import 618ms, tests 2.23s, environment 0ms)
+        ```
+
+        Negative controls, each one applied to
+        `web/src/mastra/failure-recorder.ts` and reverted:
+
+        | Control | Result |
+        | --- | --- |
+        | append removed entirely | `4 failed`, 26 passed: the real run's entry, its `ts` form, the ordered trail, and the direct-call entry |
+        | append moved above the run-id guard | `3 failed`, 27 passed: the real run's "once", the trail, and "appends nothing for a repeat delivery" |
+        | entry `stage` hardcoded to `""` (Python's full-run value) | `3 failed`, 27 passed: both entry assertions and the trail |
+        | `moved_to_dlq` dropped from `data` | `2 failed`, 28 passed: both entry assertions |
+
+        Gates, from `web/` (`pnpm -C web ...` fails with
+        `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL` in this worktree):
+
+        ```
+        $ npx tsc --noEmit
+        TSC EXIT=0
+
+        $ npx eslint .
+        LINT EXIT=0
+
+        $ npx vitest run
+        Test Files  2 failed | 86 passed (88)
+             Tests  9 failed | 1585 passed | 7 skipped (1601)
+        # the 9 are the recorded baseline: 6 image-preview, 3 PostDetail.
+        # 1594 -> 1601 is exactly this item's seven new tests.
+
+        $ npx next build
+        BUILD EXIT=0
+        v Compiled successfully in 3.7s
+
+        $ cd api && uv run pytest -q
+        120 failed, 241 passed, 25 errors in 13.79s
+
+        $ cd api && uv run ruff check .
+        Found 32 errors.
+
+        $ cd api && uv run ruff format --check .
+        9 files would be reformatted, 131 files already formatted
+        ```
+      - [ ] 5.5c-iii-b The `warning` / `retry` entry while attempts remain, which means
+        deciding the port's retry policy first: whether `pipelineWorkflow` carries a
+        `retryConfig` at all (Python retried the whole pipeline three times, skipping
+        already-complete stages), and if it does, writing the entry from inside the step
+        where `retryCount` and the error are both available. Moving `retryConfig` also
+        moves `attempts` in `stage_logs._error`, in the dead-letter list's `attempts`,
+        and in 5.5c-iii-a's entry, all of which derive it from the same accessor.
     - [ ] 5.5c-iv `publishStageLog()` and the `log` event: the 28 call sites inside the
       six stage nodes, and the module-level `set_event_context` /
       `clear_event_context` they read, which has no equivalent in a step that already

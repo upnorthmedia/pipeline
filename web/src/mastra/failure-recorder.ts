@@ -17,6 +17,14 @@
  * module only ports the half of `_move_to_dlq()` that touches the post, which
  * is the half the dashboard reads.
  *
+ * It also carries the run-level records Python wrote from the same `except`
+ * block: the `stage_error` event on the bus and the `error` / `stage_error`
+ * entry in `execution_logs`. The `warning` / `retry` entry beside it is not
+ * here, and ledger item 5.5c-iii-b holds why: the evented engine only publishes
+ * `workflow.fail` once `retryConfig.attempts` is exhausted, and the workflow
+ * sets no retry policy, so a run that reaches this listener has no attempts
+ * left by construction.
+ *
  * The hook is a listener on the `workflows-finish` topic, registered through
  * `events` on the Mastra instance. That keeps it inside a Mastra primitive and
  * puts it in the right process for free: `Mastra.startWorkers()` is what
@@ -39,6 +47,7 @@
  */
 import type { Event, PubSub } from "@mastra/core/events"
 
+import { appendExecutionLog } from "./execution-log"
 import { publishPipelineEvent } from "./pipeline-events"
 import { markPipelineFailed } from "./post-state"
 import { STAGES, type Stage } from "./state"
@@ -108,32 +117,33 @@ function failedStageOf(data: unknown): Stage | "" {
 }
 
 /**
- * Runs already announced by this process, so one failure produces one
- * `stage_error` on the bus.
+ * Runs already reported by this process, so one failure produces one
+ * `stage_error` on the bus and one `stage_error` entry in `execution_logs`.
  *
  * The engine publishes `workflow.fail` more than once for a single failed run
  * (measured in `failure-recorder.test.ts`), which the database write above can
- * absorb because it rewrites the same values. A notification cannot: the
- * dashboard raises a toast per `stage_error` and appends one debug log line
- * per event, so a repeat is visible to the operator. Python published exactly
- * one per attempt.
+ * absorb because it rewrites the same values. Neither of the two reports can:
+ * the dashboard raises a toast per `stage_error` and appends one debug log line
+ * per event, and `appendExecutionLog` is an append, so a repeat leaves a second
+ * copy of the entry on the row for every reader of `GET /posts/{id}/logs`.
+ * Python emitted exactly one of each per attempt.
  *
  * In-process, and deliberately so: it guards the measured duplicate, which is
  * two publishes of the same event a few milliseconds apart, reaching the same
  * subscriber. It is not a distributed lock, and a second `worker` process
- * subscribed to the same fan-out topic would announce the same failure again.
+ * subscribed to the same fan-out topic would report the same failure again.
  * The bound keeps a long-lived worker from accumulating run ids forever;
  * insertion order makes the oldest entry the one to drop.
  */
-const announced = new Set<string>()
-const ANNOUNCED_LIMIT = 1000
+const reported = new Set<string>()
+const REPORTED_LIMIT = 1000
 
-function firstAnnouncementOf(runId: string): boolean {
-  if (announced.has(runId)) return false
-  announced.add(runId)
-  if (announced.size > ANNOUNCED_LIMIT) {
-    const oldest = announced.values().next().value
-    if (oldest !== undefined) announced.delete(oldest)
+function firstReportOf(runId: string): boolean {
+  if (reported.has(runId)) return false
+  reported.add(runId)
+  if (reported.size > REPORTED_LIMIT) {
+    const oldest = reported.values().next().value
+    if (oldest !== undefined) reported.delete(oldest)
   }
   return true
 }
@@ -149,7 +159,9 @@ function firstAnnouncementOf(runId: string): boolean {
  * The row is written before the event goes out, which is the order every
  * announcement in this port keeps: `posts/[id]/page.tsx` refetches the post on
  * `stage_error`, so the refetch must not read a row that still calls the run
- * healthy.
+ * healthy. The `execution_logs` entry follows the publish, which is the order
+ * Python's own exception branch used (`api/src/worker.py:321`): it publishes
+ * first and appends afterwards, unlike every other pair in the runner.
  */
 export async function recordRunFailure(event: Event, pubsub: PubSub): Promise<void> {
   if (event.type !== "workflow.fail") return
@@ -160,15 +172,29 @@ export async function recordRunFailure(event: Event, pubsub: PubSub): Promise<vo
   if (!postId) return
 
   const message = messageOf(event.data)
-  await markPipelineFailed(postId, message, executionsBeforeFailure())
+  const attempts = executionsBeforeFailure()
+  await markPipelineFailed(postId, message, attempts)
 
-  if (!firstAnnouncementOf(event.runId)) return
+  if (!firstReportOf(event.runId)) return
+
+  const stage = failedStageOf(event.data)
   await publishPipelineEvent(pubsub, postId, "stage_error", {
-    stage: failedStageOf(event.data),
+    stage,
     error: message,
     // Python's `f"Pipeline failed: {e}"`, which is what `debug-log-panel.tsx`
     // prefers over the bare error when it renders the line.
     message: `Pipeline failed: ${message}`,
+  })
+  await appendExecutionLog(postId, {
+    stage,
+    level: "error",
+    event: "stage_error",
+    message: `Pipeline failed after ${attempts} attempts: ${message}`,
+    // Python's three keys. `moved_to_dlq` stays `true` and stays honest: the
+    // Redis list it named is not ported, but `markPipelineFailed` has just
+    // written the `stage_logs._error` marker that 5.4d-iii-a made the port's
+    // definition of being in the dead-letter queue.
+    data: { error: message, attempts, moved_to_dlq: true },
   })
 }
 

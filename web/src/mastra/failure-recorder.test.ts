@@ -1,7 +1,9 @@
 // @vitest-environment node
 /**
- * Items 5.4d-i and 5.5b: a permanently failed pipeline run is recorded on its
- * post, and announced to the dashboard as `stage_error`.
+ * Items 5.4d-i, 5.5b and 5.5c-iii-a: a permanently failed pipeline run is
+ * recorded on its post, announced to the dashboard as `stage_error`, and
+ * written to `execution_logs` so a browser that was not open can still read
+ * that it died and why.
  *
  * The first suite is a real run of the real workflow with a real evented
  * engine, a real Redis Streams transport and the real database. Only the two
@@ -172,6 +174,11 @@ async function waitForFailure(id: string, timeoutMs = 30_000) {
   }
 }
 
+/** A post's `execution_logs`, typed enough to read an entry's fields. */
+function executionLogsOf(row: typeof posts.$inferSelect) {
+  return (row.executionLogs ?? []) as Record<string, unknown>[]
+}
+
 /** Every `stage_error` the bus has delivered for a post. */
 function stageErrorsFor(postId: string) {
   return pipelineEvents.filter(
@@ -202,6 +209,8 @@ const RUN_NON_ERROR = "33333333-3333-4333-8333-333333333331"
 const RUN_NO_STAGE = "33333333-3333-4333-8333-333333333332"
 const RUN_WITH_STAGE = "33333333-3333-4333-8333-333333333333"
 const RUN_REPEAT = "33333333-3333-4333-8333-333333333334"
+const RUN_LOG_STAGE = "33333333-3333-4333-8333-333333333335"
+const RUN_LOG_REPEAT = "33333333-3333-4333-8333-333333333336"
 
 /** A `workflow.fail` event shaped exactly as the engine publishes one. */
 function failEvent(overrides: {
@@ -386,6 +395,47 @@ describe("a pipeline run that fails", () => {
     expect(completed).toEqual(["research", "outline"])
   })
 
+  it("writes Python's error entry to execution_logs, once", () => {
+    const entries = executionLogsOf(failedRow).filter((entry) => entry.event === "stage_error")
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toEqual({
+      ts: expect.any(String),
+      stage: "write",
+      level: "error",
+      event: "stage_error",
+      // Python's `f"Pipeline failed after {job_try} attempts: {e}"`, with the
+      // attempt count the engine's retry policy makes true here.
+      message: `Pipeline failed after 1 attempts: ${BOOM}`,
+      data: { error: BOOM, attempts: 1, moved_to_dlq: true },
+    })
+  })
+
+  it("timestamps the error entry in the offset form the analytics query sorts on", () => {
+    const [entry] = executionLogsOf(failedRow).filter((e) => e.event === "stage_error")
+    expect(String(entry.ts)).toMatch(/\+00:00$/)
+  })
+
+  it("closes the log with the failure, after the stages that did complete", () => {
+    // The failing run's whole trail, which is what `GET /posts/{id}/logs`
+    // serves to an operator who was not watching: it started, two stages ran,
+    // and it died in the third.
+    expect(executionLogsOf(failedRow).map((entry) => `${entry.event}/${entry.stage}`)).toEqual([
+      "pipeline_start/",
+      "stage_start/research",
+      "stage_complete/research",
+      "stage_start/outline",
+      "stage_complete/outline",
+      "stage_start/write",
+      "stage_error/write",
+    ])
+  })
+
+  it("writes no pipeline_complete entry for a run that died", () => {
+    expect(executionLogsOf(failedRow).some((entry) => entry.event === "pipeline_complete")).toBe(
+      false,
+    )
+  })
+
   it("never says the pipeline finished", () => {
     const finished = pipelineEvents.filter(
       (event) => event.data?.post_id === POST_ID && event.data?.event === "pipeline_complete",
@@ -476,5 +526,36 @@ describe("recordRunFailure", () => {
 
     // The write is idempotent so a repeat is free; a toast is not.
     expect(announced).toHaveLength(1)
+  })
+
+  it("appends the error entry naming the stage it announced, with Python's data keys", async () => {
+    await recordRunFailure(
+      failEvent({ runId: RUN_LOG_STAGE, steps: { edit: { status: "failed" } } }),
+      recorder,
+    )
+    const entries = executionLogsOf(await readPost(UNIT_POST_ID))
+    expect(entries.at(-1)).toEqual({
+      ts: expect.any(String),
+      stage: "edit",
+      level: "error",
+      event: "stage_error",
+      message: `Pipeline failed after 1 attempts: ${BOOM}`,
+      data: { error: BOOM, attempts: 1, moved_to_dlq: true },
+    })
+  })
+
+  it("appends nothing for a repeat delivery, because an append is not idempotent", async () => {
+    await recordRunFailure(failEvent({ runId: RUN_LOG_REPEAT }), recorder)
+    const afterFirst = executionLogsOf(await readPost(UNIT_POST_ID)).length
+    await recordRunFailure(failEvent({ runId: RUN_LOG_REPEAT }), recorder)
+    expect(executionLogsOf(await readPost(UNIT_POST_ID))).toHaveLength(afterFirst)
+  })
+
+  it("appends nothing for an event it ignores", async () => {
+    const before = executionLogsOf(await readPost(UNIT_POST_ID)).length
+    await recordRunFailure(failEvent({ workflowId: "sitemapCrawl" }), recorder)
+    await recordRunFailure(failEvent({ type: "workflow.end" }), recorder)
+    await recordRunFailure(failEvent({ input: {} }), recorder)
+    expect(executionLogsOf(await readPost(UNIT_POST_ID))).toHaveLength(before)
   })
 })
