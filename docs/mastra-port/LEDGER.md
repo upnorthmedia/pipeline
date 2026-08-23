@@ -11488,8 +11488,219 @@ three pieces are separately verifiable, so they are separate items.
               $ cd api && uv run ruff format --check scripts/export_mimetypes_parity.py
               1 file already formatted
               ```
-            - [ ] 5.3c-iii-b-1-c-ii-2 The sorted walk: `media_dir.is_dir()`, the
+            - [x] 5.3c-iii-b-1-c-ii-2 The sorted walk: `media_dir.is_dir()`, the
               `sorted(media_dir.iterdir())` ordering and the `is_file()` filter.
+              Ported to `web/src/mastra/wordpress/media-walk.ts` as `listMediaFiles()`,
+              with the two Python primitives the walk is built out of exported beside it:
+              `decodeFsName()` (`os.fsdecode`, UTF-8 with `surrogateescape`) and
+              `comparePythonStrings()` (Python's `<` between two `str`s, which compares
+              code points).
+
+              Four behaviours the obvious JavaScript spelling gets wrong:
+
+              1. **`is_file()` stats, `readdir` does not.** `Path.is_file()` follows
+                 symlinks, so a symlink to a file is uploaded and a symlink to a directory
+                 is not. `readdir(dir, { withFileTypes: true })` answers from the directory
+                 entry and gets both backwards.
+              2. **Only four errnos are absence.** `pathlib._IGNORED_ERRNOS` is `ENOENT`,
+                 `ENOTDIR`, `EBADF`, `ELOOP`; every other `OSError` propagates out of the
+                 publish hook. So a name over `NAME_MAX` and an unreadable directory raise,
+                 while an embedded NUL is a `ValueError` and is caught as absence.
+              3. **`os.listdir` decodes with `surrogateescape`.** A byte that is not valid
+                 UTF-8 becomes U+DC00 plus that byte. Node's default decoding replaces it
+                 with U+FFFD, which loses the name and collides two distinct files into
+                 one. `listMediaFiles` therefore reads names as `Buffer`s and carries a
+                 byte path per entry, so the file that is opened later is the file that was
+                 named.
+              4. **`sorted()` compares code points.** `Array.prototype.sort` compares
+                 UTF-16 code units, so an astral filename sorts before everything from
+                 U+E000 through U+FFFF instead of after it.
+
+              The oracle is `web/src/mastra/wordpress/data/wp-media-walk-parity.json`,
+              written by `api/scripts/export_media_walk_parity.py`, which pulls the four
+              walk lines out of the real `publish_to_wordpress` with `inspect.getsource`,
+              asserts their exact shape, appends a `names.append(img_file.name)` in place
+              of the mimetypes filter that follows them (item -ii-1) and executes the
+              result against a scratch tree it builds from the case table the vitest file
+              rebuilds. 34 `os.fsdecode` cases, 15 `sorted()` cases, 20 walk cases and 3
+              error cases.
+
+              ```
+              $ cd api && uv run python scripts/export_media_walk_parity.py
+              wrote 34 fsdecode cases, 15 sort cases and 20 walk cases keeping 26 files, plus 3 error cases, to /Users/cody/.../web/src/mastra/wordpress/data/wp-media-walk-parity.json
+
+              $ cd web && pnpm exec vitest run src/mastra/wordpress/media-walk.test.ts
+               ✓ src/mastra/wordpress/media-walk.test.ts (79 tests) 124ms
+
+               Test Files  1 passed (1)
+                    Tests  79 passed (79)
+              ```
+
+              **Corpus domain.** The walk cases hold only names that are valid UTF-8 and
+              unique under case folding, because APFS rejects a filename that is not valid
+              UTF-8 with `EILSEQ` (`fs.writeFileSync(Buffer.from([0xff]))` → `EILSEQ`) and
+              is case-insensitive by default, so the vitest side could not rebuild such a
+              tree. The two behaviours that hides are covered without a filesystem, by the
+              `fsdecode` corpus and by the `sorts` corpus, whose names arrive as code point
+              lists because a `surrogateescape`-decoded name holds lone surrogates that do
+              not survive a round trip through JSON as text.
+
+              **Mutation testing: 28 mutations, 20 fail, 8 survive.**
+
+              | # | Mutation | Result |
+              | --- | --- | --- |
+              | 1 | `dirent.isFile()` instead of `stat` | 2 failed |
+              | 2 | default string comparison in the sort | 1 failed |
+              | 3 | `localeCompare` in the sort | 2 failed |
+              | 4 | `bytes.toString("utf8")` instead of `decodeFsName` | **survives on APFS** |
+              | 5 | no `is_dir()` gate, only existence | 1 failed |
+              | 6 | `lstat` instead of `stat` | 2 failed |
+              | 7 | every errno is absence | 2 failed |
+              | 8 | `ERR_INVALID_ARG_VALUE` throws | 1 failed |
+              | 9 | `EACCES` added to the ignored set | 1 failed |
+              | 10 | `ELOOP` dropped from the ignored set | 2 failed |
+              | 11 | `ENOTDIR` dropped from the ignored set | 1 failed |
+              | 12 | decode allows encoded surrogates | 3 failed |
+              | 13 | decode allows overlongs | 2 failed |
+              | 14 | decode allows past U+10FFFF | 1 failed |
+              | 15 | decode accepts 0xc0 and 0xc1 leads | **survives, equivalent** |
+              | 16 | decode accepts leads past 0xf4 | **survives, equivalent** |
+              | 17 | decode does not check continuation bytes | 1 failed |
+              | 18 | decode does not check for truncation | **survives, equivalent** |
+              | 19 | decode escapes with U+FFFD | 21 failed |
+              | 20 | decode skips the whole invalid sequence | 9 failed |
+              | 21 | compare advances by one UTF-16 unit | **survives, equivalent** |
+              | 22 | compare treats a prefix as equal | 1 failed |
+              | 23 | compare reverses the prefix rule | 1 failed |
+              | 24 | compare reversed | 19 failed |
+              | 25 | no sort at all | **survives on APFS** |
+              | 26 | sort after the `is_file` filter | **survives, equivalent** |
+              | 27 | path built from the decoded name | **survives on APFS** |
+              | 28 | directories kept | 3 failed |
+
+              Mutations 9 and 11 survived the first pass; the `EACCES` error case (a
+              directory chmod-ed to `0444`, skipped when the test runs as root, and the
+              export script refuses to run as root for the same reason) and the two
+              `ENOTDIR` walk cases were added for them.
+
+              Five survivors are provably equivalent code rather than uncovered behaviour.
+              15 and 16 widen the lead-byte table into ranges the overlong and U+10FFFF
+              checks reject anyway (13 and 14 both fail, so those checks are live). 18 is
+              redundant with the continuation check, since reading past the end yields
+              `undefined` and `(undefined & 0xc0) !== 0x80`. 21 cannot misalign, because two
+              strings only keep advancing while their code points are equal and equal code
+              points have equal encodings. 26 reorders a sort and a filter, and filtering
+              preserves relative order.
+
+              The other three survive only because APFS cannot hold the file that shows
+              them. Node's `readdir` already returns names in `strcmp` order (200 random
+              names created in scrambled order came back byte-sorted on both macOS and
+              Linux), and byte order over valid UTF-8 *is* code point order, so on a
+              filesystem that only accepts valid UTF-8 the sort has nothing left to do. The
+              divergence needs a name that is not valid UTF-8, and there `readdir` order
+              and Python's order are reversed:
+
+              ```
+              $ docker run --rm python:3.12-slim python -c "
+              import os, pathlib, tempfile
+              d = tempfile.mkdtemp()
+              for raw in (b'\xff', b'\xef\xbf\xbd'):
+                  open(os.path.join(d.encode(), raw), 'wb').close()
+              print([[hex(ord(c)) for c in p.name] for p in sorted(pathlib.Path(d).iterdir())])
+              "
+              [['0xdcff'], ['0xfffd']]
+              ```
+
+              (`readdir` returns `['efbfbd', 'ff']`, the reverse.) So all three were
+              measured on Linux instead, where the port runs in production. Node 24 strips
+              the types, so `media-walk.ts` imports directly, and the expectation is the
+              real Python walk over the same tree
+              (`[[[97,46,119,101,98,112],"three"],[[56575],"one"],[[65533],"two"]]`, that
+              is `a.webp`, `\udcff`, `�` with their contents):
+
+              `/tmp/linuxcheck/check.mjs`, which is not committed because it needs
+              docker and a non-APFS filesystem to mean anything:
+
+              ```js
+              import fs from "node:fs"
+              import { readFile, writeFile } from "node:fs/promises"
+
+              const EXPECTED = [[[97,46,119,101,98,112],"three"],[[56575],"one"],[[65533],"two"]]
+              const SOURCE = "/work/media-walk.ts"
+
+              function build() {
+                const d = fs.mkdtempSync("/tmp/walk-")
+                for (const [raw, body] of [[[0xff], "one"], [[0xef,0xbf,0xbd], "two"], [[...Buffer.from("a.webp")], "three"]])
+                  fs.writeFileSync(Buffer.concat([Buffer.from(d + "/"), Buffer.from(raw)]), body)
+                fs.mkdirSync(d + "/sub")
+                return d
+              }
+
+              async function run(label, mutate) {
+                const original = await readFile(SOURCE, "utf8")
+                const copy = `/tmp/variant-${label.replace(/\W/g, "")}.ts`
+                await writeFile(copy, mutate ? mutate(original) : original)
+                const { listMediaFiles } = await import(copy)
+                const files = await listMediaFiles(build())
+                const got = files.map((f) => [[...f.name].map((c) => c.codePointAt(0)), fs.readFileSync(f.path, "utf8")])
+                const ok = JSON.stringify(got) === JSON.stringify(EXPECTED)
+                console.log(`${ok ? "MATCHES python" : "DIFFERS from python"}  ${label}`)
+                if (!ok) console.log(`  got ${JSON.stringify(got)}`)
+              }
+              ```
+
+              ```
+              $ docker run --rm -v .../web/src/mastra/wordpress:/work:ro -v /tmp/linuxcheck/check.mjs:/check.mjs node:24-alpine node /check.mjs
+              MATCHES python  the port as committed
+              DIFFERS from python  mutation 4: default utf8 decode
+                got [[[97,46,119,101,98,112],"three"],[[65533],"two"],[[65533],"one"]]
+              DIFFERS from python  mutation 25: no sort at all
+                got [[[97,46,119,101,98,112],"three"],[[65533],"two"],[[56575],"one"]]
+              DIFFERS from python  mutation 27: path built from the decoded name
+                got [[[97,46,119,101,98,112],"three"],[[56575],"two"],[[65533],"two"]]
+              ```
+
+              Mutation 4 collides the two names into one U+FFFD; 25 keeps `readdir`'s byte
+              order, which is the reverse of Python's; 27 reads the wrong file for both
+              entries (both come back `"two"`).
+
+              **Gates.**
+
+              ```
+              $ cd web && pnpm exec tsc --noEmit
+              tsc exit 0
+              $ cd web && pnpm lint
+              lint exit 0
+              $ cd web && pnpm build
+              build exit 0
+              $ cd api && uv run ruff check scripts/export_media_walk_parity.py
+              All checks passed!
+              $ cd api && uv run ruff format --check scripts/export_media_walk_parity.py
+              1 file already formatted
+              $ set -a; . ./.env; set +a; cd api && uv run pytest -q
+              120 failed, 241 passed, 25 errors in 15.03s
+              ```
+
+              **Frontend suite: 10 failed / 3866 passed, one over the 9-failure baseline,
+              and the extra failure is not this item's.** `scaffold-check.test.ts > emits
+              the workflow lifecycle events the trace view will read` fails whenever the
+              suite holds one more test file than it did at the baseline. Proven by
+              elimination: 2/2 full runs failed it with `media-walk.test.ts` present, the
+              suite returned to 9 failures with that file moved aside, and it failed again
+              with the file replaced by a one-line `expect(1 + 1).toBe(2)` dummy. The run
+              itself succeeds; only the drained `fullStream` is short (4 events), so
+              `run.stream()` is missing events the orchestration worker already published.
+              Recorded in `todo.md`, upgraded from `[investigate]` to `[confirmed]`, and it
+              belongs to Phase 5's resumable-replay item rather than here.
+
+              ```
+              $ cd web && pnpm test           # with media-walk.test.ts
+                    Tests  10 failed | 3866 passed | 7 skipped (3883)
+              $ cd web && pnpm test           # media-walk.test.ts moved aside
+                    Tests  9 failed | 3788 passed | 7 skipped (3804)
+              $ cd web && pnpm test           # replaced by a one-line dummy test file
+                    Tests  10 failed | 3788 passed | 7 skipped (3805)
+              ```
             - [ ] 5.3c-iii-b-1-c-ii-3 The upload loop: the per-file `upload_media` call
               with its manifest alt text defaulting to the title, the featured-media
               resolution with its manifest-or-first fallback, and the local-to-remote URL

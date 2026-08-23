@@ -523,14 +523,20 @@
   realistic trigger. Reproduced in the port (ledger item 5.9b) with three oracle scenarios
   so the behaviour is pinned rather than accidental; the one-line fix is to widen the
   `except`, which changes the response for that input and needs a UI decision first.
-- [investigate] 2026-08-23 `src/mastra/workflows/scaffold-check.test.ts > emits the
-  workflow lifecycle events the trace view will read` fails intermittently inside a full
-  `pnpm test` run (asserting the collected event types contain `workflow-step-start`) and
-  passes 5/5 every time the file is run alone. Two consecutive full runs during ledger item
-  5.9b gave 10 failures and then the 9-failure baseline, with only this test differing.
-  Suspected cross-file contention on the shared Mastra instance or the Redis Streams topic
-  rather than a defect in the workflow; it inflates the frontend baseline and needs pinning
-  down before Phase 9 treats 9 as an exact number.
+- [confirmed] 2026-08-23 `src/mastra/workflows/scaffold-check.test.ts > emits the
+  workflow lifecycle events the trace view will read` fails inside a full `pnpm test` run
+  whenever the suite holds one more test file than it did at the 9-failure baseline, and
+  passes 5/5 every time the file is run alone. It is not intermittent: during ledger item
+  5.3c-iii-b-1-c-ii-2 the suite failed it 2/2 with the new test file present, passed with
+  that file moved aside, and failed again with the file replaced by
+  `web/src/mastra/wordpress/dummy-load.test.ts` holding a single `expect(1 + 1).toBe(2)`.
+  So any iteration that adds a test file takes the frontend gate from 9 failures to 10
+  through this test alone. The run itself succeeds (`stream.status` is `success` and the
+  storage assertions pass); only the drained `fullStream` is short, 4 events rather than
+  the full lifecycle, so the subscription established by `run.stream()` is missing events
+  the orchestration worker has already published. That is the same gap Phase 5's resumable
+  replay item exists to close, and it should be fixed there rather than by shrinking test
+  files; until it is, 9 is not a usable exact baseline.
 - [confirmed] 2026-08-23 `markdown_to_wp_html` raises `AttributeError: No renderer
   "'inline_html'"` for any article whose markdown contains an HTML tag mistune's block
   layer declines. `_GutenbergRenderer` in `api/src/services/wp_html.py` implements
