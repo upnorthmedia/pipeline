@@ -17,9 +17,8 @@ import { STAGE_OUTPUT_KEY, STAGE_RULES_MAP, STAGES } from "./state"
 import type { PipelineContext, Stage } from "./state"
 
 /**
- * Where `rules/*.md` live. Python resolves this from the repo root and lets
- * `RULES_DIR` override it in Docker; this module keeps both behaviours so the
- * two stacks read the same files from the same place while they coexist.
+ * Where `rules/*.md` live: the repo root by default, overridden by `RULES_DIR`
+ * in Docker, where the worker bundle's cwd is its own output directory.
  */
 export function rulesDir(): string {
   return process.env.RULES_DIR ?? path.resolve(process.cwd(), "..", "rules")

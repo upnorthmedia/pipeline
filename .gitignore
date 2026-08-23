@@ -46,7 +46,6 @@ docker-compose.override.yml
 # Misc
 *.log
 plan.md
-CLAUDE.md
 repomix*
 
 # Worktrees

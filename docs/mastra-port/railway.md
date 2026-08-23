@@ -105,8 +105,9 @@ through the settings UI.
 2. **Set the preserved secrets** before the first deploy of `web`.
 3. **Create the schema.** Nothing in the deployment runs migrations. Against
    the Postgres service's `DATABASE_PUBLIC_URL`, from a checkout:
-   `pnpm -C web db:migrate` (pipeline tables) then `pnpm -C web auth:migrate`
-   (BetterAuth tables). The `mastra_*` run-state tables are created by the
+   `pnpm -C web db:migrate` (pipeline tables) then
+   `pnpm -C web auth:migrate --apply` (BetterAuth tables; without `--apply` it only
+   prints the DDL). The `mastra_*` run-state tables are created by the
    `@mastra/pg` adapter on first boot. See `web/drizzle/README.md`.
 4. **Carry the data over.** `WP_ENCRYPTION_KEY` only means something with the
    `api_settings` rows it encrypted.

@@ -1385,12 +1385,27 @@ pages that use it work with the Python API stopped.
   configures no `server` key, so Studio is at the root of 4111. Nothing in either Railway
   service or either compose file starts or publishes Studio.
   Evidence: [`evidence/phase-7.md` #7.3](../mastra-port/evidence/phase-7.md)
-- [ ] 7.4 Update `CLAUDE.md`, `README.md`, and `.env` documentation to the new architecture,
+- [x] 7.4 Update `CLAUDE.md`, `README.md`, and `.env` documentation to the new architecture,
   commands, and env vars. Every command listed must be one actually run successfully.
-  `CLAUDE.md` does not exist yet and has to be created here. Per definition-of-done 13 it
-  must carry the Studio invocation; link `docs/mastra-port/studio.md` rather than restating
-  it.
-- [ ] 7.5 Move `rules/` handling and any remaining assets that lived under `api/`.
+  `CLAUDE.md` created (it did not exist, and `.gitignore` had been ignoring that name, so
+  it had to be unignored); it carries the Studio invocation for definition-of-done 13 and
+  links `docs/mastra-port/studio.md`. `README.md` rewritten off the four-service
+  architecture and the models in `stage-models.ts`; `.env.example` rebuilt from a
+  `process.env` inventory, dropping `DATABASE_URL`, `TEST_DATABASE_URL` and
+  `WORKER_MAX_JOBS` and adding `BETTER_AUTH_SECRET`, `NEXT_PUBLIC_APP_URL` and the three
+  path variables; `web/README.md` was still `create-next-app` boilerplate and now points
+  at the root. One documented command was wrong and is fixed everywhere including
+  `railway.md`: `auth:migrate` is a dry run without `--apply`.
+  Evidence: [`evidence/phase-7.md` #7.4](../mastra-port/evidence/phase-7.md)
+- [x] 7.5 Move `rules/` handling and any remaining assets that lived under `api/`.
+  Nothing was left to move, and this is the check that says so. `rules/` is at the repo
+  root, unmodified, reached only through `rulesDir()` in `web/src/mastra/prompts.ts` (the
+  six stage prompts and the rules editor route), copied into both images and mounted by
+  both compose services. The only non-Python files deleted with `api/` were its Python
+  build and Alembic scaffolding plus seven sitemap XML fixtures, which had already been
+  copied into `web/src/mastra/sitemap/data/fixtures/` in `6bf29f4`; `api/src` held nothing
+  but `.py` files.
+  Evidence: [`evidence/phase-7.md` #7.5](../mastra-port/evidence/phase-7.md)
 - [ ] 7.6 `docker-compose up` brings up a working stack and a post goes from creation to `ready`
   with images through the UI, executing in the worker service.
 - [ ] 7.7 `grep -rn "alembic\|arq\|fastapi\|uvicorn"` returns nothing outside

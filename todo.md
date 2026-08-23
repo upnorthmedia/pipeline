@@ -705,3 +705,12 @@
   script in `web/package.json`. The working form is `pnpm -C web exec tsc --noEmit`
   (exit 0). Item 9.1 has to paste every gate command, so it needs the `exec` form or a
   `typecheck` script in `web/package.json`.
+
+- [confirmed] 2026-08-23 The three failing tests in `web/src/app/posts/PostDetail.test.tsx`
+  (`renders stage tabs`, `shows Run Next and Run All buttons ...`, `renders stage logs when
+  present`) are UI expectation drift, not a runtime defect: each fails with
+  `Unable to find an element with the text: ...` for `Final`, `Run Next` and `Execution Logs`
+  respectively. They plus the 6 in `image-preview.test.tsx` are the whole of the standing
+  `9 failed | 4510 passed` state of `pnpm -C web test`, which had only ever been recorded as
+  an aggregate. Item 9.1 needs both files audited against the current components, the same
+  way the Playwright suite does.

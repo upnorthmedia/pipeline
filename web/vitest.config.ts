@@ -4,9 +4,9 @@ import fs from "fs";
 import path from "path";
 
 /**
- * The repo keeps one `.env` at its root (shared by the Python stack, compose and
- * the dashboard). Vitest runs from `web/`, so load it here to give database
- * tests their connection string without duplicating credentials.
+ * The repo keeps one `.env` at its root (shared by compose, `next.config.ts`
+ * and the Mastra CLI). Vitest runs from `web/`, so load it here to give
+ * database tests their connection string without duplicating credentials.
  */
 function repoRootEnv(): Record<string, string> {
   const file = path.resolve(__dirname, "../.env");

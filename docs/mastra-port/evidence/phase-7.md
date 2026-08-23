@@ -1438,3 +1438,289 @@ Note the `exec`: on the installed pnpm (10.26.2) the objective's literal
 `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "web" not found`, because `tsc` is not a
 script in `web/package.json` and pnpm no longer falls back to the local binary. Logged in
 `todo.md` against item 9.1, which has to paste every gate command.
+
+## 7.4
+
+`CLAUDE.md`, `README.md` and the `.env` documentation brought onto the Mastra
+architecture. Every command any of the three lists was run here first.
+
+### What landed
+
+- `CLAUDE.md`, **new**: the repo did not have one. Two-process architecture with the
+  deployed start commands, where things live, the command list, the gate list with the two
+  known-red gates named, the traps (consumer-group contention, the `next/*` ban under
+  `src/mastra/`, keys in the database rather than the environment, the no-second-queue
+  rule), the Studio invocation for definition-of-done 13, and the conventions.
+- `.gitignore` no longer ignores `CLAUDE.md`. It was listed under `# Misc` next to
+  `plan.md`, so the file the objective requires as a deliverable could not have been
+  committed.
+- `README.md` rewritten: the FastAPI/ARQ diagram replaced by web/worker/db/redis, the
+  stage table carrying the models actually in `stage-models.ts`, gates and review-gate
+  behaviour described as workflow suspension, a development section that no longer has a
+  Python half, and a repository layout table.
+- `.env.example` rewritten against what the code actually reads. Removed: `DATABASE_URL`
+  (asyncpg URL, nothing parses that scheme now), `TEST_DATABASE_URL` (pytest is gone;
+  nothing outside `docs/` references it) and `WORKER_MAX_JOBS` (ARQ's, unread since 7.1c).
+  Added: `BETTER_AUTH_SECRET`, `NEXT_PUBLIC_APP_URL`, `RULES_DIR`/`MEDIA_DIR`/
+  `TEXTSTAT_DATA_DIR`, the Stripe/Resend keys, and the note that provider API keys are
+  database rows, not environment variables.
+- `web/README.md` was still `create-next-app` boilerplate (npm/yarn/bun, deploy on
+  Vercel); replaced with a pointer to the root documents and the three commands.
+- `docs/mastra-port/railway.md` step 3 corrected: `auth:migrate` needs `--apply`.
+- Two code comments that asserted the two stacks coexist (`web/src/mastra/prompts.ts`,
+  `web/vitest.config.ts`) rewritten, since only one stack is left.
+
+### The env var inventory the rewrite was built from
+
+Every `process.env` read across `web/` and `packages/`, tests and config files
+included:
+
+```
+$ grep -rhno "process\.env\.[A-Za-z_0-9]*" web/src web/e2e web/scripts web/next.config.ts web/vitest.config.ts web/drizzle.config.ts web/playwright.config.ts packages | sed 's/.*process\.env\.//' | sort | uniq -c | sort -rn
+  72 WP_ENCRYPTION_KEY
+  39 MEDIA_DIR
+  38 REDIS_URL
+  14 DATABASE_URL_SYNC
+   9 RULES_DIR
+   5 JENA_WEBHOOK_SECRET
+   5 ANTHROPIC_API_KEY
+   4 JENA_API_KEY
+   4 DATABASE_URL
+   3 NODE_ENV
+   3 GEMINI_API_KEY
+   2 CI
+   2 
+   1 TEXTSTAT_DATA_DIR
+   1 STRIPE_WEBHOOK_SECRET
+   1 STRIPE_SECRET_KEY
+   1 RESEND_API_KEY
+   1 PROBE_SLEEP_MS
+   1 PROBE_REDIS_URL
+   1 PROBE_MARKER_FILE
+   1 PERPLEXITY_API_KEY
+   1 NEXT_PUBLIC_APP_URL
+   1 JENA_CONTENT_PATH
+   1 GITHUB_TOKEN
+   1 GITHUB_REPO
+   1 GITHUB_BRANCH
+   1 GEMINI_IMAGE_QUOTA
+   1 EMAIL_FROM
+   1 DURABILITY_KILL_DELAY_MS
+```
+
+The blank line is `process.env[name]` in the three `src/mastra/scripts/*.mjs` helpers.
+
+`DATABASE_URL`'s four reads are all `DATABASE_URL_SYNC ?? DATABASE_URL` fallbacks
+(`src/db/index.ts` and two crash-probe files), so `DATABASE_URL_SYNC` is the only name
+worth documenting: `src/lib/auth.ts` reads it directly with no fallback. The three
+provider keys appear only in test files. `JENA_*` and `GITHUB_*` belong to
+`packages/create-mdx-blog`, which is the scaffolded blog's environment, not this app's.
+`PROBE_*` and `DURABILITY_KILL_DELAY_MS` are the crash-probe fixture's.
+
+`TEST_DATABASE_URL` after the rewrite appears nowhere outside the port record:
+
+```
+$ git grep -n "TEST_DATABASE_URL\|WORKER_MAX_JOBS" -- . ':(exclude)docs/mastra-port'
+exit=1 (no matches)
+```
+
+### The commands the documents list, run
+
+Toolchain: `node -v` `v24.12.0`, `pnpm -v` `10.26.2`, images `node:22-alpine`.
+
+```
+$ pnpm -C web install
+Done in 508ms using pnpm v10.26.2
+
+$ docker compose up -d db redis
+ Container objective-port-jena-46c1e6-1-redis-1 Running
+ Container objective-port-jena-46c1e6-1-db-1 Running
+
+$ docker compose config -q
+exit=0
+```
+
+Both migration runners, against a scratch database so nothing touched the dev data. The
+scratch URL is the dev URL with the database name replaced:
+
+```
+$ psql "$ROOT/postgres" -c "DROP DATABASE IF EXISTS doc744_scratch" -c "CREATE DATABASE doc744_scratch"
+NOTICE:  database "doc744_scratch" does not exist, skipping
+DROP DATABASE
+CREATE DATABASE
+
+$ DATABASE_URL_SYNC="$ROOT/doc744_scratch" pnpm -C web db:migrate
+> drizzle-kit migrate
+Reading config file '.../web/drizzle.config.ts'
+Using 'pg' driver for database querying
+[✓] migrations applied successfully!
+exit=0
+
+$ DATABASE_URL_SYNC="$ROOT/doc744_scratch" pnpm -C web auth:migrate
+tables to create: auth_users, auth_sessions, auth_accounts, auth_verifications
+columns to add:   (none)
+[the compiled DDL, ending:]
+create index "auth_verifications_identifier_idx" on "auth_verifications" ("identifier");
+re-run with --apply to execute
+
+$ DATABASE_URL_SYNC="$ROOT/doc744_scratch" pnpm -C web auth:migrate --apply
+tables to create: auth_users, auth_sessions, auth_accounts, auth_verifications
+columns to add:   (none)
+applied
+```
+
+That dry-run is why `railway.md` and both READMEs now carry `--apply`: the previously
+documented `pnpm -C web auth:migrate` prints DDL and exits 0 without creating anything,
+so following the old cutover step would have produced a database whose every
+authenticated route 401s.
+
+Both are idempotent on a second run, and the bare (no `run`) form works because both are
+scripts in `web/package.json`:
+
+```
+$ DATABASE_URL_SYNC="$ROOT/doc744_scratch" pnpm -C web db:migrate
+[✓] migrations applied successfully!   exit=0
+$ DATABASE_URL_SYNC="$ROOT/doc744_scratch" pnpm -C web auth:migrate --apply
+tables to create: (none)
+columns to add:   (none)
+schema is up to date                   exit=0
+```
+
+The scratch database ended with the 9 tables a fresh install should have (5 from the
+Drizzle baseline, 4 from BetterAuth), and the dev database's `auth_*` count was 4 before
+and 4 after, so the override took and nothing leaked:
+
+```
+$ psql "$ROOT/doc744_scratch" -c "select table_name from information_schema.tables where table_schema='public' and table_name like 'auth_%'"
+auth_accounts
+auth_sessions
+auth_users
+auth_verifications
+$ psql "$ROOT/doc744_scratch" -c "select count(*) from information_schema.tables where table_schema='public'"
+9
+--- dev auth table count before=4 after=4 ---
+```
+
+Studio, the invocation `CLAUDE.md` and `README.md` both point at, started and queried:
+
+```
+$ pnpm -C web studio
+> MASTRA_WORKERS=false mastra dev --env ../.env
+✓ Initial bundle complete
+◇ Starting Mastra dev server...
+ mastra  1.26.0 ready in 1054 ms
+
+$ curl -s http://localhost:4111/api/workflows | python3 -c "..."
+['images', 'nextjsPublish', 'pipeline', 'recrawlCheck', 'scaffoldCheck', 'sitemapCrawl', 'wordpressPublish']
+pipeline steps: 8
+```
+
+`docker compose up` for the whole stack is listed in the README's quick start; item 7.6
+is the one that boots it end to end, and `docker compose config -q` above is what was run
+here.
+
+### Gates
+
+```
+$ pnpm -C web exec tsc --noEmit
+exit=0
+$ pnpm -C web lint
+> eslint
+exit=0
+$ pnpm -C web build
+✓ Compiled successfully in 7.0s
+✓ Generating static pages using 15 workers (42/42) in 291.8ms
+exit=0
+$ pnpm -C web test
+ Test Files  2 failed | 133 passed (135)
+      Tests  9 failed | 4510 passed | 7 skipped (4526)
+exit=1
+```
+
+9 failing tests in 2 files is the standing state, unchanged by this iteration and
+identical to the count recorded under 7.3: 6 in `image-preview.test.tsx` and 3 in
+`PostDetail.test.tsx`, all of them `Unable to find an element with the text: ...`
+expectation drift. This iteration changed no component, and the three `PostDetail`
+failures are now named in `todo.md` rather than hiding inside an aggregate.
+
+A first run of the suite reported **11** failures in 4 files, the extra two being
+`scaffold-check.test.ts` ("expected [...] to include `workflow-step-result`") and
+`pipeline-events.test.ts`. A `mastra dev` process left running by the previous iteration
+was the cause; both files passed the moment it was killed, with nothing else changed:
+
+```
+$ ps aux | grep mastra
+cody 39942 ... mastra/dist/index.js dev --env ../.env
+$ kill 39942
+$ pnpm -C web test src/mastra/workflows/scaffold-check.test.ts src/mastra/pipeline-events.test.ts src/app/posts/PostDetail.test.tsx
+ Test Files  1 failed | 2 passed (3)
+      Tests  3 failed | 57 passed (60)
+```
+
+That is the same consumer-group contention 7.2a recorded for a stray worker container,
+but reached through Studio's own process, which is why `CLAUDE.md` states the rule as
+"stop the worker **and Studio**" rather than just the worker.
+
+## 7.5
+
+`rules/` handling and the assets that lived under `api/`. Nothing was left to move; this
+is the check that says so.
+
+`rules/` never moved: it is at the repo root, unmodified, and the TypeScript stack reads
+it through one function.
+
+```
+$ grep -rn "RULES_DIR" web/src --include='*.ts' | grep -v test
+web/src/mastra/prompts.ts:25:  return process.env.RULES_DIR ?? path.resolve(process.cwd(), "..", "rules")
+```
+
+Two consumers, both through `rulesDir()`: the six stage prompts (`loadRules()` in
+`prompts.ts`) and the rules editor route (`web/src/app/api/rules/rule-files.ts:35`). Both
+runtime images `COPY rules ./rules` and pin `RULES_DIR=/app/rules` (7.2a), and both
+compose services mount `./rules:/app/rules`.
+
+The non-Python files that went with `api/` in commit `f917348`, and where each one landed:
+
+```
+$ git show --stat f917348 --name-only | grep -v '\.py$' | grep '^api/'
+api/.dockerignore
+api/Dockerfile
+api/alembic.ini
+api/alembic/script.py.mako
+api/entrypoint.sh
+api/pyproject.toml
+api/tests/fixtures/empty_sitemap.xml
+api/tests/fixtures/malformed_sitemap.xml
+api/tests/fixtures/simple_sitemap.xml
+api/tests/fixtures/sitemap_index.xml
+api/tests/fixtures/sub_sitemap_pages.xml
+api/tests/fixtures/sub_sitemap_posts.xml
+api/tests/fixtures/sub_sitemap_products.xml
+api/uv.lock
+```
+
+Where each landed:
+
+| Deleted | Replacement |
+| --- | --- |
+| `api/.dockerignore` | repo-root `.dockerignore` (7.2a) |
+| `api/Dockerfile` | `web/Dockerfile`, the `worker-builder` and `worker` stages (7.1c) |
+| `api/alembic.ini` | `web/drizzle.config.ts` plus `web/drizzle/` (7.0) |
+| `api/alembic/script.py.mako` | nothing; `drizzle-kit generate` writes its own SQL |
+| `api/entrypoint.sh` | nothing; the worker image runs `node` directly |
+| `api/pyproject.toml` | `web/package.json` |
+| `api/uv.lock` | `web/pnpm-lock.yaml` |
+| `api/tests/fixtures/*.xml` | `web/src/mastra/sitemap/data/fixtures/`, all 7 |
+
+The seven sitemap XML fixtures were copied in `6bf29f4` (item 5.2c-i, the sitemap
+service port), well before the delete, and are still read by `web/src/mastra/sitemap/sitemap.test.ts`:
+
+```
+$ ls web/src/mastra/sitemap/data/fixtures
+empty_sitemap.xml  malformed_sitemap.xml  simple_sitemap.xml  sitemap_index.xml
+sub_sitemap_pages.xml  sub_sitemap_posts.xml  sub_sitemap_products.xml
+```
+
+`api/` carried no other data: the textstat corpus the `edit` stage needs was written in
+TypeScript under `web/src/mastra/textstat/data`, generated `media/` has always lived at
+the repo root, and `api/src` contained nothing but `.py` files.
