@@ -14272,6 +14272,213 @@ three pieces are separately verifiable, so they are separate items.
   - [ ] 5.5d `GET /api/events/{post_id}` and `GET /api/events`, as Next.js route handlers
     serving `text/event-stream` in `use-sse.ts`'s named-event shape, subscribed to the
     topic rather than to an in-process stream.
+
+    Split, because the two endpoints share a generator in Python but not a
+    security question in TypeScript. Both call `_subscribe_and_stream()`, and neither
+    Python handler authenticated anything: `post_events()` took `post_id: str` and
+    `global_events()` took no parameter at all, so any caller received any post's feed
+    or every post's feed. Phase 5's multi-tenancy rule closes that, and the two
+    endpoints close it differently. The per-post one resolves ownership once, before
+    the stream opens, with the same inner join every other `{post_id}` handler uses.
+    The global one cannot: it has no single post to check, its feed spans posts the
+    caller may create after connecting, and an ownership lookup per delivered event is
+    a design decision rather than a transcription. So 5.5d-i is the per-post endpoint
+    plus the framing and subscription machinery both share, and 5.5d-ii is the global
+    endpoint and its per-event scoping.
+    - [x] 5.5d-i `GET /api/events/{post_id}`, plus the `text/event-stream` framing and
+      the subscription lifecycle both endpoints share.
+
+      Ported to `web/src/app/api/events/[post_id]/route.ts`, with
+      `web/src/app/api/events/sse.ts` (the wire format `sse_starlette` used to write)
+      and `web/src/app/api/events/stream.ts` (the port of `_subscribe_and_stream()`,
+      the generator both Python endpoints shared).
+
+      **Deviation 1, deliberate: the endpoint is authenticated and ownership-scoped,
+      and the Python one was not.** `post_events()` took `post_id: str`, declared no
+      session dependency and did no lookup, so any caller who knew or guessed a post id
+      received that post's live feed, which carries stage messages, model names and
+      per-stage token counts. Phase 5's rule is that a handler which can read another
+      user's post is a defect rather than a follow-up, so this resolves ownership with
+      the same inner join to `website_profiles` every other `{post_id}` handler uses,
+      before the stream opens. `EventSource` cannot set headers but does send
+      same-origin cookies, so the BetterAuth session `use-sse.ts` already carries is
+      what authenticates it and the hook needed no change.
+
+      **Deviation 2, a consequence of the first: a malformed id is now a 422.** Python
+      typed the parameter `str`, so `/api/events/not-a-uuid` opened a stream on
+      `pipeline:post:not-a-uuid`, a channel nothing ever published to, and the browser
+      sat on an empty connection. Resolving ownership means comparing against a uuid
+      column, so the id is validated with the shared `isUuid()` / `unprocessableUuid()`
+      pair instead of reaching Postgres and raising.
+
+      **Deviation 3: the keepalive comment carries an ISO 8601 timestamp.**
+      `EventSourceResponse._ping()` interpolated `datetime.now(timezone.utc)`, whose
+      `str()` is `2026-08-22 12:34:56.789012+00:00`. The frame is an SSE comment, which
+      `EventSource` discards before any listener runs, so neither spelling is
+      observable to `use-sse.ts`; the 15s interval is the part that matters and it is
+      preserved.
+
+      **What the transport swap forced, read off the installed package rather than
+      assumed.** `RedisStreamsPubSub.subscribe()` anchors a newly created consumer group
+      at `0` unless told otherwise, and `SubscribeOptions.startFrom` documents that
+      default:
+
+      ```
+      $ grep -n "startFrom" web/node_modules/@mastra/core/dist/events/types.d.ts
+      84:    startFrom?: 'earliest' | 'latest';
+
+      $ grep -n "groupAnchor = options" web/node_modules/@mastra/redis-streams/dist/index.js
+      164:		const groupAnchor = options?.startFrom === "latest" ? "$" : "0";
+      ```
+
+      Left at the default, a browser connecting mid-run would be handed the whole
+      retained stream (`maxStreamLength` defaults to 10000) as if it were live, where
+      Python's `PUBLISH` retained nothing and a connection saw only what arrived after
+      it. Replay is item 5.5e and has to be asked for, so this subscribes with
+      `startFrom: "latest"`.
+
+      The second forced behaviour is that every delivery is acked, including the ones
+      the `post_id` filter drops. Nothing acks on a subscriber's behalf:
+
+      ```
+      $ sed -n '557,565p' web/node_modules/@mastra/redis-streams/dist/index.js
+      		try {
+      			const result = sub.cb(event, ack, nack);
+      			if (result && typeof result.catch === "function") result.catch(async () => {
+      				await nack();
+      			});
+      		} catch {
+      			await nack();
+      		}
+      	}
+      ```
+
+      An unacked entry stays in the group's pending list for the life of the
+      subscription, so a dashboard left open for a day would accumulate one entry per
+      event published installation-wide. The filtered-out ones are the leak, because
+      nothing writes them to the client and so nothing acks them as a side effect.
+
+      **One subscription per request, matching `redis.pubsub()` per request.** Each
+      `subscribe()` opens its own Redis connection and creates a private
+      `__fanout-<uuid>` consumer group, and `unsubscribe()` is what quits the one and
+      destroys the other, so teardown is wired to `request.signal` (Python's
+      `await request.is_disconnected()` poll) and to the stream's `cancel()`. A
+      process-wide subscription fanned out in memory would be one connection instead of
+      one per browser, but it is a different design from the one Python had and nothing
+      here needs it yet; the leak it would avoid is closed by the teardown, proven by
+      its own test.
+
+      **Not deviations, deliberately preserved.** `data:` carries the whole published
+      payload including `event` and `post_id`, which is what `json.dumps(parsed)` sent
+      and what `use-sse.ts` parses. A payload with no `event` key is named `update`,
+      which is `parsed.get("event", "update")`. Frames are separated by `\r\n`, which
+      is `EventSourceResponse.DEFAULT_SEPARATOR`, and the four response headers
+      (`Content-Type` with Starlette's appended charset, `Cache-Control: no-store`,
+      `Connection: keep-alive`, `X-Accel-Buffering: no`) are the ones that class set.
+
+      `web/src/lib/api.ts` needed no change: `sseUrl.post()` already points at
+      `/api/events/{id}` and the hook's `NAMED_EVENTS` list is unchanged.
+
+      Pre-implementation state, measured by moving the three new source files aside:
+
+      ```
+      $ pnpm -C web vitest run src/app/api/events/events.test.ts
+      Error: Cannot find module './[post_id]/route' imported from
+      '.../web/src/app/api/events/events.test.ts'
+       Test Files  1 failed (1)
+            Tests  no tests
+      ```
+
+      Negative controls, each applied alone and reverted, against the 16 tests:
+
+      | Control | Result |
+      | --- | --- |
+      | NC1: `startFrom: "latest"` dropped, so a new group anchors at `0` | 1 failed |
+      | NC2: deliveries left unacked | 1 failed |
+      | NC3: ownership check removed, matching Python's unauthenticated handler | 3 failed |
+      | NC4: frames separated by `\n` instead of `\r\n` | 1 failed |
+      | NC5: `post_id` filter dropped, so every post's events are forwarded | 1 failed |
+      | NC6: teardown leaves the subscription open | 1 failed |
+      | NC7: no `update` fallback for a payload with no event name | 1 failed |
+      | NC8: subscriptions share one consumer group, so deliveries round-robin | 4 failed |
+
+      NC4 failing exactly one test is the point of asserting on raw bytes once: the
+      frame parser in the test reads the same `SSE_SEPARATOR` constant, so every other
+      assertion stays green when the separator changes and only the byte-exact
+      comparison notices. NC8 is the control that pins why the subscription takes no
+      `group`: a shared group makes two browsers watching one post compete for its
+      events, and each would see roughly half a run.
+
+      The 16 tests run against the real database, real BetterAuth sessions and the real
+      Redis Streams topic, with every asserted event published by a second
+      `RedisStreamsPubSub` client so a frame that reaches the response body provably
+      travelled through Redis rather than an in-process emitter:
+
+      ```
+      $ pnpm -C web vitest run src/app/api/events/events.test.ts --reporter=verbose
+ ✓ src/app/api/events/events.test.ts > GET /api/events/{post_id} > rejects an unauthenticated request 255ms
+ ✓ src/app/api/events/events.test.ts > GET /api/events/{post_id} > answers a malformed path uuid with FastAPI's 422 266ms
+ ✓ src/app/api/events/events.test.ts > GET /api/events/{post_id} > answers a post that does not exist with a 404 258ms
+ ✓ src/app/api/events/events.test.ts > GET /api/events/{post_id} > answers another user's post with the same 404, opening no stream 261ms
+ ✓ src/app/api/events/events.test.ts > GET /api/events/{post_id} > answers a post whose profile_id is null with a 404 261ms
+ ✓ src/app/api/events/events.test.ts > GET /api/events/{post_id} > answers an owned post with sse_starlette's four response headers 1271ms
+ ✓ src/app/api/events/events.test.ts > GET /api/events/{post_id} > delivers a published event as one CRLF-framed named frame 1318ms
+ ✓ src/app/api/events/events.test.ts > GET /api/events/{post_id} > carries the whole published payload in data, event name and post_id included 1345ms
+ ✓ src/app/api/events/events.test.ts > GET /api/events/{post_id} > delivers every event name useSSE() listens for, in publication order 1340ms
+ ✓ src/app/api/events/events.test.ts > GET /api/events/{post_id} > ignores events for other posts 1329ms
+ ✓ src/app/api/events/events.test.ts > GET /api/events/{post_id} > names an event with no `event` key `update`, as parsed.get('event', 'update') did 1326ms
+ ✓ src/app/api/events/events.test.ts > GET /api/events/{post_id} > drops an event carrying no post_id rather than broadcasting it 1353ms
+ ✓ src/app/api/events/events.test.ts > GET /api/events/{post_id} > does not replay events published before the connection opened 1328ms
+ ✓ src/app/api/events/events.test.ts > GET /api/events/{post_id} > fans out to two concurrent readers of the same post instead of round-robining 2352ms
+ ✓ src/app/api/events/events.test.ts > GET /api/events/{post_id} > destroys its consumer group and stops delivering once the client disconnects 1829ms
+ ✓ src/app/api/events/events.test.ts > GET /api/events/{post_id} > acknowledges every delivery, so a long-lived reader accumulates no pending entries 1332ms
+ Test Files  1 passed (1)
+      Tests  16 passed (16)
+   Duration  18.40s (transform 157ms, setup 85ms, import 798ms, tests 17.45s, environment 0ms)
+      ```
+
+      Frontend gates:
+
+      ```
+      $ pnpm -C web tsc --noEmit
+      (no output, exit 0)
+
+      $ pnpm -C web lint
+      (no output, exit 0)
+
+      $ pnpm -C web test
+       Test Files  3 failed | 91 passed (94)
+            Tests  10 failed | 1677 passed | 7 skipped (1694)
+      ```
+
+      The ten are the nine already recorded plus one known flake, and no file touched
+      here appears among them: six in `src/components/__tests__/image-preview.test.tsx`,
+      three in `src/app/posts/PostDetail.test.tsx`, and
+      `scaffold-check > emits the workflow lifecycle events the trace view will read`,
+      the flake `todo.md` records.
+
+      ```
+      $ pnpm -C web build
+      ✓ Compiled successfully in 4.1s
+      ✓ Generating static pages using 15 workers (35/35) in 313.4ms
+      ├ ƒ /api/events/[post_id]
+      ```
+
+      Python gates, unchanged from the recorded baseline:
+
+      ```
+      $ cd api && uv run pytest -q
+      120 failed, 241 passed, 25 errors in 15.05s
+
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+      [*] 17 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).
+
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 131 files already formatted
+      ```
+    - [ ] 5.5d-ii `GET /api/events`, and how the global feed is scoped to the caller's
+      own posts.
   - [ ] 5.5e Resumable replay: a browser that reconnects mid-run recovers the events it
     missed. Test disconnects and reconnects mid-run and asserts no gap in the sequence.
 - [ ] 5.6 `rules`

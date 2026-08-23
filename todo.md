@@ -394,3 +394,14 @@
   somewhere else. Deleted by hand under 5.5c-iv-d-2; the fix is either an
   `afterAll` cleanup in whichever suite writes them or a `MEDIA_DIR` default in
   `vitest.setup`, plus a `.gitignore` entry for `media/`.
+- [optimization] 2026-08-23 `GET /api/events/{post_id}` opens one `RedisStreamsPubSub`
+  subscription per connected browser, and each one costs a dedicated Redis connection plus
+  a private `__fanout-<uuid>` consumer group (verified in `@mastra/redis-streams`'s
+  `subscribe()`: it calls `createClient()` and `xGroupCreate()` per call). That mirrors
+  Python's `redis.pubsub()` per request, so it is not a regression, but it scales with open
+  tabs rather than with `web` processes: a user with the posts list, the monitor and a post
+  detail open holds three. The fix, if connection count ever matters, is one process-wide
+  subscription per `web` instance fanned out in memory to the connected `ReadableStream`s;
+  it must stay ungrouped so two `web` replicas each see every event rather than splitting
+  them. Not done now because nothing has hit the limit and the teardown path
+  (`request.signal` -> `unsubscribe()`) already prevents the leak, proven by a test.
