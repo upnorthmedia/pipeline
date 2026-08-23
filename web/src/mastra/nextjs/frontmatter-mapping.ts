@@ -33,6 +33,8 @@
  * `api/scripts/export_frontmatter_mapping_parity.py` from the real function.
  */
 
+import { pyDictGet, pyDictHas, pyDictSet, PyTypeError } from "./pyyaml/values"
+
 /** `value is None`: an absent `Map` key and a stored `null` are both `None`. */
 function isNone(value: unknown): boolean {
   return value === null || value === undefined
@@ -54,22 +56,15 @@ function dictGet(target: Record<string, unknown>, key: string): unknown {
  * Two things a `Map.set` does not do on its own. Python refuses an unhashable
  * key, and the hook does not catch the `TypeError`, so a mapping that stores a
  * list or an object under `key` fails the publish rather than writing a
- * stringified key into the reader's frontmatter. And Python hashes `True` with
- * `1` and `False` with `0`, so two targets that write those two keys write one
- * entry, keeping the key first inserted and the value written last, which is
- * what `Map.set` already does for a key it considers equal.
+ * stringified key into the reader's frontmatter. And Python's key equality is
+ * not a `Map`'s: `True`, `1` and `1.0` are one key, so two targets that write
+ * them write one entry, keeping the key first inserted and the value written
+ * last. `pyDictSet` is that assignment.
  */
 function setResultKey(result: Map<unknown, unknown>, key: unknown, value: unknown): void {
-  if (Array.isArray(key)) throw new TypeError("unhashable type: 'list'")
-  if (isDict(key)) throw new TypeError("unhashable type: 'dict'")
-
-  let stored = key
-  if (!result.has(key)) {
-    const twin =
-      typeof key === "boolean" ? (key ? 1 : 0) : key === 1 ? true : key === 0 ? false : undefined
-    if (twin !== undefined && result.has(twin)) stored = twin
-  }
-  result.set(stored, value)
+  if (Array.isArray(key)) throw new PyTypeError("unhashable type: 'list'")
+  if (isDict(key)) throw new PyTypeError("unhashable type: 'dict'")
+  pyDictSet(result, key, value)
 }
 
 /** Transform Jena AI's frontmatter into the target blog's schema. */
@@ -81,15 +76,15 @@ export function applyFrontmatterMapping(
 
   for (const [jenaField, target] of mapping) {
     if (typeof target === "string") {
-      if (jenaFrontmatter.has(jenaField)) {
-        setResultKey(result, target, jenaFrontmatter.get(jenaField))
+      if (pyDictHas(jenaFrontmatter, jenaField)) {
+        setResultKey(result, target, pyDictGet(jenaFrontmatter, jenaField))
       }
     } else if (isDict(target)) {
       const key = Object.hasOwn(target, "key") ? target.key : jenaField
       const transform = dictGet(target, "transform")
       const fallback = dictGet(target, "default")
 
-      let value = jenaFrontmatter.get(jenaField)
+      let value = pyDictGet(jenaFrontmatter, jenaField)
 
       if (isNone(value) && !isNone(fallback)) {
         setResultKey(result, key, fallback)

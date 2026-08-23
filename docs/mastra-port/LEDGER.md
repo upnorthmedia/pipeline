@@ -745,15 +745,18 @@ pages that use it work with the Python API stopped.
 
             Evidence: [`evidence/phase-5.md` #5.3c-iii-b-2-a](../mastra-port/evidence/phase-5.md)
 
-          - [ ] 5.3c-iii-b-2-b `_apply_mapping_to_content`: the `---` fence split, the
+          - [x] 5.3c-iii-b-2-b `_apply_mapping_to_content`: the `---` fence split, the
             `yaml.safe_load` of the frontmatter block and the
             `yaml.dump(mapped, default_flow_style=False, allow_unicode=True)` that
-            rebuilds it. Note before starting: `sort_keys` defaults to `True`, and
-            PyYAML's `represent_mapping` wraps the sort in `try/except TypeError`, so the
-            emitted key order is sorted when the mapped keys are mutually comparable and
-            insertion-ordered when they are not (which 5.3c-iii-b-2-a can produce, with a
-            `None` or `int` key beside strings). Split again if the emitter's quoting and
-            wrapping rules do not fit one iteration.
+            rebuilds it. No JavaScript YAML library emits PyYAML's bytes (js-yaml matched
+            12 of 22 representative values, the `yaml` package 10), so `representer.py`,
+            `serializer.py`, the block half of `emitter.py`, `resolver.py` and
+            `SafeConstructor` are ported in `web/src/mastra/nextjs/pyyaml/`, with the
+            `yaml` package (now a direct dependency of `web/`) used for syntax only.
+            Verified against a 201-case oracle and 2400 randomly generated documents run
+            through the real function, with three documented divergences.
+
+            Evidence: [`evidence/phase-5.md` #5.3c-iii-b-2-b](../mastra-port/evidence/phase-5.md)
           - [ ] 5.3c-iii-b-2-c The payload: `post.ready_content or post.final_md_content
             or ""`, the `image_manifest` walk that reads each image off disk and
             base64-encodes it, and the `json.dumps` whose exact bytes the signature covers.
@@ -764,7 +767,11 @@ pages that use it work with the Python API stopped.
             `publish_complete` / `publish_error` events with `_fail`. `web/src/db/schema.ts`
             types `nextjs_frontmatter_map` as `Record<string, string>`, which the dict
             shaped targets contradict; widen it to `Record<string, unknown>` here, where
-            the column is first read.
+            the column is first read. Note: registering this step is what first pulls
+            `web/src/mastra/nextjs/pyyaml/` (and with it the `yaml` package) into the
+            Mastra entry point's import graph, so
+            `web/src/mastra/no-next-imports.test.ts`, which asserts the exact package set
+            that graph reaches, needs `yaml` added in the same iteration.
           - [ ] 5.3c-iii-b-2-e The `output_format == "nextjs"` branch of
             `POST /{post_id}/publish`: `nextjs_publish_status = "pending"`, the start of
             the new workflow, and the removal of the temporary fall-through recorded under

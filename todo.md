@@ -585,3 +585,10 @@
   item 5.3c-iii-b-1-c-ii-3. Not reachable through the images stage, which names every file
   with a timestamp, so the fix (rewrite longest key first, or one pass with a single
   alternation) is a deliberate behaviour change rather than part of the port.
+- [investigate] 2026-08-23 `src/mastra/workflows/pipeline-completion.test.ts > ...
+  (`Date.parse(recorded)` at line 328) failed once in a full `pnpm test` run during ledger
+  item 5.3c-iii-b-2-b, taking that run to 11 failures, and did not fail in the next two
+  runs of the same suite. The file passes 14/14 in isolation. Likely the same cross-file
+  interference as the `scaffold-check` entry above (both drain a real Redis Streams
+  subscription under load) rather than a defect in the assertion, but it has only been
+  seen once, so it is recorded rather than diagnosed.

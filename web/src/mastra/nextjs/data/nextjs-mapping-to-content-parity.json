@@ -1,0 +1,2457 @@
+{
+  "cases": [
+    {
+      "name": "no leading fence",
+      "content": "# Heading\n\nBody.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "# Heading\n\nBody.\n"
+    },
+    {
+      "name": "leading fence on a later line",
+      "content": "text\n---\nv: 1\n---\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "text\n---\nv: 1\n---\n"
+    },
+    {
+      "name": "fence but no closing fence",
+      "content": "---\nv: 1\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 1\n"
+    },
+    {
+      "name": "exactly the fence",
+      "content": "---",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---"
+    },
+    {
+      "name": "fence twice, nothing after",
+      "content": "------",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\n{}\n---"
+    },
+    {
+      "name": "fence three times",
+      "content": "---------",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\n{}\n------"
+    },
+    {
+      "name": "empty frontmatter block",
+      "content": "---\n---\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\n{}\n---\n"
+    },
+    {
+      "name": "frontmatter block is one newline",
+      "content": "---\n\n---\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\n{}\n---\n"
+    },
+    {
+      "name": "frontmatter block is blank",
+      "content": "------\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\n{}\n---\n"
+    },
+    {
+      "name": "fence run of four dashes",
+      "content": "----\nv: 1\n----\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "error": {
+        "type": "ParserError",
+        "message": "while parsing a block node\nexpected the node content, but found '?'\n  in \"<unicode string>\", line 2, column 1:\n    v: 1\n    ^"
+      }
+    },
+    {
+      "name": "a third fence stays in the tail",
+      "content": "---\nv: 1\n---\nbody\n---\nmore\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 1\n---\nbody\n---\nmore\n"
+    },
+    {
+      "name": "mid-line fence closes the block",
+      "content": "---\nv: 1\n--- inline ---\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 1\n--- inline ---\n"
+    },
+    {
+      "name": "no trailing newline after the block",
+      "content": "---\nv: 1\n---",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 1\n---"
+    },
+    {
+      "name": "tail starts immediately",
+      "content": "---\nv: 1\n---tail",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 1\n---tail"
+    },
+    {
+      "name": "frontmatter loads to none",
+      "content": "---\n\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\n{}\n---\nbody"
+    },
+    {
+      "name": "frontmatter is a comment only",
+      "content": "---\n# just a comment\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\n{}\n---\nbody"
+    },
+    {
+      "name": "frontmatter is an empty flow map",
+      "content": "---\n{}\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\n{}\n---\nbody"
+    },
+    {
+      "name": "frontmatter is an empty flow list",
+      "content": "---\n[]\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\n{}\n---\nbody"
+    },
+    {
+      "name": "frontmatter is a bare scalar string",
+      "content": "---\nhello\n---\nbody",
+      "mapping": [],
+      "result": "---\n{}\n---\nbody"
+    },
+    {
+      "name": "frontmatter is a bare scalar int",
+      "content": "---\n7\n---\nbody",
+      "mapping": [],
+      "result": "---\n{}\n---\nbody"
+    },
+    {
+      "name": "frontmatter is a list",
+      "content": "---\n- a\n- b\n---\nbody",
+      "mapping": [],
+      "result": "---\n{}\n---\nbody"
+    },
+    {
+      "name": "frontmatter is a string, str target hits",
+      "content": "---\nhello\n---\nbody",
+      "mapping": [
+        [
+          "ell",
+          "x"
+        ]
+      ],
+      "error": {
+        "type": "TypeError",
+        "message": "string indices must be integers, not 'str'"
+      }
+    },
+    {
+      "name": "frontmatter is a string, str target misses",
+      "content": "---\nhello\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\n{}\n---\nbody"
+    },
+    {
+      "name": "frontmatter is a string, dict target",
+      "content": "---\nhello\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          {
+            "key": "x"
+          }
+        ]
+      ],
+      "error": {
+        "type": "AttributeError",
+        "message": "'str' object has no attribute 'get'"
+      }
+    },
+    {
+      "name": "frontmatter is a list, str target hits",
+      "content": "---\n- a\n---\nbody",
+      "mapping": [
+        [
+          "a",
+          "x"
+        ]
+      ],
+      "error": {
+        "type": "TypeError",
+        "message": "list indices must be integers or slices, not str"
+      }
+    },
+    {
+      "name": "frontmatter is an int, str target",
+      "content": "---\n7\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "error": {
+        "type": "TypeError",
+        "message": "argument of type 'int' is not iterable"
+      }
+    },
+    {
+      "name": "frontmatter is invalid yaml",
+      "content": "---\nv: [1, 2\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "error": {
+        "type": "ParserError",
+        "message": "while parsing a flow sequence\n  in \"<unicode string>\", line 2, column 4:\n    v: [1, 2\n       ^\nexpected ',' or ']', but got '<stream end>'\n  in \"<unicode string>\", line 3, column 1:\n    \n    ^"
+      }
+    },
+    {
+      "name": "frontmatter has a duplicate key",
+      "content": "---\nv: one\nv: two\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: two\n---\nbody"
+    },
+    {
+      "name": "frontmatter has a tab indent",
+      "content": "---\nv:\n\t- a\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "error": {
+        "type": "ScannerError",
+        "message": "while scanning for the next token\nfound character '\\t' that cannot start any token\n  in \"<unicode string>\", line 3, column 1:\n    \t- a\n    ^"
+      }
+    },
+    {
+      "name": "yes resolves to a bool",
+      "content": "---\nv: yes\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: true\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "no resolves to a bool",
+      "content": "---\nv: no\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: false\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "on resolves to a bool",
+      "content": "---\nv: on\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: true\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "off resolves to a bool",
+      "content": "---\nv: off\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: false\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "true resolves to a bool",
+      "content": "---\nv: true\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: true\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "y is a plain string",
+      "content": "---\nv: y\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: y\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "tilde is null",
+      "content": "---\nv: ~\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: null\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "bare null keyword",
+      "content": "---\nv: null\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: null\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "empty value is null",
+      "content": "---\nv:\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: null\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "Null capitalised",
+      "content": "---\nv: Null\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: null\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "decimal int",
+      "content": "---\nv: 42\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 42\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "negative int",
+      "content": "---\nv: -42\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: -42\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "int with underscores",
+      "content": "---\nv: 1_000\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 1000\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "hex int",
+      "content": "---\nv: 0x1f\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 31\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "octal int",
+      "content": "---\nv: 0o17\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 0o17\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "yaml 1.1 octal int",
+      "content": "---\nv: 017\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 15\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "sexagesimal int",
+      "content": "---\nv: 1:30\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 90\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "big int beyond float precision",
+      "content": "---\nv: 9007199254740993\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 9007199254740993\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "float",
+      "content": "---\nv: 1.5\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 1.5\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "float that is integral",
+      "content": "---\nv: 1.0\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 1.0\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "float in exponent form",
+      "content": "---\nv: 1e3\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 1e3\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "negative zero float",
+      "content": "---\nv: -0.0\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: -0.0\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "infinity",
+      "content": "---\nv: .inf\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: .inf\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "negative infinity",
+      "content": "---\nv: -.inf\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: -.inf\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "not a number",
+      "content": "---\nv: .nan\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: .nan\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a date",
+      "content": "---\nv: 2026-08-23\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 2026-08-23\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a datetime with a space",
+      "content": "---\nv: 2026-08-23 01:02:03\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 2026-08-23 01:02:03\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a datetime in iso form",
+      "content": "---\nv: 2026-08-23T01:02:03\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 2026-08-23 01:02:03\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a datetime with fractional seconds",
+      "content": "---\nv: 2026-08-23T01:02:03.500\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 2026-08-23 01:02:03.500000\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a datetime with an offset",
+      "content": "---\nv: 2026-08-23T01:02:03+02:00\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 2026-08-23 01:02:03+02:00\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a datetime in utc",
+      "content": "---\nv: 2026-08-23T01:02:03Z\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 2026-08-23 01:02:03+00:00\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "an explicit str tag over a number",
+      "content": "---\nv: !!str 5\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: '5'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a quoted number stays a string",
+      "content": "---\nv: \"5\"\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: '5'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a single quoted string",
+      "content": "---\nv: 'it''s'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: it's\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a literal block scalar",
+      "content": "---\nv: |\n  line one\n  line two\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'line one\n\n  line two\n\n  '\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a folded block scalar",
+      "content": "---\nv: >\n  line one\n  line two\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'line one line two\n\n  '\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a literal block scalar, chomped",
+      "content": "---\nv: |-\n  line one\n  line two\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'line one\n\n  line two'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a flow sequence",
+      "content": "---\nv: [a, b]\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n- a\n- b\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a flow mapping",
+      "content": "---\nv: {a: 1, b: 2}\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n  a: 1\n  b: 2\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a nested block mapping",
+      "content": "---\nv:\n  a: 1\n  b:\n    c: 2\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n  a: 1\n  b:\n    c: 2\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a sequence of mappings",
+      "content": "---\nv:\n  - a: 1\n  - b: 2\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n- a: 1\n- b: 2\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "an anchor and an alias inside one value",
+      "content": "---\nv:\n  a: &x [1, 2]\n  b: *x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n  a: &id001\n  - 1\n  - 2\n  b: *id001\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a merge key",
+      "content": "---\nbase: &b {a: 1}\nv:\n  <<: *b\n  c: 2\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n  a: 1\n  c: 2\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a binary value",
+      "content": "---\nv: !!binary aGk=\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: !!binary |\n  aGk=\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a set",
+      "content": "---\nv: !!set {a, b}\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: !!set\n  a: null\n  b: null\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "an omap",
+      "content": "---\nv: !!omap\n  - a: 1\n  - b: 2\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n- !!python/tuple\n  - a\n  - 1\n- !!python/tuple\n  - b\n  - 2\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "an unknown tag",
+      "content": "---\nv: !custom hi\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "error": {
+        "type": "ConstructorError",
+        "message": "could not determine a constructor for the tag '!custom'\n  in \"<unicode string>\", line 2, column 4:\n    v: !custom hi\n       ^"
+      }
+    },
+    {
+      "name": "unicode in a value",
+      "content": "---\nv: café naïve — 🎉\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: café naïve — 🎉\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "an escaped unicode value",
+      "content": "---\nv: \"\\u00e9\\u2028\"\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'é   '\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a plain string",
+      "content": "---\nv: Hello world\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: Hello world\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with a colon",
+      "content": "---\nv: 'Hello: world'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'Hello: world'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with a hash",
+      "content": "---\nv: 'tag #1'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'tag #1'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with an apostrophe",
+      "content": "---\nv: it's a test\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: it's a test\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with double quotes",
+      "content": "---\nv: say \"hi\"\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: say \"hi\"\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "an empty string",
+      "content": "---\nv: ''\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: ''\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a padded string",
+      "content": "---\nv: '  padded  '\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: '  padded  '\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string that looks like a bool",
+      "content": "---\nv: 'yes'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'yes'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string that looks like a number",
+      "content": "---\nv: '123'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: '123'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string that looks like a date",
+      "content": "---\nv: '2026-08-23'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: '2026-08-23'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string starting with an indicator",
+      "content": "---\nv: '- dash'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: '- dash'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string starting with a question mark",
+      "content": "---\nv: '? q'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: '? q'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string that is a lone dash",
+      "content": "---\nv: '-'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: '-'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with a trailing colon",
+      "content": "---\nv: 'ends:'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'ends:'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with a colon then space",
+      "content": "---\nv: 'a: b'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'a: b'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with a comma",
+      "content": "---\nv: 'a, b'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: a, b\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with brackets",
+      "content": "---\nv: '[a]'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: '[a]'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with a leading percent",
+      "content": "---\nv: '%x'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: '%x'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with a leading at sign",
+      "content": "---\nv: '@x'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: '@x'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with a leading backtick",
+      "content": "---\nv: '`x'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: '`x'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with a tab",
+      "content": "---\nv: \"a\\tb\"\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: \"a\\tb\"\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with a carriage return",
+      "content": "---\nv: \"a\\rb\"\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: \"a\\rb\"\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with an escape char",
+      "content": "---\nv: \"a\\eb\"\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: \"a\\eb\"\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with a del char",
+      "content": "---\nv: \"a\\x7fb\"\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: \"a\\x7Fb\"\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with a nel char",
+      "content": "---\nv: \"a\\x85b\"\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'a  b'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with a line separator",
+      "content": "---\nv: \"a\\u2028b\"\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'a   b'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with a bom",
+      "content": "---\nv: \"a\\ufeffb\"\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: \"a\\uFEFFb\"\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a two line string",
+      "content": "---\nv: |-\n  line one\n  line two\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'line one\n\n  line two'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a two line string with a trailing break",
+      "content": "---\nv: |\n  line one\n  line two\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'line one\n\n  line two\n\n  '\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a three line string",
+      "content": "---\nv: |-\n  one\n  two\n  three\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'one\n\n  two\n\n  three'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with a blank line inside",
+      "content": "---\nv: |-\n  one\n\n  two\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'one\n\n\n  two'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a string with leading whitespace on a line",
+      "content": "---\nv: |-\n  one\n   two\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: \"one\\n two\"\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a long unbroken string",
+      "content": "---\nv: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a long string of words",
+      "content": "---\nv: word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: word word word word word word word word word word word word word word word word\n  word word word word word word word word word word word word word word\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a long string of words with a colon",
+      "content": "---\nv: 'word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word: x'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'word word word word word word word word word word word word word word word word\n  word word word word word word word word word word word word word word: x'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a long quoted string with a tab",
+      "content": "---\nv: \"word word word word word word word word word word word word word word word word word word word word word word word word word \\tend\"\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: \"word word word word word word word word word word word word word word word word\\\n  \\ word word word word word word word word word \\tend\"\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a long string in a nested map",
+      "content": "---\nv:\n  k: word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n  k: word word word word word word word word word word word word word word word word\n    word word word word word word word word word word word word word word\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a long string in a sequence",
+      "content": "---\nv:\n  - word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n- word word word word word word word word word word word word word word word word\n  word word word word word word word word word word word word word word\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a long unicode string",
+      "content": "---\nv: café café café café café café café café café café café café café café café café café café café café café café café café café \n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: café café café café café café café café café café café café café café café café\n  café café café café café café café café café\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "an empty sequence value",
+      "content": "---\nv: []\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: []\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "an empty mapping value",
+      "content": "---\nv: {}\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: {}\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a nested empty collection",
+      "content": "---\nv:\n  a: []\n  b: {}\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n  a: []\n  b: {}\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a deeply nested structure",
+      "content": "---\nv:\n  a:\n    b:\n      c:\n        - d\n        - e: f\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n  a:\n    b:\n      c:\n      - d\n      - e: f\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a sequence of sequences",
+      "content": "---\nv:\n  - - x\n  - - y\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n- - x\n- - y\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "three string keys sort",
+      "content": "---\nz: 1\na: 2\nm: 3\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "z",
+          "z"
+        ],
+        [
+          "a",
+          "a"
+        ],
+        [
+          "m",
+          "m"
+        ]
+      ],
+      "result": "---\na: 2\nm: 3\nz: 1\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "uppercase sorts before lowercase",
+      "content": "---\nb: 1\nA: 2\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "b",
+          "b"
+        ],
+        [
+          "A",
+          "A"
+        ]
+      ],
+      "result": "---\nA: 2\nb: 1\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a lone null key",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          {
+            "key": null
+          }
+        ]
+      ],
+      "result": "---\nnull: x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "true and 1 are the same key",
+      "content": "---\na: one\nb: two\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "a",
+          {
+            "key": true
+          }
+        ],
+        [
+          "b",
+          {
+            "key": 1
+          }
+        ]
+      ],
+      "result": "---\ntrue: two\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "an empty string key",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          ""
+        ]
+      ],
+      "result": "---\n? ''\n: x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a key of 127 chars",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+        ]
+      ],
+      "result": "---\n? kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\n: x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a key of 128 chars",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+        ]
+      ],
+      "result": "---\n? kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\n: x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a key of 129 chars",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+        ]
+      ],
+      "result": "---\n? kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\n: x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a two line key",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "one\ntwo"
+        ]
+      ],
+      "result": "---\n? 'one\n\n  two'\n: x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a key that needs quoting",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "yes"
+        ]
+      ],
+      "result": "---\n'yes': x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a key with a colon",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "a:b"
+        ]
+      ],
+      "result": "---\na:b: x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a key with a space",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "a b"
+        ]
+      ],
+      "result": "---\na b: x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a key that is a number string",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "5"
+        ]
+      ],
+      "result": "---\n'5': x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a list key raises",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          {
+            "key": [
+              "a"
+            ]
+          }
+        ]
+      ],
+      "error": {
+        "type": "TypeError",
+        "message": "unhashable type: 'list'"
+      }
+    },
+    {
+      "name": "an object key raises",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          {
+            "key": {
+              "a": 1
+            }
+          }
+        ]
+      ],
+      "error": {
+        "type": "TypeError",
+        "message": "unhashable type: 'dict'"
+      }
+    },
+    {
+      "name": "keys from a loaded map are dropped unless mapped",
+      "content": "---\nkept: 1\ndropped: 2\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "kept",
+          "kept"
+        ]
+      ],
+      "result": "---\nkept: 1\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a key loaded as an int",
+      "content": "---\n2026: a year\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          2026,
+          "year"
+        ],
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: x\nyear: a year\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a default string",
+      "content": "---\nother: 1\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          {
+            "key": "v",
+            "default": "fallback"
+          }
+        ]
+      ],
+      "result": "---\nv: fallback\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a default list",
+      "content": "---\nother: 1\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          {
+            "key": "v",
+            "default": [
+              "a",
+              "b"
+            ]
+          }
+        ]
+      ],
+      "result": "---\nv:\n- a\n- b\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a default object",
+      "content": "---\nother: 1\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          {
+            "key": "v",
+            "default": {
+              "a": 1
+            }
+          }
+        ]
+      ],
+      "result": "---\nv:\n  a: 1\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a default number",
+      "content": "---\nother: 1\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          {
+            "key": "v",
+            "default": 5
+          }
+        ]
+      ],
+      "result": "---\nv: 5\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a default float",
+      "content": "---\nother: 1\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          {
+            "key": "v",
+            "default": 1.5
+          }
+        ]
+      ],
+      "result": "---\nv: 1.5\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a default bool",
+      "content": "---\nother: 1\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          {
+            "key": "v",
+            "default": true
+          }
+        ]
+      ],
+      "result": "---\nv: true\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "the array transform wraps a scalar",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          {
+            "key": "v",
+            "transform": "array"
+          }
+        ]
+      ],
+      "result": "---\nv:\n- x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "the array transform leaves a list",
+      "content": "---\nv: [x]\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          {
+            "key": "v",
+            "transform": "array"
+          }
+        ]
+      ],
+      "result": "---\nv:\n- x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "the array transform wraps a date",
+      "content": "---\nv: 2026-08-23\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          {
+            "key": "v",
+            "transform": "array"
+          }
+        ]
+      ],
+      "result": "---\nv:\n- 2026-08-23\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "one loaded list reaches two keys",
+      "content": "---\na: &x [p, q]\nb: *x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "a",
+          "first"
+        ],
+        [
+          "b",
+          {
+            "key": "second"
+          }
+        ]
+      ],
+      "result": "---\nfirst: &id001\n- p\n- q\nsecond: *id001\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "one loaded map reaches two keys",
+      "content": "---\na: &x {p: 1}\nb: *x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "a",
+          "first"
+        ],
+        [
+          "b",
+          {
+            "key": "second"
+          }
+        ]
+      ],
+      "result": "---\nfirst: &id001\n  p: 1\nsecond: *id001\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "one loaded date reaches two keys",
+      "content": "---\na: &x 2026-08-23\nb: *x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "a",
+          "first"
+        ],
+        [
+          "b",
+          {
+            "key": "second"
+          }
+        ]
+      ],
+      "result": "---\nfirst: &id001 2026-08-23\nsecond: *id001\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "one loaded string reaches two keys",
+      "content": "---\na: &x hello\nb: *x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "a",
+          "first"
+        ],
+        [
+          "b",
+          {
+            "key": "second"
+          }
+        ]
+      ],
+      "result": "---\nfirst: hello\nsecond: hello\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "one loaded list reaches three keys",
+      "content": "---\na: &x [p]\nb: *x\nc: *x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "a",
+          "a"
+        ],
+        [
+          "b",
+          "b"
+        ],
+        [
+          "c",
+          "c"
+        ]
+      ],
+      "result": "---\na: &id001\n- p\nb: *id001\nc: *id001\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "an aliased list is also a key's value",
+      "content": "---\na: &x [p]\nb: *x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "a",
+          "first"
+        ],
+        [
+          "b",
+          {
+            "key": "second",
+            "transform": "array"
+          }
+        ]
+      ],
+      "result": "---\nfirst: &id001\n- p\nsecond: *id001\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "the array transform wraps the same list twice",
+      "content": "---\na: &x q\nb: *x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "a",
+          {
+            "key": "first",
+            "transform": "array"
+          }
+        ],
+        [
+          "b",
+          {
+            "key": "second",
+            "transform": "array"
+          }
+        ]
+      ],
+      "result": "---\nfirst:\n- q\nsecond:\n- q\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "int keys from two fields sort numerically",
+      "content": "---\na: one\nb: two\nc: three\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "a",
+          {
+            "key": 10
+          }
+        ],
+        [
+          "b",
+          {
+            "key": 9
+          }
+        ],
+        [
+          "c",
+          {
+            "key": 2
+          }
+        ]
+      ],
+      "result": "---\n2: three\n9: two\n10: one\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "an int key beside a string key keeps insertion order",
+      "content": "---\na: one\nb: two\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "a",
+          {
+            "key": "z"
+          }
+        ],
+        [
+          "b",
+          {
+            "key": 2
+          }
+        ]
+      ],
+      "result": "---\nz: one\n2: two\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a null key beside a string key keeps insertion order",
+      "content": "---\na: one\nb: two\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "a",
+          {
+            "key": "z"
+          }
+        ],
+        [
+          "b",
+          {
+            "key": null
+          }
+        ]
+      ],
+      "result": "---\nz: one\nnull: two\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a bool key beside an int key sorts",
+      "content": "---\na: one\nb: two\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "a",
+          {
+            "key": 2
+          }
+        ],
+        [
+          "b",
+          {
+            "key": true
+          }
+        ]
+      ],
+      "result": "---\ntrue: two\n2: one\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a float key beside an int key sorts",
+      "content": "---\na: one\nb: two\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "a",
+          {
+            "key": 3
+          }
+        ],
+        [
+          "b",
+          {
+            "key": 1.5
+          }
+        ]
+      ],
+      "result": "---\n1.5: two\n3: one\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a nested list shared with its parent",
+      "content": "---\nv:\n  inner: &x [1]\n  other: *x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n  inner: &id001\n  - 1\n  other: *id001\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a literal nul in the block",
+      "content": "---\nv: a\u0000b\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "error": {
+        "type": "ReaderError",
+        "message": "unacceptable character #x0000: special characters are not allowed\n  in \"<unicode string>\", position 5"
+      }
+    },
+    {
+      "name": "a literal escape char in the block",
+      "content": "---\nv: \"a\u001bb\"\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "error": {
+        "type": "ReaderError",
+        "message": "unacceptable character #x001b: special characters are not allowed\n  in \"<unicode string>\", position 6"
+      }
+    },
+    {
+      "name": "a literal del char in the block",
+      "content": "---\nv: ab\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "error": {
+        "type": "ReaderError",
+        "message": "unacceptable character #x007f: special characters are not allowed\n  in \"<unicode string>\", position 5"
+      }
+    },
+    {
+      "name": "a literal vertical tab in the block",
+      "content": "---\nv: a\u000bb\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "error": {
+        "type": "ReaderError",
+        "message": "unacceptable character #x000b: special characters are not allowed\n  in \"<unicode string>\", position 5"
+      }
+    },
+    {
+      "name": "a literal nul only in the body",
+      "content": "---\nv: 1\n---\nbody\u0000\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 1\n---\nbody\u0000\n"
+    },
+    {
+      "name": "a literal c1 control in the block",
+      "content": "---\nv: ab\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "error": {
+        "type": "ReaderError",
+        "message": "unacceptable character #x009f: special characters are not allowed\n  in \"<unicode string>\", position 5"
+      }
+    },
+    {
+      "name": "content starting with two dashes",
+      "content": "-- x\n---\nv: 1\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "-- x\n---\nv: 1\n---\nbody"
+    },
+    {
+      "name": "frontmatter is an empty string, dict target",
+      "content": "---\n''\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          {
+            "key": "x"
+          }
+        ]
+      ],
+      "result": "---\n{}\n---\nbody"
+    },
+    {
+      "name": "frontmatter is zero, dict target",
+      "content": "---\n0\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          {
+            "key": "x"
+          }
+        ]
+      ],
+      "result": "---\n{}\n---\nbody"
+    },
+    {
+      "name": "frontmatter is false, str target",
+      "content": "---\nfalse\n---\nbody",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\n{}\n---\nbody"
+    },
+    {
+      "name": "a merge key overridden locally",
+      "content": "---\nbase: &b {a: 1, d: 4}\nv:\n  <<: *b\n  a: 2\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n  a: 2\n  d: 4\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a multi line plain scalar",
+      "content": "---\nv: line one\n  line two\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: line one line two\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a multi line plain scalar in a list",
+      "content": "---\nv:\n  - line one\n    line two\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n- line one line two\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a key of 122 chars",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+        ]
+      ],
+      "result": "---\nkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk: x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a key of 123 chars",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+        ]
+      ],
+      "result": "---\n? kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\n: x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a key of 122 chars that needs quoting",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999"
+        ]
+      ],
+      "result": "---\n'99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999': x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a nested key of 123 chars",
+      "content": "---\nv: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          {
+            "key": "n",
+            "default": {
+              "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk": 1
+            }
+          }
+        ]
+      ],
+      "result": "---\nn: x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a document with crlf line endings",
+      "content": "---\r\nv: 1\r\n---\r\nbody\r\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 1\n---\r\nbody\r\n"
+    },
+    {
+      "name": "a value with a trailing space",
+      "content": "---\nv: \"x \"\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 'x '\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a list item with a trailing space",
+      "content": "---\nv: [\"x \"]\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n- 'x '\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a value that is only spaces",
+      "content": "---\nv: '   '\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: '   '\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a value starting with a break",
+      "content": "---\nv: \"\\nx\"\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: '\n\n  x'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a sequence inside a sequence inside a map",
+      "content": "---\nv:\n- - - x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n- - - x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a map inside a sequence inside a map",
+      "content": "---\nv:\n- k:\n  - x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n- k:\n  - x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a long string three levels deep",
+      "content": "---\nv:\n  a:\n    b: word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n  a:\n    b: word word word word word word word word word word word word word word word\n      word word word word word word word word word word word word word word word\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a long key inside a nested map",
+      "content": "---\nv:\n  kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk: x\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n  kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk: x\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a float in exponent form on output",
+      "content": "---\nv: 1.0e+16\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 1.0e+16\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a small float",
+      "content": "---\nv: 0.0001\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 0.0001\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a smaller float",
+      "content": "---\nv: 1.0e-5\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 1.0e-05\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a float at the fixed notation boundary",
+      "content": "---\nv: 1.0e+15\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 1000000000000000.0\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a float with many digits",
+      "content": "---\nv: 0.1\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 0.1\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a sexagesimal float",
+      "content": "---\nv: 1:30.5\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: 90.5\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a date as a key",
+      "content": "---\n2026-08-23: x\nv: y\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: y\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a set with three members",
+      "content": "---\nv: !!set {c, a, b}\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: !!set\n  a: null\n  b: null\n  c: null\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a nested map with an int key",
+      "content": "---\nv: {3: c, 1: a}\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n  1: a\n  3: c\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a nested map with mixed keys",
+      "content": "---\nv: {a: 1, 2: b}\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv:\n  a: 1\n  2: b\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a value that is a whole document",
+      "content": "---\nv: |-\n  ---\n  a: 1\n  ---\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: ''\n---\n  a: 1\n  ---\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a value starting with three dashes",
+      "content": "---\nv: '--- x'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "error": {
+        "type": "ScannerError",
+        "message": "while scanning a quoted scalar\n  in \"<unicode string>\", line 2, column 4:\n    v: '\n       ^\nfound unexpected end of stream\n  in \"<unicode string>\", line 2, column 5:\n    v: '\n        ^"
+      }
+    },
+    {
+      "name": "a value starting with three dots",
+      "content": "---\nv: '... x'\n---\n# Heading\n\nBody text.\n",
+      "mapping": [
+        [
+          "v",
+          "v"
+        ]
+      ],
+      "result": "---\nv: '... x'\n---\n# Heading\n\nBody text.\n"
+    },
+    {
+      "name": "a realistic frontmatter through a realistic mapping",
+      "content": "---\ntitle: How to Choose a Metal Roof\ndescription: A buyer's guide to metal roofing, with costs.\ndate: 2026-08-23\ntags:\n  - roofing\n  - metal\nauthor: Jena AI\ndraft: false\n---\n\n# How to Choose a Metal Roof\n\nBody.\n",
+      "mapping": [
+        [
+          "title",
+          "title"
+        ],
+        [
+          "description",
+          {
+            "key": "excerpt"
+          }
+        ],
+        [
+          "date",
+          {
+            "key": "publishedAt"
+          }
+        ],
+        [
+          "tags",
+          {
+            "key": "categories",
+            "transform": "array"
+          }
+        ],
+        [
+          "author",
+          {
+            "key": "author",
+            "default": "Staff"
+          }
+        ],
+        [
+          "missing",
+          {
+            "key": "layout",
+            "default": "post"
+          }
+        ],
+        [
+          "draft",
+          "draft"
+        ]
+      ],
+      "result": "---\nauthor: Jena AI\ncategories:\n- roofing\n- metal\ndraft: false\nexcerpt: A buyer's guide to metal roofing, with costs.\nlayout: post\npublishedAt: 2026-08-23\ntitle: How to Choose a Metal Roof\n---\n\n# How to Choose a Metal Roof\n\nBody.\n"
+    }
+  ]
+}

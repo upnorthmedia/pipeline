@@ -13850,3 +13850,205 @@ three pieces are separately verifiable, so they are separate items.
   ```
 
 `auth` is out of scope; BetterAuth already owns it.
+
+## 5.3c-iii-b-2-b
+
+Ported to `web/src/mastra/nextjs/apply-mapping-to-content.ts`, on top of a port of
+PyYAML itself in `web/src/mastra/nextjs/pyyaml/` (`load.ts`, `dump.ts`, `values.ts`).
+
+`_apply_mapping_to_content` is sixteen lines, and fourteen of them are the two PyYAML
+calls it makes. Those calls decide the bytes in the reader's blog repo, so the bytes are
+the contract:
+
+- `yaml.safe_load` is a YAML **1.1** reader. `yes` is a bool, `017` is octal, `1:30` is
+  sexagesimal, `2026-08-23` is a `datetime.date`, and `1e3` is a *string*, because
+  PyYAML's float pattern needs both a dot and a signed exponent.
+- `yaml.dump(..., default_flow_style=False, allow_unicode=True)` never emits a block
+  scalar, folds at column 80, indents a sequence at its parent's level, sorts keys when
+  they are mutually comparable, and picks plain, then single-quoted, then double-quoted.
+
+**No JavaScript YAML library produces those bytes**, which is the finding that shaped the
+item. Measured against `yaml.dump` over 22 representative values:
+
+```
+js-yaml 4.1.1  (sortKeys: true, lineWidth: 80)                   12 of 22 identical
+yaml 2.9.0     (blockQuote: false, indentSeq: false, ...)        10 of 22 identical
+```
+
+Both prefer `|`/`>` blocks for multi-line and long strings, indent sequences under their
+key, and differ on `''` keys; the `yaml` package also prefers `"` over `'` and folds one
+column early. So `representer.py`, `serializer.py` and the block half of `emitter.py` are
+transcribed in `pyyaml/dump.ts`, and `resolver.py` plus `SafeConstructor` in
+`pyyaml/load.ts`. The `yaml` package is now a direct dependency of `web/`
+(`pnpm -C web add yaml@2.9.0`) and is used for **syntax only**: `parseAllDocuments` gives
+the node tree, every scalar keeps its text and its style, and the tag resolution and
+construction on top of it are PyYAML's.
+
+**Four behaviours the port preserves**, each of which an obvious implementation loses:
+
+- `content.split("---", 2)` splits on the *substring*. `----` is two splits with an empty
+  middle, `------` produces `---\n{}\n---`, and a `---` inside the body is what closes the
+  block. Fewer than three parts returns the content untouched.
+- `yaml.safe_load(parts[1]) or {}` replaces any *falsy* load with an empty dict, so an
+  empty block, a comment-only block, `[]`, `{}`, `0` and `''` all emit `{}`. A truthy
+  non-dict is **not** replaced, and `apply_frontmatter_mapping` then runs `in`, `[]` and
+  `.get` against a string or a list: `TypeError: string indices must be integers, not
+  'str'`, `AttributeError: 'str' object has no attribute 'get'`. `publish_to_nextjs`
+  catches neither, so a body whose first line is `---` fails the publish, and the port
+  fails it the same way rather than publishing something Python refused.
+- `represent_mapping` wraps `sorted(mapping.items())` in `try/except TypeError`, so key
+  order is sorted for mutually comparable keys and insertion order otherwise. Only the
+  keys are ever compared (a tuple comparison reaches the value only for equal keys, which
+  a dict cannot hold), and for two or more keys of mixed comparability classes every
+  element is compared with at least one other, so "mixed classes" is the same test as
+  "did Python's sort raise". A lone `None` key sorts; a `None` key beside a string does
+  not.
+- A repeated object gets an `&id001` anchor and an `*id001` reference, because
+  `SafeRepresenter.ignore_aliases` covers only the immutable scalars. Two mapping entries
+  reading one aliased list, or a `date` reached twice, both hit this.
+
+**Three divergences, deliberate, all recorded as tests:**
+
+1. **Error wording.** A document PyYAML refuses raises here too, but with the `yaml`
+   package's message, not PyYAML's scanner's. Sixteen oracle cases assert only that a
+   `yaml.YAMLError` subclass is raised. `Reader.check_printable` *is* ported, so a literal
+   NUL, ESC, DEL or C1 control fails the publish here exactly as it does in Python.
+2. **NEL, LS and PS as line breaks.** YAML 1.1 counts U+0085/2028/2029 as line breaks; the
+   `yaml` package counts only CR and LF. A literal one inside a scalar stays content here
+   where PyYAML folds it. Rewriting them to newlines was tried and is worse: the `yaml`
+   package rejects a quoted scalar whose continuation is not indented past its parent,
+   which PyYAML accepts, so the rewrite failed documents Python reads fine. The escaped
+   forms (`"\N"`, `"\L"`, `"\P"`) are content in both and do agree.
+3. **A surrogate pair escape.** `"🎉"` is two lone surrogates in Python, which
+   are not printable and come back out escaped. A JavaScript string cannot hold that pair
+   as anything but the astral character it encodes. Written as the character itself, which
+   is what real frontmatter holds, the two agree.
+
+Also fixed here, in the module the previous item left behind: `applyFrontmatterMapping`
+looked its source field up with `Map.has`/`Map.get`, which cannot see that Python hashes
+`True` with `1` and that two equal `date`s are one key. It now goes through `pyDictHas`
+/`pyDictGet`, and `setResultKey`'s hand-rolled true/1 twin lookup is the shared
+`pyDictSet`. Item 5.3c-iii-b-2-a's 61 tests still pass unchanged.
+
+The oracle is `web/src/mastra/nextjs/data/nextjs-mapping-to-content-parity.json`, written
+by `api/scripts/export_mapping_to_content_parity.py`, which asserts the eight lines it is
+describing are still in the real function (`inspect.getsource`) before running it:
+
+```
+$ cd api && uv run python scripts/export_mapping_to_content_parity.py
+wrote 201 cases (16 raising) to .../web/src/mastra/nextjs/data/nextjs-mapping-to-content-parity.json
+
+$ pnpm -C web vitest run src/mastra/nextjs/apply-mapping-to-content.test.ts
+ ✓ src/mastra/nextjs/apply-mapping-to-content.test.ts (205 tests) 22ms
+
+ Test Files  1 passed (1)
+      Tests  205 passed (205)
+   Duration  392ms
+
+$ pnpm -C web vitest run src/mastra/nextjs/
+ Test Files  2 passed (2)
+      Tests  266 passed (266)
+```
+
+**A randomised differential run** on top of the oracle, because a hand-picked corpus
+cannot cover an emitter: 600 documents per seed, generated from a grammar of nested maps,
+sequences and 60 adversarial scalars (indicators, long lines, control characters, unicode,
+trailing spaces, block scalars) crossed with random mappings, run through the real Python
+function and the port and compared byte for byte. Four seeds, 2400 documents:
+
+```
+seed 20260823   600 cases (459 output, 141 raising in both)   mismatches: 0
+seed 7          600 cases (480 output, 120 raising in both)   mismatches: 0
+seed 99         600 cases (474 output, 126 raising in both)   mismatches: 0
+seed 4242       600 cases (477 output, 123 raising in both)   mismatches: 0
+```
+
+The generator lives at `/tmp/fuzz_gen.py` and is not committed: it is a measurement, not a
+fixture, and it needs the Python side to run. It is what found divergences 2 and 3 above,
+and the `Reader.check_printable` gap: before that check was ported, 27 of the first 600
+cases published content Python had refused.
+
+Twenty-eight mutations, each applied alone and reverted after measuring, counted against
+`pnpm -C web vitest run src/mastra/nextjs/` (266 tests). Twenty-five are killed:
+
+```
+1  split fence guard (--- becomes --)                 apply-mapping-to-content.ts   1 failed
+2  split maxsplit 2 becomes 3                         apply-mapping-to-content.ts   4 failed
+3  parts length guard 3 becomes 2                     apply-mapping-to-content.ts   2 failed
+4  the `or {}` truthiness becomes `?? {}`             apply-mapping-to-content.ts   3 failed
+5  the rebuilt fence gains a newline                  apply-mapping-to-content.ts 183 failed
+6  the non-dict `.get` AttributeError is dropped      apply-mapping-to-content.ts   1 failed
+7  `in` against a string always misses                apply-mapping-to-content.ts   1 failed
+8  the resolver's first-character list is ignored     load.ts                     SURVIVED
+9  yaml 1.1 on/off drop out of the bool pattern       load.ts                       2 failed
+10 a leading zero is decimal rather than octal        load.ts                       1 failed
+11 sexagesimal ints use base 10                       load.ts                       1 failed
+12 a timestamp without a time is still a datetime     load.ts                       4 failed
+13 merged pairs are appended rather than prepended    load.ts                       1 failed
+14 a scalar's text is always its source               load.ts                     SURVIVED
+15 mixed key classes no longer raise                  dump.ts                       2 failed
+16 a lone key is compared                             dump.ts                     SURVIVED
+17 single-quoted style is never chosen                dump.ts                      42 failed
+18 a line break no longer forbids block plain         dump.ts                       8 failed
+19 write_indent's column test becomes >=              dump.ts                     167 failed
+20 best_width 80 becomes 100                          dump.ts                       7 failed
+21 represent_float's `.0e` fixup is dropped           dump.ts                       2 failed
+22 the prepared tag is never written                  dump.ts                       4 failed
+23 the anchor template pads to 2 rather than 3        dump.ts                       7 failed
+24 expect_scalar's extra indent level is dropped      dump.ts                      41 failed
+25 a scalar node is never recorded for aliasing       dump.ts                       1 failed
+26 Reader.check_printable is skipped                  load.ts                       5 failed
+27 the printable range admits the C1 controls         load.ts                       1 failed
+28 the source field is looked up with Map.has         frontmatter-mapping.ts        1 failed
+```
+
+The three survivors are equivalent mutants:
+
+- **8** drops the first-character filter in front of the implicit resolvers. Every pattern
+  is anchored and can only match a scalar whose first character is already in its own
+  registration list (`yYnNtTfFoO` for bool, `-+0123456789.` for float, `~nN` plus the
+  empty string for null), so the filter cannot change which pattern matches first.
+- **14** makes `scalarText` always return `Scalar.source`. In `yaml` 2.9.0 `source` holds
+  the *normalised* scalar text (folded for a multi-line plain scalar, unescaped for a
+  quoted one) and differs from `.value` only when the library resolved the value to a
+  non-string, in which case the port re-resolves the same text itself. Verified by
+  printing both for plain, folded, single-quoted, double-quoted and literal scalars.
+- **16** lowers `pythonSorted`'s early return from two items to one. With one item there
+  is nothing to compare and both branches return the same one-item order.
+
+Gates:
+
+```
+$ pnpm -C web tsc --noEmit
+(exit 0)
+
+$ pnpm -C web lint
+(exit 0)
+
+$ pnpm -C web test
+ Test Files  3 failed | 119 passed (122)
+      Tests  10 failed | 4215 passed | 7 skipped (4232)
+(the Phase 0 baseline of 9: 6 in image-preview.test.tsx and 3 in PostDetail.test.tsx,
+plus the known scaffold-check.test.ts flake. A second run of the same suite reported 11,
+the extra being pipeline-completion.test.ts, which passes 14/14 in isolation:
+  $ pnpm -C web vitest run src/mastra/workflows/pipeline-completion.test.ts
+   Tests  14 passed (14))
+
+$ pnpm -C web build
+(exit 0, compiled successfully)
+
+$ cd api && uv run pytest -q          # with the repo .env exported, see the note below
+120 failed, 241 passed, 25 errors in 13.14s   # the recorded baseline, unchanged
+
+$ cd api && uv run ruff check scripts/export_mapping_to_content_parity.py
+All checks passed!
+
+$ cd api && uv run ruff format --check scripts/export_mapping_to_content_parity.py
+1 file already formatted
+```
+
+Note for the next iteration: `source ../.env` is not enough to reproduce the pytest
+baseline. `.env` has no `export` lines, so the variables stay shell-local and pytest still
+reaches the compose default port; `set -a; source ../.env; set +a` is what exports them.
+Without it the run answers `4 failed, 205 passed, 177 errors`, and with only a partial
+export, `InvalidPasswordError` against whatever else is listening on 5433.
