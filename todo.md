@@ -473,6 +473,17 @@
   under `TestClient(raise_server_exceptions=False)`: `?since=nope`, `?until=nope` and
   `?since=2026-13-01` all return `500 Internal Server Error`, while `?page=0` and
   `?per_page=201` correctly return 422. Found while porting the `fromisoformat` round trip
-  (ledger item 5.8d-i). The port decides its answer in item 5.8d-ii; the precedent from
-  5.8b is a 422 rather than reproducing the 500. No fix applied to `api/`, which is deleted
-  in Phase 7.
+  (ledger item 5.8d-i). Resolved for the port in item 5.8d-ii: the TypeScript handler
+  answers pydantic's `datetime_from_date_parsing` 422, matching the 5.8b precedent. No fix
+  applied to `api/`, which is still serving until Phase 7 deletes it.
+- [confirmed] 2026-08-23 The whole `/api/analytics/logs` result set is ordered and bounded by
+  a *text* comparison on `log_entry->>'ts'`, in both stacks. That is only correct because
+  every writer renders the timestamp with `datetime.now(UTC).isoformat()`, which always
+  produces the same width and the same `+00:00` offset. Nothing enforces it: an entry
+  written with a `Z` suffix, a non-UTC offset, or a whole-second timestamp with no fraction
+  sorts wrongly against its neighbours and can fall on the wrong side of `since`/`until`.
+  Found while porting the handler (ledger item 5.8d-ii). Ported faithfully rather than
+  fixed, because changing the comparison to a cast (`(log_entry->>'ts')::timestamptz`) would
+  change which rows a given bound returns and defeat the parity oracle. Worth revisiting
+  once the TypeScript writers are the only ones producing `execution_logs` entries: item
+  5.5c's `log` publisher is the single writer, so pinning its format in one place is cheap.

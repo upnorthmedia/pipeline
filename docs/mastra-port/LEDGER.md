@@ -15809,11 +15809,17 @@ three pieces are separately verifiable, so they are separate items.
   error bodies and row-level ownership, but it does not prove the internal-links
   panel's search box, its infinite scroll (`page < data.pages`) or its delete
   button work end to end against them. That check belongs to Phase 8 item 8.6.
-- [ ] 5.8 `analytics` (split: four endpoints over 519 lines, each with its own
-  aggregation. `/dashboard` is five grouped queries, `/costs` and `/models` are raw
-  `jsonb_each` unrolls of `stage_logs` with their own arithmetic, `/logs` is a
-  `jsonb_array_elements` explorer with seven filters and pagination. Split into
-  5.8a `/dashboard`, 5.8b `/costs`, 5.8c `/models`, 5.8d `/logs`.)
+- [x] 5.8 `analytics` (all four sub-items done: 5.8a `/dashboard`, 5.8b `/costs`,
+  5.8c `/models`, 5.8d `/logs`. `api/src/api/analytics.py` is fully ported to
+  `web/src/app/api/analytics/`; the `DashboardStats`, `CostAnalytics`,
+  `ModelAnalytics` and `PaginatedLogs` shapes in `web/src/lib/api.ts` all needed no
+  change. 120 new tests across the four endpoints, against the real database and
+  real BetterAuth sessions, where Python had none. Two of the four were measured
+  byte-for-byte against the live Python endpoint on shared fixtures; `/costs` could
+  not be, because its Python original 500s on every call from a FROM-clause bug the
+  port fixes. What is not proven here is `/monitor` rendering these payloads in a
+  real browser with the Python API stopped; that is Phase 8 item 8.8. Split because
+  the four endpoints are 519 lines with unrelated aggregation apiece.)
   - [x] 5.8a `GET /api/analytics/dashboard`.
 
     Ported to `web/src/app/api/analytics/dashboard/route.ts`. Five independent
@@ -16648,11 +16654,14 @@ three pieces are separately verifiable, so they are separate items.
     belongs to Phase 8 item 8.8. The `model` filter is never exercised end to
     end either, because `web/src/lib/api.ts`'s `analytics.models()` is called
     with no arguments from the dashboard.
-  - [ ] 5.8d `GET /api/analytics/logs` (split: the handler is eight filters, two raw
+  - [x] 5.8d `GET /api/analytics/logs` (both sub-items done: 5.8d-i the
+    `datetime.fromisoformat(x).isoformat()` port against a committed 128-case CPython
+    oracle, 5.8d-ii the handler. Split because the handler is eight filters, two raw
     statements and a pagination rollup, but ahead of any of that it runs both time
-    bounds through `datetime.fromisoformat(x).isoformat()`, and that round trip is a
-    parser with its own grammar rather than a formatting detail. Split into 5.8d-i the
-    `fromisoformat` port, 5.8d-ii the handler.)
+    bounds through that round trip, and it is a parser with its own grammar rather
+    than a formatting detail. The handler is byte-for-byte equal to the live Python
+    endpoint on twelve queries over shared fixtures; the two deviations are the 422s
+    it answers where Python 500s on an unparseable bound or a non-uuid `profile_id`.)
     - [x] 5.8d-i Port `datetime.fromisoformat(x).isoformat()`, the normalisation
       `search_logs()` applies to `since` and `until` before binding them.
 
@@ -16854,8 +16863,314 @@ three pieces are separately verifiable, so they are separate items.
 
       Unchanged from the counts recorded under 5.8a to 5.8c. No Python changed in this
       iteration.
-    - [ ] 5.8d-ii The handler itself: the eight filters, the `jsonb_array_elements`
+    - [x] 5.8d-ii The handler itself: the eight filters, the `jsonb_array_elements`
       unroll, the count and data statements and the pagination rollup.
+
+      Ported to `web/src/app/api/analytics/logs/route.ts`. `execution_logs` is
+      unrolled with `jsonb_array_elements`, filtered by up to six optional
+      predicates plus the caller's `user_id` and the `since` lower bound, counted,
+      then fetched a page at a time. The `PaginatedLogs` and `LogEntry` shapes
+      `web/src/lib/api.ts` already declares needed no change: every field and type
+      already matched what the handler returns.
+
+      The `FROM` clause is the working shape, the same one `/models` uses:
+      `posts JOIN website_profiles` is the first item and
+      `jsonb_array_elements(p.execution_logs)` an implicitly `LATERAL` second one.
+      Probed rather than inferred, because `/costs` reads almost identically and
+      its join sits inside the second item where the `posts` alias is out of scope.
+
+      **Validation order, probed off the real router.** FastAPI validates every
+      declared parameter before the endpoint body runs, so a bad `page` is
+      reported even when `since` is also unparseable, and the two `int` parameters
+      are reported together in declaration order:
+
+      ```
+      $ cd api && PYTHONPATH=. uv run python /tmp/probe_logs_order.py
+      ?page=0 422 {"detail": [{"type": "greater_than_equal", "loc": ["query", "page"], "msg": "Input should be greater than or equal to 1", "input": "0", "ctx": {"ge": 1}}]}
+      ?page=abc&per_page=999 422 {"detail": [{"type": "int_parsing", "loc": ["query", "page"], "msg": "Input should be a valid integer, unable to parse string as an integer", "input": "abc"}, {"type": "less_than_equal", "loc": ["query", "per_page"], "msg": "Input should be less than or equal to 200", "input": "999", "ctx": {"le": 200}}]}
+      ?per_page=201 422 {"detail": [{"type": "less_than_equal", "loc": ["query", "per_page"], "msg": "Input should be less than or equal to 200", "input": "201", "ctx": {"le": 200}}]}
+      ?page=2.0 200 {"items": [], "total": 0, "page": 2, "per_page": 50, "pages": 0}
+      ?page=abc&since=nonsense 422 {"detail": [{"type": "int_parsing", "loc": ["query", "page"], "msg": "Input should be a valid integer, unable to parse string as an integer", "input": "abc"}]}
+      ?level=a&level=b 200 {"items": [], "total": 0, "page": 1, "per_page": 50, "pages": 0}
+      ?page=1&page=3 200 {"items": [], "total": 0, "page": 3, "per_page": 50, "pages": 0}
+      ```
+
+      `?page=1&page=3` answering `3` confirms Starlette's `QueryParams.get()` takes
+      the *last* value of a repeated key, so every parameter here is read off
+      `getAll(name).at(-1)` rather than `URLSearchParams.get()`.
+
+      **The two 500s, confirmed.** With `page` valid, an unparseable bound escapes
+      the handler:
+
+      ```
+      $ cd api && PYTHONPATH=. uv run python /tmp/probe_500.py
+      ?since=nonsense 500 Internal Server Error
+      ?until=nonsense 500 Internal Server Error
+      ?since= 200 {"items":[],"total":0,"page":1,"per_page":50,"pages":0}
+      ?since=2026-08-23T00:00:00Z 200 {"items":[],"total":0,"page":1,"per_page":50,"pages":0}
+      ```
+
+      `?since=` is a 200: Python's guard is `if not since:`, so an empty value
+      falls back to the default 90-day window rather than being parsed. Same for
+      every other optional filter, all of which use `if <value>:`.
+
+      **The `= ANY(:levels)` binding needed a different shape.** drizzle's `sql`
+      template expands a JS array into one placeholder per element, which parses as
+      a record, so neither the bare array nor a cast works:
+
+      ```
+      $ cd web && npx vitest run src/app/api/analytics/probe-array.test.ts
+      Caused by: error: op ANY/ALL (array) requires array on right side     # any(${levels})
+      Caused by: error: cannot cast type record to text[]                   # any(${levels}::text[])
+      ```
+
+      Building the array in SQL with `sql.join` does work, and quotes correctly:
+
+      ```
+      ["info","error"] -> ["info","error"]
+      ["a,b"]          -> ["a,b"]
+      [""]             -> [""]
+      ["it's"]         -> ["it's"]
+      ["{x}"]          -> ["{x}"]
+      ["A"]            -> []
+      ```
+
+      **Failing first.** The test file was written before the handler:
+
+      ```
+      $ cd web && npx vitest run src/app/api/analytics/logs.test.ts
+       FAIL  src/app/api/analytics/logs.test.ts [ src/app/api/analytics/logs.test.ts ]
+      Error: Cannot find module './logs/route' imported from '.../logs.test.ts'
+       Test Files  1 failed (1)
+            Tests  no tests
+      ```
+
+      **Passing.** 39 tests against the real database and real BetterAuth sessions:
+
+      ```
+      $ cd web && npx vitest run src/app/api/analytics/logs.test.ts --reporter=verbose
+      + GET /api/analytics/logs > rejects an unauthenticated request 3ms
+      + GET /api/analytics/logs > answers an empty history with an empty page and no pages 15ms
+      + GET /api/analytics/logs > projects the nine fields of one entry, with data as a parsed object 5ms
+      + GET /api/analytics/logs > reports a missing key as null rather than dropping the entry 4ms
+      + GET /api/analytics/logs > unrolls every entry of every post into its own row 5ms
+      + GET /api/analytics/logs > orders entries by timestamp descending 4ms
+      + GET /api/analytics/logs scoping > excludes a post whose execution_logs is the empty array 4ms
+      + GET /api/analytics/logs scoping > excludes another user's posts 7ms
+      + GET /api/analytics/logs scoping > excludes a post with no profile, which has no owner to scope by 4ms
+      + GET /api/analytics/logs filters > filters by a single level 3ms
+      + GET /api/analytics/logs filters > splits a comma-separated level list and strips whitespace around each 3ms
+      + GET /api/analytics/logs filters > treats an empty level as no filter at all 3ms
+      + GET /api/analytics/logs filters > filters by an exact stage, not a prefix 3ms
+      + GET /api/analytics/logs filters > filters by profile_id 4ms
+      + GET /api/analytics/logs filters > treats an empty profile_id as no filter at all 3ms
+      + GET /api/analytics/logs filters > searches the message case-insensitively as a substring 4ms
+      + GET /api/analytics/logs filters > passes a wildcard in q through to ILIKE unescaped, as Python does 4ms
+      + GET /api/analytics/logs filters > combines every filter with AND 3ms
+      + GET /api/analytics/logs time bounds > includes an entry exactly on the since bound 4ms
+      + GET /api/analytics/logs time bounds > excludes an entry one second before the since bound 3ms
+      + GET /api/analytics/logs time bounds > includes an entry exactly on the until bound 3ms
+      + GET /api/analytics/logs time bounds > excludes an entry one second after the until bound 3ms
+      + GET /api/analytics/logs time bounds > normalises a Z-suffixed bound to +00:00 so the boundary second still matches 5ms
+      + GET /api/analytics/logs time bounds > defaults to a ninety-day window when since is absent 3ms
+      + GET /api/analytics/logs time bounds > treats an empty since as absent and falls back to the default window 3ms
+      + GET /api/analytics/logs time bounds > applies no upper bound when until is absent 3ms
+      + GET /api/analytics/logs time bounds > treats an empty until as no upper bound 3ms
+      + GET /api/analytics/logs pagination > rolls the page count up and reports the requested page 3ms
+      + GET /api/analytics/logs pagination > reports zero pages rather than one when nothing matches 2ms
+      + GET /api/analytics/logs pagination > answers an empty page past the end 3ms
+      + GET /api/analytics/logs validation > rejects page below its minimum 1ms
+      + GET /api/analytics/logs validation > rejects per_page above its maximum 1ms
+      + GET /api/analytics/logs validation > reports page and per_page in declaration order in one response 1ms
+      + GET /api/analytics/logs validation > accepts pydantic's lax integer forms 2ms
+      + GET /api/analytics/logs validation > takes the last value of a repeated parameter, as Starlette does 5ms
+      + GET /api/analytics/logs validation > rejects a since it cannot parse instead of raising 1ms
+      + GET /api/analytics/logs validation > rejects an until it cannot parse instead of raising 1ms
+      + GET /api/analytics/logs validation > reports a bad page before a bad since, because FastAPI validated first 1ms
+      + GET /api/analytics/logs validation > rejects a profile_id that is not a uuid instead of reaching the column 1ms
+
+       Test Files  1 passed (1)
+            Tests  39 passed (39)
+      ```
+
+      (vitest's pass glyph is a check mark; transcribed as `+` here. The full test
+      names are prefixed with the file path in the real output and are trimmed to
+      the describe path above.)
+
+      **Cross-stack parity against the running Python endpoint.** This endpoint
+      executes, so parity was measured rather than argued. A probe wrote three
+      profiles across two users and five posts with deliberately awkward fixtures
+      (an entry holding only `ts`, an entry with `data` explicitly `null`, an entry
+      with a deeply nested `data`, messages `b-m boom` / `bxxm BOOM` / `nothing` so
+      an unescaped `%` and a case-insensitive match are distinguishable, a
+      `.500000` sub-second timestamp on the boundary, an empty `execution_logs`, a
+      post with no profile, and a post belonging to another user), then called the
+      TypeScript handler on twelve queries. The Python router was then mounted on a
+      bare `FastAPI()` under `TestClient` with `get_current_user` overridden to the
+      same user id and `get_session` bound to the real dev database, and called on
+      the same rows:
+
+      ```
+      $ cd api && PYTHONPATH=. uv run python /tmp/probe_logs_py.py
+      done 12
+
+      $ python3 -c "
+      import json
+      py=json.load(open('/tmp/logs-py.json')); ts=json.load(open('/tmp/logs-ts.json'))
+      print('deep equal:', py==ts)
+      for q in py: print(('OK ' if py[q]==ts[q] else 'DIFF'), q, py[q]['body']['total'])
+      "
+      deep equal: True
+      OK   6
+      OK  ?per_page=3 6
+      OK  ?per_page=3&page=2 6
+      OK  ?level=error 3
+      OK  ?level=%20info%20,%20error%20 4
+      OK  ?stage=write 4
+      OK  ?q=b%25m 2
+      OK  ?q=BOOM 2
+      OK  ?since=2026-08-20T12:00:00Z 5
+      OK  ?since=2026-01-01&until=2026-08-20T12:00:01Z 4
+      OK  ?since=2026-01-01&until=2026-08-20T12:00:00.5 2
+      OK  ?level=error&stage=write&q=boom 1
+      ```
+
+      Byte-for-byte equal on all twelve, including the page-2 slice, the descending
+      text ordering across a `.500000` sub-second tie, the unescaped `%` in `q`,
+      the trimmed comma list, both `Z`-suffixed bounds and a nested `data` object.
+      Unlike `/models` there is not even a trailing-zero difference to record: this
+      endpoint does no arithmetic beyond the pagination rollup, so every value on
+      the wire is a string, a `null` or an integer in both stacks.
+
+      The fixtures were deleted afterwards; no probe file is committed.
+
+      **Deviation 1, recorded: an unparseable `since` or `until` answers 422, not
+      500.** Both are declared `str | None`, so pydantic never looked at them and
+      `datetime.fromisoformat()` raised straight out of the handler. Every value it
+      rejects is a 500 in Python, on a parameter the caller controls; this is
+      logged in `todo.md` as a confirmed defect against the still-serving Python
+      route. The port answers pydantic's own `datetime_from_date_parsing`, the
+      error a `datetime` query parameter would have produced, probed off the
+      installed pydantic 2.12:
+
+      ```
+      $ cd api && uv run python -c "<TypeAdapter(datetime).validate_python on three bad values>"
+      'nonsense' [{'type': 'datetime_from_date_parsing', ..., 'msg': 'Input should be a valid datetime or date, input is too short', 'ctx': {'error': 'input is too short'}}]
+      '2026-13-01' [{'type': 'datetime_from_date_parsing', ..., 'msg': 'Input should be a valid datetime or date, month value is outside expected range of 1-12', ...}]
+      '' [{'type': 'datetime_from_date_parsing', ..., 'msg': 'Input should be a valid datetime or date, input is too short', ...}]
+      ```
+
+      The message drops pydantic's `ctx.error` tail. That tail names the specific
+      failure and comes from speedate, a different parser from `fromisoformat` with
+      different failure modes, so reproducing it would mean inventing text.
+      `pathUuidIssue` already drops the same kind of tail for the same reason.
+
+      **Deviation 2, recorded: a `profile_id` that is not a uuid answers 422, not
+      500.** Identical to the deviation recorded under 5.8b, for the identical
+      reason: the parameter is declared `str | None` and the raw value reached a
+      `uuid` column. The error is the `uuid_parsing` 422 `GET /api/posts` already
+      answers. An empty value is still no filter at all.
+
+      **Negative controls**, twenty mutations, each applied to
+      `logs/route.ts` alone and verified with `cmp` against a saved good copy
+      before the suite was run (an earlier iteration found `git diff --quiet` gives
+      a false negative for an untracked file):
+
+      | Mutation | Result | First failing tests |
+      | --- | --- | --- |
+      | `since` bound made exclusive (`>=` to `>`) | 1 failed | includes an entry exactly on the since bound |
+      | `until` bound made exclusive (`<=` to `<`) | 1 failed | includes an entry exactly on the until bound |
+      | Ordering flipped to ascending | 2 failed | orders entries by timestamp descending; rolls the page count up |
+      | `level` list not trimmed | 1 failed | splits a comma-separated level list and strips whitespace |
+      | `level` not split on commas at all | 1 failed | splits a comma-separated level list and strips whitespace |
+      | Empty `level` becomes a filter (`if (level)` to `!== undefined`) | 1 failed | treats an empty level as no filter at all |
+      | First repeated value taken instead of last | 1 failed | takes the last value of a repeated parameter |
+      | `since` not normalised through `fromIsoFormat` | 2 failed | normalises a Z-suffixed bound; rejects a since it cannot parse |
+      | `until` not normalised through `fromIsoFormat` | 1 failed | rejects an until it cannot parse |
+      | `count(*)` left as the string `pg` returns | 27 failed | answers an empty history; projects the nine fields; unrolls every entry |
+      | Page count truncates instead of rolling up | 3 failed | projects the nine fields; answers an empty page past the end; rolls the page count up |
+      | Offset off by one page (`page * perPage`) | 11 failed | orders entries by timestamp descending; projects the nine fields; reports a missing key as null |
+      | Profile join widened to a `left join` | **0 failed** | (analysed below) |
+      | Message search made case sensitive (`ilike` to `like`) | 1 failed | searches the message case-insensitively as a substring |
+      | `p.execution_logs != '[]'::jsonb` guard dropped | **0 failed** | (analysed below) |
+      | Bound errors reported before page errors | 1 failed | reports a bad page before a bad since |
+      | `wp.user_id` scoping predicate dropped | 1 failed | excludes another user's posts |
+      | `data` projected with `->>` instead of `->` | 1 failed | projects the nine fields of one entry, with data as a parsed object |
+      | `stage` filter made a prefix match | 1 failed | filters by an exact stage, not a prefix |
+      | `q` wildcards escaped before the `ILIKE` | 1 failed | passes a wildcard in q through to ILIKE unescaped |
+
+      **The two controls with no teeth are both dead code, not untested code.**
+      Widening the join to a `left join` changes nothing because
+      `wp.user_id = :user_id` is `NULL` for a post with no profile and a `NULL`
+      predicate is not `true`: the scoping is carried entirely by the predicate,
+      and the inner join is redundant to it. (Dropping the predicate instead does
+      fail, which is the row above it.) Dropping the
+      `p.execution_logs != '[]'::jsonb` guard changes nothing because
+      `jsonb_array_elements('[]')` yields zero rows, so the guard is a planner
+      hint, not a filter. Both are kept because both are what the Python does, and
+      the second does let Postgres skip the unroll.
+
+      **Not covered.** No browser drives `/monitor`'s logs tab against this
+      handler, so nothing here proves the table and its filter controls render the
+      payload; that check belongs to Phase 8 item 8.8. `web/src/lib/api.ts`'s
+      `analytics.logs()` never sends `until`, so the upper bound is exercised only
+      by this suite and never end to end. The text ordering of `log_entry->>'ts'`
+      is only correct because every writer renders the timestamp through
+      `datetime.now(UTC).isoformat()`; nothing in either stack enforces that, and
+      an entry written with a different offset or a `Z` suffix would sort wrongly
+      in both.
+
+      **Gates.**
+
+      ```
+      $ cd web && npx tsc --noEmit
+      (no output, exit 0)
+
+      $ cd web && npx eslint
+      (no output, exit 0)
+
+      $ cd web && npx vitest run          # three runs with this item present
+       Test Files  3 failed | 98 passed (101)
+            Tests  10 failed | 2043 passed | 7 skipped (2060)
+       Test Files  2 failed | 99 passed (101)
+            Tests  9 failed | 2044 passed | 7 skipped (2060)
+       Test Files  2 failed | 99 passed (101)
+            Tests  9 failed | 2044 passed | 7 skipped (2060)
+
+      $ cd web && npx vitest run          # this item's two files moved aside
+       Test Files  2 failed | 98 passed (100)
+            Tests  9 failed | 2005 passed | 7 skipped (2021)
+      ```
+
+      Both sides sit at 9 (6 `image-preview` + 3 `PostDetail`). The tenth on the
+      first run is `scaffold-check.test.ts > emits the workflow lifecycle events
+      the trace view will read`, the load-sensitive flake already recorded in
+      `todo.md`: it fired once in three runs with this item present and not at all
+      in the HEAD-side run. 39 new tests, 2005 to 2044 passing.
+
+      ```
+      $ cd web && npx next build
+      ✓ Compiled successfully in 4.2s
+      ├ ƒ /api/analytics/costs
+      ├ ƒ /api/analytics/dashboard
+      ├ ƒ /api/analytics/logs
+      ├ ƒ /api/analytics/models
+      build exit=0
+      (plus the standing 15 BetterAuthError lines, count unchanged)
+
+      $ cd api && uv run pytest -q
+      120 failed, 241 passed, 25 errors in 15.32s
+
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+      [*] 17 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).
+
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 131 files already formatted
+      ```
+
+      Python counts unchanged from those recorded under 5.8a to 5.8d-i. No Python
+      changed in this iteration.
 - [ ] 5.9 `wordpress`
 - [ ] 5.10 `nextjs` (HMAC signing from `hmac_signing.py` and the webhook contract with
   `packages/create-mdx-blog` preserved exactly)
