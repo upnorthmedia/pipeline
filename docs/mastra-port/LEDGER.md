@@ -12160,10 +12160,145 @@ three pieces are separately verifiable, so they are separate items.
       9 files would be reformatted, 131 files already formatted
       ```
 
-    - [ ] 5.5c-ii `pipeline_start`: the run-level entry Python wrote before the stage
+    - [x] 5.5c-ii `pipeline_start`: the run-level entry Python wrote before the stage
       loop, gated on `is_full_pipeline`. Needs a head step on the chain, symmetric with
       `pipeline-complete`, because the structural rule keeps run logic in a Mastra
       primitive rather than in the route handler that starts the run.
+
+      `web/src/mastra/steps/pipeline-start.ts` is the head step, added to
+      `workflows/pipeline.ts` ahead of `research`, so the chain is now
+
+      ```
+      pipeline-start -> research -> outline -> write -> edit -> images -> ready
+        -> pipeline-complete
+      ```
+
+      It ports exactly the block at `api/src/worker.py:117`: one `execution_logs`
+      entry, `stage: ""`, `level: "info"`, `event: "pipeline_start"`, message
+      `"Full pipeline run initiated"`, and nothing else. There is no SSE event beside
+      it, because Python published none and `use-sse.ts` has no handler for one.
+
+      **Why this entry is worth a step of its own.** It is the only record that a full
+      run was ever picked up. A run that dies inside `research` commits no column and
+      moves no status, so without it `GET /api/posts/{id}/logs` shows an empty array
+      for a post that has in fact been running for a minute, and an operator cannot
+      tell that from a post that was never enqueued.
+
+      **Decision: a step, not the route handler that starts the run.** The structural
+      rule of the port is one reason. The stronger one is that the two say different
+      things: `startPipeline` returning means the `workflow.start` event reached
+      Redis, while this entry means the worker consumed it and began executing. Only
+      the second is what the log line claims. It is the exact mirror of
+      `pipeline-complete` at the other end of the chain, down to the gate: both are
+      about the run rather than any stage, both write `stage: ""`, and both do nothing
+      for a run that named its stages.
+
+      The step's `outputSchema` is `stageStepInputSchema` rather than
+      `stageStepOutputSchema`, because it produces no stage meta and `research`
+      consumes the workflow's own input shape. It returns `inputData` untouched, so
+      adding it changes nothing about what the first stage receives.
+
+      A real stored entry, written through the step against the real database and read
+      back off the column:
+
+      ```
+      [
+        {
+          "ts": "2026-08-23T00:05:27.450+00:00",
+          "event": "pipeline_start",
+          "level": "info",
+          "stage": "",
+          "message": "Full pipeline run initiated"
+        }
+      ]
+      ```
+
+      `web/src/mastra/steps/pipeline-start.test.ts`, against the real database:
+
+      ```
+      $ pnpm exec vitest run --reporter=verbose src/mastra/steps/pipeline-start.test.ts
+       ✓ a run with no stage selection > writes Python's pipeline_start entry and nothing else 27ms
+       ✓ a run with no stage selection > leaves the columns that describe where the run is alone 6ms
+       ✓ a run with no stage selection > passes its input through unchanged, so the chain is untouched 3ms
+       ✓ a run that names its stages > writes nothing, because Python gated the entry on is_full_pipeline 3ms
+       ✓ a run that names its stages > still passes its input through, selection included 2ms
+       ✓ the step's position in the registered workflow > is the head of the chain, ahead of research 3ms
+
+       Test Files  1 passed (1)
+            Tests  6 passed (6)
+      ```
+
+      The end-to-end evidence is 5.5a's four real workflow runs in
+      `pipeline-events.test.ts`, on a real evented engine over real Redis Streams
+      against the real database, which now assert the ordering the step's position
+      produces. Two of those assertions changed behaviour rather than being added:
+      the full run's log now opens with `pipeline_start`, and the run parked at its
+      first gate, which previously wrote nothing at all, now records that it started.
+
+      ```
+      $ pnpm exec vitest run --reporter=verbose src/mastra/pipeline-events.test.ts
+       ✓ what a run writes to execution_logs > opens with the run, records a start and a complete per stage, then closes with the run 1ms
+       ✓ what a run writes to execution_logs > carries Python's pipeline_start message and no data 1ms
+       ✓ what a run writes to execution_logs > carries Python's stage_complete data, including the tokens the event omits 1ms
+       ✓ what a run writes to execution_logs > records the same duration the event carried, rounded the same way 1ms
+       ✓ what a run writes to execution_logs > stamps every entry with a timestamp that sorts against Python's 1ms
+       ✓ what a run writes to execution_logs > says nothing about a stage the run skipped 1ms
+       ✓ what a run writes to execution_logs > still opens a run that skips its first stage with pipeline_start 1ms
+       ✓ what a run writes to execution_logs > records a run parked at its first gate as started and nothing more 1ms
+       ✓ what a run writes to execution_logs > records only the named stage for a rerun, and nothing about the pipeline 1ms
+
+       Test Files  1 passed (1)
+            Tests  36 passed (36)
+      ```
+
+      Negative controls, each reverted immediately:
+
+      | Control | Result |
+      | --- | --- |
+      | `if (!inputData.stages)` replaced with `if (true)` | 2 failed: the step test's rerun case and `pipeline-events`' "records only the named stage for a rerun" |
+      | `.then(pipelineStartStep)` removed from the chain | 5 failed: the position test and all four `pipeline-events` ordering assertions |
+      | message changed to `"Pipeline started"` | 2 failed: the step test's entry-shape case and `pipeline-events`' message case |
+      | step moved behind `researchStep` in the chain | 1 failed: the position test, which is the only thing that pins head-of-chain rather than merely present |
+
+      Gates. Frontend from `web/`, with `set -a; . ../.env; set +a` first:
+
+      ```
+      $ pnpm exec tsc --noEmit
+      TSC EXIT=0
+
+      $ pnpm run lint
+      LINT EXIT=0
+
+      $ pnpm test
+       Test Files  2 failed | 86 passed (88)
+            Tests  9 failed | 1578 passed | 7 skipped (1594)
+         Duration  79.14s
+
+      $ pnpm build
+      BUILD EXIT=0
+      ```
+
+      The 9 failures are the recorded baseline unchanged: 6 in `image-preview.test.tsx`
+      and 3 in `PostDetail.test.tsx`. 1578 passed against the previous item's 1570, the
+      6 new step tests plus the 2 added to `pipeline-events.test.ts`.
+
+      One run of the suite during this item also reported the
+      `scaffold-check.test.ts` lifecycle-events flake already tracked in `todo.md`
+      (`expected [ 'workflow-start', ...(3) ] to include 'workflow-step-result'`).
+      Three subsequent runs were clean. Nothing in this item touches that file.
+
+      Python, unchanged because nothing under `api/` was touched:
+
+      ```
+      $ cd api && uv run pytest -q
+      120 failed, 241 passed, 25 errors in 12.91s
+
+      $ uv run ruff check .
+      Found 32 errors.
+
+      $ uv run ruff format --check .
+      9 files would be reformatted, 131 files already formatted
+      ```
     - [ ] 5.5c-iii The failure entries from Python's exception branch: the `warning` /
       `retry` entry while attempts remain and the `error` / `stage_error` entry once
       they are spent. These go beside the `stage_error` publish in

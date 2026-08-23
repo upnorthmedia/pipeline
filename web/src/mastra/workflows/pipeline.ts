@@ -8,8 +8,13 @@
  * which `.then()` now declares.
  *
  * ```
- * research -> outline -> write -> edit -> images -> ready -> pipeline-complete
+ * pipeline-start -> research -> outline -> write -> edit -> images -> ready
+ *   -> pipeline-complete
  * ```
+ *
+ * `pipeline-start` is not a stage either. It is the head of Python's
+ * `if is_full_pipeline:` block, writing the run-level `pipeline_start` entry to
+ * `execution_logs` before any stage runs (see `steps/pipeline-start.ts`).
  *
  * `pipeline-complete` is not a stage. It is the tail of Python's
  * `if is_full_pipeline:` block, stamping `current_stage = "complete"` and
@@ -37,17 +42,17 @@
  * the `"running"` write, the `stage_start` / `stage_complete` / `pipeline_complete`
  * events on the shared topic, and the matching `execution_logs` entries.
  *
- * Deliberately not here yet: the run-level `pipeline_start` log entry, the
- * failure entries the exception branch wrote, the per-stage `log` events the
- * stage nodes published, and the auto-publish half of the completion hook. The
- * first three are the rest of Phase 5's `events` item; the last needs the
- * `wordpress` and `nextjs` routers.
+ * Deliberately not here yet: the failure entries the exception branch wrote,
+ * the per-stage `log` events the stage nodes published, and the auto-publish
+ * half of the completion hook. The first two are the rest of Phase 5's `events`
+ * item; the last needs the `wordpress` and `nextjs` routers.
  */
 import { createWorkflow } from "@mastra/core/workflows/evented"
 
 import { editStep } from "../steps/edit"
 import { outlineStep } from "../steps/outline"
 import { pipelineCompleteStep } from "../steps/pipeline-complete"
+import { pipelineStartStep } from "../steps/pipeline-start"
 import { readyStep } from "../steps/ready"
 import { researchStep } from "../steps/research"
 import { stageStepInputSchema, stageStepOutputSchema } from "../steps/stage-io"
@@ -66,6 +71,7 @@ export const pipelineWorkflow = createWorkflow({
   inputSchema: stageStepInputSchema,
   outputSchema: stageStepOutputSchema,
 })
+  .then(pipelineStartStep)
   .then(researchStep)
   .then(outlineStep)
   .then(writeStep)

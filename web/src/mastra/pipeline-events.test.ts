@@ -545,17 +545,25 @@ async function logsFor(postId: string): Promise<Record<string, unknown>[]> {
 }
 
 describe("what a run writes to execution_logs", () => {
-  it("records a start and a complete for each of the six stages, then the run", async () => {
+  it("opens with the run, records a start and a complete per stage, then closes with the run", async () => {
     const entries = await logsFor(FULL_POST_ID)
     expect(entries.map((entry) => [entry.event, entry.stage])).toEqual([
+      // Python passed `""` for the two run-level entries, so filtering the log
+      // by stage skips them. `pipeline_start` is first because the step that
+      // writes it is the head of the chain, ahead of `research`.
+      ["pipeline_start", ""],
       ...STAGES.flatMap((stage) => [
         ["stage_start", stage],
         ["stage_complete", stage],
       ]),
-      // Python passed `""` for the two run-level entries, so filtering the log
-      // by stage skips them.
       ["pipeline_complete", ""],
     ])
+  })
+
+  it("carries Python's pipeline_start message and no data", async () => {
+    const [opening] = await logsFor(FULL_POST_ID)
+    expect(opening).toMatchObject({ level: "info", message: "Full pipeline run initiated" })
+    expect("data" in opening).toBe(false)
   })
 
   it("carries Python's stage_complete data, including the tokens the event omits", async () => {
@@ -602,13 +610,23 @@ describe("what a run writes to execution_logs", () => {
     expect(entries.filter((entry) => entry.event === "stage_start")).toHaveLength(STAGES.length - 1)
   })
 
-  it("says nothing at all about a run parked at its first gate", async () => {
-    // The gate fires before `announceStageStart`, and nothing else in the port
-    // writes here yet: `pipeline_start` is 5.5c-ii.
-    expect(await logsFor(GATE_POST_ID)).toEqual([])
+  it("still opens a run that skips its first stage with pipeline_start", async () => {
+    // The skip is decided inside `research`, which the head step runs ahead of,
+    // so the run-level entry does not depend on any stage executing.
+    expect((await logsFor(SKIP_POST_ID)).map((entry) => entry.event)[0]).toBe("pipeline_start")
+  })
+
+  it("records a run parked at its first gate as started and nothing more", async () => {
+    // The gate fires before `announceStageStart`, so `research` writes nothing.
+    // The run-level entry is the whole log, and it is the only evidence on the
+    // row that this run was ever picked up by a worker.
+    const entries = await logsFor(GATE_POST_ID)
+    expect(entries.map((entry) => [entry.event, entry.stage])).toEqual([["pipeline_start", ""]])
   })
 
   it("records only the named stage for a rerun, and nothing about the pipeline", async () => {
+    // Python gated `pipeline_start` on `is_full_pipeline`, the same gate
+    // `pipeline_complete` sits behind, so a rerun opens and closes silently.
     const entries = await logsFor(RERUN_POST_ID)
     expect(entries.map((entry) => [entry.event, entry.stage])).toEqual([
       ["stage_start", "edit"],
