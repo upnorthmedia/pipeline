@@ -13,6 +13,7 @@ import {
   json,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -41,10 +42,17 @@ export type StageStatusJson = Partial<
 /**
  * Alembic's own bookkeeping table. Owned by Alembic, never written from
  * TypeScript, but described here so the parity check sees a complete database.
+ * Alembic names its primary key `_pkc`, not Postgres' default `_pkey`, so the
+ * name is stated here: without it the baseline migration would build a
+ * differently named constraint than the live database carries.
  */
-export const alembicVersion = pgTable("alembic_version", {
-  versionNum: varchar("version_num", { length: 32 }).primaryKey().notNull(),
-})
+export const alembicVersion = pgTable(
+  "alembic_version",
+  {
+    versionNum: varchar("version_num", { length: 32 }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.versionNum], name: "alembic_version_pkc" })],
+)
 
 export const websiteProfiles = pgTable(
   "website_profiles",

@@ -153,3 +153,60 @@ export function diffSchemas(alembic: SchemaShape, drizzle: SchemaShape): ParityD
   }
   return diffs
 }
+
+/**
+ * One `table | name | definition` line per index or constraint, sorted. Names
+ * are part of the shape: `posts_profile_id_fkey` and `uq_settings_key_user_id`
+ * are quoted in error paths and in `ON CONFLICT` arbiters, so a database that
+ * carries the same columns under different constraint names is not the same
+ * database.
+ */
+export type CatalogLines = string[]
+
+/** Index definitions from `pg_indexes`, Alembic-owned tables only. */
+export async function describeIndexes(pool: Pool): Promise<CatalogLines> {
+  const { rows } = await pool.query<{ table_name: string; line: string }>(
+    `SELECT tablename AS table_name,
+            tablename || ' | ' || indexname || ' | ' || indexdef AS line
+       FROM pg_indexes
+      WHERE schemaname = 'public'`,
+  )
+  return rows
+    .filter((row) => isAlembicOwned(row.table_name))
+    .map((row) => row.line)
+    .sort()
+}
+
+/** Constraint definitions from `pg_constraint`, Alembic-owned tables only. */
+export async function describeConstraints(pool: Pool): Promise<CatalogLines> {
+  const { rows } = await pool.query<{ table_name: string; line: string }>(
+    `SELECT conrelid::regclass::text AS table_name,
+            conrelid::regclass::text || ' | ' || conname || ' | ' ||
+              pg_get_constraintdef(oid) AS line
+       FROM pg_constraint
+      WHERE connamespace = 'public'::regnamespace`,
+  )
+  return rows
+    .filter((row) => isAlembicOwned(row.table_name))
+    .map((row) => row.line)
+    .sort()
+}
+
+/** Lines present on one side only, tagged with which side has them. */
+export function diffCatalogLines(
+  expected: CatalogLines,
+  actual: CatalogLines,
+  expectedLabel: string,
+  actualLabel: string,
+): ParityDiff[] {
+  const inActual = new Set(actual)
+  const inExpected = new Set(expected)
+  return [
+    ...expected
+      .filter((line) => !inActual.has(line))
+      .map((line) => `only in ${expectedLabel}: ${line}`),
+    ...actual
+      .filter((line) => !inExpected.has(line))
+      .map((line) => `only in ${actualLabel}: ${line}`),
+  ].sort()
+}

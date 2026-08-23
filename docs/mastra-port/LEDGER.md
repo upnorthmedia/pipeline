@@ -1260,11 +1260,24 @@ pages that use it work with the Python API stopped.
 
 ## Phase 7: Cutover
 
-- [ ] 7.0 How a fresh database is created after Alembic is deleted. `schema.ts` mirrors
+- [x] 7.0 How a fresh database is created after Alembic is deleted. `schema.ts` mirrors
   the Alembic-owned schema today and has no generate workflow (see `drizzle.config.ts`),
   so once `api/` is gone nothing in the repo can build an empty database. Give Drizzle a
   baseline migration generated from `schema.ts` and prove it produces the same shape the
   Alembic chain does, including the settings key from 6.0.
+
+  `web/drizzle/0000_baseline.sql` creates the whole schema in one migration, applied with
+  `pnpm -C web db:migrate`. `src/db/baseline-parity.test.ts` builds a scratch database from it
+  through the real migrator and diffs it against the live Alembic database in both directions
+  across columns, indexes and constraints, names included; 8 tests, 8 of 8 mutations killed.
+  `web/drizzle/README.md` records the three owners a fresh database needs in order (this
+  baseline, then `pnpm auth:migrate`, then `@mastra/pg` creating `mastra_*` on first boot).
+  One `schema.ts` edit was needed: `alembic_version`'s primary key is named
+  `alembic_version_pkc`, which `.primaryKey()` cannot express, so it moved to
+  `primaryKey({ columns, name })`. The baseline is a snapshot of the end state, not a replay of
+  001-012, so it builds an empty database only and has no downgrade path.
+
+  Evidence: [`evidence/phase-7.md` #7.0](../mastra-port/evidence/phase-7.md)
 - [ ] 7.1 Delete `api/`. Remove the Python `api` and `worker` services from
   `docker-compose.yml` and `docker-compose.prod.yml` and replace them with the TypeScript
   `worker` service. Keep `db` and `redis`.

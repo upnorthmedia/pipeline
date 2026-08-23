@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "db:migrate": "drizzle-kit migrate",
     "auth:migrate": "node --env-file=../.env scripts/auth-migrate.mts",
     "worker:build": "mastra worker build -o .mastra/worker",
     "worker": "mastra worker start --dir .mastra/worker"
