@@ -229,6 +229,36 @@ export interface Setting {
   updated_at: string;
 }
 
+/** One row of the settings page's per-stage model table (ledger item 6.3). */
+export interface StageModelRow {
+  stage: PipelineStage;
+  provider: string;
+  model: string;
+  effort: string | null;
+  /** Which layer supplied the effective value: default, global, or user. */
+  model_source: "default" | "global" | "user";
+  effort_source: "default" | "global" | "user";
+  /** Verified ids selectable for this stage; the only legal values on write. */
+  models: string[];
+  /** Empty where the provider documents no effort parameter. */
+  efforts: string[];
+  /** What the field resolves to once the caller's own override is removed. */
+  fallback_model: string;
+  fallback_effort: string | null;
+}
+
+/** One stage's stored overrides. An absent field falls back a layer. */
+export interface StageModelOverride {
+  model?: string;
+  effort?: string;
+}
+
+export interface StageModels {
+  stages: StageModelRow[];
+  /** The caller's own row, which the client edits and writes back whole. */
+  overrides: Partial<Record<PipelineStage, StageModelOverride>>;
+}
+
 export interface RuleFile {
   name: string;
   filename: string;
@@ -354,6 +384,27 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (res.status === 204) return undefined as T;
   return res.json();
+}
+
+/**
+ * The human-readable reason behind a failed request.
+ *
+ * `request()` throws with the raw response body, and every ported handler
+ * answers `{"detail": "..."}` the way FastAPI did, so unwrapping it here is
+ * what lets a page show the server's actual complaint (an id off the
+ * allowlist, say) instead of a generic failure notice.
+ */
+export function apiErrorMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof Error) || !error.message) return fallback;
+  try {
+    const body = JSON.parse(error.message);
+    const detail = (body as { detail?: unknown }).detail;
+    if (typeof detail === "string" && detail) return detail;
+  } catch {
+    // Not JSON: a network failure or an HTML error page. Neither is worth
+    // showing to a user, so the caller's own wording wins.
+  }
+  return fallback;
 }
 
 // --- Profiles ---
@@ -526,6 +577,29 @@ export const settings = {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
+};
+
+// --- Stage models ---
+
+/**
+ * Per-stage model configuration. Reads come from a dedicated endpoint because
+ * the effective value is a merge of three layers and only the server has the
+ * global row; writes go through `PATCH /api/settings` under the `stage_models`
+ * key, which is where the allowlist is enforced.
+ *
+ * `update` sends the whole overrides map, not a patch, because the setting is
+ * stored as one row value: omitting a stage is how it is reverted.
+ */
+export const stageModels = {
+  get: () => request<StageModels>("/api/settings/stage-models"),
+
+  update: async (overrides: StageModels["overrides"]) => {
+    await request<Setting[]>("/api/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ stage_models: overrides }),
+    });
+    return request<StageModels>("/api/settings/stage-models");
+  },
 };
 
 // --- API Keys ---

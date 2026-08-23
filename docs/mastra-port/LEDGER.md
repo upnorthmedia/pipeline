@@ -1224,9 +1224,23 @@ pages that use it work with the Python API stopped.
   equivalent under a one-entry allowlist with a tripwire test on it.
 
   Evidence: [`evidence/phase-6.md` #6.2b](../mastra-port/evidence/phase-6.md)
-- [ ] 6.3 Settings UI: table of six stages with model and effort selectors, current effective
+- [x] 6.3 Settings UI: table of six stages with model and effort selectors, current effective
   value plus default-or-override indicator, save and revert-to-default per stage, real provider
-  errors surfaced rather than silent fallback.
+  errors surfaced rather than silent fallback. A new `GET /api/settings/stage-models` supplies
+  the table because the page cannot build it from `GET /api/settings` alone: that endpoint
+  returns the caller's own rows verbatim, with no global row, no defaults and no allowlist, and
+  resolving in the browser would be a second `resolveStageModels()` free to disagree with the
+  one the pipeline runs. Writes still go through `PATCH /api/settings`, so the allowlist is
+  enforced in one place. Two shape decisions worth carrying forward: the selector shows the
+  effective value with a `Default`/`Global`/`Override` badge rather than an empty form, and
+  revert deletes the stage's entry instead of writing the fallback back, so a later change to
+  the operator's global row still reaches the user. Verified live in a browser end to end
+  (select, save, read the row from Postgres, revert, read it again), 49 tests, 10 of 10
+  mutations killed. One shared-fixture change: `src/test/setup.ts` now shims the pointer-capture
+  and `scrollIntoView` APIs jsdom lacks and Radix `Select` calls, guarded for the
+  `node`-environment suites that load the same file.
+
+  Evidence: [`evidence/phase-6.md` #6.3](../mastra-port/evidence/phase-6.md)
 - [ ] 6.4 Test asserts that changing a stage's model in the UI changes the model in the outbound
   provider request payload.
 

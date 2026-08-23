@@ -34,6 +34,7 @@ import {
   type RuleFile,
 } from "@/lib/api";
 import { toast } from "sonner";
+import { StageModelsCard } from "./stage-models-card";
 
 const RULE_NAMES = [
   "blog-research",
@@ -208,7 +209,7 @@ export default function SettingsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
           <p className="text-sm text-muted-foreground">
-            API keys and rule file editor
+            API keys, stage models, and rule file editor
           </p>
         </div>
       </div>
@@ -345,6 +346,9 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Per-stage model configuration */}
+      <StageModelsCard />
 
       {/* Rule File Editor */}
       <Card>

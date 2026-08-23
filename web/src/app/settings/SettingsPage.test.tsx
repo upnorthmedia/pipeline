@@ -17,6 +17,10 @@ vi.mock("@/lib/api", async () => {
       get: vi.fn(),
       update: vi.fn(),
     },
+    stageModels: {
+      get: vi.fn(),
+      update: vi.fn(),
+    },
   };
 });
 
@@ -28,13 +32,14 @@ vi.mock("sonner", () => ({
   },
 }));
 
-const { apiKeys, rules } = await import("@/lib/api");
+const { apiKeys, rules, stageModels } = await import("@/lib/api");
 const { toast } = await import("sonner");
 const mockApiKeysGet = vi.mocked(apiKeys.get);
 const mockApiKeysUpdate = vi.mocked(apiKeys.update);
 const mockRulesList = vi.mocked(rules.list);
 const mockRulesGet = vi.mocked(rules.get);
 const mockRulesUpdate = vi.mocked(rules.update);
+const mockStageModelsGet = vi.mocked(stageModels.get);
 
 const testKeyStatuses = {
   anthropic: { provider: "anthropic", configured: true, source: "db" as const, hint: "...ab12", valid: null },
@@ -56,6 +61,7 @@ beforeEach(() => {
   mockApiKeysGet.mockResolvedValue(testKeyStatuses);
   mockRulesList.mockResolvedValue(testRuleFiles);
   mockRulesGet.mockResolvedValue({ name: "blog-research", content: "# Research Rules\nContent here" });
+  mockStageModelsGet.mockResolvedValue({ stages: [], overrides: {} });
 });
 
 describe("SettingsPage", () => {
@@ -63,7 +69,9 @@ describe("SettingsPage", () => {
     renderWithProviders(<SettingsPage />);
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
-      expect(screen.getByText("API keys and rule file editor")).toBeInTheDocument();
+      expect(
+        screen.getByText("API keys, stage models, and rule file editor")
+      ).toBeInTheDocument();
     });
   });
 

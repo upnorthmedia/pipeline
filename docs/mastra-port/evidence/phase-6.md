@@ -743,3 +743,255 @@ $ cd web && pnpm build
 Nine of the ten failures are the recorded baseline (6 in `image-preview.test.tsx`, 3 in
 `PostDetail.test.tsx`); the tenth is the known `scaffold-check.test.ts` flake, which passed on
 a repeat run of the same tree. No Python file was touched, so the pytest gate is unchanged.
+
+---
+
+## 6.3
+
+The settings page's per-stage model and effort table.
+
+### What was built
+
+A read endpoint plus a card. Writes reuse `PATCH /api/settings`, so there is exactly one
+place that decides what a legal model id is.
+
+`GET /api/settings/stage-models` has no FastAPI ancestor. It exists because the page cannot
+build the table from `GET /api/settings` alone: that endpoint returns the caller's own rows
+verbatim, so the page would see the user's overrides but neither the operator's global row
+underneath them, nor the verified defaults underneath that, nor the allowlist a selector is
+populated from. Resolving in the browser would be a second implementation of
+`resolveStageModels()` free to disagree with the one the pipeline runs on.
+
+Each stage row carries two resolutions. `model`/`effort` are what the caller's runs use now.
+`fallback_model`/`fallback_effort` are what those fields resolve to with the caller's own row
+removed, which is what "revert" produces and is not always the hardcoded default: a global
+row sits in between.
+
+### Three decisions
+
+**The selector shows the effective value, not the override.** A stage nobody has configured
+still runs on something. Showing that value with a badge for its origin (`Default`, `Global`,
+`Override`) means the table always reads as the configuration the pipeline will run, never as
+an empty form.
+
+**Revert clears the stage, it does not write the fallback back.** Storing the resolved value
+as an override would freeze today's fallback into the user's row, so a later change to the
+operator's global row would stop reaching them. `M6` in the mutation table below is exactly
+this mistake, and the test kills it.
+
+**The client writes the whole overrides map, not a patch.** `stage_models` is one row value,
+so a write that carried only the edited stage would silently drop every other stage's
+override. `M7` is that mistake.
+
+Two things the item asks for that the shape did not need: an effort control is rendered only
+where `efforts` is non-empty (Perplexity and Gemini get the text "no effort setting"), and a
+rejected write shows the route's own 422 `detail` against the row it belongs to rather than a
+generic failure, via a new `apiErrorMessage()` helper in `lib/api.ts` that unwraps the
+`{"detail": ...}` body `request()` throws with.
+
+### Live evidence
+
+Dev server on :3000 with `NEXT_PUBLIC_API_URL=http://localhost:3000`, a real BetterAuth
+session cookie, against the dev database.
+
+```
+$ curl -s -o /dev/null -w "%{http_code}\n" -H "Cookie: $COOKIE" \
+    http://localhost:3000/api/settings/stage-models
+200
+
+$ curl -s -H "Cookie: $COOKIE" http://localhost:3000/api/settings/stage-models \
+    | python3 -m json.tool | head -30
+{
+    "stages": [
+        {
+            "stage": "research",
+            "provider": "perplexity",
+            "model": "sonar-pro",
+            "effort": null,
+            "model_source": "default",
+            "effort_source": "default",
+            "models": [
+                "sonar-pro"
+            ],
+            "efforts": [],
+            "fallback_model": "sonar-pro",
+            "fallback_effort": null
+        },
+        {
+            "stage": "outline",
+            "provider": "anthropic",
+            "model": "claude-opus-5",
+            "effort": "high",
+            "model_source": "default",
+            "effort_source": "default",
+            "models": [
+                "claude-opus-5",
+                "claude-fable-5",
+                "claude-opus-4-6"
+            ],
+            "efforts": [
+                "low",
+```
+
+The accessibility tree of the rendered card, with nothing configured
+(`chrome-devtools-axi open http://localhost:3000/settings`):
+
+```
+uid=g1746:4_32 StaticText "Stage Models"
+uid=g1746:4_33 StaticText "Model and reasoning effort per pipeline stage. Only verified model ids are selectable."
+uid=g1746:4_34 StaticText "Research"
+uid=g1746:4_35 StaticText "perplexity"
+uid=g1746:4_36 StaticText "Default"
+uid=g1746:4_37 combobox "research model" expandable haspopup="listbox" value="sonar-pro"
+uid=g1746:4_38 StaticText "no effort setting"
+uid=g1746:4_39 button "Save" disableable disabled
+uid=g1746:4_40 button "Revert research to default" disableable disabled
+uid=g1746:4_41 StaticText "Outline"
+uid=g1746:4_42 StaticText "anthropic"
+uid=g1746:4_43 StaticText "Default"
+uid=g1746:4_44 combobox "outline model" expandable haspopup="listbox" value="claude-opus-5"
+uid=g1746:4_45 combobox "outline effort" expandable haspopup="listbox" value="high"
+uid=g1746:4_46 button "Save" disableable disabled
+uid=g1746:4_47 button "Revert outline to default" disableable disabled
+```
+
+Selecting `claude-opus-4-6` on the `write` row and clicking Save (`chrome-devtools-axi click`
+on the combobox, the option, then the button):
+
+```
+uid=g1752:7_49 StaticText "Write"
+uid=g1752:7_50 StaticText "anthropic"
+uid=g1752:7_51 StaticText "Override"
+uid=g1752:7_52 combobox "write model" expandable haspopup="listbox" value="claude-opus-4-6"
+uid=g1752:7_53 combobox "write effort" expandable haspopup="listbox" value="high"
+uid=g1752:7_54 button "Save" disableable disabled
+uid=g1752:7_55 button "Revert write to default"
+uid=g1752:9_0 StaticText "Reverts to "
+uid=g1752:9_1 StaticText "claude-opus-5"
+uid=g1752:9_2 StaticText " / high"
+```
+
+The row that write produced, read straight from Postgres:
+
+```
+$ docker compose exec -T db psql -U pipeline -d content_pipeline \
+    -c "select key, user_id, value from settings where key='stage_models' and user_id='$USERID';"
+     key      |                     user_id                      |                           value
+--------------+--------------------------------------------------+-----------------------------------------------------------
+ stage_models | ui-check-63-b2bf0994-ab8a-497f-a17a-2bc34a8658ea | {"write": {"model": "claude-opus-4-6", "effort": "high"}}
+(1 row)
+```
+
+Clicking Revert on the same row:
+
+```
+uid=g1756:7_49 StaticText "Write"
+uid=g1756:7_50 StaticText "anthropic"
+uid=g1756:7_51 StaticText "Default"
+uid=g1756:7_52 combobox "write model" expandable haspopup="listbox" value="claude-opus-5"
+uid=g1756:7_53 combobox "write effort" expandable haspopup="listbox" value="high"
+uid=g1756:7_54 button "Save" disableable disabled
+uid=g1756:7_55 button "Revert write to default" disableable disabled
+
+$ docker compose exec -T db psql -U pipeline -d content_pipeline \
+    -c "select key, value from settings where user_id='$USERID';"
+     key      | value
+--------------+-------
+ stage_models | {}
+(1 row)
+```
+
+The stage entry is gone rather than replaced by the fallback, which is the point of the second
+decision above.
+
+```
+$ npx -y chrome-devtools-axi console
+## Console messages
+Showing 1-1 of 1 (Page 1 of 1).
+msgid=36 [issue] A form field element should have an id or name attribute (count: 1)
+```
+
+No errors. That one issue is a pre-existing Chrome autofill hint against the API-key inputs on
+the same page, not the new card.
+
+Screenshots: `docs/mastra-port/ui/136-settings-stage-models-light.png` and
+`136-settings-stage-models-dark.png`, both full-page with the `write` override in place.
+
+### Tests
+
+```
+$ cd web && pnpm vitest run src/app/api/settings/stage-models/route.test.ts \
+    src/app/settings/stage-models-card.test.tsx src/app/settings/SettingsPage.test.tsx \
+    src/app/api/settings/route.test.ts
+ ✓ src/app/api/settings/stage-models/route.test.ts (9 tests) 77ms
+ ✓ src/app/api/settings/route.test.ts (18 tests) 97ms
+ ✓ src/app/settings/SettingsPage.test.tsx (12 tests) 459ms
+ ✓ src/app/settings/stage-models-card.test.tsx (10 tests) 531ms
+
+ Test Files  4 passed (4)
+      Tests  49 passed (49)
+(exit 0)
+```
+
+The route suite runs against the real database and a real BetterAuth session; a mocked
+resolver would prove nothing about the layering the endpoint exists to expose. It captures and
+restores the shared global `stage_models` row per the hazard recorded under #6.0.
+
+### Mutations
+
+Ten mutations, with a control run of the unmutated files on both sides of the sweep (both
+exit 0, so the harness reports a pass when it should).
+
+| # | File | Mutation | Verdict |
+| --- | --- | --- | --- |
+| M1 | route.ts | `resolveStageModels(null)` -> `resolveStageModels(user.id)` (fallback computed with the user's own row) | KILLED |
+| M2 | route.ts | `fallback_model: withoutUser[...]` -> `effective[...]` | KILLED |
+| M3 | route.ts | stored-row validation dropped, value returned raw | KILLED |
+| M4 | route.ts | own-row lookup drops the `user_id` predicate | KILLED |
+| M5 | card.tsx | `entry.effort === null` -> `false` (sends `effort` to a provider with none) | KILLED |
+| M6 | card.tsx | revert writes `{ model: fallback_model }` instead of deleting the stage | KILLED |
+| M7 | card.tsx | write starts from `{}` instead of the existing overrides | KILLED |
+| M8 | card.tsx | `apiErrorMessage(...)` -> the generic fallback string | KILLED |
+| M9 | card.tsx | source badge never reports `user` | KILLED |
+| M10 | card.tsx | Save enabled regardless of dirtiness | KILLED |
+
+### One shared-fixture change
+
+`src/test/setup.ts` gained pointer-capture and `scrollIntoView` no-ops on `Element.prototype`.
+jsdom implements none of them and Radix's `Select` calls all three while opening, so before
+this a test that clicked a `<Select>` trigger threw `target.hasPointerCapture is not a
+function`, which reads like a component bug rather than a missing DOM API. No component in the
+repo had been tested through a `Select` before, so the gap had not surfaced. The block is
+guarded by `typeof Element !== "undefined"` because the same setup file is loaded for the
+`node`-environment route suites, where an unguarded reference is a `ReferenceError` that fails
+every one of them.
+
+### Gates
+
+```
+$ cd web && pnpm tsc --noEmit
+(exit 0, no output)
+
+$ cd web && pnpm lint
+(exit 0, no output)
+
+$ cd web && pnpm build
+(exit 0)
+├ ƒ /api/settings
+├ ƒ /api/settings/api-keys
+├ ƒ /api/settings/api-keys/[provider]/reveal
+├ ƒ /api/settings/stage-models
+
+$ cd web && pnpm test
+ Test Files  2 failed | 127 passed (129)
+      Tests  9 failed | 4455 passed | 7 skipped (4471)
+```
+
+Nine of the nine failures are the recorded baseline: 6 in `image-preview.test.tsx` and 3 in
+`PostDetail.test.tsx`. Both were confirmed pre-existing on this tree by stashing this
+iteration's changes and re-running `PostDetail.test.tsx`, which still reported `3 failed | 12
+passed`. A tenth failure in `images-manifest.test.ts` appeared in the full-suite run and passed
+on its own immediately afterwards, so it is load-dependent flake and not a regression. The
+build's 15 `BetterAuthError: You are using the default secret` lines are pre-existing noise
+from prerendering without `BETTER_AUTH_SECRET` in the build environment. No Python file was
+touched, so the pytest gate is unchanged.

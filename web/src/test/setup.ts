@@ -6,6 +6,28 @@ afterEach(() => {
   cleanup();
 });
 
+// jsdom implements neither the Pointer Events capture API nor scrollIntoView,
+// and Radix's Select calls all three while opening. Without these a `<Select>`
+// throws "target.hasPointerCapture is not a function" the moment a test clicks
+// its trigger, which reads like a component bug rather than a missing DOM API.
+// This file is also the setup for the `node`-environment route suites, where
+// there is no DOM at all, hence the guard.
+if (typeof Element !== "undefined") {
+  for (const method of [
+    "hasPointerCapture",
+    "setPointerCapture",
+    "releasePointerCapture",
+    "scrollIntoView",
+  ] as const) {
+    if (!(method in Element.prototype)) {
+      Object.defineProperty(Element.prototype, method, {
+        value: () => undefined,
+        writable: true,
+      });
+    }
+  }
+}
+
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
