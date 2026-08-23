@@ -29,7 +29,8 @@ import { apiRequest, createTestSession, deleteTestSessions, type TestSession } f
 
 import { GET as postEvents } from "./[post_id]/route"
 import { GET as globalEvents } from "./route"
-import { SSE_SEPARATOR } from "./sse"
+import { eventAnchor } from "./anchor"
+import { SSE_SEPARATOR, encodeSseEvent, encodeSsePing } from "./sse"
 
 const PREFIX = "events-sse-test-"
 const URL_BASE = "http://test/api/events"
@@ -165,6 +166,37 @@ function parseFrame(frame: string): { event: string; data: Record<string, unknow
   return { event: name!.slice("event: ".length), data: JSON.parse(data) }
 }
 
+/** The `id:` field of one frame, or `undefined` when the frame carries none. */
+function frameId(frame: string): string | undefined {
+  const line = frame.split(SSE_SEPARATOR).find((part) => part.startsWith("id: "))
+  return line?.slice("id: ".length)
+}
+
+/**
+ * The envelope `RedisStreamsPubSub.publish()` wrote for one published payload,
+ * read back off the stream itself.
+ *
+ * This is the only way to see the `id` and `createdAt` the transport stamps:
+ * the subscriber callback receives them, but a test asserting the frame's id is
+ * correct needs an independent source for the expected value, and the stream
+ * entry is it.
+ */
+async function envelopeFor(match: (data: Record<string, unknown>) => boolean) {
+  const entries = (await raw.xRange(STREAM_KEY, "-", "+")) as {
+    id: string
+    message: Record<string, string>
+  }[]
+  for (const entry of entries.reverse()) {
+    const envelope = JSON.parse(entry.message.event) as {
+      id: string
+      createdAt: string
+      data: Record<string, unknown>
+    }
+    if (match(envelope.data)) return envelope
+  }
+  throw new Error("no matching entry on the stream")
+}
+
 async function waitForFrames(connection: Connection, count: number, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs
   for (;;) {
@@ -287,7 +319,7 @@ describe("GET /api/events/{post_id}", () => {
 
     const [frame] = await waitForFrames(connection, 1)
     expect(frame).toBe(
-      `event: stage_start\r\ndata: ${JSON.stringify({
+      `id: ${frameId(frame)}\r\nevent: stage_start\r\ndata: ${JSON.stringify({
         event: "stage_start",
         post_id: post.id,
         stage: "research",
@@ -619,6 +651,25 @@ describe("GET /api/events", () => {
     }
   })
 
+  it("stamps the same event with the same id on the feed as on the per-post stream", async () => {
+    const post = await insertPost(user.userId)
+    const perPost = await connect(post.id)
+
+    // The feed joins one event late, so the two connections have delivered
+    // different numbers of frames by the time they share one. The anchor names
+    // a position in the shared stream, so it has to agree anyway: an id
+    // counted per connection would not.
+    await publishPipelineEvent(publisher, post.id, "log", { n: 1 })
+    await waitForFrames(perPost, 1)
+    const global = await connectFeed()
+    await publishPipelineEvent(publisher, post.id, "log", { n: 2 })
+
+    const mine = await waitForFrames(perPost, 2)
+    const [theirs] = await waitForFrames(global, 1)
+    expect(frameId(theirs)).toBeDefined()
+    expect(frameId(mine[1])).toBe(frameId(theirs))
+  })
+
   it("scopes two concurrent callers to their own posts on the same topic", async () => {
     const mine = await insertPost(user.userId)
     const theirs = await insertPost(other.userId)
@@ -636,5 +687,127 @@ describe("GET /api/events", () => {
       expect(frames).toHaveLength(1)
       expect(parseFrame(frames[0]).data.post_id).toBe(expected)
     }
+  })
+})
+
+/**
+ * The `id:` field, which is the replay anchor ledger item 5.5e-ii resumes from.
+ *
+ * Python's `_subscribe_and_stream()` yielded `{"event": ..., "data": ...}` and
+ * `ServerSentEvent.encode()` skipped `id:` entirely because `self.id` was
+ * `None`, so this is a deliberate addition rather than a port. The frames it
+ * changes are the ones `useSSE()` already parses, and an id it ignores costs it
+ * nothing: `EventSource` strips the field before dispatching the event.
+ */
+describe("SSE frame ids", () => {
+  it("puts id: before event: on every frame, as ServerSentEvent.encode() ordered them", async () => {
+    const post = await insertPost(user.userId)
+    const connection = await connect(post.id)
+
+    const names = ["stage_start", "log", "stage_complete"]
+    for (const name of names) await publishPipelineEvent(publisher, post.id, name, {})
+
+    const frames = await waitForFrames(connection, names.length)
+    for (const frame of frames) {
+      const lines = frame.split(SSE_SEPARATOR)
+      expect(lines[0].startsWith("id: ")).toBe(true)
+      expect(lines[1].startsWith("event: ")).toBe(true)
+    }
+  })
+
+  it("names the transport's own event id and publish timestamp", async () => {
+    const post = await insertPost(user.userId)
+    const connection = await connect(post.id)
+
+    await publishPipelineEvent(publisher, post.id, "stage_start", { stage: "research" })
+
+    const [frame] = await waitForFrames(connection, 1)
+    const envelope = await envelopeFor((data) => data.post_id === post.id)
+    expect(frameId(frame)).toBe(`${new Date(envelope.createdAt).getTime()}-${envelope.id}`)
+  })
+
+  it("keeps the whole uuid, which contains the separator four times over", async () => {
+    const post = await insertPost(user.userId)
+    const connection = await connect(post.id)
+
+    await publishPipelineEvent(publisher, post.id, "stage_start", { stage: "research" })
+
+    const [frame] = await waitForFrames(connection, 1)
+    const id = frameId(frame)!
+    const envelope = await envelopeFor((data) => data.post_id === post.id)
+    // Splitting on the first `-` is the parse a replay has to do; splitting on
+    // the last would cut the uuid apart.
+    expect(id.slice(id.indexOf("-") + 1)).toBe(envelope.id)
+    expect(Number(id.slice(0, id.indexOf("-")))).toBe(new Date(envelope.createdAt).getTime())
+  })
+
+  it("issues a distinct, non-decreasing id per event across one run", async () => {
+    const post = await insertPost(user.userId)
+    const connection = await connect(post.id)
+
+    const start = Date.now()
+    for (let i = 0; i < 5; i += 1) await publishPipelineEvent(publisher, post.id, "log", { i })
+
+    const frames = await waitForFrames(connection, 5)
+    const ids = frames.map((frame) => frameId(frame)!)
+    expect(new Set(ids).size).toBe(5)
+
+    const millis = ids.map((id) => Number(id.slice(0, id.indexOf("-"))))
+    for (const value of millis) {
+      expect(Number.isInteger(value)).toBe(true)
+      expect(value).toBeGreaterThanOrEqual(start)
+      expect(value).toBeLessThanOrEqual(Date.now())
+    }
+    expect([...millis].sort((a, b) => a - b)).toEqual(millis)
+  })
+})
+
+describe("eventAnchor()", () => {
+  const base = { type: "stage_start", data: {}, runId: "run" }
+
+  it("joins the publish timestamp to the transport uuid", () => {
+    const id = "3f1a2b3c-4d5e-4f60-8a71-9b2c3d4e5f60"
+    expect(eventAnchor({ ...base, id, createdAt: new Date(1_755_859_200_123) })).toBe(
+      `1755859200123-${id}`,
+    )
+  })
+
+  it("accepts the string createdAt a payload carries before the transport revives it", () => {
+    // `#deliverMessage()` only revives `createdAt` when it is a string; a
+    // locally delivered event arrives as a Date. Both shapes reach here.
+    const id = "3f1a2b3c-4d5e-4f60-8a71-9b2c3d4e5f60"
+    const createdAt = "2026-08-22T12:00:00.123Z" as unknown as Date
+    expect(eventAnchor({ ...base, id, createdAt })).toBe(`1787400000123-${id}`)
+  })
+
+  it("omits the anchor for an event the transport did not stamp", () => {
+    expect(eventAnchor({ ...base, id: "", createdAt: new Date(0) })).toBeUndefined()
+    expect(
+      eventAnchor({ ...base, id: "x", createdAt: new Date("not a date") }),
+    ).toBeUndefined()
+  })
+})
+
+describe("encodeSseEvent()", () => {
+  it("writes no id: line when there is no anchor, as Python's `if self.id is not None` did", () => {
+    expect(encodeSseEvent("log", { a: 1 })).toBe(
+      `event: log${SSE_SEPARATOR}data: {"a":1}${SSE_SEPARATOR}${SSE_SEPARATOR}`,
+    )
+  })
+
+  it("strips line breaks out of the id, so an id cannot forge a second field", () => {
+    const frame = encodeSseEvent("log", {}, "1-a\r\ndata: injected")
+    expect(frame.startsWith(`id: 1-adata: injected${SSE_SEPARATOR}`)).toBe(true)
+    expect(frame.split(SSE_SEPARATOR).filter((line) => line.startsWith("data: "))).toEqual([
+      "data: {}",
+    ])
+  })
+})
+
+describe("encodeSsePing()", () => {
+  it("stays a bare comment, so a keepalive cannot move the client's Last-Event-ID", () => {
+    expect(encodeSsePing(new Date(1_755_859_200_123))).toBe(
+      `: ping - 2025-08-22T10:40:00.123Z${SSE_SEPARATOR}${SSE_SEPARATOR}`,
+    )
   })
 })

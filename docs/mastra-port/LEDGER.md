@@ -14680,6 +14680,232 @@ three pieces are separately verifiable, so they are separate items.
       of the baseline 25. That is the environment, not a regression.
   - [ ] 5.5e Resumable replay: a browser that reconnects mid-run recovers the events it
     missed. Test disconnects and reconnects mid-run and asserts no gap in the sequence.
+
+    Split, because the installed transport does not offer the resume primitive this item
+    assumed and the replacement is three separable pieces. `SubscribeOptions` in
+    `@mastra/core` offers `startFrom: 'earliest' | 'latest'` and nothing else, and
+    `RedisStreamsPubSub` never shows a subscriber the Redis entry id it read:
+
+    ```
+    $ sed -n '80,84p' web/node_modules/@mastra/core/dist/events/types.d.ts
+        /**
+         * Where a newly created subscription should begin reading.
+         * Defaults to 'earliest'. Existing consumer groups keep their checkpoint.
+         */
+        startFrom?: 'earliest' | 'latest';
+
+    $ grep -n "#deliverMessage(sub\|sub.cb(" web/node_modules/@mastra/redis-streams/dist/index.js
+    212:                                        await this.#deliverMessage(sub, entry.id, entry.message);
+    472:                                await this.#deliverMessage(sub, entry.id, entry.message);
+    476:        async #deliverMessage(sub, streamId, fields) {
+    558:                        const result = sub.cb(event, ack, nack);
+    ```
+
+    The read loop knows `entry.id` and `#deliverMessage()` takes it, but the subscriber
+    is invoked as `sub.cb(event, ack, nack)`: `streamId` is closed over by `ack`/`nack`
+    and reaches nothing else. So a replay cannot ask Redis for a position by entry id and
+    cannot ask `subscribe()` for one at all. It has to re-read the retained stream from
+    `earliest` and drop what the client already holds, which needs (a) an anchor on the
+    wire, (b) a handler that skips to it, and (c) a client that carries it across the
+    reconnect `useSSE()` performs itself. Item
+    5.5e-iii is not optional plumbing: `use-sse.ts` builds a **new** `EventSource` on
+    every retry, and the `Last-Event-ID` buffer is per `EventSource` object, so the
+    browser sends no such header here and the anchor has to travel as a query parameter.
+
+    - [x] 5.5e-i The replay anchor: an `id:` field on every SSE frame.
+
+      `web/src/app/api/events/anchor.ts` defines the anchor as
+      `<createdAt milliseconds>-<transport uuid>`, `encodeSseEvent()` in `sse.ts` gained
+      an optional third argument that writes it, and `pipelineEventStream()` reads it off
+      the delivered envelope rather than the payload.
+
+      **This is an addition, not a port.** Python yielded `{"event": ..., "data": ...}`
+      dicts and `ServerSentEvent.encode()` guards the field with `if self.id is not None`,
+      so no frame `api/src/api/events.py` produced ever carried an id. The field order and
+      the newline stripping are still `encode()`'s, which is why they are matched exactly:
+
+      ```
+      $ sed -n '38,46p' api/.venv/lib/python3.13/site-packages/sse_starlette/event.py
+              if self.id is not None:
+                  # Clean newlines in the event id
+                  buffer.write("id: " + self._LINE_SEP_EXPR.sub("", self.id) + self._sep)
+
+              if self.event is not None:
+                  # Clean newlines in the event name
+                  buffer.write(
+                      "event: " + self._LINE_SEP_EXPR.sub("", self.event) + self._sep
+                  )
+      ```
+
+      `id` before `event`, and the id stripped of line breaks so it cannot open a second
+      field. `encodeSsePing()` is untouched and stays a bare comment, so a keepalive
+      cannot move the client's `Last-Event-ID` off a real position.
+
+      **Why both halves of the anchor.** The uuid is the exact match: `publish()` stamps
+      `randomUUID()` per event and it names one stream entry. The timestamp is the
+      fallback, and it is load-bearing rather than decorative, because `maxStreamLength`
+      is 10000 and the anchor event can have been trimmed away by the time a client
+      reconnects; a replay that skips until it sees a uuid no longer on the stream would
+      skip forever and leave the browser connected and silent. Anything stamped later than
+      the anchor was published after it, trimmed anchor or not, which is the bound 5.5e-ii
+      will resume on. The separator is `-`, which also occurs inside the uuid, so the
+      parse splits on the first one.
+
+      **Known imprecision, recorded now rather than discovered later.** `publish()` assigns
+      `createdAt` before awaiting `xAdd`, so two concurrent publishes can be stamped in one
+      order and land in the stream in the other. When 5.5e-ii falls back to the timestamp
+      the effect is a duplicate frame, never a gap, which is the right way round for this
+      item's requirement.
+
+      Eleven new tests in `web/src/app/api/events/events.test.ts` (28 -> 39). The
+      integration ones assert on the raw bytes of frames that crossed a real Redis
+      connection; the expected id is read back independently off the stream with
+      `xRange`, so nothing asserts the implementation against itself.
+
+      ```
+      $ cd web && npx vitest run src/app/api/events/events.test.ts
+       Test Files  1 passed (1)
+            Tests  39 passed (39)
+      ```
+
+      Six negative controls, each reverted after it was measured. Two of them changed a
+      test rather than only confirming one, and both changes are recorded here because
+      the tests as first written were too weak:
+
+      | # | Reverted behaviour | Failed |
+      | --- | --- | --- |
+      | NC1 | drop the third argument at the call site (the pre-implementation state) | 5 |
+      | NC2 | write `id:` after `event:` | 3 |
+      | NC3 | anchor is the uuid alone | 5 |
+      | NC4 | anchor is the timestamp alone | 5 |
+      | NC5 | anchor is a per-connection counter plus the uuid | 4 |
+      | NC6 | do not strip line breaks out of the id | 1 |
+
+      ```
+      $ # NC1: send(encodeSseEvent(eventName(payload), payload))
+           x delivers a published event as one CRLF-framed named frame
+           x puts id: before event: on every frame, as ServerSentEvent.encode() ordered them
+           x names the transport's own event id and publish timestamp
+           x keeps the whole uuid, which contains the separator four times over
+           x issues a distinct, non-decreasing id per event across one run
+            Tests  5 failed | 34 passed (39)
+
+      $ # NC2: `event: ...` then `id: ...`
+           x delivers a published event as one CRLF-framed named frame
+           x puts id: before event: on every frame, as ServerSentEvent.encode() ordered them
+           x strips line breaks out of the id, so an id cannot forge a second field
+            Tests  3 failed | 36 passed (39)
+
+      $ # NC3: return `${event.id}`
+           x names the transport's own event id and publish timestamp
+           x keeps the whole uuid, which contains the separator four times over
+           x issues a distinct, non-decreasing id per event across one run
+           x joins the publish timestamp to the transport uuid
+           x accepts the string createdAt a payload carries before the transport revives it
+            Tests  5 failed | 34 passed (39)
+
+      $ # NC4: return `${millis}`
+           x names the transport's own event id and publish timestamp
+           x keeps the whole uuid, which contains the separator four times over
+           x issues a distinct, non-decreasing id per event across one run
+           x joins the publish timestamp to the transport uuid
+           x accepts the string createdAt a payload carries before the transport revives it
+            Tests  5 failed | 34 passed (39)
+
+      $ # NC5: const anchor = `${(counter += 1)}-${event.id}`
+           x stamps the same event with the same id on the feed as on the per-post stream
+           x names the transport's own event id and publish timestamp
+           x keeps the whole uuid, which contains the separator four times over
+           x issues a distinct, non-decreasing id per event across one run
+            Tests  4 failed | 35 passed (39)
+
+      $ # NC6: `id: ${id}` instead of `id: ${singleLine(id)}`
+           x strips line breaks out of the id, so an id cannot forge a second field
+            Tests  1 failed | 38 passed (39)
+      ```
+
+      NC3 and NC4 first failed only four tests each: "issues a distinct, non-decreasing id
+      per event across one run" passed against a uuid-only anchor because
+      `Number("3f1a2b3c")` is `NaN` and an array of `NaN`s sorts to itself. The test now
+      asserts each timestamp is an integer inside the window the test itself ran in, which
+      is what makes it a statement about the timestamp rather than about sorting.
+
+      NC5 first failed only three: "stamps the same event with the same id on the feed as
+      on the per-post stream" opened both connections before publishing, so a
+      per-connection counter reached the same value on each and agreed by accident. The
+      feed now joins one event late, so the two connections have delivered different
+      numbers of frames by the time they share one, and only an anchor derived from the
+      event can still agree.
+
+      One existing assertion changed rather than being added to: "delivers a published
+      event as one CRLF-framed named frame" pinned the whole frame byte for byte and every
+      frame now carries one more line. It still pins the whole frame, with the id line
+      included and its value taken from the frame, because the value itself is pinned
+      against the stream entry by a separate test.
+
+      Frontend gates:
+
+      ```
+      $ cd web && npx tsc --noEmit
+      TSC EXIT=0
+
+      $ cd web && npx eslint
+      LINT EXIT=0
+      (no output)
+
+      $ cd web && npx vitest run
+       Test Files  2 failed | 92 passed (94)
+            Tests  9 failed | 1701 passed | 7 skipped (1717)
+      ```
+
+      Nine failed is the recorded baseline: six in
+      `src/components/__tests__/image-preview.test.tsx` and three in
+      `src/app/posts/PostDetail.test.tsx`. Passing count 1690 -> 1701.
+
+      The first full run of this suite reported eleven, adding
+      `src/mastra/pipeline-events.test.ts > carries Python's log payload and nothing else`
+      to the `scaffold-check` flake `todo.md` already records. Both pass in isolation and
+      neither reappeared on the second full run, so the shared Redis topic has a second
+      cross-file interference alongside the recorded one:
+
+      ```
+      $ cd web && npx vitest run src/mastra/pipeline-events.test.ts src/mastra/workflows/scaffold-check.test.ts
+       Test Files  2 passed (2)
+            Tests  45 passed (45)
+      ```
+
+      ```
+      $ cd web && npx next build
+      BUILD EXIT=0
+      v Compiled successfully in 4.0s
+      v Generating static pages using 15 workers (36/36) in 291.4ms
+      |- f /api/events
+      |- f /api/events/[post_id]
+      ```
+
+      Python gates, unchanged from the recorded baseline (no Python was touched):
+
+      ```
+      $ set -a && . ./.env && set +a && cd api && uv run pytest -q
+      120 failed, 241 passed, 25 errors in 15.11s
+
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+      [*] 17 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).
+
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 131 files already formatted
+      ```
+
+    - [ ] 5.5e-ii Server-side replay: both handlers accept an anchor (the `Last-Event-ID`
+      header and a `last_event_id` query parameter, since `EventSource` can set no
+      headers), subscribe with `startFrom: "earliest"` when one is given, drop everything
+      up to and including it, and fall back to the anchor's timestamp when the anchor
+      event has been trimmed off the stream. Test disconnects and reconnects mid-run and
+      asserts no gap in the event sequence.
+    - [ ] 5.5e-iii `use-sse.ts` carries the anchor across the reconnect it performs
+      itself: record `MessageEvent.lastEventId` per delivered event and put it on the URL
+      of the next `EventSource`, because a fresh `EventSource` sends no `Last-Event-ID`.
 - [ ] 5.6 `rules`
 - [ ] 5.7 `links`
 - [ ] 5.8 `analytics`

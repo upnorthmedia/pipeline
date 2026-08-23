@@ -41,6 +41,7 @@ import type { Event } from "@mastra/core/events"
 import { pubsub } from "@/mastra"
 import { TOPIC_PIPELINE_EVENTS, type PipelineEventPayload } from "@/mastra/pipeline-events"
 
+import { eventAnchor } from "./anchor"
 import { SSE_HEADERS, SSE_PING_INTERVAL_MS, encodeSseEvent, encodeSsePing } from "./sse"
 
 /**
@@ -67,7 +68,7 @@ function eventName(payload: PipelineEventPayload): string {
  * A 200 streaming the pipeline events `matches` accepts, in the shape
  * `web/src/hooks/use-sse.ts` parses: a named event whose `data` is the whole
  * published payload, `event` and `post_id` included, exactly as Python's
- * `json.dumps(parsed)` sent it.
+ * `json.dumps(parsed)` sent it, carrying the `id:` field `anchor.ts` describes.
  *
  * The subscription is established before the response is returned, so an event
  * published after the caller has its `Response` cannot fall into a gap between
@@ -120,9 +121,13 @@ export async function pipelineEventStream(
 
       listener = async (event, ack) => {
         const payload = payloadOf(event)
+        // The anchor is read from the delivered envelope, not from the payload:
+        // it names the event's position in the retained stream, which is a
+        // property of the transport rather than of what the pipeline published.
+        const anchor = eventAnchor(event)
         const delivery = tail.then(async () => {
           if (payload !== null && (await matches(payload)))
-            send(encodeSseEvent(eventName(payload), payload))
+            send(encodeSseEvent(eventName(payload), payload, anchor))
         })
         tail = delivery.catch(() => {})
         try {

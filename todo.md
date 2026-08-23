@@ -275,6 +275,13 @@
   that file reads. Fix is probably to give it its own instance and prefix like the others.
   Recurred once more on the first full run of item 5.5c-i and passed on the rerun, which
   strengthens the cross-file reading over a defect in the workflow.
+- [investigate] 2026-08-22 `src/mastra/pipeline-events.test.ts > carries Python's log payload
+  and nothing else` failed once on a full `vitest run` during item 5.5e-i, passed on the
+  rerun of the same suite, and passes when run alone. It reads the shared
+  `TOPIC_PIPELINE_EVENTS` stream on the default Redis key prefix, so this looks like the
+  same cross-file interference as the `scaffold-check` entry above rather than a second
+  defect; the same fix (an isolated instance and `keyPrefix` per real-transport test file)
+  would cover both. Worth confirming they share one cause before fixing either.
 - [confirmed] 2026-08-22 The `cost_usd` on every `stage_complete` execution log entry is
   priced at Anthropic Opus rates regardless of provider. `api/src/worker.py:244` hardcodes
   15.0 / 75.0 per million tokens and ignores `MODEL_COSTS` in

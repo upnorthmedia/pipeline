@@ -50,13 +50,21 @@ function singleLine(value: string): string {
 }
 
 /**
- * One named event: `event: <name>` then one `data:` line per line of `data`,
- * then the blank line that ends the frame.
+ * One named event: an optional `id: <id>`, then `event: <name>`, then one
+ * `data:` line per line of `data`, then the blank line that ends the frame.
+ *
+ * The field order and the omission of `id:` when no id is given are
+ * `ServerSentEvent.encode()`'s, which writes `id` before `event` and guards it
+ * with `if self.id is not None`. Python never passed one, so no frame this port
+ * replaces carried an id; the argument exists because the replay anchor of
+ * ledger item 5.5e has to travel on the wire somewhere, and `id:` is the field
+ * `EventSource` already tracks and echoes back as `Last-Event-ID`.
  */
-export function encodeSseEvent(name: string, data: unknown): string {
+export function encodeSseEvent(name: string, data: unknown, id?: string): string {
   const body = JSON.stringify(data)
   const lines = body.split(/\r\n|\r|\n/)
   return (
+    (id === undefined ? "" : `id: ${singleLine(id)}${SSE_SEPARATOR}`) +
     `event: ${singleLine(name)}${SSE_SEPARATOR}` +
     lines.map((line) => `data: ${line}${SSE_SEPARATOR}`).join("") +
     SSE_SEPARATOR
