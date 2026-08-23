@@ -79,13 +79,16 @@ describe("the oracle has teeth", () => {
 
   it("refuses a fence whose backtick info string holds a backtick", () => {
     // The decline sends the line to the paragraph fallback, so the backticks
-    // reach the inline parser. An accepted fence would never get there, which
-    // is what makes the throw the assertion. (The rendered form of this input
-    // belongs to the b-iii corpus, since a codespan is what comes out.)
-    expect(() => markdownToWpHtml("```a`b\nx\n```\n")).toThrowError(
-      UnportedMarkdownError,
+    // reach the inline parser and become literal text; the closing fence is
+    // then a fence of its own with an empty body. This assertion was a throw
+    // until 5.3c-iii-b-1-b-iii-a ported `codespan`, which is what made the
+    // rendered form reachable. The value below is the real Python output.
+    expect(markdownToWpHtml("```a`b\nx\n```\n")).toBe(
+      "<!-- wp:paragraph -->\n<p>```a`b\nx</p>\n<!-- /wp:paragraph -->\n\n" +
+        '<!-- wp:code -->\n<pre class="wp-block-code"><code></code></pre>\n' +
+        "<!-- /wp:code -->\n\n",
     );
-    expect(() => markdownToWpHtml("```ab\nx\n```\n")).not.toThrow();
+    expect(markdownToWpHtml("```ab\nx\n```\n")).not.toContain("<p>");
   });
 
   it("distinguishes a soft break from a hard one", () => {
@@ -110,17 +113,19 @@ describe("constructs whose handlers are not ported yet", () => {
    *
    * Only inline rules are left. `block_quote` was listed here until
    * 5.3c-iii-b-1-b-ii-1 ported it, `list` until -ii-2, `raw_html` until -ii-3-a
-   * and `ref_link` until -ii-3-b-2, which finished the block layer; their
-   * coverage is now `wp-html-quotes.test.ts`, `wp-html-lists.test.ts`,
-   * `wp-html-raw-html.test.ts` and `wp-html-ref-link.test.ts`.
+   * and `ref_link` until -ii-3-b-2, which finished the block layer, and
+   * `escape` and `codespan` until -iii-a; their coverage is now
+   * `wp-html-quotes.test.ts`, `wp-html-lists.test.ts`,
+   * `wp-html-raw-html.test.ts`, `wp-html-ref-link.test.ts` and
+   * `wp-html-inline-escape-codespan.test.ts`.
    */
 
   it.each([
     ["emphasis", "an *emphasised* word\n"],
-    ["codespan", "an `inline code` word\n"],
     ["link", "a [link](https://example.com) here\n"],
-    ["escape", "a \\* literal asterisk\n"],
     ["auto_link", "an <https://example.com> autolink\n"],
+    ["auto_email", "an <a@example.com> address\n"],
+    ["inline_html", "an <span>inline</span> tag\n"],
   ])("throws for the %s inline rule", (rule, markdown) => {
     expect(() => markdownToWpHtml(markdown)).toThrowError(UnportedMarkdownError);
     try {

@@ -51,12 +51,22 @@
  * title and (failing that) the href must be followed by `[ \t]*\n` or the whole
  * definition is abandoned and the line falls back to a paragraph.
  *
- * Not ported yet: the inline rules `escape`, `codespan`, `emphasis`, `link`,
- * `auto_link`, `auto_email` and `inline_html` (5.3c-iii-b-1-b-iii). Their
- * *patterns* are registered here in mistune's rule order, because rule order is
- * what decides whether `- - -` is a thematic break or a list, and their handlers
- * throw `UnportedMarkdownError`. A half-ported converter that silently dropped a
- * link would be worse than one that stops.
+ * Ported here too (ledger 5.3c-iii-b-1-b-iii-a): the inline layer's own state
+ * and scan loop, plus the two rules that need nothing from it. `escape` strips
+ * the backslashes off a run of escaped punctuation and emits plain text, so a
+ * `\\*` never reaches the emphasis rule. `codespan` compiles a closing pattern
+ * per opening run, which is why a run of three backticks does not close a run of
+ * two, and it folds newlines into spaces and drops one space from each end only
+ * when the code is not blank. A backtick inside a backtick fence's info string
+ * declines the fence, and the paragraph it falls back to lands here.
+ *
+ * Not ported yet: `emphasis` (5.3c-iii-b-1-b-iii-c), `link` and `image`
+ * (5.3c-iii-b-1-b-iii-d), and `auto_link`, `auto_email` and `inline_html`
+ * (5.3c-iii-b-1-b-iii-b). Their *patterns* are registered here in mistune's rule
+ * order, because rule order is what decides which of two rules matching at the
+ * same offset wins, and their handlers throw `UnportedMarkdownError`. A
+ * half-ported converter that silently dropped a link would be worse than one
+ * that stops.
  *
  * Regex translation notes:
  *
@@ -273,6 +283,16 @@ const PY_SPACE =
   "\\t\\n\\v\\f\\r \\x1c-\\x1f\\x85\\xa0\\u1680\\u2000-\\u200a" +
   "\\u2028\\u2029\\u202f\\u205f\\u3000";
 const PY_SPACE_RUN = new RegExp(`[${PY_SPACE}]+`, "g");
+const PY_STRIP_RE = new RegExp(`^[${PY_SPACE}]+|[${PY_SPACE}]+$`, "g");
+
+/**
+ * Python `str.strip()` with no argument. Not `String.prototype.trim`, which
+ * also strips `\ufeff`: that is not whitespace to Python, so a document or a
+ * fence info string ending in a byte order mark keeps it.
+ */
+function pyStrip(text: string): string {
+  return text.replace(PY_STRIP_RE, "");
+}
 
 /** `str.split()` with no separator: split on runs of whitespace, drop the ends. */
 function pySplitWhitespace(s: string): string[] {
@@ -306,6 +326,13 @@ export type RefLink = {
   title?: string;
 };
 
+/**
+ * `state.env`, shared between the block state and every inline state parsed out
+ * of it. A `Map` rather than an object because Python looks the key up in a
+ * `dict`, where `in` cannot reach a prototype.
+ */
+type InlineEnv = { refLinks: Map<string, RefLink> };
+
 /** `BlockState`. */
 class BlockState {
   src = "";
@@ -314,12 +341,10 @@ class BlockState {
   cursorMax = 0;
   readonly parent?: BlockState;
   /**
-   * `state.env`, shared with the parent state so a definition inside a block
-   * quote or a list item is visible to the whole document. A `Map` rather than
-   * an object because Python looks the key up in a `dict`, where `in` cannot
-   * reach a prototype.
+   * Shared with the parent state, so a definition inside a block quote or a
+   * list item is visible to the whole document.
    */
-  readonly env: { refLinks: Map<string, RefLink> };
+  readonly env: InlineEnv;
 
   constructor(parent?: BlockState) {
     this.parent = parent;
@@ -533,7 +558,7 @@ function parseFencedCode(
   };
   if (info) {
     info = unescapeChar(info);
-    token.attrs = { info: info.trim() };
+    token.attrs = { info: pyStrip(info) };
   }
 
   state.tokens.push(token);
@@ -1279,42 +1304,146 @@ function parseBlocks(
 
 const INLINE_SC = compileSc(INLINE_SPECIFICATION, INLINE_RULES, "g");
 
+/** Which ledger item each still-unported inline rule belongs to. */
+const UNPORTED_INLINE_RULES: Record<string, string> = {
+  emphasis: "5.3c-iii-b-1-b-iii-c",
+  link: "5.3c-iii-b-1-b-iii-d",
+  auto_link: "5.3c-iii-b-1-b-iii-b",
+  auto_email: "5.3c-iii-b-1-b-iii-b",
+  inline_html: "5.3c-iii-b-1-b-iii-b",
+};
+
+/** `InlineState`. */
+class InlineState {
+  src = "";
+  tokens: Token[] = [];
+  inImage = false;
+  inLink = false;
+  inEmphasis = false;
+  inStrong = false;
+  /** Shared with the block state, so `ref_links` is visible to the `link` rule. */
+  readonly env: InlineEnv;
+
+  constructor(env: InlineEnv) {
+    this.env = env;
+  }
+
+  appendToken(token: Token): void {
+    this.tokens.push(token);
+  }
+
+  /** `copy`: the four nesting flags carry over, `src` and `tokens` do not. */
+  copy(): InlineState {
+    const state = new InlineState(this.env);
+    state.inImage = this.inImage;
+    state.inLink = this.inLink;
+    state.inEmphasis = this.inEmphasis;
+    state.inStrong = this.inStrong;
+    return state;
+  }
+}
+
+/** `InlineParser.process_text`. */
+function processText(text: string, state: InlineState): void {
+  state.appendToken({ type: "text", raw: text });
+}
+
+/** `InlineParser.parse_escape`: the backslashes come off, the token is text. */
+function parseEscape(m: RegExpExecArray, state: InlineState): number {
+  processText(unescapeChar(m[0]), state);
+  return m.index + m[0].length;
+}
+
+/** Python `len(s.strip())`, which uses `str.isspace()`'s set, not JavaScript's. */
+const PY_NON_SPACE = new RegExp(`[^${PY_SPACE}]`);
+
+/** `InlineParser.parse_codespan`. */
+function parseCodespan(m: RegExpExecArray, state: InlineState): number {
+  const marker = m[0];
+  const pos = m.index + marker.length;
+
+  // `re.compile(r"(.*?[^`])" + marker + r"(?!`)", re.S).match(src, pos)`: the
+  // closing run must be exactly as long as the opening one, and the character
+  // before it must not be a backtick, which is what makes the run "exactly".
+  const end = new RegExp(`([\\s\\S]*?[^\`])${marker}(?!\`)`, "y");
+  end.lastIndex = pos;
+  const m2 = end.exec(state.src);
+  if (!m2) {
+    processText(marker, state);
+    return pos;
+  }
+
+  let code = m2[1].replace(/\n/g, " ");
+  if (PY_NON_SPACE.test(code) && code.startsWith(" ") && code.endsWith(" ")) {
+    code = code.slice(1, -1);
+  }
+  state.appendToken({ type: "codespan", raw: code });
+  return end.lastIndex;
+}
+
+/** `Parser.parse_method`: dispatch on the rule whose alternative matched. */
+function parseInlineMethod(
+  m: RegExpExecArray,
+  state: InlineState,
+): number | undefined {
+  const rule = matchedRule(m, INLINE_RULES);
+  switch (rule) {
+    case "escape":
+      return parseEscape(m, state);
+    case "codespan":
+      return parseCodespan(m, state);
+    case "linebreak":
+    case "softbreak":
+      state.appendToken({ type: rule });
+      return m.index + m[0].length;
+    default:
+      throw new UnportedMarkdownError(rule, UNPORTED_INLINE_RULES[rule]);
+  }
+}
+
 /** `InlineParser.parse`. */
-function parseInline(src: string): Token[] {
-  const tokens: Token[] = [];
+function parseInline(state: InlineState): Token[] {
+  const src = state.src;
   let pos = 0;
 
   while (pos < src.length) {
     const m = search(INLINE_SC, src, pos);
     if (!m) break;
 
-    if (m.index > pos) tokens.push({ type: "text", raw: src.slice(pos, m.index) });
+    const endPos = m.index;
+    if (endPos > pos) processText(src.slice(pos, endPos), state);
 
-    const rule = matchedRule(m, INLINE_RULES);
-    if (rule !== "linebreak" && rule !== "softbreak") {
-      throw new UnportedMarkdownError(rule, "5.3c-iii-b-1-b-iii");
+    const newPos = parseInlineMethod(m, state);
+    if (!newPos) {
+      // A handler that declines gives up its opening character to the text
+      // run and the scan restarts one past it. Only `link` declines, and that
+      // is ledger item 5.3c-iii-b-1-b-iii-d, so nothing reaches this yet.
+      pos = endPos + 1;
+      processText(src.slice(endPos, pos), state);
+    } else {
+      pos = newPos;
     }
-    tokens.push({ type: rule });
-    pos = m.index + m[0].length;
   }
 
   if (pos === 0) {
-    tokens.push({ type: "text", raw: src });
+    processText(src, state);
   } else if (pos < src.length) {
-    tokens.push({ type: "text", raw: src.slice(pos) });
+    processText(src.slice(pos), state);
   }
-  return tokens;
+  return state.tokens;
 }
 
 /** `Markdown._iter_render`: inline source is parsed on the way to the renderer. */
-function resolveChildren(tokens: Token[]): void {
+function resolveChildren(tokens: Token[], env: InlineEnv): void {
   for (const token of tokens) {
     if (token.children !== undefined) {
-      resolveChildren(token.children);
+      resolveChildren(token.children, env);
     } else if (token.text !== undefined) {
       const text = token.text;
       delete token.text;
-      token.children = parseInline(stripChars(text, " \r\n\t\f"));
+      const state = new InlineState(env);
+      state.src = stripChars(text, " \r\n\t\f");
+      token.children = parseInline(state);
     }
   }
 }
@@ -1332,6 +1461,8 @@ function renderToken(token: Token): string {
   switch (token.type) {
     case "text":
       return token.raw ?? "";
+    case "codespan":
+      return `<code>${token.raw ?? ""}</code>`;
     case "softbreak":
       return "\n";
     case "linebreak":
@@ -1400,13 +1531,13 @@ export function markdownToWpHtml(markdownContent: string): string {
   const content = markdownContent.replace(FRONTMATTER_RE, "");
 
   // `Markdown.parse`: normalise line separators and guarantee a trailing one.
-  let src = content.trim().replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  let src = pyStrip(content).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   if (!src.endsWith("\n")) src += "\n";
 
   const state = new BlockState();
   state.process(src);
   parseBlocks(state);
-  resolveChildren(state.tokens);
+  resolveChildren(state.tokens, state.env);
   return renderTokens(state.tokens);
 }
 
@@ -1423,7 +1554,7 @@ export function parseRefLinks(
   markdownContent: string,
 ): Record<string, RefLink> {
   const content = markdownContent.replace(FRONTMATTER_RE, "");
-  let src = content.trim().replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  let src = pyStrip(content).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   if (!src.endsWith("\n")) src += "\n";
 
   const state = new BlockState();

@@ -10552,6 +10552,179 @@ three pieces are separately verifiable, so they are separate items.
             Note that `image` is an inline token that the Gutenberg renderer turns into a
             block comment, so an image inside a paragraph nests one. Its oracle must
             include the backtick-info-string fence case moved out of the -b-i corpus.
+
+            **Split into four.** The nine rules do not sit at one level of difficulty.
+            Two of them need nothing from the inline state at all, three read one flag
+            off it, one needs the precedence scan, and two need three link helpers plus
+            the reference-link env the block layer already fills. Splitting along what
+            each rule needs from the state keeps every sub-item independently
+            verifiable against its own oracle:
+
+            * -iii-a `escape` and `codespan`, plus the inline state, the inline scan
+              loop and the `codespan` renderer method. Carries the backtick-info-string
+              fence case moved out of the -b-i corpus, because a codespan is what that
+              paragraph renders to.
+            * -iii-b `auto_link`, `auto_email` and `inline_html`, plus the `link`
+              renderer method the two autolinks emit into and the `in_link` flag
+              `inline_html` toggles. `_GutenbergRenderer` has no `inline_html` method,
+              so that token raises; the oracle has to pin the raise, not an HTML string.
+            * -iii-c `emphasis` and `strong`, plus their renderer methods and
+              `precedence_scan`, which is what stops a codespan or a tag from being cut
+              in half by an emphasis run that opened before it.
+            * -iii-d `link` and `image`, plus `parse_link_label`, `parse_link_text` and
+              `parse_link`, the `in_link` / `in_image` guards, the reference-link
+              lookup against `state.env['ref_links']`, and the `link` and `image`
+              renderer methods.
+
+            - [x] 5.3c-iii-b-1-b-iii-a `escape` and `codespan`, the inline state, the
+              inline scan loop and the `codespan` renderer method.
+
+              `web/src/mastra/wordpress/wp-html.ts` gains `InlineState` (the four
+              nesting flags, `copy()`, `append_token`, and the `env` shared with the
+              block state), `process_text`, `parse_method`'s dispatch, `InlineParser.parse`
+              including its decline branch, `parse_escape`, `parse_codespan` and the
+              renderer's `codespan` case. The two rules ported here are the two that
+              read nothing off the state, which is why they come first.
+
+              `escape` matches a *run* of backslash-plus-punctuation and emits one text
+              token with the backslashes removed, so `\*` never reaches `emphasis`.
+              `codespan` compiles a closing pattern per opening run, so three backticks
+              do not close two and the character before the closing run may not itself
+              be a backtick; the captured code has its newlines folded to spaces and one
+              space taken off each end, but only when the code is not entirely
+              whitespace.
+
+              **Oracle.** `api/scripts/export_wp_html_inline_escape_codespan_parity.py`
+              writes 95 cases to
+              `web/src/mastra/wordpress/data/wp-html-inline-escape-codespan-parity.json`,
+              every one of them the real `markdown_to_wp_html`'s output. The script
+              replays the TypeScript scan loop over each parsed paragraph and refuses to
+              write a case that reaches `emphasis`, `link`, `auto_link`, `auto_email` or
+              `inline_html`, so there is no bucket of pinned-for-later cases here: every
+              case is one the port renders today. The replay skips a codespan the way
+              the handler does, which is what lets `` `<div>` `` be a case rather than an
+              `inline_html` blocker.
+
+              ```
+              $ cd api && PYTHONPATH=. uv run python scripts/export_wp_html_inline_escape_codespan_parity.py
+              wrote 95 cases to /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web/src/mastra/wordpress/data/wp-html-inline-escape-codespan-parity.json
+              $ cd api && uv run ruff check scripts/export_wp_html_inline_escape_codespan_parity.py
+              All checks passed!
+              $ cd api && uv run ruff format --check scripts/export_wp_html_inline_escape_codespan_parity.py
+              1 file already formatted
+              ```
+
+              ```
+              $ pnpm -C web exec vitest run src/mastra/wordpress/wp-html-inline-escape-codespan.test.ts
+               Test Files  1 passed (1)
+                    Tests  109 passed (109)
+              ```
+
+              **A divergence the corpus found, and the fix.** `markdownToWpHtml` and
+              `parseRefLinks` both spelled Python's document-level `content.strip()` as
+              `content.trim()`, and `parse_fenced_code` spelled `info.strip()` as
+              `info.trim()`. `String.prototype.trim` strips `\ufeff`; Python's
+              `str.strip()` does not, because `"\ufeff".isspace()` is false. So a
+              paragraph ending in a byte order mark lost it in TypeScript and kept it in
+              Python. The three sites now call a new `pyStrip`, built from the
+              `PY_SPACE` class the file already had. The case that found it is in the
+              corpus:
+
+              ```
+              'a `b`\ufeff\n'
+                -> '<!-- wp:paragraph -->\n<p>a <code>b</code>\ufeff</p>\n<!-- /wp:paragraph -->\n\n'
+              ```
+
+              The three sibling `.trim()` calls left in the file (`quote.trim() === ""`,
+              `!src.trim()`, `!text.trim()`) are truthiness tests, not values, and
+              `\ufeff` cannot change any of their answers.
+
+              **Two tests updated, not deleted.** `wp-html-blocks.test.ts` asserted that
+              `escape` and `codespan` *throw*, and that a fence whose backtick info
+              string holds a backtick throws on the way to the paragraph fallback. Both
+              assertions were correct for the state of the port and are wrong now that
+              these two rules render. The rule list now names `auto_email` and
+              `inline_html` in their place, and the fence case asserts the real Python
+              output:
+
+              ```
+              '```a`b\nx\n```\n'
+                -> '<!-- wp:paragraph -->\n<p>```a`b\nx</p>\n<!-- /wp:paragraph -->\n\n'
+                   '<!-- wp:code -->\n<pre class="wp-block-code"><code></code></pre>\n<!-- /wp:code -->\n\n'
+              ```
+
+              **Mutations.** Each applied to `wp-html.ts` alone, with the corpus and the
+              controls unchanged, then reverted. Twelve of thirteen are caught:
+
+              | Mutation | Result |
+              | --- | --- |
+              | codespan: do not fold newlines inside the code to spaces | 3 failed |
+              | codespan: strip the end spaces even when the code is all whitespace | 3 failed |
+              | codespan: strip an end space when only one end has one | 6 failed |
+              | codespan: let a backtick sit before the closing run | 2 failed |
+              | codespan: drop the negative lookahead after the closing run | 2 failed |
+              | codespan: an unclosed marker consumes nothing instead of emitting text | 8 failed |
+              | escape: keep the backslashes in the emitted text | 39 failed |
+              | escape: match one escape rather than a run | **survives** |
+              | renderer: html escape the ampersand in a codespan | 3 failed |
+              | loop: emit the text hole after the token instead of before it | 52 failed |
+              | loop: drop the trailing text run after the last token | 41 failed |
+              | loop: strip the inline source with `trim()` instead of Python's set | 5 failed |
+              | wrapper: strip the document with `trim()` instead of `pyStrip` | 1 failed (this is the divergence above) |
+
+              The survivor is genuinely unobservable rather than untested. Matching one
+              escape at a time emits `{text "*"}, {text "_"}` where the run emits
+              `{text "*_"}`, and `_GutenbergRenderer.text` concatenates, so no input can
+              tell the two apart through this renderer. Recorded rather than papered
+              over with a test that asserts on token shape the renderer never sees.
+
+              **Gates.** Frontend:
+
+              ```
+              $ pnpm -C web exec tsc --noEmit
+              tsc exit=0
+              $ pnpm -C web lint
+              lint exit=0
+              $ pnpm -C web test   (three consecutive runs, for the known flake)
+               Test Files  2 failed | 110 passed (112)   Tests   9 failed | 3142 passed | 7 skipped (3158)
+               Test Files  3 failed | 109 passed (112)   Tests  10 failed | 3141 passed | 7 skipped (3158)
+               Test Files  2 failed | 110 passed (112)   Tests   9 failed | 3142 passed | 7 skipped (3158)
+              $ pnpm -C web build
+              build exit=0
+              ```
+
+              The 9-failure floor is the recorded baseline: the 6 known
+              `image-preview.test.tsx` failures plus 3 flaky `PostDetail.test.tsx`
+              tests. No `src/mastra/wordpress/` test is among them. Total test count
+              rises 3049 -> 3158 with this item's 109.
+
+              Backend, unchanged at its baseline (this iteration adds one script under
+              `api/scripts/`, formatted and linted above):
+
+              ```
+              $ cd api && set -a && . ../.env && set +a && uv run pytest -q
+              120 failed, 241 passed, 25 errors in 15.07s
+              $ cd api && uv run ruff check .
+              Found 32 errors.
+              $ cd api && uv run ruff format --check .
+              9 files would be reformatted, 142 files already formatted
+              ```
+
+              Note on the pytest invocation: without the repo `.env` sourced, every
+              database test fails with `InvalidPasswordError` and the run reports
+              `4 failed, 205 passed, 177 errors`. The baseline numbers above are the
+              env-sourced run.
+
+            - [ ] 5.3c-iii-b-1-b-iii-b `auto_link`, `auto_email` and `inline_html`, plus
+              the `link` renderer method and the `in_link` flag `inline_html` toggles.
+              `_GutenbergRenderer` has no `inline_html` method, so the oracle pins the
+              `AttributeError` rather than an HTML string.
+            - [ ] 5.3c-iii-b-1-b-iii-c `emphasis` and `strong`, their renderer methods
+              and `precedence_scan`.
+            - [ ] 5.3c-iii-b-1-b-iii-d `link` and `image`, `parse_link_label`,
+              `parse_link_text`, `parse_link`, the `in_link` / `in_image` guards, the
+              `state.env['ref_links']` lookup, and the `link` and `image` renderer
+              methods.
         - [ ] 5.3c-iii-b-1-c The Mastra WordPress publish workflow
           (`api/src/pipeline/publish.py`): the media-directory sweep, the manifest-driven
           featured image and alt text, the local-to-remote URL rewrite, the create/update
