@@ -14897,12 +14897,216 @@ three pieces are separately verifiable, so they are separate items.
       9 files would be reformatted, 131 files already formatted
       ```
 
-    - [ ] 5.5e-ii Server-side replay: both handlers accept an anchor (the `Last-Event-ID`
+    - [x] 5.5e-ii Server-side replay: both handlers accept an anchor (the `Last-Event-ID`
       header and a `last_event_id` query parameter, since `EventSource` can set no
       headers), subscribe with `startFrom: "earliest"` when one is given, drop everything
       up to and including it, and fall back to the anchor's timestamp when the anchor
       event has been trimmed off the stream. Test disconnects and reconnects mid-run and
       asserts no gap in the event sequence.
+
+      `anchor.ts` gained `parseAnchor()`, `requestAnchor()` and `anchorPosition()`;
+      `pipelineEventStream()` reads the anchor once per request and, while it is still
+      catching up, drops every delivery `anchorPosition()` does not place after it. The
+      skip runs inside the same chained `tail` the ordering fix uses, so the decision is
+      made in delivery order, and it runs **before** `matches`, so a client with a large
+      backlog behind it does not pay for an ownership lookup per skipped event.
+
+      **This is an addition, not a port.** `PUBLISH` retains nothing, so every event
+      `api/src/api/events.py` published while a browser was reconnecting was gone; the
+      Python endpoints had no anchor, no parameter and no replay. The behaviour being
+      added is the ledger's own requirement, not a Python behaviour being preserved.
+
+      **Three decisions and the evidence behind each.**
+
+      1. *Header first, then the query parameter.* Both are real paths and they age
+         differently: the parameter is fixed when the URL is built, the header is
+         whatever the last frame that `EventSource` object received carried. A browser
+         reconnecting an existing object sends a stale parameter and a current header, so
+         taking the older of the two would replay everything twice. A header that does
+         not parse falls through to the parameter rather than cancelling the replay.
+      2. *An unparseable anchor means "no anchor", not an error.* The alternative is
+         refusing the connection or handing back the whole retained stream, and a client
+         whose only mistake is an id this server did not write deserves neither.
+      3. *The timestamp comparison is strict (`>`), so the anchor's own millisecond reads
+         as "before".* When the anchor is still on the stream the uuid settles it exactly
+         and nothing published after it is lost. When the anchor has been **trimmed** the
+         client already has an unavoidable gap, because entries are trimmed oldest first
+         and everything between the anchor and the oldest retained entry went with it; the
+         timestamp's job there is to stop the replay skipping forever, not to make a lossy
+         stream lossless. `>=` would trade that exactness for duplicates on every
+         reconnect, and NC4 below measures it.
+
+      **The cost, measured rather than assumed.** The transport hands a subscriber decoded
+      payloads and never the Redis entry id (recorded under 5.5e above), so there is no
+      position to seek to and catching up means reading every retained entry. Against the
+      dev stream holding its full 10000:
+
+      ```
+      $ docker compose exec -T redis redis-cli xlen "mastra:topic:pipeline-events"
+      10005
+      ```
+
+      the replaying tests run at about 2.9s each where the equivalent non-replaying test
+      ("does not replay events published before the connection opened") runs at 1.34s, so
+      the scan of a full stream costs roughly 1.3s before the first frame, paid once per
+      reconnect. That is recorded in `stream.ts` so it is not rediscovered later.
+
+      Nineteen new tests in `web/src/app/api/events/events.test.ts` (39 -> 59): seven
+      integration tests that disconnect a real connection and reconnect through the real
+      handler, plus unit coverage of the three new functions.
+
+      ```
+      $ cd web && npx vitest run src/app/api/events/events.test.ts
+       Test Files  1 passed (1)
+            Tests  59 passed (59)
+      ```
+
+      Seven negative controls, each reverted after it was measured:
+
+      | # | Reverted behaviour | Failed |
+      | --- | --- | --- |
+      | NC1 | the pre-implementation state: always `"latest"`, no skip loop | 5 |
+      | NC2 | always `startFrom: "earliest"`, anchor or not | 12 |
+      | NC3 | drop the exact-uuid match, leaving only the timestamp | 2 |
+      | NC4 | `>=` instead of `>` on the timestamp | 3 |
+      | NC5 | send the anchored event itself instead of dropping it | 5 |
+      | NC6 | prefer the query parameter over the header | 2 |
+      | NC7 | split the anchor on the last `-` instead of the first | 12 |
+
+      ```
+      $ # NC1
+           x resumes where the client stopped, with no gap across the disconnect
+           x accepts the anchor as the Last-Event-ID header a browser's own reconnect sends
+           x prefers the header over a query parameter, because the two age differently
+           x resumes from the anchor's timestamp when the anchored event is gone from the stream
+           x replays the queue-wide feed from an anchor, still scoped to the caller
+            Tests  5 failed | 53 passed (58)
+
+      $ # NC2: every connection replays the retained stream
+           x does not replay events published before the connection opened
+           x delivers events for every post the caller owns, not just one
+           x drops another user's events, which global_events() broadcast to everyone
+           x drops an event for a post that no longer exists
+           x drops an event for a post whose profile_id is null, as the inner join did
+           x delivers events for a post created after the connection opened
+           x preserves publication order across posts whose ownership is not yet resolved
+           x remembers a negative answer too, so a mid-connection reassignment needs a reconnect
+           x stamps the same event with the same id on the feed as on the per-post stream
+           x scopes two concurrent callers to their own posts on the same topic
+           x ignores an anchor it did not write rather than replaying the whole stream
+           x replays the queue-wide feed from an anchor, still scoped to the caller
+            Tests  12 failed | 46 passed (58)
+
+      $ # NC3: remove `if (event.id === anchor.id) return "at"`
+           x resumes on the uuid when what follows the anchor shares its millisecond
+           x recognises the anchor itself by uuid, whatever its timestamp says
+            Tests  2 failed | 57 passed (59)
+
+      $ # NC4: millis >= anchor.millis
+           x prefers the header over a query parameter, because the two age differently
+           x resumes from the anchor's timestamp when the anchored event is gone from the stream
+           x treats the anchor's own millisecond as before, so an exact match still settles it
+            Tests  3 failed | 56 passed (59)
+
+      $ # NC5: `if (position === "before") return` with no early return on "at"
+           x resumes where the client stopped, with no gap across the disconnect
+           x resumes on the uuid when what follows the anchor shares its millisecond
+           x accepts the anchor as the Last-Event-ID header a browser's own reconnect sends
+           x prefers the header over a query parameter, because the two age differently
+           x replays the queue-wide feed from an anchor, still scoped to the caller
+            Tests  5 failed | 54 passed (59)
+
+      $ # NC6: parameter checked first, header second
+           x prefers the header over a query parameter, because the two age differently
+           x prefers the header, which is the fresher of the two
+            Tests  2 failed | 57 passed (59)
+
+      $ # NC7: trimmed.lastIndexOf("-")
+           x resumes where the client stopped, with no gap across the disconnect
+           x resumes on the uuid when what follows the anchor shares its millisecond
+           x accepts the anchor as the Last-Event-ID header a browser's own reconnect sends
+           x prefers the header over a query parameter, because the two age differently
+           x resumes from the anchor's timestamp when the anchored event is gone from the stream
+           x replays the queue-wide feed from an anchor, still scoped to the caller
+           x splits on the first separator, which keeps the uuid whole
+           x reads back exactly what eventAnchor() wrote
+           x takes the Last-Event-ID header when there is one
+           x takes the query parameter, which is the path useSSE() will use
+           x prefers the header, which is the fresher of the two
+           x falls through to the parameter when the header does not parse
+            Tests  12 failed | 47 passed (59)
+      ```
+
+      **NC3 was run twice and the first run is the reason there are 59 tests and not 58.**
+      With the exact-uuid match removed, only the one unit test failed: every replay
+      integration test happened to publish its post-anchor events a comfortable
+      millisecond or more after the anchor (the client has to receive a frame and
+      disconnect in between, which takes over a second), so the timestamp fallback alone
+      carried all of them and the uuid half was never exercised end to end. The added test
+      "resumes on the uuid when what follows the anchor shares its millisecond" publishes
+      six events in one turn, finds an adjacent pair the transport stamped with the same
+      `createdAt`, and anchors on the first of that pair, so the successor is one the
+      timestamp places "before" the anchor and only the uuid can rescue. It is
+      deterministic rather than lucky: six concurrent stamps span microseconds, so at most
+      one millisecond boundary can fall inside them and at least four of the five adjacent
+      pairs must share a value.
+
+      Frontend gates:
+
+      ```
+      $ cd web && npx tsc --noEmit
+      TSC EXIT=0
+
+      $ cd web && npx eslint
+      LINT EXIT=0
+      (no output)
+
+      $ cd web && npx vitest run
+       Test Files  3 failed | 91 passed (94)
+            Tests  10 failed | 1720 passed | 7 skipped (1737)
+
+      $ cd web && npx next build
+      BUILD EXIT=0
+      v Compiled successfully in 4.0s
+      v Generating static pages using 15 workers (36/36) in 296.6ms
+      |- f /api/events
+      |- f /api/events/[post_id]
+      ```
+
+      Passing count 1701 -> 1720. **Ten failed, not the recorded nine**, and the tenth is
+      not this item's: it is `scaffold-check.test.ts > emits the workflow lifecycle events
+      the trace view will read`, the cross-file flake `todo.md` already records, which has
+      stopped being intermittent in this environment. Measured on both sides rather than
+      assumed, by reverting all three changed files to HEAD and running the whole suite:
+
+      ```
+      $ git checkout -- web/src/app/api/events/ && cd web && npx vitest run
+       Test Files  3 failed | 91 passed (94)
+            Tests  10 failed | 1700 passed | 7 skipped (1717)
+      ```
+
+      Same ten failures at HEAD, so the baseline moved on its own. It also passes alone and
+      alongside this item's file, which rules the new replay traffic out as the trigger:
+
+      ```
+      $ cd web && npx vitest run src/mastra/workflows/scaffold-check.test.ts src/app/api/events/events.test.ts
+       Test Files  2 passed (2)
+            Tests  64 passed (64)
+      ```
+
+      Python gates, unchanged from the recorded baseline (no Python was touched):
+
+      ```
+      $ set -a && . ./.env && set +a && cd api && uv run pytest -q
+      120 failed, 241 passed, 25 errors in 15.12s
+
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+      [*] 17 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).
+
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 131 files already formatted
+      ```
     - [ ] 5.5e-iii `use-sse.ts` carries the anchor across the reconnect it performs
       itself: record `MessageEvent.lastEventId` per delivered event and put it on the URL
       of the next `EventSource`, because a fresh `EventSource` sends no `Last-Event-ID`.

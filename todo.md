@@ -275,6 +275,13 @@
   that file reads. Fix is probably to give it its own instance and prefix like the others.
   Recurred once more on the first full run of item 5.5c-i and passed on the rerun, which
   strengthens the cross-file reading over a defect in the workflow.
+  Update 2026-08-22 (item 5.5e-ii): it has stopped being intermittent. It failed on both
+  full runs of the item and on a third full run with all of the item's files reverted to
+  HEAD, so the whole-suite failure count is now 10 rather than the recorded 9 and the
+  extra one is this. It still passes alone and alongside `events.test.ts`, so the trigger
+  is still whole-suite concurrency. This has crossed from a flake worth pinning to a
+  standing baseline discrepancy: fix it (own instance and `keyPrefix`) before Phase 9,
+  because item 9.1 wants a green run.
 - [investigate] 2026-08-22 `src/mastra/pipeline-events.test.ts > carries Python's log payload
   and nothing else` failed once on a full `vitest run` during item 5.5e-i, passed on the
   rerun of the same suite, and passes when run alone. It reads the shared

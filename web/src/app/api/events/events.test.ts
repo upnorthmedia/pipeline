@@ -29,12 +29,22 @@ import { apiRequest, createTestSession, deleteTestSessions, type TestSession } f
 
 import { GET as postEvents } from "./[post_id]/route"
 import { GET as globalEvents } from "./route"
-import { eventAnchor } from "./anchor"
+import { anchorPosition, eventAnchor, parseAnchor, requestAnchor } from "./anchor"
 import { SSE_SEPARATOR, encodeSseEvent, encodeSsePing } from "./sse"
 
 const PREFIX = "events-sse-test-"
 const URL_BASE = "http://test/api/events"
 const MISSING_ID = "00000000-0000-4000-8000-000000000000"
+
+/**
+ * How long a replaying connection is given to produce its first frame.
+ *
+ * A replay reads the retained stream from the beginning, because the transport
+ * exposes no seekable position, so the wait is proportional to how many entries
+ * the shared topic is holding rather than to how far back the anchor is. This
+ * is the same 10s every other wait uses, restated where the reason differs.
+ */
+const REPLAY_TIMEOUT_MS = 10_000
 
 /** Discard port on loopback: nothing here should ever reach a real site. */
 const SITE = "http://127.0.0.1:9/site"
@@ -81,16 +91,46 @@ async function insertPost(
   return row
 }
 
+/**
+ * Where a reconnecting client puts the anchor it is resuming from.
+ *
+ * Both are real paths: `header` is what a browser sends when it reconnects an
+ * `EventSource` object itself, `param` is what `useSSE()` will send, because it
+ * builds a new `EventSource` on every retry and a fresh one has no
+ * `Last-Event-ID` to send.
+ */
+interface Anchored {
+  header?: string
+  param?: string
+}
+
+/** The request one connection is opened with, anchor included. */
+function anchoredRequest(
+  url: string,
+  init: { cookie?: string; signal?: AbortSignal } & Anchored,
+): Request {
+  const target = new URL(url)
+  if (init.param !== undefined) target.searchParams.set("last_event_id", init.param)
+  return apiRequest(target.toString(), {
+    cookie: init.cookie,
+    signal: init.signal,
+    headers: init.header === undefined ? undefined : { "last-event-id": init.header },
+  })
+}
+
 /** The per-post handler, called the way Next.js calls it. */
-function events(postId: string, init: { cookie?: string; signal?: AbortSignal } = {}) {
-  return postEvents(apiRequest(`${URL_BASE}/${postId}`, init), {
+function events(
+  postId: string,
+  init: { cookie?: string; signal?: AbortSignal } & Anchored = {},
+) {
+  return postEvents(anchoredRequest(`${URL_BASE}/${postId}`, init), {
     params: Promise.resolve({ post_id: postId }),
   })
 }
 
 /** The global handler, which takes no path parameter at all. */
-function feed(init: { cookie?: string; signal?: AbortSignal } = {}) {
-  return globalEvents(apiRequest(URL_BASE, init))
+function feed(init: { cookie?: string; signal?: AbortSignal } & Anchored = {}) {
+  return globalEvents(anchoredRequest(URL_BASE, init))
 }
 
 interface Connection {
@@ -113,13 +153,17 @@ interface Connection {
 async function connect(
   postId: string,
   cookie: string | undefined = user.cookie,
+  anchor: Anchored = {},
 ): Promise<Connection> {
-  return drain((signal) => events(postId, { cookie, signal }))
+  return drain((signal) => events(postId, { cookie, signal, ...anchor }))
 }
 
 /** The same, for the global feed, which selects on the session and nothing else. */
-async function connectFeed(cookie: string | undefined = user.cookie): Promise<Connection> {
-  return drain((signal) => feed({ cookie, signal }))
+async function connectFeed(
+  cookie: string | undefined = user.cookie,
+  anchor: Anchored = {},
+): Promise<Connection> {
+  return drain((signal) => feed({ cookie, signal, ...anchor }))
 }
 
 async function drain(
@@ -153,6 +197,21 @@ async function drain(
       return parts.map((part) => part + SSE_SEPARATOR + SSE_SEPARATOR)
     },
   }
+}
+
+/**
+ * Closes one connection mid-test, the way a browser navigating away does.
+ *
+ * `afterEach` tears the rest down; a test that reconnects has to do it early,
+ * and has to wait for the same settling `afterEach` waits for, because the
+ * abort does not await the `unsubscribe()` it starts.
+ */
+async function disconnect(connection: Connection): Promise<void> {
+  connection.abort.abort()
+  await connection.drained
+  const index = open.findIndex((entry) => entry.abort === connection.abort)
+  if (index >= 0) open.splice(index, 1)
+  await new Promise((resolve) => setTimeout(resolve, 250))
 }
 
 /** The `event:` name and the parsed `data:` payload of one frame. */
@@ -759,6 +818,267 @@ describe("SSE frame ids", () => {
       expect(value).toBeLessThanOrEqual(Date.now())
     }
     expect([...millis].sort((a, b) => a - b)).toEqual(millis)
+  })
+})
+
+/**
+ * Replay: what a client gets back when it reconnects carrying the id of the
+ * last frame it received.
+ *
+ * Python had no equivalent. `PUBLISH` retains nothing, so every event published
+ * while `api/src/api/events.py` had no subscriber was gone, and a browser that
+ * refreshed mid-run saw the pipeline resume from wherever it happened to be.
+ * The retained Redis stream can answer for that window, and these tests are the
+ * ledger's requirement that it does: disconnect mid-run, reconnect, and find no
+ * gap in the sequence.
+ *
+ * The payload's `i` is the sequence: an assertion on the exact list of `i`
+ * values catches a gap and a duplicate with the same expression.
+ */
+describe("replay from an anchor", () => {
+  it("resumes where the client stopped, with no gap across the disconnect", async () => {
+    const post = await insertPost(user.userId)
+    const first = await connect(post.id)
+
+    for (const i of [1, 2, 3]) await publishPipelineEvent(publisher, post.id, "log", { i })
+    const received = await waitForFrames(first, 3)
+    const anchor = frameId(received[2])!
+    await disconnect(first)
+
+    // The window the client is not there for. Python lost these outright.
+    for (const i of [4, 5, 6]) await publishPipelineEvent(publisher, post.id, "log", { i })
+
+    const second = await connect(post.id, user.cookie, { param: anchor })
+    await publishPipelineEvent(publisher, post.id, "log", { i: 7 })
+
+    const frames = await waitForFrames(second, 4, REPLAY_TIMEOUT_MS)
+    expect(frames.map((frame) => parseFrame(frame).data.i)).toEqual([4, 5, 6, 7])
+  })
+
+  it("resumes on the uuid when what follows the anchor shares its millisecond", async () => {
+    const post = await insertPost(user.userId)
+    const first = await connect(post.id)
+
+    // Published in one turn, so the transport stamps these microseconds apart.
+    // At most one millisecond boundary can fall inside that span, so at least
+    // four of the five adjacent pairs share a `createdAt`.
+    await Promise.all(
+      [1, 2, 3, 4, 5, 6].map((i) => publishPipelineEvent(publisher, post.id, "log", { i })),
+    )
+    const received = await waitForFrames(first, 6)
+    const millis = received.map((frame) => {
+      const id = frameId(frame)!
+      return Number(id.slice(0, id.indexOf("-")))
+    })
+
+    // Anchor on a frame whose successor carries the same timestamp: the
+    // fallback ordering places that successor "before" the anchor, so only the
+    // uuid half can tell the replay where the client actually stopped.
+    const at = millis.findIndex(
+      (value, index) => index < millis.length - 1 && value === millis[index + 1],
+    )
+    expect(at).toBeGreaterThanOrEqual(0)
+
+    const anchor = frameId(received[at])!
+    const expected = received.slice(at + 1).map((frame) => parseFrame(frame).data.i)
+    await disconnect(first)
+
+    const second = await connect(post.id, user.cookie, { param: anchor })
+    const frames = await waitForFrames(second, expected.length, REPLAY_TIMEOUT_MS)
+    expect(frames.map((frame) => parseFrame(frame).data.i)).toEqual(expected)
+  })
+
+  it("accepts the anchor as the Last-Event-ID header a browser's own reconnect sends", async () => {
+    const post = await insertPost(user.userId)
+    const first = await connect(post.id)
+
+    await publishPipelineEvent(publisher, post.id, "log", { i: 1 })
+    const [frame] = await waitForFrames(first, 1)
+    await disconnect(first)
+
+    await publishPipelineEvent(publisher, post.id, "log", { i: 2 })
+
+    const second = await connect(post.id, user.cookie, { header: frameId(frame)! })
+    const frames = await waitForFrames(second, 1, REPLAY_TIMEOUT_MS)
+    expect(frames.map((f) => parseFrame(f).data.i)).toEqual([2])
+  })
+
+  it("prefers the header over a query parameter, because the two age differently", async () => {
+    const post = await insertPost(user.userId)
+    const first = await connect(post.id)
+
+    for (const i of [1, 2, 3]) await publishPipelineEvent(publisher, post.id, "log", { i })
+    const received = await waitForFrames(first, 3)
+    await disconnect(first)
+
+    await publishPipelineEvent(publisher, post.id, "log", { i: 4 })
+
+    // The URL was built when the connection first opened and still names the
+    // first frame; the header is what the last frame carried.
+    const second = await connect(post.id, user.cookie, {
+      param: frameId(received[0])!,
+      header: frameId(received[2])!,
+    })
+    const frames = await waitForFrames(second, 1, REPLAY_TIMEOUT_MS)
+    expect(frames.map((f) => parseFrame(f).data.i)).toEqual([4])
+  })
+
+  it("resumes from the anchor's timestamp when the anchored event is gone from the stream", async () => {
+    const post = await insertPost(user.userId)
+    const first = await connect(post.id)
+
+    for (const i of [1, 2]) await publishPipelineEvent(publisher, post.id, "log", { i })
+    const received = await waitForFrames(first, 2)
+    const id = frameId(received[1])!
+    const millis = id.slice(0, id.indexOf("-"))
+    await disconnect(first)
+
+    // A millisecond of clearance: "published later" has to be expressible in
+    // the anchor's own resolution for the fallback to place these after it.
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    for (const i of [3, 4]) await publishPipelineEvent(publisher, post.id, "log", { i })
+
+    // The anchor's timestamp with a uuid that names no entry: what a client
+    // holds once its own anchor event has been trimmed off the stream.
+    const second = await connect(post.id, user.cookie, { param: `${millis}-${randomUUID()}` })
+    const frames = await waitForFrames(second, 2, REPLAY_TIMEOUT_MS)
+    expect(frames.map((f) => parseFrame(f).data.i)).toEqual([3, 4])
+  })
+
+  it("ignores an anchor it did not write rather than replaying the whole stream", async () => {
+    const post = await insertPost(user.userId)
+    const first = await connect(post.id)
+
+    await publishPipelineEvent(publisher, post.id, "log", { i: 1 })
+    await waitForFrames(first, 1)
+    await disconnect(first)
+
+    await publishPipelineEvent(publisher, post.id, "log", { i: 2 })
+
+    const second = await connect(post.id, user.cookie, { param: "garbage" })
+    await publishPipelineEvent(publisher, post.id, "log", { i: 3 })
+
+    const frames = await waitForFrames(second, 1)
+    expect(frames.map((f) => parseFrame(f).data.i)).toEqual([3])
+  })
+
+  it("replays the queue-wide feed from an anchor, still scoped to the caller", async () => {
+    const mine = await insertPost(user.userId)
+    const theirs = await insertPost(other.userId)
+    const first = await connectFeed()
+
+    await publishPipelineEvent(publisher, mine.id, "log", { i: 1 })
+    const [frame] = await waitForFrames(first, 1)
+    await disconnect(first)
+
+    await publishPipelineEvent(publisher, theirs.id, "log", { i: 2 })
+    await publishPipelineEvent(publisher, mine.id, "log", { i: 3 })
+
+    const second = await connectFeed(user.cookie, { param: frameId(frame)! })
+    const frames = await waitForFrames(second, 1, REPLAY_TIMEOUT_MS)
+    expect(frames.map((f) => parseFrame(f).data.i)).toEqual([3])
+  })
+})
+
+describe("parseAnchor()", () => {
+  it("splits on the first separator, which keeps the uuid whole", () => {
+    const id = "3f1a2b3c-4d5e-4f60-8a71-9b2c3d4e5f60"
+    expect(parseAnchor(`1755859200123-${id}`)).toEqual({ millis: 1_755_859_200_123, id })
+  })
+
+  it("reads back exactly what eventAnchor() wrote", () => {
+    const event = {
+      type: "stage_start",
+      data: {},
+      runId: "run",
+      id: randomUUID(),
+      createdAt: new Date(1_755_859_200_123),
+    }
+    expect(parseAnchor(eventAnchor(event)!)).toEqual({ millis: 1_755_859_200_123, id: event.id })
+  })
+
+  it("names no position for a value this server did not write", () => {
+    expect(parseAnchor("garbage")).toBeUndefined()
+    expect(parseAnchor("abc-def")).toBeUndefined()
+    expect(parseAnchor("1.5-abc")).toBeUndefined()
+    expect(parseAnchor("-abc")).toBeUndefined()
+    expect(parseAnchor("1755859200123-")).toBeUndefined()
+    expect(parseAnchor(null)).toBeUndefined()
+    expect(parseAnchor(undefined)).toBeUndefined()
+  })
+})
+
+describe("requestAnchor()", () => {
+  const id = "3f1a2b3c-4d5e-4f60-8a71-9b2c3d4e5f60"
+
+  function request(init: { header?: string; param?: string }): Request {
+    const url = new URL(URL_BASE)
+    if (init.param !== undefined) url.searchParams.set("last_event_id", init.param)
+    return new Request(
+      url,
+      init.header === undefined ? {} : { headers: { "last-event-id": init.header } },
+    )
+  }
+
+  it("takes the Last-Event-ID header when there is one", () => {
+    expect(requestAnchor(request({ header: `1-${id}` }))).toEqual({ millis: 1, id })
+  })
+
+  it("takes the query parameter, which is the path useSSE() will use", () => {
+    expect(requestAnchor(request({ param: `2-${id}` }))).toEqual({ millis: 2, id })
+  })
+
+  it("prefers the header, which is the fresher of the two", () => {
+    expect(requestAnchor(request({ header: `2-${id}`, param: `1-${id}` }))).toEqual({
+      millis: 2,
+      id,
+    })
+  })
+
+  it("falls through to the parameter when the header does not parse", () => {
+    expect(requestAnchor(request({ header: "garbage", param: `1-${id}` }))).toEqual({
+      millis: 1,
+      id,
+    })
+  })
+
+  it("reports no anchor for a request that carries neither", () => {
+    expect(requestAnchor(request({}))).toBeUndefined()
+  })
+})
+
+describe("anchorPosition()", () => {
+  const anchor = { millis: 1_000, id: "anchor-uuid" }
+  const base = { type: "log", data: {}, runId: "run" }
+
+  it("recognises the anchor itself by uuid, whatever its timestamp says", () => {
+    expect(anchorPosition(anchor, { ...base, id: anchor.id, createdAt: new Date(9_999) })).toBe(
+      "at",
+    )
+  })
+
+  it("places an earlier event before the anchor", () => {
+    expect(anchorPosition(anchor, { ...base, id: "other", createdAt: new Date(999) })).toBe(
+      "before",
+    )
+  })
+
+  it("places a later event after it", () => {
+    expect(anchorPosition(anchor, { ...base, id: "other", createdAt: new Date(1_001) })).toBe(
+      "after",
+    )
+  })
+
+  it("treats the anchor's own millisecond as before, so an exact match still settles it", () => {
+    expect(anchorPosition(anchor, { ...base, id: "other", createdAt: new Date(1_000) })).toBe(
+      "before",
+    )
+  })
+
+  it("reports an unplaceable event as after, so a replay cannot stall on one", () => {
+    expect(
+      anchorPosition(anchor, { ...base, id: "other", createdAt: new Date("not a date") }),
+    ).toBe("after")
   })
 })
 

@@ -14,12 +14,14 @@
  * Three things the transport swap forces, each of which is a real behaviour and
  * not boilerplate:
  *
- * - **`startFrom: "latest"`.** `subscribe()` anchors a new consumer group at
- *   `0` by default, so a browser connecting mid-run would be handed the whole
- *   retained stream (up to `maxStreamLength`, 10000 events) as if it were live.
- *   Python's `PUBLISH` retained nothing, so a connection saw only what arrived
- *   after it. Replay is a feature, but it is ledger item 5.5e and it has to be
- *   asked for, not delivered to every connection by accident.
+ * - **`startFrom: "latest"`, unless the caller sent an anchor.** `subscribe()`
+ *   anchors a new consumer group at `0` by default, so a browser connecting
+ *   mid-run would be handed the whole retained stream (up to `maxStreamLength`,
+ *   10000 events) as if it were live. Python's `PUBLISH` retained nothing, so a
+ *   connection saw only what arrived after it. A caller that sends back the id
+ *   of the last frame it received is asking for exactly that replay, and gets
+ *   `"earliest"` plus the skip loop below; every other caller keeps Python's
+ *   behaviour.
  * - **Every delivery is acked, including the filtered-out ones.** Redis Streams
  *   keeps an unacked entry in the group's pending list for the life of the
  *   subscription; a dashboard left open for a day would accumulate one entry
@@ -41,7 +43,7 @@ import type { Event } from "@mastra/core/events"
 import { pubsub } from "@/mastra"
 import { TOPIC_PIPELINE_EVENTS, type PipelineEventPayload } from "@/mastra/pipeline-events"
 
-import { eventAnchor } from "./anchor"
+import { anchorPosition, eventAnchor, requestAnchor } from "./anchor"
 import { SSE_HEADERS, SSE_PING_INTERVAL_MS, encodeSseEvent, encodeSsePing } from "./sse"
 
 /**
@@ -73,12 +75,26 @@ function eventName(payload: PipelineEventPayload): string {
  * The subscription is established before the response is returned, so an event
  * published after the caller has its `Response` cannot fall into a gap between
  * the handler returning and the stream being read.
+ *
+ * **Replay.** A request carrying an anchor (`Last-Event-ID` or `last_event_id`)
+ * resumes from it: the subscription reads the retained stream from the
+ * beginning and every delivery is dropped until the replay passes the anchor,
+ * after which the stream continues live. The skip runs before `matches`, so a
+ * client with a large backlog behind it does not pay for an ownership lookup
+ * per skipped event.
+ *
+ * The cost is that catching up means reading every retained entry: the
+ * transport hands a subscriber decoded payloads and never its Redis entry id
+ * (see `anchor.ts`), so there is no position to seek to. Against a full
+ * 10000-entry stream that is a few seconds of round trips before the first
+ * frame, paid once per reconnect.
  */
 export async function pipelineEventStream(
   request: Request,
   matches: (payload: PipelineEventPayload) => boolean | Promise<boolean>,
 ): Promise<Response> {
   const encoder = new TextEncoder()
+  const anchor = requestAnchor(request)
   let ping: ReturnType<typeof setInterval> | undefined
   let listener: ((event: Event, ack?: () => Promise<void>) => Promise<void>) | undefined
   let done = false
@@ -119,15 +135,32 @@ export async function pipelineEventStream(
       // fail-closed answer for a predicate that decides who may see what.
       let tail: Promise<void> = Promise.resolve()
 
+      // Set while the replay is still working through events the client
+      // already holds. Read and cleared inside the chain, so the decision is
+      // made in delivery order rather than in whatever order the transport's
+      // unawaited callbacks happen to resume in.
+      let catchingUp = anchor !== undefined
+
       listener = async (event, ack) => {
         const payload = payloadOf(event)
-        // The anchor is read from the delivered envelope, not from the payload:
-        // it names the event's position in the retained stream, which is a
-        // property of the transport rather than of what the pipeline published.
-        const anchor = eventAnchor(event)
+        // The frame's own id is read from the delivered envelope, not from the
+        // payload: it names the event's position in the retained stream, which
+        // is a property of the transport rather than of what the pipeline
+        // published.
+        const id = eventAnchor(event)
         const delivery = tail.then(async () => {
+          if (catchingUp) {
+            const position = anchorPosition(anchor!, event)
+            if (position !== "after") {
+              // "at" is the frame the client's anchor came from, so it has it
+              // already and the next event is the first one it is missing.
+              if (position === "at") catchingUp = false
+              return
+            }
+            catchingUp = false
+          }
           if (payload !== null && (await matches(payload)))
-            send(encodeSseEvent(eventName(payload), payload, anchor))
+            send(encodeSseEvent(eventName(payload), payload, id))
         })
         tail = delivery.catch(() => {})
         try {
@@ -138,7 +171,9 @@ export async function pipelineEventStream(
       }
 
       try {
-        await pubsub.subscribe(TOPIC_PIPELINE_EVENTS, listener, { startFrom: "latest" })
+        await pubsub.subscribe(TOPIC_PIPELINE_EVENTS, listener, {
+          startFrom: anchor === undefined ? "latest" : "earliest",
+        })
       } catch (error) {
         listener = undefined
         onSubscribeFailed(error)
