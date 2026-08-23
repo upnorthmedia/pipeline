@@ -446,12 +446,26 @@ describe("a pipeline run that fails", () => {
       "stage_start/research",
       "stage_complete/research",
       "stage_start/outline",
+      // `outline`'s three progress lines (item 5.5c-iv). `research` has none
+      // yet; its call sites are a later sub-item, and this list will say so
+      // when they land.
+      "log/outline",
+      "log/outline",
+      "log/outline",
       "stage_complete/outline",
+      // `write` writes two of its three before the stubbed provider throws: the
+      // rules are read and the call is announced, and the line reporting what
+      // came back never happens. Repeated per attempt, because a retry re-runs
+      // the whole step body.
       // Every attempt but the last is followed by the `retry` entry saying
       // another one is coming; the last is followed by the `stage_error` entry
       // saying none is.
-      ...Array(MAX_ATTEMPTS - 1).fill(["stage_start/write", "retry/write"]).flat(),
+      ...Array(MAX_ATTEMPTS - 1)
+        .fill(["stage_start/write", "log/write", "log/write", "retry/write"])
+        .flat(),
       "stage_start/write",
+      "log/write",
+      "log/write",
       "stage_error/write",
     ])
   })

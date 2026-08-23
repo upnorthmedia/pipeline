@@ -300,6 +300,16 @@ afterAll(async () => {
   vi.restoreAllMocks()
 })
 
+/**
+ * The stages whose `publish_stage_log()` call sites are ported (item 5.5c-iv),
+ * in pipeline order.
+ *
+ * Named rather than assumed, because the assertions below are exact sequences:
+ * a stage that quietly stopped logging, and a stage that started, both have to
+ * fail here rather than be absorbed by a looser assertion.
+ */
+const LOGGING_STAGES = ["outline", "write", "ready"] as const
+
 describe("a run that executes every stage", () => {
   it("announces each of the six stages exactly once, in pipeline order", () => {
     const announced = eventsFor(FULL_POST_ID, "stage_start").map((event) => event.data.stage)
@@ -385,6 +395,43 @@ describe("a run that executes every stage", () => {
 
   it("stamps the post finished before it says the pipeline is", () => {
     expect(currentStageOnDelivery[`${FULL_POST_ID}/pipeline_complete`]).toBe("complete")
+  })
+
+  it("delivers three progress lines for each ported stage and none for the others", () => {
+    const perStage = Object.fromEntries(
+      STAGES.map((stage) => [
+        stage,
+        eventsFor(FULL_POST_ID, "log").filter((event) => event.data.stage === stage).length,
+      ]),
+    )
+    // Counted rather than sequenced: `received` is appended by an async
+    // subscriber that awaits a row read first, so its order is the order those
+    // reads resolved in and not the order the topic delivered. Measured on this
+    // very run: `stage_complete`/`research` was recorded ahead of
+    // `stage_start`/`research`. Ordering is pinned on `execution_logs` below,
+    // where the entry is written by the publishing process itself.
+    expect(perStage).toEqual({
+      research: 0,
+      outline: 3,
+      write: 3,
+      edit: 0,
+      images: 0,
+      ready: 3,
+    })
+  })
+
+  it("carries Python's log payload and nothing else", () => {
+    const first = eventsFor(FULL_POST_ID, "log").find((event) => event.data.stage === "outline")
+    expect(first?.data).toEqual({
+      event: "log",
+      post_id: FULL_POST_ID,
+      stage: "outline",
+      message: "Rules loaded, building prompt...",
+      level: "info",
+      // `datetime.now(UTC).isoformat()`, the field `debug-log-panel.tsx` renders
+      // as the line's clock time.
+      timestamp: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T[\d:.]+\+00:00$/),
+    })
   })
 
   it("sends pipeline_complete after the last stage_complete", () => {
@@ -554,6 +601,17 @@ describe("what a run writes to execution_logs", () => {
       ["pipeline_start", ""],
       ...STAGES.flatMap((stage) => [
         ["stage_start", stage],
+        // The stage's own progress lines, item 5.5c-iv, sitting between the two
+        // announcements the runner made around the node. Only three stages have
+        // them so far; `research`, `edit` and `images` are later sub-items, and
+        // this list is what will say so when they land.
+        ...((LOGGING_STAGES as readonly string[]).includes(stage)
+          ? [
+              ["log", stage],
+              ["log", stage],
+              ["log", stage],
+            ]
+          : []),
         ["stage_complete", stage],
       ]),
       ["pipeline_complete", ""],
@@ -622,6 +680,39 @@ describe("what a run writes to execution_logs", () => {
     // row that this run was ever picked up by a worker.
     const entries = await logsFor(GATE_POST_ID)
     expect(entries.map((entry) => [entry.event, entry.stage])).toEqual([["pipeline_start", ""]])
+  })
+
+  it("carries each stage's three progress lines, in the order the node wrote them", async () => {
+    const entries = await logsFor(FULL_POST_ID)
+    const messagesFor = (stage: string) =>
+      entries
+        .filter((entry) => entry.event === "log" && entry.stage === stage)
+        .map((entry) => entry.message)
+
+    expect(messagesFor("outline")).toEqual([
+      "Rules loaded, building prompt...",
+      "Calling Claude for outline...",
+      // The stub reports 20 output tokens; the duration is real elapsed time.
+      expect.stringMatching(/^Received 20 tokens in \d+\.\ds$/),
+    ])
+    expect(messagesFor("write")).toEqual([
+      "Rules loaded, building prompt...",
+      "Calling Claude for draft (up to 16k tokens)...",
+      expect.stringMatching(/^Received 20 tokens in \d+\.\ds$/),
+    ])
+    expect(messagesFor("ready")).toEqual([
+      "Rules loaded, building prompt...",
+      "Calling Claude for final assembly...",
+      expect.stringMatching(/^Assembly done \(20 tokens, \d+\.\ds\)$/),
+    ])
+  })
+
+  it("stores a progress line with no data key, as Python's `if data:` did", async () => {
+    const entries = await logsFor(FULL_POST_ID)
+    for (const entry of entries.filter((item) => item.event === "log")) {
+      expect(Object.keys(entry).sort()).toEqual(["event", "level", "message", "stage", "ts"])
+      expect(entry.level).toBe("info")
+    }
   })
 
   it("records only the named stage for a rerun, and nothing about the pipeline", async () => {

@@ -316,3 +316,14 @@
   Note the residual asymmetry, deliberate: the policy now applies per sub-step, so a
   failing `images-generate` re-runs only that fan-out entry where Python's job retry
   re-entered the stage from the manifest.
+- [confirmed] 2026-08-23 `received` in `web/src/mastra/pipeline-events.test.ts` is not in
+  delivery order, so any assertion built on its ordering is unsound. Its subscriber
+  `await`s a row read before pushing the event (5.5b's deliberate fix for a real flake),
+  so the array records the order those reads resolved in rather than the order the topic
+  delivered. Measured under ledger item 5.5c-iv-a on the suite's own full run:
+  `stage_complete/research` was recorded ahead of `stage_start/research`, and one
+  `log/ready` after `stage_complete/ready`. The new SSE assertions were rewritten as
+  counts, and ordering is pinned on `execution_logs` instead. Still standing on this
+  basis: "sends pipeline_complete after the last stage_complete", which reads
+  `order.at(-1)`. It has not been seen to flake, but nothing stops it. A sound fix is to
+  record the delivery index synchronously at the top of the subscriber and sort by it.

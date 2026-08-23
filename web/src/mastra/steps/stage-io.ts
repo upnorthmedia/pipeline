@@ -22,7 +22,8 @@ import type { PubSub } from "@mastra/core/events"
 import { z } from "zod"
 
 import { pythonRound } from "../analytics/python-round"
-import { appendExecutionLog, stageCostUsd } from "../execution-log"
+import { appendExecutionLog, nowIso, stageCostUsd } from "../execution-log"
+import type { LogLevel } from "../execution-log"
 import { publishPipelineEvent } from "../pipeline-events"
 import {
   markCompleteIfAllStagesComplete,
@@ -241,6 +242,109 @@ export async function announceStageStart(
     stage,
     message,
   })
+}
+
+/**
+ * What `publishStageLog()` needs off the `mastra` handed to `execute`.
+ *
+ * The transport, and a logger for the one failure Python chose not to raise.
+ * `getLogger` is optional because most of this module's helpers are driven in
+ * tests by a hand-built `mastra` that only carries a `pubsub`.
+ */
+export interface StageLogContext {
+  pubsub: PubSub
+  getLogger?: () => { debug(message: string, ...args: unknown[]): void } | undefined
+}
+
+/** What a call site can vary; everything else is fixed by the stage and the message. */
+export interface StageLogOptions {
+  /** Python's `level="info"` default, which is what all 28 call sites take. */
+  level?: LogLevel
+  /** Python's `event="log"` default: the SSE event name `use-sse.ts` listens for. */
+  event?: string
+  /** Extra fields, carried onto both the event and the stored entry. */
+  data?: Record<string, unknown>
+}
+
+/**
+ * Python's `publish_stage_log()` from `api/src/pipeline/helpers.py:49`, the
+ * progress line a stage writes about its own internals.
+ *
+ * The other three log-writing helpers in this module are about a stage as a
+ * whole, and the runner wrote them. These are the 28 calls the six stage nodes
+ * made from inside themselves: rules loaded, provider about to be called,
+ * provider answered, this many links dropped. They are what fills
+ * `debug-log-panel.tsx` between one `stage_start` and its `stage_complete`.
+ *
+ * **The module-level context is gone, and nothing replaces it.** Python's stage
+ * nodes were handed a `PipelineState` dict and nothing else, so the runner
+ * parked the Redis handle and the post id in module globals
+ * (`set_event_context()` before the node call, `clear_event_context()` after)
+ * for the node to read back. A Mastra step's `execute` already receives
+ * `mastra`, so both are arguments here. That deletes Python's
+ * "silently no-op when no context is set" branch along with the globals, which
+ * is a real behaviour change: in Python a stage node called outside the runner
+ * (which is to say, in a test) published nothing and stored nothing, where the
+ * port always does both. It also deletes the failure mode the globals carried,
+ * which is that two runs in one process shared one post id.
+ *
+ * **The publish comes first and the append may fail without stopping the
+ * stage.** Both are Python's, and they are the opposite of the ordering
+ * `announceStageStart` and `announceStageComplete` use. Those two write the row
+ * first because a browser reacts to them by refetching the post; this one
+ * carries its whole content in the payload, so there is nothing to refetch and
+ * nothing to race. The `try` around the append is Python's own, and its reason
+ * is that a progress line is not worth failing a paid-for provider call over:
+ * `append_execution_log` raises on a database error, and every other caller
+ * lets it.
+ */
+export async function publishStageLog(
+  mastra: StageLogContext,
+  postId: string,
+  stage: Stage,
+  message: string,
+  options: StageLogOptions = {},
+): Promise<void> {
+  const { level = "info", event = "log", data } = options
+  // Python's `**({"data": data} if data else {})`, false for an empty dict as
+  // well as for None, so a call site that assembled nothing sends no `data` key
+  // rather than an empty object.
+  const hasData = data !== undefined && Object.keys(data).length > 0
+  await publishPipelineEvent(mastra.pubsub, postId, event, {
+    stage,
+    message,
+    level,
+    timestamp: nowIso(),
+    ...(hasData ? { data } : {}),
+  })
+  try {
+    await appendExecutionLog(postId, { stage, level, event, message, data })
+  } catch (error) {
+    // Python's `logger.debug("Failed to persist execution log entry")`. Kept at
+    // debug for the same reason: the event a browser needed has already gone
+    // out, and the entry that did not land is a line in an audit trail rather
+    // than any part of the stage's result.
+    mastra.getLogger?.()?.debug("failed to persist execution log entry", {
+      postId,
+      stage,
+      event,
+      error,
+    })
+  }
+}
+
+/**
+ * Python's `f"{seconds:.1f}"`, used by the progress line every stage writes
+ * after its provider answers.
+ *
+ * `pythonRound` first, for the reason `roundSeconds` below records: a duration
+ * is milliseconds divided by 1000, so every 250ms and 750ms boundary is an
+ * exact tie at one decimal place, and Python resolves those to even while
+ * `toFixed` resolves them away from zero. `2.25` renders `2.2` in Python and
+ * `2.3` through `toFixed` alone.
+ */
+export function formatSeconds(seconds: number): string {
+  return pythonRound(seconds, 1).toFixed(1)
 }
 
 /**

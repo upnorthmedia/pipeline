@@ -258,6 +258,35 @@ describe("outline step announcement", () => {
         stage: "outline",
         message: "Starting outline...",
       },
+      // Python's three `publish_stage_log()` calls from inside the stage
+      // node, in the order they were written and between the two
+      // announcements the runner made around it.
+      {
+        event: "log",
+        post_id: fixtureIds[0],
+        stage: "outline",
+        level: "info",
+        message: "Rules loaded, building prompt...",
+        timestamp: expect.any(String),
+      },
+      {
+        event: "log",
+        post_id: fixtureIds[0],
+        stage: "outline",
+        level: "info",
+        message: "Calling Claude for outline...",
+        timestamp: expect.any(String),
+      },
+      {
+        event: "log",
+        post_id: fixtureIds[0],
+        stage: "outline",
+        level: "info",
+        message: expect.stringMatching(
+          new RegExp(`^Received ${replayOf(fixtures[0]).usage.outputTokens} tokens in \\d+\\.\\ds$`),
+        ),
+        timestamp: expect.any(String),
+      },
       {
         event: "stage_complete",
         post_id: fixtureIds[0],

@@ -24,9 +24,11 @@ import type { JsonValue } from "./images-manifest"
 import {
   announceStageComplete,
   announceStageStart,
+  formatSeconds,
   gateResumeSchema,
   gateSuspendSchema,
   markRerunComplete,
+  publishStageLog,
   recordStageRetry,
   reviewGate,
   shouldRunStage,
@@ -136,11 +138,26 @@ export const readyStep = createStep({
       const gate = await reviewGate("ready", inputData, state.stageSettings, resumeData)
       if (gate) return suspend(gate)
       await announceStageStart(mastra, "ready", inputData)
-      const prompt = buildReadyPrompt(loadRules("ready"), state)
+      const rules = loadRules("ready")
+      // Python's three progress lines, in the three positions
+      // `ready_node` wrote them: after the rules are read, before the
+      // provider is called, and once it has answered.
+      await publishStageLog(mastra, postId, "ready", "Rules loaded, building prompt...")
+      const prompt = buildReadyPrompt(rules, state)
 
+      await publishStageLog(mastra, postId, "ready", "Calling Claude for final assembly...")
       const startedAt = Date.now()
       const result = await mastra.getAgent("ready").generate(prompt)
       const durationMs = Date.now() - startedAt
+
+      const tokensOut = result.usage?.outputTokens ?? 0
+      const durationS = durationMs / 1000
+      await publishStageLog(
+        mastra,
+        postId,
+        "ready",
+        `Assembly done (${tokensOut} tokens, ${formatSeconds(durationS)}s)`,
+      )
 
       await saveStageOutput(postId, "ready", result.text, { ready: STATUS_COMPLETE })
       await markRerunComplete(inputData)
@@ -154,8 +171,8 @@ export const readyStep = createStep({
         // silent server-side alias shows up in the run trace.
         model: result.response?.modelId ?? "",
         tokensIn: result.usage?.inputTokens ?? 0,
-        tokensOut: result.usage?.outputTokens ?? 0,
-        durationS: durationMs / 1000,
+        tokensOut,
+        durationS,
       }
       await announceStageComplete(mastra, output)
       return output

@@ -13188,6 +13188,238 @@ three pieces are separately verifiable, so they are separate items.
       six stage nodes, and the module-level `set_event_context` /
       `clear_event_context` they read, which has no equivalent in a step that already
       receives `mastra`.
+
+      Split, because the 28 calls are neither evenly spread nor all the same shape:
+
+      ```
+      $ for f in research outline write edit ready images; do printf "%-9s %s\n" "$f" \
+          "$(grep -c 'await publish_stage_log(' api/src/pipeline/stages/$f.py)"; done
+      research  5
+      outline   3
+      write     3
+      edit      7
+      ready     3
+      images    7
+      ```
+
+      `outline`, `write` and `ready` write the same three lines in the same three
+      positions and share a writer. `research`'s five sit inside its validator retry
+      loop, `edit`'s seven inside its link-validation and quality passes, and `images`'
+      seven inside the nested workflow's three sub-steps, which have their own attempt
+      numbering. Porting them together would be one iteration touching every stage file.
+
+      - [x] 5.5c-iv-a `publishStageLog()` itself, plus the three stages whose call sites
+        are the same three lines: `outline`, `write` and `ready`.
+
+        `publishStageLog()` is in `web/src/mastra/steps/stage-io.ts`, beside the three
+        announcement writers that already live there, because it is the fourth thing a
+        stage writes about itself and shares both of their collaborators.
+
+        **Decision 1: the module-level context is deleted, not replaced.** Python's
+        stage nodes received a `PipelineState` dict and nothing else, so the runner
+        parked the Redis handle, the post id and the session factory in module globals
+        for them to read back:
+
+        ```
+        $ grep -rn "set_event_context\|clear_event_context" api/src --include=*.py
+        api/src/pipeline/helpers.py:31:def set_event_context(
+        api/src/pipeline/helpers.py:41:def clear_event_context() -> None:
+        api/src/worker.py:186:            set_event_context(redis, post_id, session_factory)
+        api/src/worker.py:190:            clear_event_context()
+        api/src/worker.py:316:        clear_event_context()
+        ```
+
+        A Mastra step's `execute` already receives `mastra`, and every call site already
+        has the post id, so both are arguments. Two things go with the globals. Python's
+        `if _event_redis is None ...: return` no-op branch has nothing left to test, so a
+        stage driven outside the runner now publishes and stores where Python silently
+        did neither. And the failure mode the globals carried, two runs in one process
+        sharing one post id, cannot be expressed.
+
+        **Decision 2: publish first, and let the append fail.** Both are Python's, and
+        both are the reverse of what `announceStageStart` and `announceStageComplete` do
+        (5.5c-i recorded that those two commit the row first because the dashboard
+        refetches the post on them). A progress line carries its whole content in the
+        payload, so there is nothing to refetch and nothing to race; and Python wrapped
+        only this call in `try/except`, at `logger.debug`, because a log line is not
+        worth failing a paid-for provider call over. The port keeps the swallow and logs
+        it through `mastra.getLogger()?.debug`.
+
+        **Decision 3: `f"{x:.1f}"` goes through `pythonRound` first.** The third line of
+        every stage renders the elapsed seconds to one decimal place, and a duration is
+        milliseconds divided by 1000, so 250ms and 750ms boundaries are exact ties at
+        one place. Python resolves those to even and `toFixed` resolves them away from
+        zero: `2.25` renders `2.2` in Python and `2.3` through `toFixed` alone. Same
+        reasoning as `roundSeconds` in 5.5b, same helper.
+
+        The nine call sites, in Python's own order relative to the stage body: after
+        `load_rules` and before `build_stage_prompt`, immediately before the provider
+        call, and once it has answered and before the runner saved the column. That last
+        position is why `tokensOut` and `durationS` are now named before the output
+        object rather than computed inside it: the line reports the same two numbers the
+        step returns, and computing them twice is how they drift.
+
+        A real event and its stored entry, written by `publishStageLog` against the real
+        database and read back off the column (post row inserted and deleted by the
+        probe; token count and duration are the fixture's, not a live call):
+
+        ```
+        {
+          "event": "log",
+          "post_id": "00000000-0000-4000-8000-0000000055f9",
+          "stage": "outline",
+          "message": "Rules loaded, building prompt...",
+          "level": "info",
+          "timestamp": "2026-08-23T01:27:15.366+00:00"
+        }
+        {
+          "ts": "2026-08-23T01:27:15.367+00:00",
+          "event": "log",
+          "level": "info",
+          "stage": "outline",
+          "message": "Rules loaded, building prompt..."
+        }
+        ```
+
+        **Measured while writing the tests: `received` in `pipeline-events.test.ts` is
+        not in delivery order.** Its subscriber awaits a row read before pushing the
+        event (5.5b's fix for a real flake), so the array's order is the order those
+        reads resolved in. A first draft asserting that every progress line lands
+        between its stage's `stage_start` and `stage_complete` failed on this run's own
+        data, which recorded `stage_complete`/`research` ahead of `stage_start`/`research`
+        and one `ready` log after `stage_complete`/`ready`. The SSE assertions are
+        therefore counts, and ordering is pinned on `execution_logs`, where the entry is
+        written by the publishing process itself. Logged in `todo.md`.
+
+        Pre-implementation, the new file against HEAD:
+
+        ```
+        $ npx vitest run src/mastra/steps/stage-log.test.ts --reporter=verbose
+        TypeError: (0 , __vite_ssr_import_3__.publishStageLog) is not a function
+         Test Files  1 failed (1)
+              Tests  9 failed (9)
+        ```
+
+        And the three stages' existing whole-sequence announcement assertions, which are
+        a behaviour change rather than a test edit:
+
+        ```
+        $ npx vitest run src/mastra/steps/outline.test.ts src/mastra/steps/write.test.ts \
+            src/mastra/steps/ready.test.ts
+         Test Files  3 failed (3)
+              Tests  3 failed | 34 passed (37)
+        ```
+
+        The writer's own suite, against the real database:
+
+        ```
+        $ npx vitest run src/mastra/steps/stage-log.test.ts --reporter=verbose
+         v publishStageLog > publishes Python's payload under the default `log` event name 17ms
+         v publishStageLog > stamps the timestamp in the offset form the stored entries use 2ms
+         v publishStageLog > writes the same line to execution_logs 3ms
+         v publishStageLog > carries a call site's own level and event name to both 2ms
+         v publishStageLog > carries `data` onto both the event and the entry 2ms
+         v publishStageLog > omits `data` from both when it is an empty object, per Python's `if data:` 4ms
+         v publishStageLog > publishes before it appends, which is the reverse of the stage announcements 5ms
+         v publishStageLog > swallows an append failure, reports it at debug, and still published 2ms
+         v publishStageLog > swallows an append failure with no logger configured at all 6ms
+         Test Files  1 passed (1)
+              Tests  9 passed (9)
+        ```
+
+        The real run, on a real evented engine, a real Redis Streams topic and the real
+        database (four new assertions, and the whole-trail assertion updated to
+        interleave three `log` entries per ported stage):
+
+        ```
+        $ npx vitest run src/mastra/pipeline-events.test.ts --reporter=verbose
+         v a run that executes every stage > delivers three progress lines for each ported stage and none for the others 0ms
+         v a run that executes every stage > carries Python's log payload and nothing else 0ms
+         v what a run writes to execution_logs > opens with the run, records a start and a complete per stage, then closes with the run 2ms
+         v what a run writes to execution_logs > carries each stage's three progress lines, in the order the node wrote them 2ms
+         v what a run writes to execution_logs > stores a progress line with no data key, as Python's `if data:` did 2ms
+         Test Files  1 passed (1)
+              Tests  40 passed (40)
+        ```
+
+        `failure-recorder.test.ts`'s whole-trail assertion on its real failing run also
+        changed, for the right reason: `write` now writes two of its three lines before
+        the stubbed provider throws, once per attempt.
+
+        ```
+        $ npx vitest run src/mastra/failure-recorder.test.ts
+         Test Files  1 passed (1)
+              Tests  35 passed (35)
+        ```
+
+        Negative controls, each reverted after measuring:
+
+        ```
+        # 1. append before publish, rather than after
+        Tests  1 failed | 8 passed (9)
+          x publishes before it appends, which is the reverse of the stage announcements
+
+        # 2. drop Python's `if data:` emptiness test, sending an empty object
+        Tests  1 failed | 8 passed (9)
+          x omits `data` from both when it is an empty object, per Python's `if data:`
+
+        # 3. remove the try/catch, letting an append failure out of the helper
+        Tests  2 failed | 7 passed (9)
+          x swallows an append failure, reports it at debug, and still published
+          x swallows an append failure with no logger configured at all
+
+        # 4. remove the three call sites from `write` only
+        Test Files  2 failed | 1 passed (3)
+        Tests  4 failed | 52 passed (56)
+          x write step announcement > announces the stage on the event bus, in Python's payload shape
+          x a run that executes every stage > delivers three progress lines for each ported stage and none for the others
+          x what a run writes to execution_logs > opens with the run, records a start and a complete per stage, then closes with the run
+          x what a run writes to execution_logs > carries each stage's three progress lines, in the order the node wrote them
+        ```
+
+        Stated blind spot: no test distinguishes `pythonRound(x, 1).toFixed(1)` from a
+        bare `toFixed(1)`. The two disagree only on durations that are exact multiples of
+        0.25 ending in .25 or .75, which is roughly 2 stage completions in 1000 and not
+        something a real elapsed time can be made to hit on demand. The reasoning is
+        recorded above and on the helper instead.
+
+        Gates:
+
+        ```
+        $ npx tsc --noEmit
+        TSC EXIT=0
+        (no output)
+
+        $ npx eslint
+        LINT EXIT=0
+        (no output)
+
+        $ npx vitest run
+         Test Files  2 failed | 91 passed (93)
+              Tests  9 failed | 1632 passed | 7 skipped (1648)
+        # 9 failed is the recorded baseline: 6 in image-preview.test.tsx and 3 in
+        # PostDetail.test.tsx, both pre-existing. Passing count 1618 -> 1632 (+14).
+
+        $ npx next build
+        BUILD EXIT=0
+        v Compiled successfully in 3.6s
+
+        $ cd api && uv run pytest -q
+        120 failed, 241 passed, 25 errors in 13.51s
+
+        $ cd api && uv run ruff check .
+        Found 32 errors.
+
+        $ cd api && uv run ruff format --check .
+        9 files would be reformatted, 131 files already formatted
+        ```
+
+      - [ ] 5.5c-iv-b `research`'s five call sites, which sit inside its validator retry
+        loop and so are written once per attempt rather than once per stage.
+      - [ ] 5.5c-iv-c `edit`'s seven call sites, which report the link-validation and
+        quality passes and are the only ones in the six stages that carry `data`.
+      - [ ] 5.5c-iv-d `images`' seven call sites, spread across the nested workflow's
+        three sub-steps, including the per-image lines inside the `.foreach()` fan-out.
   - [ ] 5.5d `GET /api/events/{post_id}` and `GET /api/events`, as Next.js route handlers
     serving `text/event-stream` in `use-sse.ts`'s named-event shape, subscribed to the
     topic rather than to an in-process stream.

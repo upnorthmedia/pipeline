@@ -15,9 +15,11 @@ import { STATUS_COMPLETE } from "../state"
 import {
   announceStageComplete,
   announceStageStart,
+  formatSeconds,
   gateResumeSchema,
   gateSuspendSchema,
   markRerunComplete,
+  publishStageLog,
   recordStageRetry,
   reviewGate,
   shouldRunStage,
@@ -45,11 +47,31 @@ export const writeStep = createStep({
       const gate = await reviewGate("write", inputData, state.stageSettings, resumeData)
       if (gate) return suspend(gate)
       await announceStageStart(mastra, "write", inputData)
-      const prompt = buildStagePrompt("write", loadRules("write"), state)
+      const rules = loadRules("write")
+      // Python's three progress lines, in the three positions
+      // `write_node` wrote them: after the rules are read, before the
+      // provider is called, and once it has answered.
+      await publishStageLog(mastra, postId, "write", "Rules loaded, building prompt...")
+      const prompt = buildStagePrompt("write", rules, state)
 
+      await publishStageLog(
+        mastra,
+        postId,
+        "write",
+        "Calling Claude for draft (up to 16k tokens)...",
+      )
       const startedAt = Date.now()
       const result = await mastra.getAgent("write").generate(prompt)
       const durationMs = Date.now() - startedAt
+
+      const tokensOut = result.usage?.outputTokens ?? 0
+      const durationS = durationMs / 1000
+      await publishStageLog(
+        mastra,
+        postId,
+        "write",
+        `Received ${tokensOut} tokens in ${formatSeconds(durationS)}s`,
+      )
 
       await saveStageOutput(postId, "write", result.text, { write: STATUS_COMPLETE })
       await markRerunComplete(inputData)
@@ -63,8 +85,8 @@ export const writeStep = createStep({
         // silent server-side alias shows up in the run trace.
         model: result.response?.modelId ?? "",
         tokensIn: result.usage?.inputTokens ?? 0,
-        tokensOut: result.usage?.outputTokens ?? 0,
-        durationS: durationMs / 1000,
+        tokensOut,
+        durationS,
       }
       await announceStageComplete(mastra, output)
       return output

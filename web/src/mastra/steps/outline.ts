@@ -16,9 +16,11 @@ import { STATUS_COMPLETE } from "../state"
 import {
   announceStageComplete,
   announceStageStart,
+  formatSeconds,
   gateResumeSchema,
   gateSuspendSchema,
   markRerunComplete,
+  publishStageLog,
   recordStageRetry,
   reviewGate,
   shouldRunStage,
@@ -46,11 +48,26 @@ export const outlineStep = createStep({
       const gate = await reviewGate("outline", inputData, state.stageSettings, resumeData)
       if (gate) return suspend(gate)
       await announceStageStart(mastra, "outline", inputData)
-      const prompt = buildStagePrompt("outline", loadRules("outline"), state)
+      const rules = loadRules("outline")
+      // Python's three progress lines, in the three positions
+      // `outline_node` wrote them: after the rules are read, before the
+      // provider is called, and once it has answered.
+      await publishStageLog(mastra, postId, "outline", "Rules loaded, building prompt...")
+      const prompt = buildStagePrompt("outline", rules, state)
 
+      await publishStageLog(mastra, postId, "outline", "Calling Claude for outline...")
       const startedAt = Date.now()
       const result = await mastra.getAgent("outline").generate(prompt)
       const durationMs = Date.now() - startedAt
+
+      const tokensOut = result.usage?.outputTokens ?? 0
+      const durationS = durationMs / 1000
+      await publishStageLog(
+        mastra,
+        postId,
+        "outline",
+        `Received ${tokensOut} tokens in ${formatSeconds(durationS)}s`,
+      )
 
       await saveStageOutput(postId, "outline", result.text, { outline: STATUS_COMPLETE })
       await markRerunComplete(inputData)
@@ -64,8 +81,8 @@ export const outlineStep = createStep({
         // silent server-side alias shows up in the run trace.
         model: result.response?.modelId ?? "",
         tokensIn: result.usage?.inputTokens ?? 0,
-        tokensOut: result.usage?.outputTokens ?? 0,
-        durationS: durationMs / 1000,
+        tokensOut,
+        durationS,
       }
       await announceStageComplete(mastra, output)
       return output

@@ -65,8 +65,13 @@ export interface ExecutionLogEntry {
  * left as it is rather than padded with zeros: the padding would claim
  * precision the runtime does not have, and its only effect on the string
  * comparison is to move an entry within the millisecond it was already in.
+ *
+ * Exported because `publishStageLog()` stamps the same shape into its SSE
+ * payload's `timestamp`: Python called `datetime.now(UTC).isoformat()` in both
+ * places, so an entry and the event announcing it carry the same rendering of
+ * the clock even though they read it twice.
  */
-function nowIso(): string {
+export function nowIso(): string {
   return new Date().toISOString().replace("Z", "+00:00")
 }
 
