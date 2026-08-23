@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import parity from "./data/wp-html-html-parity.json";
-import { UnportedMarkdownError, markdownToWpHtml } from "./wp-html";
+import { MissingRendererError, markdownToWpHtml } from "./wp-html";
 
 /**
  * `markdown_to_wp_html`'s raw-HTML handling, replayed against the real Python
@@ -42,8 +42,9 @@ describe("rule 7's decline path", () => {
    * through to the paragraph fallback. There is no rendered output to compare:
    * the inline parse produces an `inline_html` token and `_GutenbergRenderer`
    * has no method for it, so the real function raises `AttributeError`. The
-   * oracle records that, and the port reaches the same layer and throws there
-   * because the inline rules are ledger item -b-iii.
+   * oracle records that, and since ledger item -b-iii-b ported the inline
+   * `inline_html` rule the port now raises in the same place for the same
+   * reason rather than stopping short at an unported rule.
    */
 
   it("records four declines that crash the real renderer", () => {
@@ -63,8 +64,8 @@ describe("rule 7's decline path", () => {
       } catch (error) {
         thrown = error;
       }
-      expect(thrown).toBeInstanceOf(UnportedMarkdownError);
-      expect((thrown as UnportedMarkdownError).rule).toBe("inline_html");
+      expect(thrown).toBeInstanceOf(MissingRendererError);
+      expect((thrown as MissingRendererError).tokenType).toBe("inline_html");
     },
   );
 });

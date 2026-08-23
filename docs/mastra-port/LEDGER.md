@@ -10715,10 +10715,157 @@ three pieces are separately verifiable, so they are separate items.
               `4 failed, 205 passed, 177 errors`. The baseline numbers above are the
               env-sourced run.
 
-            - [ ] 5.3c-iii-b-1-b-iii-b `auto_link`, `auto_email` and `inline_html`, plus
+            - [x] 5.3c-iii-b-1-b-iii-b `auto_link`, `auto_email` and `inline_html`, plus
               the `link` renderer method and the `in_link` flag `inline_html` toggles.
               `_GutenbergRenderer` has no `inline_html` method, so the oracle pins the
               `AttributeError` rather than an HTML string.
+
+              `web/src/mastra/wordpress/wp-html.ts` gains `parseAutoLink`,
+              `parseAutoEmail`, `addAutoLink`, `parseInlineHtml`, their three dispatch
+              arms, the renderer's `link` case and `MissingRendererError`. Two small
+              exports were added for the parity surfaces the rendered HTML cannot
+              reach: `parseInlineTokens` and `renderTokens`.
+
+              **These three rules are the `in_link` rules, and `in_link` has no output
+              of its own.** Inside an anchor an autolink is not a link, it is the
+              literal text it was written as, so `<a href="/x"><https://e.example>`
+              yields a text token. The rule that sets the flag is `inline_html`, and
+              that is also the one inline token `_GutenbergRenderer` has no method for,
+              so mistune's `BaseRenderer._get_method` raises
+              `AttributeError: No renderer "'inline_html'"` before anything is
+              rendered. The flag is therefore unobservable through
+              `markdown_to_wp_html`, which is why the oracle has three corpora rather
+              than one.
+
+              **Oracle.** `api/scripts/export_wp_html_inline_autolink_parity.py` writes
+              `web/src/mastra/wordpress/data/wp-html-inline-autolink-parity.json`:
+
+              * 81 `html_cases`, whole documents through the real
+                `markdown_to_wp_html`. 66 pin the HTML, 15 pin the `AttributeError`.
+              * 19 `token_cases`, single inline strings through mistune's own
+                `InlineParser.__call__`. This is the only surface `in_link` is visible
+                on.
+              * 6 `render_cases`, single `link` tokens through
+                `_GutenbergRenderer.link`. `_add_auto_link` never sets a title, so the
+                method's title branch has no input until the `link` rule lands in
+                -iii-d; pinning it against the real method now keeps the ported method
+                whole rather than half written.
+
+              The script refuses to write any case that reaches `emphasis` or `link`,
+              the two rules still unported, so nothing here is a silently pinned
+              expectation.
+
+              Four behaviours worth naming, each pinned by a case and a mutation:
+
+              1. `escape_url` runs on the href and on the href only. It is
+                 `quote(unescape(link))`, so `<https://e.example/?a=1&amp;b=2>` gets a
+                 href of `?a=1&b=2` while the label keeps the entity it was written
+                 with, and a non-ASCII path is percent encoded in the href alone.
+              2. Rule order breaks the tie at one offset: `auto_link` is listed before
+                 `auto_email`, so `<mailto:a@example.com>` is an autolink whose label
+                 keeps the scheme, not an email whose label drops it.
+              3. Python matches the four literal prefixes `"<a "`, `"<a>"`, `"<A "`,
+                 `"<A>"` rather than parsing the tag, so `<a\n>` is a valid opening
+                 anchor that toggles nothing. The port copies the literals.
+              4. `_GutenbergRenderer.text` returns `raw`, so a string that fails every
+                 inline rule reaches the paragraph with its angle brackets unescaped:
+                 `<a:x>` renders as `<p><a:x></p>`.
+
+              **A case-naming correction found while building the corpus.** Two cases
+              were written expecting `<span>a</span>` and `<a href="/x">y</a>` on their
+              own line to be block HTML. They are not. Block rule kind 6 needs a block
+              tag name, and kind 7 needs the tag alone on its line, so both decline,
+              fall back to a paragraph and raise out of the inline layer. The cases were
+              renamed to say so and two genuinely-block variants (`<div>a</div>`,
+              `<span>\na\n</span>`) were added beside them.
+
+              **Three existing tests changed, because the behaviour they asserted is
+              the behaviour this item implements.** `wp-html-blocks.test.ts` and
+              `wp-html-inline-escape-codespan.test.ts` each listed `auto_link`,
+              `auto_email` and `inline_html` among the rules that throw
+              `UnportedMarkdownError`; those three entries are removed and `emphasis`
+              and `link` remain. `wp-html-raw-html.test.ts`'s five rule-7 decline cases
+              asserted `UnportedMarkdownError("inline_html")`; they now assert
+              `MissingRendererError` with `tokenType === "inline_html"`, which is
+              exactly where and why Python fails on the same input. No expectation was
+              weakened.
+
+              ```
+              $ cd api && PYTHONPATH=. uv run python \
+                  scripts/export_wp_html_inline_autolink_parity.py
+              wrote 81 html cases (15 of them raising) and 19 token cases and 6 render
+              cases to .../web/src/mastra/wordpress/data/wp-html-inline-autolink-parity.json
+
+              $ cd web && pnpm exec vitest run src/mastra/wordpress/wp-html-inline-autolink.test.ts
+               ✓ src/mastra/wordpress/wp-html-inline-autolink.test.ts (121 tests) 8ms
+               Test Files  1 passed (1)
+                    Tests  121 passed (121)
+
+              $ cd web && pnpm exec vitest run src/mastra/wordpress/
+               Test Files  10 passed (10)
+                    Tests  1068 passed (1068)
+              ```
+
+              **Mutation testing.** Thirteen mutations of the new code, each run against
+              the whole `src/mastra/wordpress/` suite. All thirteen were caught:
+
+              ```
+              $ python3 /tmp/mut_autolink.py
+              CAUGHT  auto_link ignores in_link
+              CAUGHT  auto_link keeps the closing bracket
+              CAUGHT  auto_email drops the mailto scheme
+              CAUGHT  auto_email ignores in_link
+              CAUGHT  href is not escaped
+              CAUGHT  label is escaped too
+              CAUGHT  open anchor is matched by prefix rather than literals
+              CAUGHT  close anchor never clears in_link
+              CAUGHT  inline_html renders instead of raising
+              CAUGHT  link renderer always emits a title
+              CAUGHT  link renderer treats an empty title as present
+              CAUGHT  auto_email is tried before auto_link
+              CAUGHT  inline_html does not advance past the tag
+              exit=0
+              ```
+
+              **Gates.** Frontend:
+
+              ```
+              $ cd web && pnpm exec tsc --noEmit
+              tsc exit=0
+              $ cd web && pnpm lint
+              lint exit=0
+              $ cd web && pnpm test   (three consecutive runs)
+               Test Files  2 failed | 111 passed (113)   Tests   9 failed | 3260 passed | 7 skipped (3276)
+               Test Files  3 failed | 110 passed (113)   Tests  10 failed | 3259 passed | 7 skipped (3276)
+               Test Files  2 failed | 111 passed (113)   Tests   9 failed | 3260 passed | 7 skipped (3276)
+              $ cd web && pnpm build
+              build exit=0
+              ```
+
+              The 9-failure floor is the recorded baseline: the 6 known
+              `image-preview.test.tsx` failures plus 3 flaky `PostDetail.test.tsx`
+              tests. The tenth failure in the middle run is
+              `scaffold-check.test.ts > emits the workflow lifecycle events the trace
+              view will read`, already logged in `todo.md` as an intermittent. No
+              `src/mastra/wordpress/` test is among any of them. Total test count rises
+              3158 -> 3276: this item's 121 new tests, less the 3 removed entries from
+              the two unported-rule lists.
+
+              Backend, unchanged at its baseline (this iteration adds one script under
+              `api/scripts/`, formatted and linted below):
+
+              ```
+              $ cd api && set -a && . ../.env && set +a && uv run pytest -q
+              120 failed, 241 passed, 25 errors in 15.08s
+              $ cd api && uv run ruff check .
+              Found 32 errors.
+              $ cd api && uv run ruff format --check .
+              9 files would be reformatted, 143 files already formatted
+              $ cd api && uv run ruff check scripts/export_wp_html_inline_autolink_parity.py
+              All checks passed!
+              $ cd api && uv run ruff format --check scripts/export_wp_html_inline_autolink_parity.py
+              1 file already formatted
+              ```
             - [ ] 5.3c-iii-b-1-b-iii-c `emphasis` and `strong`, their renderer methods
               and `precedence_scan`.
             - [ ] 5.3c-iii-b-1-b-iii-d `link` and `image`, `parse_link_label`,

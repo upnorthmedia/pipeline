@@ -1,0 +1,936 @@
+{
+  "generated_by": "api/scripts/export_wp_html_inline_autolink_parity.py",
+  "source": "api/src/services/wp_html.py::markdown_to_wp_html",
+  "token_source": "mistune.InlineParser.__call__",
+  "mistune_version": "3.2.0",
+  "scope": "the inline auto_link, auto_email and inline_html rules, the link renderer method and the in_link flag",
+  "html_cases": [
+    {
+      "name": "plain https autolink",
+      "markdown": "<https://example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://example.com\">https://example.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink with surrounding text",
+      "markdown": "see <https://example.com> now\n",
+      "html": "<!-- wp:paragraph -->\n<p>see <a href=\"https://example.com\">https://example.com</a> now</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink with a path",
+      "markdown": "<https://example.com/a/b>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://example.com/a/b\">https://example.com/a/b</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink with a query string",
+      "markdown": "<https://example.com/a?b=c>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://example.com/a?b=c\">https://example.com/a?b=c</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink with a fragment",
+      "markdown": "<https://example.com/a#b>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://example.com/a#b\">https://example.com/a#b</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink with a port",
+      "markdown": "<https://example.com:8443/a>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://example.com:8443/a\">https://example.com:8443/a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink with credentials",
+      "markdown": "<https://u:p@example.com/a>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://u:p@example.com/a\">https://u:p@example.com/a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "http autolink",
+      "markdown": "<http://example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"http://example.com\">http://example.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "ftp autolink",
+      "markdown": "<ftp://example.com/pub>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"ftp://example.com/pub\">ftp://example.com/pub</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "mailto autolink beats auto_email",
+      "markdown": "<mailto:a@example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"mailto:a@example.com\">mailto:a@example.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "uppercase scheme",
+      "markdown": "<HTTPS://EXAMPLE.COM>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"HTTPS://EXAMPLE.COM\">HTTPS://EXAMPLE.COM</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "mixed case scheme",
+      "markdown": "<HtTps://example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"HtTps://example.com\">HtTps://example.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "scheme with a plus",
+      "markdown": "<coap+tcp://example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"coap+tcp://example.com\">coap+tcp://example.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "scheme with a dot and a dash",
+      "markdown": "<a.b-c://example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"a.b-c://example.com\">a.b-c://example.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "shortest possible scheme is two characters",
+      "markdown": "<ab:x>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"ab:x\">ab:x</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "one character scheme is not an autolink",
+      "markdown": "<a:x>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a:x></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "thirty two character scheme",
+      "markdown": "<aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa://x>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa://x\">aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa://x</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "thirty three character scheme is not an autolink",
+      "markdown": "<aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa://x>\n",
+      "html": "<!-- wp:paragraph -->\n<p><aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa://x></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "scheme starting with a digit is not an autolink",
+      "markdown": "<1ab://x>\n",
+      "html": "<!-- wp:paragraph -->\n<p><1ab://x></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "empty body after the scheme",
+      "markdown": "<https:>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https:\">https:</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a space stops the autolink",
+      "markdown": "<https://example.com/a b>\n",
+      "html": "<!-- wp:paragraph -->\n<p><https://example.com/a b></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a newline stops the autolink",
+      "markdown": "<https://example.com/a\nb>\n",
+      "html": "<!-- wp:paragraph -->\n<p><https://example.com/a\nb></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an angle bracket stops the autolink and opens a tag",
+      "markdown": "<https://example.com/a<b>\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "a tab stops the autolink",
+      "markdown": "<https://example.com/a\tb>\n",
+      "html": "<!-- wp:paragraph -->\n<p><https://example.com/a\tb></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink whose href needs percent encoding",
+      "markdown": "<https://example.com/caf\u00e9>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://example.com/caf%C3%A9\">https://example.com/caf\u00e9</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink holding an html entity",
+      "markdown": "<https://example.com/?a=1&amp;b=2>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://example.com/?a=1&b=2\">https://example.com/?a=1&amp;b=2</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink holding a numeric entity",
+      "markdown": "<https://example.com/?a=&#38;>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://example.com/?a=&\">https://example.com/?a=&#38;</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink already percent encoded",
+      "markdown": "<https://example.com/a%20b>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://example.com/a%20b\">https://example.com/a%20b</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink with a percent that is not an escape",
+      "markdown": "<https://example.com/100%>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://example.com/100%\">https://example.com/100%</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink holding a double quote",
+      "markdown": "<https://example.com/a\"b>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://example.com/a%22b\">https://example.com/a\"b</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink holding a single quote",
+      "markdown": "<https://example.com/a'b>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://example.com/a%27b\">https://example.com/a'b</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink holding a bracket",
+      "markdown": "<https://example.com/a[b]>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://example.com/a%5Bb%5D\">https://example.com/a[b]</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink holding a tilde and a plus",
+      "markdown": "<https://example.com/a~b+c>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://example.com/a~b+c\">https://example.com/a~b+c</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink holding a semicolon and a comma",
+      "markdown": "<https://example.com/a;b,c>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://example.com/a;b,c\">https://example.com/a;b,c</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "plain email autolink",
+      "markdown": "<user@example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"mailto:user@example.com\">user@example.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "email with a dot in the local part",
+      "markdown": "<first.last@example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"mailto:first.last@example.com\">first.last@example.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "email with a plus tag",
+      "markdown": "<user+tag@example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"mailto:user+tag@example.com\">user+tag@example.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "email with punctuation in the local part",
+      "markdown": "<a!#$%&'*/=?^_`{|}~-@example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"mailto:a!#$%&%27*/=?%5E_%60%7B%7C%7D~-@example.com\">a!#$%&'*/=?^_`{|}~-@example.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "email with a two label domain",
+      "markdown": "<user@example.co.uk>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"mailto:user@example.co.uk\">user@example.co.uk</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "email with a single label domain",
+      "markdown": "<user@localhost>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"mailto:user@localhost\">user@localhost</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "email with a hyphenated domain",
+      "markdown": "<user@ex-ample.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"mailto:user@ex-ample.com\">user@ex-ample.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "uppercase email",
+      "markdown": "<USER@EXAMPLE.COM>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"mailto:USER@EXAMPLE.COM\">USER@EXAMPLE.COM</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "email with a digit only domain label",
+      "markdown": "<user@123.example>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"mailto:user@123.example\">user@123.example</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "email with no local part is not an email",
+      "markdown": "<@example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p><@example.com></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "email with no domain is not an email",
+      "markdown": "<user@>\n",
+      "html": "<!-- wp:paragraph -->\n<p><user@></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "email with a trailing dot domain is not an email",
+      "markdown": "<user@example.>\n",
+      "html": "<!-- wp:paragraph -->\n<p><user@example.></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "email with a space is not an email",
+      "markdown": "<user @example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p><user @example.com></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink inside an atx heading",
+      "markdown": "# See <https://example.com>\n",
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>See <a href=\"https://example.com\">https://example.com</a></h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "autolink inside a setext heading",
+      "markdown": "See <https://example.com>\n===\n",
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>See <a href=\"https://example.com\">https://example.com</a></h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "autolink inside a list item",
+      "markdown": "- see <https://example.com>\n",
+      "html": "<!-- wp:list -->\n<ul><li>see <a href=\"https://example.com\">https://example.com</a></li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "autolink inside an ordered list item",
+      "markdown": "1. see <https://example.com>\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>see <a href=\"https://example.com\">https://example.com</a></li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "autolink inside a block quote",
+      "markdown": "> see <https://example.com>\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>see <a href=\"https://example.com\">https://example.com</a></p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "email inside a list item",
+      "markdown": "- write <user@example.com>\n",
+      "html": "<!-- wp:list -->\n<ul><li>write <a href=\"mailto:user@example.com\">user@example.com</a></li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "two autolinks on one line",
+      "markdown": "<https://a.example> <https://b.example>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://a.example\">https://a.example</a> <a href=\"https://b.example\">https://b.example</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an autolink and an email",
+      "markdown": "<https://a.example> <u@b.example>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://a.example\">https://a.example</a> <a href=\"mailto:u@b.example\">u@b.example</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink across a soft break",
+      "markdown": "a\n<https://example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p>a\n<a href=\"https://example.com\">https://example.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink after a hard break",
+      "markdown": "a  \n<https://example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p>a<br />\n<a href=\"https://example.com\">https://example.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped angle bracket is not an autolink",
+      "markdown": "\\<https://example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p><https://example.com></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink next to a codespan",
+      "markdown": "`a` <https://example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a</code> <a href=\"https://example.com\">https://example.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan swallows an autolink",
+      "markdown": "`<https://example.com>`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code><https://example.com></code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink does not survive into a fenced code block",
+      "markdown": "```\n<https://x.example>\n```\n",
+      "html": "<!-- wp:code -->\n<pre class=\"wp-block-code\"><code><https://x.example>\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "autolink after frontmatter is stripped",
+      "markdown": "---\nt: x\n---\n<https://example.com>\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"https://example.com\">https://example.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink with crlf line endings",
+      "markdown": "see <https://example.com>\r\n",
+      "html": "<!-- wp:paragraph -->\n<p>see <a href=\"https://example.com\">https://example.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink with no trailing newline",
+      "markdown": "see <https://example.com>",
+      "html": "<!-- wp:paragraph -->\n<p>see <a href=\"https://example.com\">https://example.com</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "block tag at the start of a line is a block",
+      "markdown": "<div>a</div>\n",
+      "html": "<!-- wp:html -->\n<div>a</div>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "block tag alone on its line is a block",
+      "markdown": "<span>\na\n</span>\n",
+      "html": "<!-- wp:html -->\n<span>\na\n</span>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "inline tag with text after it on the line is not a block",
+      "markdown": "<span>a</span>\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "anchor with text after it on the line is not a block",
+      "markdown": "<a href=\"/x\">y</a>\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "open tag inside a paragraph",
+      "markdown": "a <span>b\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "close tag inside a paragraph",
+      "markdown": "a </span> b\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "self closing tag inside a paragraph",
+      "markdown": "a <br/> b\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "open tag with attributes inside a paragraph",
+      "markdown": "a <img src=\"x\" alt=\"y\"> b\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "anchor inside a paragraph",
+      "markdown": "see <a href=\"/x\">y</a> now\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "comment inside a paragraph",
+      "markdown": "a <!-- c --> b\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "processing instruction inside a paragraph",
+      "markdown": "a <?php echo 1; ?> b\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "doctype inside a paragraph",
+      "markdown": "a <!DOCTYPE html> b\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "cdata inside a paragraph",
+      "markdown": "a <![CDATA[x]]> b\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "tag inside a heading",
+      "markdown": "# a <span>b\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "tag inside a list item",
+      "markdown": "- a <span>b\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "unclosed angle bracket is not a tag",
+      "markdown": "a < b\n",
+      "html": "<!-- wp:paragraph -->\n<p>a < b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a tag name that is not html is still a tag",
+      "markdown": "a <weird-tag> b\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    }
+  ],
+  "token_cases": [
+    {
+      "name": "autolink token",
+      "src": "<https://example.com>",
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "https://example.com"
+            }
+          ],
+          "attrs": {
+            "url": "https://example.com"
+          }
+        }
+      ]
+    },
+    {
+      "name": "autolink token needing escaping",
+      "src": "<https://example.com/caf\u00e9?x=1&amp;y=2>",
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "https://example.com/caf\u00e9?x=1&amp;y=2"
+            }
+          ],
+          "attrs": {
+            "url": "https://example.com/caf%C3%A9?x=1&y=2"
+          }
+        }
+      ]
+    },
+    {
+      "name": "email token",
+      "src": "<user@example.com>",
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "user@example.com"
+            }
+          ],
+          "attrs": {
+            "url": "mailto:user@example.com"
+          }
+        }
+      ]
+    },
+    {
+      "name": "mailto autolink token",
+      "src": "<mailto:user@example.com>",
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "mailto:user@example.com"
+            }
+          ],
+          "attrs": {
+            "url": "mailto:user@example.com"
+          }
+        }
+      ]
+    },
+    {
+      "name": "lowercase open anchor turns in_link on",
+      "src": "<a href=\"/x\"><https://e.example>",
+      "tokens": [
+        {
+          "type": "inline_html",
+          "raw": "<a href=\"/x\">"
+        },
+        {
+          "type": "text",
+          "raw": "<https://e.example>"
+        }
+      ]
+    },
+    {
+      "name": "bare open anchor turns in_link on",
+      "src": "<a><https://e.example>",
+      "tokens": [
+        {
+          "type": "inline_html",
+          "raw": "<a>"
+        },
+        {
+          "type": "text",
+          "raw": "<https://e.example>"
+        }
+      ]
+    },
+    {
+      "name": "uppercase open anchor turns in_link on",
+      "src": "<A HREF=\"/x\"><https://e.example>",
+      "tokens": [
+        {
+          "type": "inline_html",
+          "raw": "<A HREF=\"/x\">"
+        },
+        {
+          "type": "text",
+          "raw": "<https://e.example>"
+        }
+      ]
+    },
+    {
+      "name": "bare uppercase open anchor turns in_link on",
+      "src": "<A><https://e.example>",
+      "tokens": [
+        {
+          "type": "inline_html",
+          "raw": "<A>"
+        },
+        {
+          "type": "text",
+          "raw": "<https://e.example>"
+        }
+      ]
+    },
+    {
+      "name": "close anchor turns in_link off",
+      "src": "<a href=\"/x\"></a><https://e.example>",
+      "tokens": [
+        {
+          "type": "inline_html",
+          "raw": "<a href=\"/x\">"
+        },
+        {
+          "type": "inline_html",
+          "raw": "</a>"
+        },
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "https://e.example"
+            }
+          ],
+          "attrs": {
+            "url": "https://e.example"
+          }
+        }
+      ]
+    },
+    {
+      "name": "spaced close anchor turns in_link off",
+      "src": "<a href=\"/x\"></a ><https://e.example>",
+      "tokens": [
+        {
+          "type": "inline_html",
+          "raw": "<a href=\"/x\">"
+        },
+        {
+          "type": "inline_html",
+          "raw": "</a >"
+        },
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "https://e.example"
+            }
+          ],
+          "attrs": {
+            "url": "https://e.example"
+          }
+        }
+      ]
+    },
+    {
+      "name": "uppercase close anchor turns in_link off",
+      "src": "<A HREF=\"/x\"></A><https://e.example>",
+      "tokens": [
+        {
+          "type": "inline_html",
+          "raw": "<A HREF=\"/x\">"
+        },
+        {
+          "type": "inline_html",
+          "raw": "</A>"
+        },
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "https://e.example"
+            }
+          ],
+          "attrs": {
+            "url": "https://e.example"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a newline after the tag name does not toggle",
+      "src": "<a\n><https://e.example>",
+      "tokens": [
+        {
+          "type": "inline_html",
+          "raw": "<a\n>"
+        },
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "https://e.example"
+            }
+          ],
+          "attrs": {
+            "url": "https://e.example"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a tab after the tag name does not toggle",
+      "src": "<a\t><https://e.example>",
+      "tokens": [
+        {
+          "type": "inline_html",
+          "raw": "<a\t>"
+        },
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "https://e.example"
+            }
+          ],
+          "attrs": {
+            "url": "https://e.example"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a self closing anchor does not toggle",
+      "src": "<a/><https://e.example>",
+      "tokens": [
+        {
+          "type": "inline_html",
+          "raw": "<a/>"
+        },
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "https://e.example"
+            }
+          ],
+          "attrs": {
+            "url": "https://e.example"
+          }
+        }
+      ]
+    },
+    {
+      "name": "another tag does not toggle",
+      "src": "<b><https://e.example>",
+      "tokens": [
+        {
+          "type": "inline_html",
+          "raw": "<b>"
+        },
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "https://e.example"
+            }
+          ],
+          "attrs": {
+            "url": "https://e.example"
+          }
+        }
+      ]
+    },
+    {
+      "name": "an email inside an anchor is text too",
+      "src": "<a href=\"/x\"><u@e.example>",
+      "tokens": [
+        {
+          "type": "inline_html",
+          "raw": "<a href=\"/x\">"
+        },
+        {
+          "type": "text",
+          "raw": "<u@e.example>"
+        }
+      ]
+    },
+    {
+      "name": "in_link survives text between the tag and the autolink",
+      "src": "<a href=\"/x\">go <https://e.example>",
+      "tokens": [
+        {
+          "type": "inline_html",
+          "raw": "<a href=\"/x\">"
+        },
+        {
+          "type": "text",
+          "raw": "go "
+        },
+        {
+          "type": "text",
+          "raw": "<https://e.example>"
+        }
+      ]
+    },
+    {
+      "name": "in_link does not leak across two anchors",
+      "src": "<a href=\"/x\"></a>a<https://e.example>",
+      "tokens": [
+        {
+          "type": "inline_html",
+          "raw": "<a href=\"/x\">"
+        },
+        {
+          "type": "inline_html",
+          "raw": "</a>"
+        },
+        {
+          "type": "text",
+          "raw": "a"
+        },
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "https://e.example"
+            }
+          ],
+          "attrs": {
+            "url": "https://e.example"
+          }
+        }
+      ]
+    },
+    {
+      "name": "comment does not toggle in_link",
+      "src": "<!-- c --><https://e.example>",
+      "tokens": [
+        {
+          "type": "inline_html",
+          "raw": "<!-- c -->"
+        },
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "https://e.example"
+            }
+          ],
+          "attrs": {
+            "url": "https://e.example"
+          }
+        }
+      ]
+    }
+  ],
+  "render_cases": [
+    {
+      "name": "link with no title",
+      "token": {
+        "type": "link",
+        "children": [
+          {
+            "type": "text",
+            "raw": "label"
+          }
+        ],
+        "attrs": {
+          "url": "https://example.com"
+        }
+      },
+      "html": "<a href=\"https://example.com\">label</a>"
+    },
+    {
+      "name": "link with a title",
+      "token": {
+        "type": "link",
+        "children": [
+          {
+            "type": "text",
+            "raw": "label"
+          }
+        ],
+        "attrs": {
+          "url": "https://example.com",
+          "title": "t"
+        }
+      },
+      "html": "<a href=\"https://example.com\" title=\"t\">label</a>"
+    },
+    {
+      "name": "link with a null title renders as no title",
+      "token": {
+        "type": "link",
+        "children": [
+          {
+            "type": "text",
+            "raw": "label"
+          }
+        ],
+        "attrs": {
+          "url": "https://example.com",
+          "title": null
+        }
+      },
+      "html": "<a href=\"https://example.com\">label</a>"
+    },
+    {
+      "name": "link with an empty title renders as no title",
+      "token": {
+        "type": "link",
+        "children": [
+          {
+            "type": "text",
+            "raw": "label"
+          }
+        ],
+        "attrs": {
+          "url": "https://example.com",
+          "title": ""
+        }
+      },
+      "html": "<a href=\"https://example.com\">label</a>"
+    },
+    {
+      "name": "link with no children",
+      "token": {
+        "type": "link",
+        "children": [],
+        "attrs": {
+          "url": "https://example.com"
+        }
+      },
+      "html": "<a href=\"https://example.com\"></a>"
+    },
+    {
+      "name": "link whose url and title are interpolated raw",
+      "token": {
+        "type": "link",
+        "children": [
+          {
+            "type": "text",
+            "raw": "a & b"
+          }
+        ],
+        "attrs": {
+          "url": "x\"y",
+          "title": "a\"b"
+        }
+      },
+      "html": "<a href=\"x\"y\" title=\"a\"b\">a & b</a>"
+    }
+  ]
+}

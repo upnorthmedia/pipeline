@@ -60,9 +60,16 @@
  * when the code is not blank. A backtick inside a backtick fence's info string
  * declines the fence, and the paragraph it falls back to lands here.
  *
- * Not ported yet: `emphasis` (5.3c-iii-b-1-b-iii-c), `link` and `image`
- * (5.3c-iii-b-1-b-iii-d), and `auto_link`, `auto_email` and `inline_html`
- * (5.3c-iii-b-1-b-iii-b). Their *patterns* are registered here in mistune's rule
+ * Ported here too (ledger 5.3c-iii-b-1-b-iii-b): `auto_link`, `auto_email` and
+ * `inline_html`, the three rules that turn on `in_link`. Inside an anchor an
+ * autolink is not a link, it is the text it was written as, which is what stops
+ * a hand written `<a>` from nesting a second one. `inline_html` is also the one
+ * inline token `_GutenbergRenderer` has no method for, so any document holding
+ * a tag inside a paragraph raises out of the renderer rather than converting;
+ * `MissingRendererError` is where mistune raises `AttributeError`.
+ *
+ * Not ported yet: `emphasis` (5.3c-iii-b-1-b-iii-c), and `link` and `image`
+ * (5.3c-iii-b-1-b-iii-d). Their *patterns* are registered here in mistune's rule
  * order, because rule order is what decides which of two rules matching at the
  * same offset wins, and their handlers throw `UnportedMarkdownError`. A
  * half-ported converter that silently dropped a link would be worse than one
@@ -91,7 +98,7 @@
 import { escapeUrl } from "./escape-url";
 
 /** A mistune token. `text` is inline source, `raw` is not parsed further. */
-type Token = {
+export type Token = {
   type: string;
   raw?: string;
   text?: string;
@@ -102,6 +109,8 @@ type Token = {
     depth?: number;
     ordered?: boolean;
     start?: number;
+    url?: string;
+    title?: string | null;
   };
   style?: string;
   marker?: string;
@@ -125,6 +134,26 @@ export class UnportedMarkdownError extends Error {
     );
     this.name = "UnportedMarkdownError";
     this.rule = rule;
+  }
+}
+
+/**
+ * Thrown where mistune's `BaseRenderer._get_method` raises
+ * `AttributeError: No renderer "'<type>'"`.
+ *
+ * `_GutenbergRenderer` deliberately implements only the token types the
+ * pipeline's own markdown produces, so an `inline_html` token, which is what a
+ * hand written tag inside a paragraph becomes, aborts the whole conversion in
+ * Python. The port raises in the same place rather than inventing an output for
+ * it.
+ */
+export class MissingRendererError extends Error {
+  readonly tokenType: string;
+
+  constructor(tokenType: string) {
+    super(`markdownToWpHtml: no renderer for "${tokenType}"`);
+    this.name = "MissingRendererError";
+    this.tokenType = tokenType;
   }
 }
 
@@ -1308,9 +1337,6 @@ const INLINE_SC = compileSc(INLINE_SPECIFICATION, INLINE_RULES, "g");
 const UNPORTED_INLINE_RULES: Record<string, string> = {
   emphasis: "5.3c-iii-b-1-b-iii-c",
   link: "5.3c-iii-b-1-b-iii-d",
-  auto_link: "5.3c-iii-b-1-b-iii-b",
-  auto_email: "5.3c-iii-b-1-b-iii-b",
-  inline_html: "5.3c-iii-b-1-b-iii-b",
 };
 
 /** `InlineState`. */
@@ -1381,6 +1407,69 @@ function parseCodespan(m: RegExpExecArray, state: InlineState): number {
   return end.lastIndex;
 }
 
+/** `InlineParser._add_auto_link`. */
+function addAutoLink(url: string, text: string, state: InlineState): void {
+  state.appendToken({
+    type: "link",
+    children: [{ type: "text", raw: text }],
+    attrs: { url: escapeUrl(url) },
+  });
+}
+
+/**
+ * `InlineParser.parse_auto_link`.
+ *
+ * Inside an `<a>` the autolink is not a link, it is the text it was written as,
+ * angle brackets and all. Outside one the brackets come off and the same string
+ * is both the href and the label, with `escape_url` applied to the href only.
+ */
+function parseAutoLink(m: RegExpExecArray, state: InlineState): number {
+  const text = m[0];
+  const pos = m.index + text.length;
+  if (state.inLink) {
+    processText(text, state);
+    return pos;
+  }
+  const inner = text.slice(1, -1);
+  addAutoLink(inner, inner, state);
+  return pos;
+}
+
+/** `InlineParser.parse_auto_email`: the same, with a `mailto:` href. */
+function parseAutoEmail(m: RegExpExecArray, state: InlineState): number {
+  const text = m[0];
+  const pos = m.index + text.length;
+  if (state.inLink) {
+    processText(text, state);
+    return pos;
+  }
+  const inner = text.slice(1, -1);
+  addAutoLink(`mailto:${inner}`, inner, state);
+  return pos;
+}
+
+/**
+ * `InlineParser.parse_inline_html`.
+ *
+ * The tag is kept verbatim in an `inline_html` token, which
+ * `_GutenbergRenderer` has no method for, so rendering one raises. The side
+ * effect is the point: an opening `<a>` turns `in_link` on for the rest of the
+ * inline run and a closing one turns it back off, which is how a hand written
+ * anchor stops an autolink inside it from nesting a second `<a>`. Python tests
+ * the four literal prefixes rather than parsing the tag, so `<a\n>` toggles
+ * nothing even though it is a valid opening anchor.
+ */
+function parseInlineHtml(m: RegExpExecArray, state: InlineState): number {
+  const html = m[0];
+  state.appendToken({ type: "inline_html", raw: html });
+  if (["<a ", "<a>", "<A ", "<A>"].some((p) => html.startsWith(p))) {
+    state.inLink = true;
+  } else if (["</a ", "</a>", "</A ", "</A>"].some((p) => html.startsWith(p))) {
+    state.inLink = false;
+  }
+  return m.index + html.length;
+}
+
 /** `Parser.parse_method`: dispatch on the rule whose alternative matched. */
 function parseInlineMethod(
   m: RegExpExecArray,
@@ -1392,6 +1481,12 @@ function parseInlineMethod(
       return parseEscape(m, state);
     case "codespan":
       return parseCodespan(m, state);
+    case "auto_link":
+      return parseAutoLink(m, state);
+    case "auto_email":
+      return parseAutoEmail(m, state);
+    case "inline_html":
+      return parseInlineHtml(m, state);
     case "linebreak":
     case "softbreak":
       state.appendToken({ type: rule });
@@ -1448,8 +1543,15 @@ function resolveChildren(tokens: Token[], env: InlineEnv): void {
   }
 }
 
-/** `_GutenbergRenderer`. */
-function renderTokens(tokens: Token[]): string {
+/**
+ * `_GutenbergRenderer.__call__`.
+ *
+ * Exported because a few of the renderer's branches are unreachable from any
+ * markdown the parser can currently produce: `_add_auto_link` never sets a
+ * title, so `link`'s title branch has no input until the `link` rule lands.
+ * Pinning those against the real Python method needs a token, not a document.
+ */
+export function renderTokens(tokens: Token[]): string {
   return tokens.map(renderToken).join("");
 }
 
@@ -1463,6 +1565,13 @@ function renderToken(token: Token): string {
       return token.raw ?? "";
     case "codespan":
       return `<code>${token.raw ?? ""}</code>`;
+    case "link": {
+      const text = renderChildren(token);
+      const url = token.attrs?.url ?? "";
+      const title = token.attrs?.title;
+      if (title) return `<a href="${url}" title="${title}">${text}</a>`;
+      return `<a href="${url}">${text}</a>`;
+    }
     case "softbreak":
       return "\n";
     case "linebreak":
@@ -1518,9 +1627,11 @@ function renderToken(token: Token): string {
         '<hr class="wp-block-separator"/>\n' +
         "<!-- /wp:separator -->\n\n"
       );
-    /* istanbul ignore next: every token this parser emits is handled above */
+    // `inline_html` is listed for the reader: `_GutenbergRenderer` has no
+    // method for it, so it takes the same path as any other unhandled type.
+    case "inline_html":
     default:
-      throw new Error(`markdownToWpHtml: no renderer for "${token.type}"`);
+      throw new MissingRendererError(token.type);
   }
 }
 
@@ -1539,6 +1650,22 @@ export function markdownToWpHtml(markdownContent: string): string {
   parseBlocks(state);
   resolveChildren(state.tokens, state.env);
   return renderTokens(state.tokens);
+}
+
+/**
+ * `InlineParser.__call__`: the inline token stream for one source string.
+ *
+ * The renderer cannot show everything the inline layer does. `in_link` has no
+ * output of its own, and the one rule that toggles it, `inline_html`, has no
+ * renderer method at all, so a document that exercises the flag aborts before
+ * anything is rendered. This is the surface the flag is verified against, and
+ * `web/src/mastra/wordpress/data/wp-html-inline-autolink-tokens-parity.json`
+ * holds mistune's own answers for it.
+ */
+export function parseInlineTokens(src: string): Token[] {
+  const state = new InlineState({ refLinks: new Map() });
+  state.src = src;
+  return parseInline(state);
 }
 
 /**

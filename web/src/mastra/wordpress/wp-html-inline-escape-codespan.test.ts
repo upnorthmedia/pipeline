@@ -12,8 +12,7 @@ import { UnportedMarkdownError, markdownToWpHtml } from "./wp-html";
  *
  * These are the two inline rules that need nothing from the inline state, so
  * this item ports the state and the scan loop alongside them. The export script
- * refuses to write a case whose paragraphs reach `emphasis`, `link`,
- * `auto_link`, `auto_email` or `inline_html`, so every case here is one the
+ * refuses to write a case whose paragraphs reach `emphasis` or `link`, so every case here is one the
  * TypeScript port is expected to render, not one pinned for later.
  */
 
@@ -117,9 +116,6 @@ describe("hand written controls", () => {
     for (const [markdown, rule] of [
       ["*a*\n", "emphasis"],
       ["[a](/b)\n", "link"],
-      ["<https://example.com>\n", "auto_link"],
-      ["<a@example.com>\n", "auto_email"],
-      ["a <span>b</span>\n", "inline_html"],
     ] as const) {
       let thrown: unknown;
       try {

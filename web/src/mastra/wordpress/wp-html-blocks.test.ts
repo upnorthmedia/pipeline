@@ -114,18 +114,17 @@ describe("constructs whose handlers are not ported yet", () => {
    * Only inline rules are left. `block_quote` was listed here until
    * 5.3c-iii-b-1-b-ii-1 ported it, `list` until -ii-2, `raw_html` until -ii-3-a
    * and `ref_link` until -ii-3-b-2, which finished the block layer, and
-   * `escape` and `codespan` until -iii-a; their coverage is now
+   * `escape` and `codespan` until -iii-a, and `auto_link`, `auto_email` and
+   * `inline_html` until -iii-b; their coverage is now
    * `wp-html-quotes.test.ts`, `wp-html-lists.test.ts`,
-   * `wp-html-raw-html.test.ts`, `wp-html-ref-link.test.ts` and
-   * `wp-html-inline-escape-codespan.test.ts`.
+   * `wp-html-raw-html.test.ts`, `wp-html-ref-link.test.ts`,
+   * `wp-html-inline-escape-codespan.test.ts` and
+   * `wp-html-inline-autolink.test.ts`.
    */
 
   it.each([
     ["emphasis", "an *emphasised* word\n"],
     ["link", "a [link](https://example.com) here\n"],
-    ["auto_link", "an <https://example.com> autolink\n"],
-    ["auto_email", "an <a@example.com> address\n"],
-    ["inline_html", "an <span>inline</span> tag\n"],
   ])("throws for the %s inline rule", (rule, markdown) => {
     expect(() => markdownToWpHtml(markdown)).toThrowError(UnportedMarkdownError);
     try {
