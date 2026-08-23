@@ -12806,15 +12806,194 @@ three pieces are separately verifiable, so they are separate items.
             9 files would be reformatted, 131 files already formatted
             ```
 
-          - [ ] 5.5c-iii-b-2-b The entry for the `images` stage. Blocked on deciding
-            where the attempt number comes from: `imagesWorkflow` is a nested run with
-            its own defaulted `retryConfig`, so `images-manifest`, `images-generate`
-            and `images-assemble` each see a `retryCount` that is not the parent's.
-            Settle first, by measurement rather than by reading, whether the parent
-            retries the nested workflow entry at all under
-            `pipelineWorkflow.retryConfig`, and whether a nested run's steps restart
-            at `retryCount === 0` on each parent attempt. Both answers change what the
-            entry can honestly say.
+          - [ ] 5.5c-iii-b-2-b The entry for the `images` stage (split: the measurement
+            that unblocks it turned up a real defect, and the entry cannot be written
+            until that is fixed. Split into 5.5c-iii-b-2-b-i the measurement plus the
+            retry policy it forces onto `imagesWorkflow`, and 5.5c-iii-b-2-b-ii the
+            entry itself.)
+
+            - [x] 5.5c-iii-b-2-b-i Settle by measurement whether the parent retries a
+              nested workflow entry, and give `imagesWorkflow` a retry policy of its
+              own if it does not.
+
+              **The two questions, answered.**
+
+              1. *Does the parent retry a nested workflow entry at all under
+                 `pipelineWorkflow.retryConfig`?* **No.** `runLeafStep` handles a
+                 nested entry by publishing `workflow.start` for the inner run and
+                 then returning, 124 lines before the failing-status retry branch:
+
+                 ```
+                 $ sed -n '3308,3312p;3434,3435p' node_modules/@mastra/core/dist/workflow-event-processor-Dp87-e6z.js
+                 			}
+                 			return;
+                 		}
+                 		if (isSingleStepEntry(step)) await this.mastra.pubsub.publish(`workflow.events.v2.${runId}`, {
+                 			type: "watch",
+                 		if (stepResult.status === "failed") if (retryCount >= (getEntryRetries(leaf) ?? workflow.retryConfig.attempts ?? 0) || stepResult.nonRetryable) await this.mastra.pubsub.publish("workflows", {
+                 			type: "workflow.step.end",
+                 ```
+
+                 A nested run reports back through `processWorkflowEnd`, which
+                 publishes `workflow.step.end` on the parent directly
+                 (`workflow-event-processor-Dp87-e6z.js:2621`), so the parent sees a
+                 finished entry and never a failed one it could retry.
+
+              2. *Do a nested run's steps restart at `retryCount === 0` on each parent
+                 attempt?* **The question does not arise.** Because there is only ever
+                 one parent attempt at a nested entry, the inner `retryCount` is a
+                 single ascending sequence owned by the inner workflow's own
+                 `retryConfig` and never restarts.
+
+              This contradicts the guess recorded in `todo.md` when 5.5c-iii-b-2-a was
+              written, that the nested entry is dispatched as `entry.step.execute(...)`
+              like any step and so inherits the parent's policy. It is dispatched that
+              way only *after* the nested branch has been ruled out, which is the whole
+              reason the ledger asked for a measurement rather than a reading.
+
+              **Measured, not read.** `web/src/mastra/workflows/nested-retry.test.ts`
+              runs three synthetic workflows on a real evented engine, a real Redis
+              Streams transport and real Postgres storage, each around a step that
+              records `retryCount` and throws:
+
+              | Workflow | Policy | Executions of its failing step |
+              | --- | --- | --- |
+              | plain step under a parent that declares `attempts: 2` (control) | parent | 3 |
+              | nested workflow with no policy, under the same parent | parent | **1** |
+              | nested workflow that declares `attempts: 2`, under the same parent | inner | 3, at `retryCount` 0, 1, 2 |
+
+              The control carries the measurement. Without it, "the nested step ran
+              once" is equally consistent with the parent's policy being inert for
+              every entry, which would mean the five stages ported in 5.5c-iii-b-1 do
+              not retry either.
+
+              **The defect this exposed, and the fix.** `imagesWorkflow` is the one
+              stage that is a nested workflow rather than a step, so
+              `pipelineWorkflow.retryConfig` never reached it: the `images` stage got a
+              single attempt where Python's `max_tries = MAX_ATTEMPTS` gave every stage
+              three. `web/src/mastra/workflows/images.ts` now declares
+              `retryConfig: { attempts: MAX_ATTEMPTS - 1 }` on `imagesWorkflow` itself.
+              Recorded in `todo.md` as confirmed and fixed, replacing the `[investigate]`
+              entry that guessed the other way.
+
+              Three decisions worth stating:
+
+              - **The policy is restated on `imagesWorkflow`, not inherited.** There is
+                nothing to inherit from: `createWorkflow` defaults `retryConfig` to
+                `{attempts: 0, delay: 0}` and the retry branch above reads
+                `workflow.retryConfig` for whichever workflow owns the entry. So the
+                constant appears in two places, and `images-retry.test.ts` asserts the
+                two agree rather than leaving that to review.
+              - **It applies per sub-step, not per stage.** A failing `images-manifest`
+                re-runs the whole stage, since nothing downstream has run yet; a failing
+                `images-generate` re-runs only that entry of the fan-out, where Python's
+                job retry would have re-entered the stage from the manifest. The set of
+                provider calls a retry spends is the same or smaller, which is the same
+                argument `pipeline.ts` already records for the other five stages. Noted
+                in `todo.md` as a residual asymmetry rather than worked around.
+              - **`delay` is absent here too**, for the reason 5.5c-iii-b-1 recorded:
+                the evented processor reads `retryConfig.attempts` and nothing else, so
+                a delay would be a value that reads as honoured and is not.
+
+              A side effect worth naming: `executionsBeforeFailure()` in
+              `failure-recorder.ts` and `dead-letter.ts` derives its attempt count from
+              `pipelineWorkflow.retryConfig`, so before this change a run that died in
+              `images` recorded `attempts: 3` on a stage that had run once. That record
+              is now true.
+
+              **Pre-implementation, `images-retry.test.ts` failing for the right
+              reason** (the whole point of the item, so pasted before the fix):
+
+              ```
+              $ pnpm exec vitest run src/mastra/workflows/images-retry.test.ts
+               FAIL  src/mastra/workflows/images-retry.test.ts > the images stage under the pipeline's retry policy > calls the manifest provider once per attempt Python's max_tries allowed
+              AssertionError: expected "generate" to be called 3 times, but got 1 times
+               FAIL  src/mastra/workflows/images-retry.test.ts > the images stage under the pipeline's retry policy > announces the stage once per attempt, as a retried step re-runs its whole body
+              AssertionError: expected [ { …(5) } ] to have a length of 3 but got 1
+               Test Files  1 failed (1)
+                    Tests  3 failed | 1 passed (4)
+              ```
+
+              **After the fix.**
+
+              ```
+              $ pnpm exec vitest run src/mastra/workflows/nested-retry.test.ts src/mastra/workflows/images-retry.test.ts --reporter=verbose
+               ✓ src/mastra/workflows/nested-retry.test.ts > the engine's retry policy on a plain step (control) > executes the failing step once per attempt the parent allows 1ms
+               ✓ src/mastra/workflows/nested-retry.test.ts > the engine's retry policy on a plain step (control) > fails the run once the attempts are spent 0ms
+               ✓ src/mastra/workflows/nested-retry.test.ts > the engine's retry policy across a nested workflow boundary > does not retry a nested workflow entry under the parent's policy 0ms
+               ✓ src/mastra/workflows/nested-retry.test.ts > the engine's retry policy across a nested workflow boundary > still fails the parent run when the nested run fails 0ms
+               ✓ src/mastra/workflows/nested-retry.test.ts > the engine's retry policy across a nested workflow boundary > retries the nested workflow's own steps under the nested workflow's policy 0ms
+               ✓ src/mastra/workflows/nested-retry.test.ts > the engine's retry policy across a nested workflow boundary > fails the parent run once the nested workflow's attempts are spent 0ms
+               ✓ src/mastra/workflows/images-retry.test.ts > the images stage under the pipeline's retry policy > declares the pipeline's policy on the nested workflow itself 0ms
+               ✓ src/mastra/workflows/images-retry.test.ts > the images stage under the pipeline's retry policy > calls the manifest provider once per attempt Python's max_tries allowed 0ms
+               ✓ src/mastra/workflows/images-retry.test.ts > the images stage under the pipeline's retry policy > fails the parent run once those attempts are spent 0ms
+               ✓ src/mastra/workflows/images-retry.test.ts > the images stage under the pipeline's retry policy > announces the stage once per attempt, as a retried step re-runs its whole body 1ms
+
+               Test Files  2 passed (2)
+                    Tests  10 passed (10)
+              ```
+
+              Both files capture `console.error` and assert the expected step-failure
+              lines rather than leaving them on stderr, for the reason
+              `failure-recorder.test.ts` records: the engine's `StepExecutor` never
+              adopts the Mastra instance's logger, so the failing step's line is
+              written by a logger no spy on `testMastra.getLogger()` can reach.
+
+              **Negative controls.** Four, each reverted immediately after:
+
+              | Control | Expected | Result |
+              | --- | --- | --- |
+              | no `retryConfig` on `imagesWorkflow` (the pre-implementation state) | `images-retry` fails | 3 failed, 1 passed |
+              | `attempts: MAX_ATTEMPTS` instead of `MAX_ATTEMPTS - 1` | `images-retry` fails | 3 failed, 1 passed |
+              | give the inner no-policy workflow a policy | the measurement's headline test fails | 2 failed, 4 passed |
+              | take the policy off the control workflow | the control fails, proving the harness can see a retry at all | 2 failed, 4 passed |
+
+              The off-by-one control failing the same three tests as no policy at all is
+              the reason the count is read off `pipelineWorkflow` in the test rather
+              than restated: `MAX_ATTEMPTS` and `MAX_ATTEMPTS - 1` are equally plausible
+              spellings and only the engine settles which is right.
+
+              **Gates.**
+
+              ```
+              $ pnpm exec tsc --noEmit
+              (exit 0, no output)
+
+              $ pnpm run lint
+              > eslint
+              (exit 0, no output)
+
+              $ pnpm exec vitest run
+               Test Files  2 failed | 89 passed (91)
+                    Tests  9 failed | 1606 passed | 7 skipped (1622)
+              # The Phase 0 baseline: 6 in `image-preview.test.tsx` plus 3 in
+              # `PostDetail.test.tsx`. No new failure.
+
+              $ pnpm run build
+              ✓ Compiled successfully
+              ```
+
+              Python, untouched by this item (no file under `api/` changed):
+
+              ```
+              $ cd api && uv run pytest -q
+              120 failed, 241 passed, 25 errors in 13.78s
+
+              $ cd api && uv run ruff check .
+              Found 32 errors.
+
+              $ cd api && uv run ruff format --check .
+              9 files would be reformatted, 131 files already formatted
+              ```
+
+            - [ ] 5.5c-iii-b-2-b-ii The `warning` / `retry` entry itself, written from
+              inside the `images` sub-steps. Now unblocked: the attempt number is the
+              sub-step's own `retryCount` against `imagesWorkflow`'s policy, which
+              5.5c-iii-b-2-b-i measured to be a single ascending sequence. Open
+              question for that iteration: whether one entry per failing sub-step is
+              right, or whether only `images-manifest` should write one, since Python
+              wrote exactly one entry per stage per attempt and a fan-out of five
+              images can fail five ways at once.
     - [ ] 5.5c-iv `publishStageLog()` and the `log` event: the 28 call sites inside the
       six stage nodes, and the module-level `set_event_context` /
       `clear_event_context` they read, which has no equivalent in a step that already

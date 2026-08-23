@@ -32,6 +32,7 @@ import { ensureMediaDir, mediaRoot } from "../images/media-dir"
 import { imagesAssembleStep, imagesStageOutputSchema } from "../steps/images-assemble"
 import { imageJobSchema, imagesGenerateStep } from "../steps/images-generate"
 import { imagesManifestStep } from "../steps/images-manifest"
+import { MAX_ATTEMPTS } from "../state"
 import { stageStepInputSchema } from "../steps/stage-io"
 
 /**
@@ -49,6 +50,23 @@ export const imagesWorkflow = createWorkflow({
   id: "images",
   inputSchema: stageStepInputSchema,
   outputSchema: imagesStageOutputSchema,
+  // The same policy `pipelineWorkflow` declares, restated here because a
+  // nested workflow does not inherit its parent's. Measured, not read:
+  // `nested-retry.test.ts` runs a parent that declares `attempts` around an
+  // inner workflow that declares none and its failing step executes exactly
+  // once, because `runLeafStep` returns as soon as it publishes
+  // `workflow.start` for a nested entry and never reaches the retry branch
+  // below it. Without this line the one stage that is a nested workflow got a
+  // single attempt where Python's `max_tries = MAX_ATTEMPTS` gave the stage
+  // three, and `pipelineWorkflow.retryConfig` silently did nothing for it.
+  //
+  // It applies per sub-step rather than per stage: a failing `images-manifest`
+  // re-runs the whole stage (nothing downstream has run yet), while a failing
+  // `images-generate` re-runs only that entry of the fan-out where Python's
+  // job retry would have re-entered the stage from the manifest. The set of
+  // provider calls a retry spends is the same or smaller, which is the same
+  // argument `pipeline.ts` records for the other five stages.
+  retryConfig: { attempts: MAX_ATTEMPTS - 1 },
 })
   .then(imagesManifestStep)
   /**
