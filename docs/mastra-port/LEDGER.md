@@ -15278,7 +15278,236 @@ three pieces are separately verifiable, so they are separate items.
       use", but it does not prove a real Chrome reconnect recovers a real run's trace.
       That check belongs to Phase 8, where item 8.1's run-trace view is exercised
       against a live run with `chrome-devtools-axi`.
-- [ ] 5.6 `rules`
+- [x] 5.6 `rules`
+
+  `api/src/api/rules.py` is 57 lines over three endpoints and has no database, no
+  queue and no service layer: it lists, reads and writes the six `rules/*.md`
+  files behind the settings page's rule editor. The port is
+  `web/src/app/api/rules/route.ts` (list), `web/src/app/api/rules/[name]/route.ts`
+  (read and write) and `web/src/app/api/rules/rule-files.ts` (the allowlist and
+  path resolution `_rule_path()` held).
+
+  **The contract.** `web/src/lib/api.ts` calls all three: `rules.list()` returns
+  `RuleFile[]` (`name`, `filename`, `exists`, `size`), `rules.get(name)` and
+  `rules.update(name, content)` return `RuleContent` (`name`, `content`). Nothing
+  in those shapes changed.
+
+  **The allowlist is derived, not transcribed.** Python spelled out a literal
+  `ALLOWED_FILES` set of six names. `RULE_NAMES` is instead
+  `Object.values(STAGE_RULES_MAP)` with `.md` stripped and sorted, so the files
+  the settings page can edit and the files `web/src/mastra/prompts.ts` actually
+  loads for a stage cannot drift apart. The derived list is pinned against
+  Python's literal by its own test, so the coupling is checked rather than
+  assumed. `rulesDir()` is imported from `prompts.ts` too, which keeps the
+  `RULES_DIR` override (set to `/app/rules` by both `docker-compose.yml`
+  services) working for the handlers as well as the pipeline.
+
+  **Deviation 1, authentication.** The Python `rules` router carried no session
+  dependency on any of its three endpoints, which made `PUT /api/rules/{name}` an
+  unauthenticated write to the product's prompt IP for every tenant at once. This
+  is the same gap item 5.5d-i found in the events router and it is closed the same
+  way: all three handlers require a session. There is no ownership scoping to add
+  on top, because `rules/*.md` are installation-wide files and not rows with an
+  owner, so the only new response is the 401.
+
+  **Deviation 2, one `stat` instead of `exists()` then `stat()`.** Python's list
+  endpoint called `Path.exists()` and then `Path.stat().st_size`, two syscalls with
+  a window between them in which a file can vanish and make the second raise. The
+  port reads one `stat` and treats `ENOENT` as "missing, size 0", which answers
+  the same two questions without the window. `GET /{name}` collapses the same
+  pair the same way: `readFile` with `ENOENT` mapped to the 404.
+
+  **Behaviours preserved on purpose.** Both of Python's 404s stay distinct: an
+  unallowlisted name is `Unknown rule: <name>` from `_rule_path()`, an allowlisted
+  name with no file on disk is `Rule file not found`, and only `GET` can reach the
+  second because `PUT` creates the file. `PUT` on a name whose file does not exist
+  still creates it rather than 404ing. The allowlist is what keeps `..` and
+  absolute paths out of `path.join`, exactly as in Python, and there is no second
+  containment check because a name that is not one of the six never reaches the
+  filesystem.
+
+  **Validation order was read off the running app, not the source.** FastAPI
+  solves dependencies, then validates the request, then calls the endpoint, so the
+  `_rule_path()` 404 is raised after body validation. That is observable and it was
+  observed rather than assumed:
+
+  ```
+  $ cd api && PYTHONPATH=. uv run python rules_order_probe.py
+  PUT bogus + missing content -> 422 {'detail': [{'type': 'missing', 'loc': ['body', 'content'], 'msg': 'Field required', 'input': {}}]}
+  PUT bogus + valid body     -> 404 {'detail': 'Unknown rule: bogus'}
+  PUT valid name + bad json  -> 422 {'detail': [{'type': 'json_invalid', 'loc': ['body', 1], 'msg': 'JSON decode error', 'input': {}, 'ctx': {'error': 'Expecting property name enclosed in double quotes'}}]}
+  PUT bogus name + bad json  -> 422 {'detail': [{'type': 'json_invalid', 'loc': ['body', 1], 'msg': 'JSON decode error', 'input': {}, 'ctx': {'error': 'Expecting property name enclosed in double quotes'}}]}
+  PUT content=5              -> 422 {'detail': [{'type': 'string_type', 'loc': ['body', 'content'], 'msg': 'Input should be a valid string', 'input': 5}]}
+  GET list ->  200 ['blog-edit', 'blog-images', 'blog-outline', 'blog-ready', 'blog-research', 'blog-write'] {'name': 'blog-edit', 'filename': 'blog-edit.md', 'exists': True, 'size': 15448}
+  GET bogus -> 404 {'detail': 'Unknown rule: bogus'}
+  ```
+
+  (The probe file was a scratch script mounting the real router on a bare
+  `FastAPI()` under `TestClient`; it was deleted after the run and is not
+  committed.) So `PUT` parses and validates the body before it looks at the path
+  name, and the shared `invalidJsonBody()` / `unprocessableBody()` helpers from
+  `web/src/app/api/pydantic.ts` reproduce all three error bodies. The one
+  difference is `loc: ["body", 0]` where Python reports the character offset of the
+  decode error, which is the choice `pydantic.ts` already made in an earlier item.
+
+  **There is no pytest coverage to port.** `grep -rn "api/rules" api/tests` returns
+  nothing, so this router has never had a test in either stack. The 22 tests in
+  `web/src/app/api/rules/rules.test.ts` are the first, and they run against the real
+  database and real BetterAuth sessions with `RULES_DIR` pointed at a scratch
+  directory, so `PUT` never touches the real `rules/*.md`.
+
+  Failing first, with the three implementation files moved aside:
+
+  ```
+  $ cd web && npx vitest run src/app/api/rules/rules.test.ts
+   FAIL  src/app/api/rules/rules.test.ts [ src/app/api/rules/rules.test.ts ]
+  Error: Cannot find module './[name]/route' imported from '.../web/src/app/api/rules/rules.test.ts'
+   Test Files  1 failed (1)
+        Tests  no tests
+  ```
+
+  Passing, with the implementation restored (`+` transcribes vitest's pass glyph):
+
+  ```
+  $ cd web && npx vitest run src/app/api/rules/rules.test.ts --reporter=verbose
+   + the rule allowlist > is Python's ALLOWED_FILES, sorted 1ms
+   + the rule allowlist > resolves every name inside the rules directory 1ms
+   + GET /api/rules > 401s without a session 3ms
+   + GET /api/rules > lists the six rules in sorted order with their filenames 12ms
+   + GET /api/rules > reports a missing file as exists false with size 0 3ms
+   + GET /api/rules > reports size in bytes, not characters 3ms
+   + GET /api/rules > ignores files in the directory that are not on the allowlist 2ms
+   + GET /api/rules/{name} > 401s without a session 1ms
+   + GET /api/rules/{name} > 404s an unknown rule with the name echoed back 2ms
+   + GET /api/rules/{name} > 404s a traversing name before touching the filesystem 2ms
+   + GET /api/rules/{name} > 404s an allowlisted rule whose file is missing, with the other message 2ms
+   + GET /api/rules/{name} > returns the file content verbatim, decoded as utf-8 2ms
+   + PUT /api/rules/{name} > 401s without a session 1ms
+   + PUT /api/rules/{name} > overwrites an existing file and echoes the content back 2ms
+   + PUT /api/rules/{name} > creates a file that was not there, so the next GET stops 404ing 3ms
+   + PUT /api/rules/{name} > writes utf-8 bytes, matching Python's write_text(encoding='utf-8') 2ms
+   + PUT /api/rules/{name} > accepts an empty string, truncating the file 2ms
+   + PUT /api/rules/{name} > 404s an unknown rule and writes nothing 1ms
+   + PUT /api/rules/{name} > 422s a missing content field with pydantic's shape 2ms
+   + PUT /api/rules/{name} > 422s a non-string content with pydantic's string_type 1ms
+   + PUT /api/rules/{name} > 422s a body that is not JSON at all 1ms
+   + PUT /api/rules/{name} > validates the body before the path, as FastAPI did 1ms
+   Test Files  1 passed (1)
+        Tests  22 passed (22)
+     Duration  601ms
+  ```
+
+  Negative controls, each applied to the implementation, measured, then reverted
+  (`x` transcribes vitest's failure glyph):
+
+  ```
+  # 1. drop the session check from PUT
+  Tests  1 failed | 21 passed (22)
+    x PUT > 401s without a session
+
+  # 2. drop the isRuleName check from GET /{name}, so a bad name falls through to the read
+  Tests  2 failed | 20 passed (22)
+    x GET /{name} > 404s an unknown rule with the name echoed back
+    x GET /{name} > 404s a traversing name before touching the filesystem
+
+  # 3. report size as readFile(...,"utf8").length instead of stat().size
+  Tests  1 failed | 21 passed (22)
+    x GET /api/rules > reports size in bytes, not characters
+
+  # 4. drop the .sort() from RULE_NAMES
+  Tests  4 failed | 18 passed (22)
+    x the rule allowlist > is Python's ALLOWED_FILES, sorted
+    x GET /api/rules > lists the six rules in sorted order with their filenames
+    x GET /api/rules > reports a missing file as exists false with size 0
+    x GET /api/rules > ignores files in the directory that are not on the allowlist
+
+  # 5. move the isRuleName check ahead of the body parse in PUT
+  Tests  1 failed | 21 passed (22)
+    x PUT > validates the body before the path, as FastAPI did
+
+  # 6. answer a missing file with unknownRule(name) instead of "Rule file not found"
+  Tests  1 failed | 21 passed (22)
+    x GET /{name} > 404s an allowlisted rule whose file is missing, with the other message
+  ```
+
+  Control 4 is the informative one: dropping the sort fails four tests, three of
+  which never mention ordering, because `RULE_NAMES` is also the iteration order of
+  the list response. Control 2 confirms the allowlist is the only thing standing
+  between a path segment and `path.join`: without it the traversing name reaches
+  the filesystem and comes back as the wrong 404.
+
+  Gates:
+
+  ```
+  $ cd web && npx tsc --noEmit
+  TSC EXIT=0
+  (no output)
+
+  $ cd web && npx eslint
+  LINT EXIT=0
+  (no output)
+
+  $ cd web && npx vitest run
+   Test Files  3 failed | 92 passed (95)
+        Tests  10 failed | 1749 passed | 7 skipped (1766)
+
+  $ cd web && npx next build
+  BUILD EXIT=0
+  |- f /api/rules
+  |- f /api/rules/[name]
+  # The BetterAuth "default secret" lines are the pre-existing, environment-driven
+  # warning recorded under item 1.2 and are filtered out of this paste.
+
+  $ cd api && uv run pytest -q            # with the repo .env sourced first
+  120 failed, 241 passed, 25 errors in 15.03s
+
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 131 files already formatted
+  ```
+
+  **The failure count, measured on both sides.** This iteration's 22 tests are all
+  additions and no existing file changed, so the honest delta needed HEAD measured
+  now rather than read off a previous entry. Six full runs, three with the new
+  router present and three with `web/src/app/api/rules/` moved aside:
+
+  ```
+  HEAD          9 failed | 1728 passed (1744)
+  HEAD          9 failed | 1728 passed (1744)
+  HEAD         10 failed | 1727 passed (1744)
+  with 5.6     10 failed | 1749 passed (1766)
+  with 5.6     10 failed | 1749 passed (1766)
+  with 5.6     10 failed | 1749 passed (1766)
+  ```
+
+  The tenth failure is always the same one,
+  `src/mastra/workflows/scaffold-check.test.ts > emits the workflow lifecycle events
+  the trace view will read`, already recorded three times in `todo.md` as cross-file
+  interference on the shared Redis `workflows` topic. It reproduces at HEAD (run 3
+  above) so it is not introduced here, it passes standalone
+  (`npx vitest run src/mastra/workflows/scaffold-check.test.ts` -> 5 passed), and
+  the 9 baseline failures are the recorded `image-preview` six plus the
+  `PostDetail` three. What this iteration adds is a frequency datum: the flake went
+  from 1 of 3 HEAD runs to 3 of 3 with this file present, while a minimal
+  placeholder test file with the same environment and imports left it at 1 of 3
+  (9 failed | 1729 passed). So the trigger is scheduling pressure specific to this
+  file's shape, not the mere presence of one more file. That is appended to the
+  `todo.md` entry; fixing it belongs to item 9.1, which cannot be signed off while
+  a full run is nondeterministic.
+
+  pytest reads 120 failed / 241 passed against the 125 / 236 pasted in item
+  5.3c-iii-a, on the same 386 collected. No Python changed this iteration
+  (`git status` is `web/src/app/api/rules/` and nothing else), so five tests moved
+  from failing to passing on their own; the Phase 0 baseline is a ceiling on
+  failures and this is below it.
+
+  **Not covered.** No browser drives the settings page against these handlers. The
+  proof is direct handler calls, which is the right level for status codes, error
+  bodies and what lands on disk, but it does not prove the rule editor's tab list
+  and save button work end to end against them. That check belongs to Phase 8 item
+  8.7, where `/settings` gets its four states and screenshots.
 - [ ] 5.7 `links`
 - [ ] 5.8 `analytics`
 - [ ] 5.9 `wordpress`

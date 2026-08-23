@@ -282,6 +282,14 @@
   is still whole-suite concurrency. This has crossed from a flake worth pinning to a
   standing baseline discrepancy: fix it (own instance and `keyPrefix`) before Phase 9,
   because item 9.1 wants a green run.
+  Update 2026-08-22 (item 5.6): it is intermittent again and it is load-sensitive. Six full
+  runs measured this iteration: 1 of 3 at HEAD, 3 of 3 with item 5.6's 22-test route-handler
+  file present, and 1 of 3 with a minimal placeholder test file of the same shape (node
+  environment, `createTestSession`, `closeDb`) in its place. So adding a file is not the
+  trigger; adding a file that changes how the fast node-environment files pack against the
+  slow real-transport ones is. That is consistent with the shared-topic reading and means
+  the failure count a future iteration measures depends on what it added, so both sides
+  have to be measured every time until this is fixed.
 - [investigate] 2026-08-22 `src/mastra/pipeline-events.test.ts > carries Python's log payload
   and nothing else` failed once on a full `vitest run` during item 5.5e-i, passed on the
   rerun of the same suite, and passes when run alone. It reads the shared
