@@ -10228,6 +10228,151 @@ three pieces are separately verifiable, so they are separate items.
               - [ ] 5.3c-iii-b-1-b-ii-3-b `ref_link`, with `parse_link_href`,
                 `parse_link_title`, `unikey`, `escape_url` (and the `unescape` /
                 percent-encoding it needs) and the `ref_links` env.
+
+                Split, because `escape_url` is not part of `ref_link` at all: it is
+                `mistune.util` machinery that the inline `link` and `image` rules in
+                -b-iii call too, and it is the half that drags in three Python stdlib
+                tables and `urllib.parse.quote`. It is also verifiable on its own, as a
+                pure function with a direct oracle, whereas `parse_ref_link` writes into
+                `state.env` and emits no token, so nothing it produces is observable
+                until the inline `link` rule exists.
+                - [x] 5.3c-iii-b-1-b-ii-3-b-1 `escape_url`: `mistune.util.unescape`
+                  (the CommonMark-flavoured `html.unescape` and the
+                  `html.entities.html5` / `_invalid_charrefs` / `_invalid_codepoints`
+                  tables it reaches into) and `urllib.parse.quote` with the safe set
+                  `:/?#@!$&()*+,;=%`.
+
+                  `web/src/mastra/wordpress/escape-url.ts` exports `unescape` and
+                  `escapeUrl`. The three stdlib tables are data, not logic, so
+                  `api/scripts/export_wp_html_escape_url_parity.py` writes them verbatim
+                  into `web/src/mastra/wordpress/data/html5-entities.json` (2231 entity
+                  names, 34 invalid charrefs, 126 invalid codepoints) rather than
+                  retyping them, and writes the 89-case oracle plus a 2-case `raises`
+                  array into `data/wp-html-escape-url-parity.json`.
+
+                  `escape_url` is not reachable from `markdown_to_wp_html`'s output yet
+                  (its only callers are `parse_ref_link` and the inline link rules), so
+                  the oracle calls `mistune.util.escape_url` and `mistune.util.unescape`
+                  directly instead of going through the converter.
+
+                  ```
+                  $ cd api && PYTHONPATH=. uv run python scripts/export_wp_html_escape_url_parity.py
+                  wrote 2231 entities, 34 invalid charrefs and 126 invalid codepoints to
+                  .../web/src/mastra/wordpress/data/html5-entities.json
+                  wrote 89 cases and 2 raises to
+                  .../web/src/mastra/wordpress/data/wp-html-escape-url-parity.json
+                  ```
+
+                  ```
+                  $ pnpm -C web exec vitest run src/mastra/wordpress/escape-url.test.ts
+                   ✓ src/mastra/wordpress/escape-url.test.ts (103 tests) 5ms
+
+                   Test Files  1 passed (1)
+                        Tests  103 passed (103)
+                  ```
+
+                  **Mutation table.** The 89 generated cases passed on the first run, so
+                  the implementation was mutated to prove they have teeth. Ten
+                  mutations, the last two of which survived:
+
+                  | Mutation | Result |
+                  | --- | --- |
+                  | Look the entity name up with `in` on the imported JSON object instead of a `Map` | 6 failed |
+                  | Longest-prefix loop runs down to `x > 0` instead of `x > 1` | **survived** |
+                  | Trailing `;` made optional in the entity-name alternative | 2 failed |
+                  | Lower-case percent hex | 39 failed |
+                  | Percent encode UTF-16 code units instead of UTF-8 bytes | 19 failed |
+                  | Check `_invalid_codepoints` before `_invalid_charrefs` | 2 failed |
+                  | Drop `%` from the safe set | 3 failed |
+                  | Drop the surrogate-range check | 2 failed |
+                  | Drop the `.rstrip(";")` on the numeric digits | 10 failed |
+                  | Drop the big-hex guard and call `parseInt` unconditionally | **survived** |
+
+                  The big-hex guard was dead and is now deleted, the same call this
+                  port has made before for a guard a control proved unreachable:
+                  `parseInt` on a hex string past 13 digits rounds (or returns
+                  `Infinity`), and both still compare greater than `0x10FFFF`,
+                  which is the only question the code asks. It can never round a value
+                  *down* across the boundary, because a value near `0x10FFFF` needs at
+                  most six significant digits and is exact.
+
+                  **Recorded as uncovered:** the longest-prefix loop's lower bound.
+                  `range(len(s) - 1, 1, -1)` deliberately refuses to consider a
+                  one-character prefix, but `html.entities.html5` has no one-character
+                  name (its shortest four are `GT`, `gt`, `LT`, `lt`), so no input can
+                  tell `x > 1` from `x > 0`. Kept faithful rather than papered over.
+
+                  ```
+                  $ cd api && uv run python -c "from html.entities import html5; print([k for k in html5 if len(k) == 1])"
+                  []
+                  ```
+
+                  **Deviation: a lone surrogate no longer crashes the converter.**
+                  `urllib.parse.quote` encodes with `errors='strict'`, so
+                  `escape_url("\ud800")` raises `UnicodeEncodeError` and the crash
+                  escapes `markdown_to_wp_html`. `TextEncoder` has no strict mode and
+                  substitutes U+FFFD, so this port returns `%EF%BF%BD`. That removes an
+                  error path rather than adding one. Both inputs are pinned in the
+                  oracle's `raises` array and asserted by the "substitutes U+FFFD where
+                  Python raised UnicodeEncodeError" test.
+
+                  **Note on the `Map`.** The entity names come from user text and the
+                  lookup is by name, so a plain-object lookup resolves every
+                  `Object.prototype` key: `&constructor;` would unescape to the source
+                  of `Object`. Python has no such hazard. Five prototype keys are in the
+                  generated corpus and six in a hand-written control; mutation 1 above
+                  is that bug, and it fails loudly.
+
+                  Gates, all from the repo root:
+
+                  ```
+                  $ pnpm -C web exec tsc --noEmit
+                  (exit 0, no output)
+
+                  $ pnpm -C web lint
+                  > content-pipeline-dashboard@0.1.0 lint
+                  > eslint
+                  (exit 0, no output)
+
+                  $ pnpm -C web test
+                   Test Files  2 failed | 108 passed (110)
+                        Tests  9 failed | 2773 passed | 7 skipped (2789)
+
+                  $ pnpm -C web build
+                  ○  (Static)   prerendered as static content
+                  ●  (SSG)      prerendered as static HTML (uses generateStaticParams)
+                  ƒ  (Dynamic)  server-rendered on demand
+                  (exit 0)
+                  ```
+
+                  9 failures is the recorded frontend baseline (6 `image-preview`, 3
+                  `PostDetail`). A second run of the same suite reported 10, the extra
+                  one being the known `scaffold-check` Redis race; both failure sets are
+                  entirely pre-existing files.
+
+                  Backend baselines unchanged. `pytest` was also run with this
+                  iteration's files stashed and reported the identical numbers, which is
+                  what proves those failures are pre-existing rather than caused here.
+                  Nothing in this iteration is importable by the backend anyway: the
+                  only Python file added is a `scripts/` exporter that no test loads.
+
+                  ```
+                  $ cd api && uv run pytest -q
+                  120 failed, 241 passed, 25 errors in 14.98s
+
+                  $ cd api && uv run ruff check .
+                  Found 32 errors.
+
+                  $ cd api && uv run ruff format --check .
+                  9 files would be reformatted, 140 files already formatted
+                  ```
+
+                  The formatted-file count moves from 139 to 140 because of the new
+                  exporter, which was run through `ruff format` and `ruff check` before
+                  it generated the committed data.
+                - [ ] 5.3c-iii-b-1-b-ii-3-b-2 `parse_ref_link` itself, with
+                  `parse_link_href`, `parse_link_title`, `unikey` and the `ref_links`
+                  env the inline `link` rule reads.
           - [ ] 5.3c-iii-b-1-b-iii The inline rules: `escape`, `codespan`, `emphasis`,
             `strong`, `link`, `image`, `auto_link`, `auto_email` and `inline_html`, plus
             the `emphasis`, `strong`, `link`, `codespan` and `image` renderer methods.

@@ -105,7 +105,7 @@ describe("the oracle has teeth", () => {
 describe("constructs whose handlers are not ported yet", () => {
   /**
    * These throw rather than falling through to a paragraph, so that wiring the
-   * converter into the publish workflow before 5.3c-iii-b-1-b-ii-3-b and -b-iii
+   * converter into the publish workflow before 5.3c-iii-b-1-b-ii-3-b-2 and -b-iii
    * land cannot silently drop a link.
    *
    * `block_quote` was in this list until 5.3c-iii-b-1-b-ii-1 ported it, `list`

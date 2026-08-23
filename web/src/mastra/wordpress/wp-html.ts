@@ -42,7 +42,8 @@
  * instead. Rule 7 is the only one that cannot interrupt a paragraph and the
  * only one that can decline, leaving its line to the paragraph fallback.
  *
- * Not ported yet: `ref_link` (5.3c-iii-b-1-b-ii-3-b) and the inline rules
+ * Not ported yet: `ref_link` (5.3c-iii-b-1-b-ii-3-b-2, whose `escape_url`
+ * half is done and lives in `escape-url.ts`) and the inline rules
  * `escape`, `codespan`, `emphasis`, `link`, `auto_link`, `auto_email` and
  * `inline_html` (5.3c-iii-b-1-b-iii). Their *patterns* are registered here in
  * mistune's rule order, because rule order is what decides whether `- - -` is a
@@ -403,7 +404,7 @@ function parseBlockMethod(
     case "block_html":
       return parseRawHtml(m, state);
     case "ref_link":
-      throw new UnportedMarkdownError(rule, "5.3c-iii-b-1-b-ii-3-b");
+      throw new UnportedMarkdownError(rule, "5.3c-iii-b-1-b-ii-3-b-2");
     /* istanbul ignore next: BLOCK_RULES is exhaustive above */
     default:
       throw new Error(`markdownToWpHtml: unknown block rule "${rule}"`);
