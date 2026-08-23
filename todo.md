@@ -487,3 +487,21 @@
   change which rows a given bound returns and defeat the parity oracle. Worth revisiting
   once the TypeScript writers are the only ones producing `execution_logs` entries: item
   5.5c's `log` publisher is the single writer, so pinning its format in one place is cheap.
+- [confirmed] 2026-08-23 `WordPressClient.__init__` in `api/src/services/wordpress.py`
+  appends its REST paths to the raw `wp_url` after nothing but a trailing-slash strip and a
+  suffix strip, so a profile whose `wp_url` carries a query string or a fragment produces a
+  nonsense endpoint. Measured against the real client: `https://example.com/?a=1` yields
+  `api_url = https://example.com/?a=1/wp-json/wp/v2`, and every call against it 404s. Found
+  while porting the read half of the client (ledger item 5.9a) and reproduced faithfully in
+  `web/src/mastra/wordpress/index.ts`, because changing it would change which URL a stored
+  profile reaches. The fix belongs with the profile form's `wp_url` validation, not in the
+  client: nothing today stops a user pasting a URL with a query string into it.
+- [investigate] 2026-08-23 `cd api && uv run pytest -q` reports `4 failed, 205 passed,
+  177 errors` with `asyncpg.exceptions.InvalidPasswordError: password authentication failed
+  for user "pipeline"` unless the repo `.env` is sourced first
+  (`set -a && . ./.env && set +a`), which restores the recorded `120 failed, 241 passed,
+  25 errors` baseline. `api/tests/conftest.py` builds its URL from environment variables with
+  defaults that no longer match the running container's credentials. Every ledger entry that
+  pastes a pytest count depends on the caller remembering to source `.env`, so the defaults
+  in `conftest.py` should either match the compose file or be removed so a missing variable
+  fails loudly instead of authenticating as the wrong user.

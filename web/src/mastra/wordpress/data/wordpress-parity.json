@@ -1,0 +1,3091 @@
+{
+  "constructor_cases": [
+    {
+      "api_url": "https://example.com/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "plain-origin",
+      "site_url": "https://example.com/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com"
+    },
+    {
+      "api_url": "https://example.com/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "one-trailing-slash",
+      "site_url": "https://example.com/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/"
+    },
+    {
+      "api_url": "https://example.com/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "many-trailing-slashes",
+      "site_url": "https://example.com/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com///"
+    },
+    {
+      "api_url": "https://example.com/blog/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "subdirectory-install",
+      "site_url": "https://example.com/blog/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/blog"
+    },
+    {
+      "api_url": "https://example.com/blog/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "subdirectory-trailing-slash",
+      "site_url": "https://example.com/blog/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/blog/"
+    },
+    {
+      "api_url": "https://example.com/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "strips-wp-admin",
+      "site_url": "https://example.com/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/wp-admin"
+    },
+    {
+      "api_url": "https://example.com/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "strips-wp-admin-slash",
+      "site_url": "https://example.com/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/wp-admin/"
+    },
+    {
+      "api_url": "https://example.com/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "strips-wp-admin-uppercase",
+      "site_url": "https://example.com/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/WP-ADMIN"
+    },
+    {
+      "api_url": "https://example.com/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "strips-wp-admin-mixed-case",
+      "site_url": "https://example.com/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/Wp-Admin"
+    },
+    {
+      "api_url": "https://example.com/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "strips-wp-login",
+      "site_url": "https://example.com/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/wp-login.php"
+    },
+    {
+      "api_url": "https://example.com/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "strips-wp-json",
+      "site_url": "https://example.com/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/wp-json"
+    },
+    {
+      "api_url": "https://example.com/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "strips-wp-json-slash",
+      "site_url": "https://example.com/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/wp-json/"
+    },
+    {
+      "api_url": "https://example.com/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "strips-wp-json-wp-v2",
+      "site_url": "https://example.com/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/wp-json/wp/v2"
+    },
+    {
+      "api_url": "https://example.com/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "strips-wp-json-wp-v2-slash",
+      "site_url": "https://example.com/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/wp-json/wp/v2/"
+    },
+    {
+      "api_url": "https://example.com/wp-admin/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "strips-one-suffix-only",
+      "site_url": "https://example.com/wp-admin/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/wp-admin/wp-json"
+    },
+    {
+      "api_url": "https://example.com/wp-json/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "strips-one-suffix-only-reversed",
+      "site_url": "https://example.com/wp-json/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/wp-json/wp-admin"
+    },
+    {
+      "api_url": "https://example.com/my-wp-admin/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "leaves-unslashed-lookalike",
+      "site_url": "https://example.com/my-wp-admin/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/my-wp-admin"
+    },
+    {
+      "api_url": "https://example.com/wp-admin/page/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "leaves-inner-occurrence",
+      "site_url": "https://example.com/wp-admin/page/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/wp-admin/page"
+    },
+    {
+      "api_url": "https://example.com/blog/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "subdirectory-with-wp-json",
+      "site_url": "https://example.com/blog/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/blog/wp-json"
+    },
+    {
+      "api_url": "/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "empty-url",
+      "site_url": "/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": ""
+    },
+    {
+      "api_url": "/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "bare-slash",
+      "site_url": "/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "/"
+    },
+    {
+      "api_url": "example.com/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "no-scheme",
+      "site_url": "example.com/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "example.com"
+    },
+    {
+      "api_url": "https://example.com/?a=1/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "keeps-query-string",
+      "site_url": "https://example.com/?a=1/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com/?a=1"
+    },
+    {
+      "api_url": "https://example.com/wp-json/wp/v2",
+      "app_password": "",
+      "authorization": "Basic cGlwZWxpbmUtYm90Og==",
+      "name": "empty-password",
+      "site_url": "https://example.com/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com"
+    },
+    {
+      "api_url": "https://example.com/wp-json/wp/v2",
+      "app_password": "a:b:c",
+      "authorization": "Basic cGlwZWxpbmUtYm90OmE6Yjpj",
+      "name": "colon-in-password",
+      "site_url": "https://example.com/wp-json",
+      "username": "pipeline-bot",
+      "wp_url": "https://example.com"
+    },
+    {
+      "api_url": "https://example.com/wp-json/wp/v2",
+      "app_password": "abcd efgh ijkl mnop",
+      "authorization": "Basic OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+      "name": "empty-username",
+      "site_url": "https://example.com/wp-json",
+      "username": "",
+      "wp_url": "https://example.com"
+    },
+    {
+      "api_url": "https://example.com/wp-json/wp/v2",
+      "app_password": "p\u00e5ss w\u00f6rd",
+      "authorization": "Basic d29yZHByZXNzLcO8c2VyOnDDpXNzIHfDtnJk",
+      "name": "non-ascii-credentials",
+      "site_url": "https://example.com/wp-json",
+      "username": "wordpress-\u00fcser",
+      "wp_url": "https://example.com"
+    }
+  ],
+  "generated_by": "api/scripts/export_wordpress_parity.py",
+  "python_version": "3.13.12",
+  "scenario_credentials": {
+    "app_password": "abcd efgh ijkl mnop",
+    "username": "pipeline-bot"
+  },
+  "scenarios": [
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "test_connection"
+      },
+      "expected": {
+        "result": {
+          "description": "Just another site",
+          "gmt_offset": 0,
+          "name": "Test Site",
+          "url": "https://example.com"
+        }
+      },
+      "name": "test-connection-success",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "{\"name\": \"Test Site\", \"description\": \"Just another site\", \"url\": \"https://example.com\", \"gmt_offset\": 0}",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "test_connection"
+      },
+      "expected": {
+        "result": {
+          "name": "Stripped"
+        }
+      },
+      "name": "test-connection-through-stripped-wp-admin",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "{\"name\": \"Stripped\"}",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}/wp-admin"
+    },
+    {
+      "api_url": "{BASE}/blog/wp-json/wp/v2",
+      "call": {
+        "fn": "test_connection"
+      },
+      "expected": {
+        "result": {
+          "name": "Blog"
+        }
+      },
+      "name": "test-connection-subdirectory-install",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/blog/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /blog/wp-json": {
+          "body": "{\"name\": \"Blog\"}",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "site_url": "{BASE}/blog/wp-json",
+      "url": "{BASE}/blog"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "test_connection"
+      },
+      "expected": {
+        "error": "WordPress API error: You are not currently logged in.",
+        "status_code": 401
+      },
+      "name": "test-connection-401-with-message",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "{\"code\": \"rest_not_logged_in\", \"message\": \"You are not currently logged in.\", \"data\": {\"status\": 401}}",
+          "content_type": "application/json",
+          "status": 401
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "test_connection"
+      },
+      "expected": {
+        "error": "WordPress API error: <html><body>nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found.",
+        "status_code": 404
+      },
+      "name": "test-connection-404-long-html",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "<html><body>nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. nginx 404 not found. </body></html>",
+          "content_type": "text/html",
+          "status": 404
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "test_connection"
+      },
+      "expected": {
+        "error": "WordPress API error: {\"code\": \"rest_bad\", \"data\": {}}",
+        "status_code": 400
+      },
+      "name": "test-connection-400-json-without-message",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "{\"code\": \"rest_bad\", \"data\": {}}",
+          "content_type": "application/json",
+          "status": 400
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "test_connection"
+      },
+      "expected": {
+        "error": "WordPress API error: [\"boom\", \"again\"]",
+        "status_code": 500
+      },
+      "name": "test-connection-500-json-array",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "[\"boom\", \"again\"]",
+          "content_type": "application/json",
+          "status": 500
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "test_connection"
+      },
+      "expected": {
+        "error": "WordPress API error: [\"error number 0\", \"error number 1\", \"error number 2\", \"error number 3\", \"error number 4\", \"error number 5\", \"error number 6\", \"error number 7\", \"error number 8\", \"error number 9\", \"error number 10\", ",
+        "status_code": 500
+      },
+      "name": "test-connection-500-long-json-array",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "[\"error number 0\", \"error number 1\", \"error number 2\", \"error number 3\", \"error number 4\", \"error number 5\", \"error number 6\", \"error number 7\", \"error number 8\", \"error number 9\", \"error number 10\", \"error number 11\", \"error number 12\", \"error number 13\", \"error number 14\", \"error number 15\", \"error number 16\", \"error number 17\", \"error number 18\", \"error number 19\"]",
+          "content_type": "application/json",
+          "status": 500
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "test_connection"
+      },
+      "expected": {
+        "error": "WordPress API error: null",
+        "status_code": 500
+      },
+      "name": "test-connection-500-json-null",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "null",
+          "content_type": "application/json",
+          "status": 500
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "test_connection"
+      },
+      "expected": {
+        "result": null
+      },
+      "name": "test-connection-200-json-null",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "null",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "test_connection"
+      },
+      "expected": {
+        "error": "WordPress API error: ",
+        "status_code": 403
+      },
+      "name": "test-connection-403-empty-body",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "",
+          "content_type": "text/html",
+          "status": 403
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "test_connection"
+      },
+      "expected": {
+        "error": "WordPress returned non-JSON response \u2014 check that the site URL is correct",
+        "status_code": 200
+      },
+      "name": "test-connection-200-non-json",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "<!DOCTYPE html><html>a theme</html>",
+          "content_type": "text/html",
+          "status": 200
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "test_connection"
+      },
+      "expected": {
+        "result": [
+          1,
+          2,
+          3
+        ]
+      },
+      "name": "test-connection-200-json-array",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "[1, 2, 3]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "test_connection"
+      },
+      "expected": {
+        "result": {
+          "name": "Sniffed"
+        }
+      },
+      "name": "test-connection-200-json-with-html-content-type",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json",
+          "query": ""
+        }
+      ],
+      "routes": {
+        "GET /wp-json": {
+          "body": "{\"name\": \"Sniffed\"}",
+          "content_type": "text/html",
+          "status": 200
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "list_categories"
+      },
+      "expected": {
+        "result": [
+          {
+            "count": 2,
+            "description": "",
+            "id": 1,
+            "name": "Category 1",
+            "slug": "category-1"
+          },
+          {
+            "count": 4,
+            "description": "",
+            "id": 2,
+            "name": "Category 2",
+            "slug": "category-2"
+          },
+          {
+            "count": 6,
+            "description": "",
+            "id": 3,
+            "name": "Category 3",
+            "slug": "category-3"
+          }
+        ]
+      },
+      "name": "categories-single-page",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/categories",
+          "query": "per_page=100&page=1"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/categories?page=1&per_page=100": {
+          "body": "[{\"id\": 1, \"name\": \"Category 1\", \"slug\": \"category-1\", \"count\": 2, \"description\": \"\"}, {\"id\": 2, \"name\": \"Category 2\", \"slug\": \"category-2\", \"count\": 4, \"description\": \"\"}, {\"id\": 3, \"name\": \"Category 3\", \"slug\": \"category-3\", \"count\": 6, \"description\": \"\"}]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "list_categories"
+      },
+      "expected": {
+        "result": []
+      },
+      "name": "categories-empty",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/categories",
+          "query": "per_page=100&page=1"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/categories?page=1&per_page=100": {
+          "body": "[]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "list_categories"
+      },
+      "expected": {
+        "result": [
+          {
+            "count": 2,
+            "description": "",
+            "id": 1,
+            "name": "Category 1",
+            "slug": "category-1"
+          },
+          {
+            "count": 4,
+            "description": "",
+            "id": 2,
+            "name": "Category 2",
+            "slug": "category-2"
+          },
+          {
+            "count": 6,
+            "description": "",
+            "id": 3,
+            "name": "Category 3",
+            "slug": "category-3"
+          },
+          {
+            "count": 8,
+            "description": "",
+            "id": 4,
+            "name": "Category 4",
+            "slug": "category-4"
+          },
+          {
+            "count": 10,
+            "description": "",
+            "id": 5,
+            "name": "Category 5",
+            "slug": "category-5"
+          },
+          {
+            "count": 12,
+            "description": "",
+            "id": 6,
+            "name": "Category 6",
+            "slug": "category-6"
+          },
+          {
+            "count": 14,
+            "description": "",
+            "id": 7,
+            "name": "Category 7",
+            "slug": "category-7"
+          },
+          {
+            "count": 16,
+            "description": "",
+            "id": 8,
+            "name": "Category 8",
+            "slug": "category-8"
+          },
+          {
+            "count": 18,
+            "description": "",
+            "id": 9,
+            "name": "Category 9",
+            "slug": "category-9"
+          },
+          {
+            "count": 20,
+            "description": "",
+            "id": 10,
+            "name": "Category 10",
+            "slug": "category-10"
+          },
+          {
+            "count": 22,
+            "description": "",
+            "id": 11,
+            "name": "Category 11",
+            "slug": "category-11"
+          },
+          {
+            "count": 24,
+            "description": "",
+            "id": 12,
+            "name": "Category 12",
+            "slug": "category-12"
+          },
+          {
+            "count": 26,
+            "description": "",
+            "id": 13,
+            "name": "Category 13",
+            "slug": "category-13"
+          },
+          {
+            "count": 28,
+            "description": "",
+            "id": 14,
+            "name": "Category 14",
+            "slug": "category-14"
+          },
+          {
+            "count": 30,
+            "description": "",
+            "id": 15,
+            "name": "Category 15",
+            "slug": "category-15"
+          },
+          {
+            "count": 32,
+            "description": "",
+            "id": 16,
+            "name": "Category 16",
+            "slug": "category-16"
+          },
+          {
+            "count": 34,
+            "description": "",
+            "id": 17,
+            "name": "Category 17",
+            "slug": "category-17"
+          },
+          {
+            "count": 36,
+            "description": "",
+            "id": 18,
+            "name": "Category 18",
+            "slug": "category-18"
+          },
+          {
+            "count": 38,
+            "description": "",
+            "id": 19,
+            "name": "Category 19",
+            "slug": "category-19"
+          },
+          {
+            "count": 40,
+            "description": "",
+            "id": 20,
+            "name": "Category 20",
+            "slug": "category-20"
+          },
+          {
+            "count": 42,
+            "description": "",
+            "id": 21,
+            "name": "Category 21",
+            "slug": "category-21"
+          },
+          {
+            "count": 44,
+            "description": "",
+            "id": 22,
+            "name": "Category 22",
+            "slug": "category-22"
+          },
+          {
+            "count": 46,
+            "description": "",
+            "id": 23,
+            "name": "Category 23",
+            "slug": "category-23"
+          },
+          {
+            "count": 48,
+            "description": "",
+            "id": 24,
+            "name": "Category 24",
+            "slug": "category-24"
+          },
+          {
+            "count": 50,
+            "description": "",
+            "id": 25,
+            "name": "Category 25",
+            "slug": "category-25"
+          },
+          {
+            "count": 52,
+            "description": "",
+            "id": 26,
+            "name": "Category 26",
+            "slug": "category-26"
+          },
+          {
+            "count": 54,
+            "description": "",
+            "id": 27,
+            "name": "Category 27",
+            "slug": "category-27"
+          },
+          {
+            "count": 56,
+            "description": "",
+            "id": 28,
+            "name": "Category 28",
+            "slug": "category-28"
+          },
+          {
+            "count": 58,
+            "description": "",
+            "id": 29,
+            "name": "Category 29",
+            "slug": "category-29"
+          },
+          {
+            "count": 60,
+            "description": "",
+            "id": 30,
+            "name": "Category 30",
+            "slug": "category-30"
+          },
+          {
+            "count": 62,
+            "description": "",
+            "id": 31,
+            "name": "Category 31",
+            "slug": "category-31"
+          },
+          {
+            "count": 64,
+            "description": "",
+            "id": 32,
+            "name": "Category 32",
+            "slug": "category-32"
+          },
+          {
+            "count": 66,
+            "description": "",
+            "id": 33,
+            "name": "Category 33",
+            "slug": "category-33"
+          },
+          {
+            "count": 68,
+            "description": "",
+            "id": 34,
+            "name": "Category 34",
+            "slug": "category-34"
+          },
+          {
+            "count": 70,
+            "description": "",
+            "id": 35,
+            "name": "Category 35",
+            "slug": "category-35"
+          },
+          {
+            "count": 72,
+            "description": "",
+            "id": 36,
+            "name": "Category 36",
+            "slug": "category-36"
+          },
+          {
+            "count": 74,
+            "description": "",
+            "id": 37,
+            "name": "Category 37",
+            "slug": "category-37"
+          },
+          {
+            "count": 76,
+            "description": "",
+            "id": 38,
+            "name": "Category 38",
+            "slug": "category-38"
+          },
+          {
+            "count": 78,
+            "description": "",
+            "id": 39,
+            "name": "Category 39",
+            "slug": "category-39"
+          },
+          {
+            "count": 80,
+            "description": "",
+            "id": 40,
+            "name": "Category 40",
+            "slug": "category-40"
+          },
+          {
+            "count": 82,
+            "description": "",
+            "id": 41,
+            "name": "Category 41",
+            "slug": "category-41"
+          },
+          {
+            "count": 84,
+            "description": "",
+            "id": 42,
+            "name": "Category 42",
+            "slug": "category-42"
+          },
+          {
+            "count": 86,
+            "description": "",
+            "id": 43,
+            "name": "Category 43",
+            "slug": "category-43"
+          },
+          {
+            "count": 88,
+            "description": "",
+            "id": 44,
+            "name": "Category 44",
+            "slug": "category-44"
+          },
+          {
+            "count": 90,
+            "description": "",
+            "id": 45,
+            "name": "Category 45",
+            "slug": "category-45"
+          },
+          {
+            "count": 92,
+            "description": "",
+            "id": 46,
+            "name": "Category 46",
+            "slug": "category-46"
+          },
+          {
+            "count": 94,
+            "description": "",
+            "id": 47,
+            "name": "Category 47",
+            "slug": "category-47"
+          },
+          {
+            "count": 96,
+            "description": "",
+            "id": 48,
+            "name": "Category 48",
+            "slug": "category-48"
+          },
+          {
+            "count": 98,
+            "description": "",
+            "id": 49,
+            "name": "Category 49",
+            "slug": "category-49"
+          },
+          {
+            "count": 100,
+            "description": "",
+            "id": 50,
+            "name": "Category 50",
+            "slug": "category-50"
+          },
+          {
+            "count": 102,
+            "description": "",
+            "id": 51,
+            "name": "Category 51",
+            "slug": "category-51"
+          },
+          {
+            "count": 104,
+            "description": "",
+            "id": 52,
+            "name": "Category 52",
+            "slug": "category-52"
+          },
+          {
+            "count": 106,
+            "description": "",
+            "id": 53,
+            "name": "Category 53",
+            "slug": "category-53"
+          },
+          {
+            "count": 108,
+            "description": "",
+            "id": 54,
+            "name": "Category 54",
+            "slug": "category-54"
+          },
+          {
+            "count": 110,
+            "description": "",
+            "id": 55,
+            "name": "Category 55",
+            "slug": "category-55"
+          },
+          {
+            "count": 112,
+            "description": "",
+            "id": 56,
+            "name": "Category 56",
+            "slug": "category-56"
+          },
+          {
+            "count": 114,
+            "description": "",
+            "id": 57,
+            "name": "Category 57",
+            "slug": "category-57"
+          },
+          {
+            "count": 116,
+            "description": "",
+            "id": 58,
+            "name": "Category 58",
+            "slug": "category-58"
+          },
+          {
+            "count": 118,
+            "description": "",
+            "id": 59,
+            "name": "Category 59",
+            "slug": "category-59"
+          },
+          {
+            "count": 120,
+            "description": "",
+            "id": 60,
+            "name": "Category 60",
+            "slug": "category-60"
+          },
+          {
+            "count": 122,
+            "description": "",
+            "id": 61,
+            "name": "Category 61",
+            "slug": "category-61"
+          },
+          {
+            "count": 124,
+            "description": "",
+            "id": 62,
+            "name": "Category 62",
+            "slug": "category-62"
+          },
+          {
+            "count": 126,
+            "description": "",
+            "id": 63,
+            "name": "Category 63",
+            "slug": "category-63"
+          },
+          {
+            "count": 128,
+            "description": "",
+            "id": 64,
+            "name": "Category 64",
+            "slug": "category-64"
+          },
+          {
+            "count": 130,
+            "description": "",
+            "id": 65,
+            "name": "Category 65",
+            "slug": "category-65"
+          },
+          {
+            "count": 132,
+            "description": "",
+            "id": 66,
+            "name": "Category 66",
+            "slug": "category-66"
+          },
+          {
+            "count": 134,
+            "description": "",
+            "id": 67,
+            "name": "Category 67",
+            "slug": "category-67"
+          },
+          {
+            "count": 136,
+            "description": "",
+            "id": 68,
+            "name": "Category 68",
+            "slug": "category-68"
+          },
+          {
+            "count": 138,
+            "description": "",
+            "id": 69,
+            "name": "Category 69",
+            "slug": "category-69"
+          },
+          {
+            "count": 140,
+            "description": "",
+            "id": 70,
+            "name": "Category 70",
+            "slug": "category-70"
+          },
+          {
+            "count": 142,
+            "description": "",
+            "id": 71,
+            "name": "Category 71",
+            "slug": "category-71"
+          },
+          {
+            "count": 144,
+            "description": "",
+            "id": 72,
+            "name": "Category 72",
+            "slug": "category-72"
+          },
+          {
+            "count": 146,
+            "description": "",
+            "id": 73,
+            "name": "Category 73",
+            "slug": "category-73"
+          },
+          {
+            "count": 148,
+            "description": "",
+            "id": 74,
+            "name": "Category 74",
+            "slug": "category-74"
+          },
+          {
+            "count": 150,
+            "description": "",
+            "id": 75,
+            "name": "Category 75",
+            "slug": "category-75"
+          },
+          {
+            "count": 152,
+            "description": "",
+            "id": 76,
+            "name": "Category 76",
+            "slug": "category-76"
+          },
+          {
+            "count": 154,
+            "description": "",
+            "id": 77,
+            "name": "Category 77",
+            "slug": "category-77"
+          },
+          {
+            "count": 156,
+            "description": "",
+            "id": 78,
+            "name": "Category 78",
+            "slug": "category-78"
+          },
+          {
+            "count": 158,
+            "description": "",
+            "id": 79,
+            "name": "Category 79",
+            "slug": "category-79"
+          },
+          {
+            "count": 160,
+            "description": "",
+            "id": 80,
+            "name": "Category 80",
+            "slug": "category-80"
+          },
+          {
+            "count": 162,
+            "description": "",
+            "id": 81,
+            "name": "Category 81",
+            "slug": "category-81"
+          },
+          {
+            "count": 164,
+            "description": "",
+            "id": 82,
+            "name": "Category 82",
+            "slug": "category-82"
+          },
+          {
+            "count": 166,
+            "description": "",
+            "id": 83,
+            "name": "Category 83",
+            "slug": "category-83"
+          },
+          {
+            "count": 168,
+            "description": "",
+            "id": 84,
+            "name": "Category 84",
+            "slug": "category-84"
+          },
+          {
+            "count": 170,
+            "description": "",
+            "id": 85,
+            "name": "Category 85",
+            "slug": "category-85"
+          },
+          {
+            "count": 172,
+            "description": "",
+            "id": 86,
+            "name": "Category 86",
+            "slug": "category-86"
+          },
+          {
+            "count": 174,
+            "description": "",
+            "id": 87,
+            "name": "Category 87",
+            "slug": "category-87"
+          },
+          {
+            "count": 176,
+            "description": "",
+            "id": 88,
+            "name": "Category 88",
+            "slug": "category-88"
+          },
+          {
+            "count": 178,
+            "description": "",
+            "id": 89,
+            "name": "Category 89",
+            "slug": "category-89"
+          },
+          {
+            "count": 180,
+            "description": "",
+            "id": 90,
+            "name": "Category 90",
+            "slug": "category-90"
+          },
+          {
+            "count": 182,
+            "description": "",
+            "id": 91,
+            "name": "Category 91",
+            "slug": "category-91"
+          },
+          {
+            "count": 184,
+            "description": "",
+            "id": 92,
+            "name": "Category 92",
+            "slug": "category-92"
+          },
+          {
+            "count": 186,
+            "description": "",
+            "id": 93,
+            "name": "Category 93",
+            "slug": "category-93"
+          },
+          {
+            "count": 188,
+            "description": "",
+            "id": 94,
+            "name": "Category 94",
+            "slug": "category-94"
+          },
+          {
+            "count": 190,
+            "description": "",
+            "id": 95,
+            "name": "Category 95",
+            "slug": "category-95"
+          },
+          {
+            "count": 192,
+            "description": "",
+            "id": 96,
+            "name": "Category 96",
+            "slug": "category-96"
+          },
+          {
+            "count": 194,
+            "description": "",
+            "id": 97,
+            "name": "Category 97",
+            "slug": "category-97"
+          },
+          {
+            "count": 196,
+            "description": "",
+            "id": 98,
+            "name": "Category 98",
+            "slug": "category-98"
+          },
+          {
+            "count": 198,
+            "description": "",
+            "id": 99,
+            "name": "Category 99",
+            "slug": "category-99"
+          },
+          {
+            "count": 200,
+            "description": "",
+            "id": 100,
+            "name": "Category 100",
+            "slug": "category-100"
+          },
+          {
+            "count": 202,
+            "description": "",
+            "id": 101,
+            "name": "Category 101",
+            "slug": "category-101"
+          },
+          {
+            "count": 204,
+            "description": "",
+            "id": 102,
+            "name": "Category 102",
+            "slug": "category-102"
+          },
+          {
+            "count": 206,
+            "description": "",
+            "id": 103,
+            "name": "Category 103",
+            "slug": "category-103"
+          }
+        ]
+      },
+      "name": "categories-two-pages",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/categories",
+          "query": "per_page=100&page=1"
+        },
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/categories",
+          "query": "per_page=100&page=2"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/categories?page=1&per_page=100": {
+          "body": "[{\"id\": 1, \"name\": \"Category 1\", \"slug\": \"category-1\", \"count\": 2, \"description\": \"\"}, {\"id\": 2, \"name\": \"Category 2\", \"slug\": \"category-2\", \"count\": 4, \"description\": \"\"}, {\"id\": 3, \"name\": \"Category 3\", \"slug\": \"category-3\", \"count\": 6, \"description\": \"\"}, {\"id\": 4, \"name\": \"Category 4\", \"slug\": \"category-4\", \"count\": 8, \"description\": \"\"}, {\"id\": 5, \"name\": \"Category 5\", \"slug\": \"category-5\", \"count\": 10, \"description\": \"\"}, {\"id\": 6, \"name\": \"Category 6\", \"slug\": \"category-6\", \"count\": 12, \"description\": \"\"}, {\"id\": 7, \"name\": \"Category 7\", \"slug\": \"category-7\", \"count\": 14, \"description\": \"\"}, {\"id\": 8, \"name\": \"Category 8\", \"slug\": \"category-8\", \"count\": 16, \"description\": \"\"}, {\"id\": 9, \"name\": \"Category 9\", \"slug\": \"category-9\", \"count\": 18, \"description\": \"\"}, {\"id\": 10, \"name\": \"Category 10\", \"slug\": \"category-10\", \"count\": 20, \"description\": \"\"}, {\"id\": 11, \"name\": \"Category 11\", \"slug\": \"category-11\", \"count\": 22, \"description\": \"\"}, {\"id\": 12, \"name\": \"Category 12\", \"slug\": \"category-12\", \"count\": 24, \"description\": \"\"}, {\"id\": 13, \"name\": \"Category 13\", \"slug\": \"category-13\", \"count\": 26, \"description\": \"\"}, {\"id\": 14, \"name\": \"Category 14\", \"slug\": \"category-14\", \"count\": 28, \"description\": \"\"}, {\"id\": 15, \"name\": \"Category 15\", \"slug\": \"category-15\", \"count\": 30, \"description\": \"\"}, {\"id\": 16, \"name\": \"Category 16\", \"slug\": \"category-16\", \"count\": 32, \"description\": \"\"}, {\"id\": 17, \"name\": \"Category 17\", \"slug\": \"category-17\", \"count\": 34, \"description\": \"\"}, {\"id\": 18, \"name\": \"Category 18\", \"slug\": \"category-18\", \"count\": 36, \"description\": \"\"}, {\"id\": 19, \"name\": \"Category 19\", \"slug\": \"category-19\", \"count\": 38, \"description\": \"\"}, {\"id\": 20, \"name\": \"Category 20\", \"slug\": \"category-20\", \"count\": 40, \"description\": \"\"}, {\"id\": 21, \"name\": \"Category 21\", \"slug\": \"category-21\", \"count\": 42, \"description\": \"\"}, {\"id\": 22, \"name\": \"Category 22\", \"slug\": \"category-22\", \"count\": 44, \"description\": \"\"}, {\"id\": 23, \"name\": \"Category 23\", \"slug\": \"category-23\", \"count\": 46, \"description\": \"\"}, {\"id\": 24, \"name\": \"Category 24\", \"slug\": \"category-24\", \"count\": 48, \"description\": \"\"}, {\"id\": 25, \"name\": \"Category 25\", \"slug\": \"category-25\", \"count\": 50, \"description\": \"\"}, {\"id\": 26, \"name\": \"Category 26\", \"slug\": \"category-26\", \"count\": 52, \"description\": \"\"}, {\"id\": 27, \"name\": \"Category 27\", \"slug\": \"category-27\", \"count\": 54, \"description\": \"\"}, {\"id\": 28, \"name\": \"Category 28\", \"slug\": \"category-28\", \"count\": 56, \"description\": \"\"}, {\"id\": 29, \"name\": \"Category 29\", \"slug\": \"category-29\", \"count\": 58, \"description\": \"\"}, {\"id\": 30, \"name\": \"Category 30\", \"slug\": \"category-30\", \"count\": 60, \"description\": \"\"}, {\"id\": 31, \"name\": \"Category 31\", \"slug\": \"category-31\", \"count\": 62, \"description\": \"\"}, {\"id\": 32, \"name\": \"Category 32\", \"slug\": \"category-32\", \"count\": 64, \"description\": \"\"}, {\"id\": 33, \"name\": \"Category 33\", \"slug\": \"category-33\", \"count\": 66, \"description\": \"\"}, {\"id\": 34, \"name\": \"Category 34\", \"slug\": \"category-34\", \"count\": 68, \"description\": \"\"}, {\"id\": 35, \"name\": \"Category 35\", \"slug\": \"category-35\", \"count\": 70, \"description\": \"\"}, {\"id\": 36, \"name\": \"Category 36\", \"slug\": \"category-36\", \"count\": 72, \"description\": \"\"}, {\"id\": 37, \"name\": \"Category 37\", \"slug\": \"category-37\", \"count\": 74, \"description\": \"\"}, {\"id\": 38, \"name\": \"Category 38\", \"slug\": \"category-38\", \"count\": 76, \"description\": \"\"}, {\"id\": 39, \"name\": \"Category 39\", \"slug\": \"category-39\", \"count\": 78, \"description\": \"\"}, {\"id\": 40, \"name\": \"Category 40\", \"slug\": \"category-40\", \"count\": 80, \"description\": \"\"}, {\"id\": 41, \"name\": \"Category 41\", \"slug\": \"category-41\", \"count\": 82, \"description\": \"\"}, {\"id\": 42, \"name\": \"Category 42\", \"slug\": \"category-42\", \"count\": 84, \"description\": \"\"}, {\"id\": 43, \"name\": \"Category 43\", \"slug\": \"category-43\", \"count\": 86, \"description\": \"\"}, {\"id\": 44, \"name\": \"Category 44\", \"slug\": \"category-44\", \"count\": 88, \"description\": \"\"}, {\"id\": 45, \"name\": \"Category 45\", \"slug\": \"category-45\", \"count\": 90, \"description\": \"\"}, {\"id\": 46, \"name\": \"Category 46\", \"slug\": \"category-46\", \"count\": 92, \"description\": \"\"}, {\"id\": 47, \"name\": \"Category 47\", \"slug\": \"category-47\", \"count\": 94, \"description\": \"\"}, {\"id\": 48, \"name\": \"Category 48\", \"slug\": \"category-48\", \"count\": 96, \"description\": \"\"}, {\"id\": 49, \"name\": \"Category 49\", \"slug\": \"category-49\", \"count\": 98, \"description\": \"\"}, {\"id\": 50, \"name\": \"Category 50\", \"slug\": \"category-50\", \"count\": 100, \"description\": \"\"}, {\"id\": 51, \"name\": \"Category 51\", \"slug\": \"category-51\", \"count\": 102, \"description\": \"\"}, {\"id\": 52, \"name\": \"Category 52\", \"slug\": \"category-52\", \"count\": 104, \"description\": \"\"}, {\"id\": 53, \"name\": \"Category 53\", \"slug\": \"category-53\", \"count\": 106, \"description\": \"\"}, {\"id\": 54, \"name\": \"Category 54\", \"slug\": \"category-54\", \"count\": 108, \"description\": \"\"}, {\"id\": 55, \"name\": \"Category 55\", \"slug\": \"category-55\", \"count\": 110, \"description\": \"\"}, {\"id\": 56, \"name\": \"Category 56\", \"slug\": \"category-56\", \"count\": 112, \"description\": \"\"}, {\"id\": 57, \"name\": \"Category 57\", \"slug\": \"category-57\", \"count\": 114, \"description\": \"\"}, {\"id\": 58, \"name\": \"Category 58\", \"slug\": \"category-58\", \"count\": 116, \"description\": \"\"}, {\"id\": 59, \"name\": \"Category 59\", \"slug\": \"category-59\", \"count\": 118, \"description\": \"\"}, {\"id\": 60, \"name\": \"Category 60\", \"slug\": \"category-60\", \"count\": 120, \"description\": \"\"}, {\"id\": 61, \"name\": \"Category 61\", \"slug\": \"category-61\", \"count\": 122, \"description\": \"\"}, {\"id\": 62, \"name\": \"Category 62\", \"slug\": \"category-62\", \"count\": 124, \"description\": \"\"}, {\"id\": 63, \"name\": \"Category 63\", \"slug\": \"category-63\", \"count\": 126, \"description\": \"\"}, {\"id\": 64, \"name\": \"Category 64\", \"slug\": \"category-64\", \"count\": 128, \"description\": \"\"}, {\"id\": 65, \"name\": \"Category 65\", \"slug\": \"category-65\", \"count\": 130, \"description\": \"\"}, {\"id\": 66, \"name\": \"Category 66\", \"slug\": \"category-66\", \"count\": 132, \"description\": \"\"}, {\"id\": 67, \"name\": \"Category 67\", \"slug\": \"category-67\", \"count\": 134, \"description\": \"\"}, {\"id\": 68, \"name\": \"Category 68\", \"slug\": \"category-68\", \"count\": 136, \"description\": \"\"}, {\"id\": 69, \"name\": \"Category 69\", \"slug\": \"category-69\", \"count\": 138, \"description\": \"\"}, {\"id\": 70, \"name\": \"Category 70\", \"slug\": \"category-70\", \"count\": 140, \"description\": \"\"}, {\"id\": 71, \"name\": \"Category 71\", \"slug\": \"category-71\", \"count\": 142, \"description\": \"\"}, {\"id\": 72, \"name\": \"Category 72\", \"slug\": \"category-72\", \"count\": 144, \"description\": \"\"}, {\"id\": 73, \"name\": \"Category 73\", \"slug\": \"category-73\", \"count\": 146, \"description\": \"\"}, {\"id\": 74, \"name\": \"Category 74\", \"slug\": \"category-74\", \"count\": 148, \"description\": \"\"}, {\"id\": 75, \"name\": \"Category 75\", \"slug\": \"category-75\", \"count\": 150, \"description\": \"\"}, {\"id\": 76, \"name\": \"Category 76\", \"slug\": \"category-76\", \"count\": 152, \"description\": \"\"}, {\"id\": 77, \"name\": \"Category 77\", \"slug\": \"category-77\", \"count\": 154, \"description\": \"\"}, {\"id\": 78, \"name\": \"Category 78\", \"slug\": \"category-78\", \"count\": 156, \"description\": \"\"}, {\"id\": 79, \"name\": \"Category 79\", \"slug\": \"category-79\", \"count\": 158, \"description\": \"\"}, {\"id\": 80, \"name\": \"Category 80\", \"slug\": \"category-80\", \"count\": 160, \"description\": \"\"}, {\"id\": 81, \"name\": \"Category 81\", \"slug\": \"category-81\", \"count\": 162, \"description\": \"\"}, {\"id\": 82, \"name\": \"Category 82\", \"slug\": \"category-82\", \"count\": 164, \"description\": \"\"}, {\"id\": 83, \"name\": \"Category 83\", \"slug\": \"category-83\", \"count\": 166, \"description\": \"\"}, {\"id\": 84, \"name\": \"Category 84\", \"slug\": \"category-84\", \"count\": 168, \"description\": \"\"}, {\"id\": 85, \"name\": \"Category 85\", \"slug\": \"category-85\", \"count\": 170, \"description\": \"\"}, {\"id\": 86, \"name\": \"Category 86\", \"slug\": \"category-86\", \"count\": 172, \"description\": \"\"}, {\"id\": 87, \"name\": \"Category 87\", \"slug\": \"category-87\", \"count\": 174, \"description\": \"\"}, {\"id\": 88, \"name\": \"Category 88\", \"slug\": \"category-88\", \"count\": 176, \"description\": \"\"}, {\"id\": 89, \"name\": \"Category 89\", \"slug\": \"category-89\", \"count\": 178, \"description\": \"\"}, {\"id\": 90, \"name\": \"Category 90\", \"slug\": \"category-90\", \"count\": 180, \"description\": \"\"}, {\"id\": 91, \"name\": \"Category 91\", \"slug\": \"category-91\", \"count\": 182, \"description\": \"\"}, {\"id\": 92, \"name\": \"Category 92\", \"slug\": \"category-92\", \"count\": 184, \"description\": \"\"}, {\"id\": 93, \"name\": \"Category 93\", \"slug\": \"category-93\", \"count\": 186, \"description\": \"\"}, {\"id\": 94, \"name\": \"Category 94\", \"slug\": \"category-94\", \"count\": 188, \"description\": \"\"}, {\"id\": 95, \"name\": \"Category 95\", \"slug\": \"category-95\", \"count\": 190, \"description\": \"\"}, {\"id\": 96, \"name\": \"Category 96\", \"slug\": \"category-96\", \"count\": 192, \"description\": \"\"}, {\"id\": 97, \"name\": \"Category 97\", \"slug\": \"category-97\", \"count\": 194, \"description\": \"\"}, {\"id\": 98, \"name\": \"Category 98\", \"slug\": \"category-98\", \"count\": 196, \"description\": \"\"}, {\"id\": 99, \"name\": \"Category 99\", \"slug\": \"category-99\", \"count\": 198, \"description\": \"\"}, {\"id\": 100, \"name\": \"Category 100\", \"slug\": \"category-100\", \"count\": 200, \"description\": \"\"}]",
+          "content_type": "application/json",
+          "status": 200
+        },
+        "GET /wp-json/wp/v2/categories?page=2&per_page=100": {
+          "body": "[{\"id\": 101, \"name\": \"Category 101\", \"slug\": \"category-101\", \"count\": 202, \"description\": \"\"}, {\"id\": 102, \"name\": \"Category 102\", \"slug\": \"category-102\", \"count\": 204, \"description\": \"\"}, {\"id\": 103, \"name\": \"Category 103\", \"slug\": \"category-103\", \"count\": 206, \"description\": \"\"}]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "list_categories"
+      },
+      "expected": {
+        "result": [
+          {
+            "count": 2,
+            "description": "",
+            "id": 1,
+            "name": "Category 1",
+            "slug": "category-1"
+          },
+          {
+            "count": 4,
+            "description": "",
+            "id": 2,
+            "name": "Category 2",
+            "slug": "category-2"
+          },
+          {
+            "count": 6,
+            "description": "",
+            "id": 3,
+            "name": "Category 3",
+            "slug": "category-3"
+          },
+          {
+            "count": 8,
+            "description": "",
+            "id": 4,
+            "name": "Category 4",
+            "slug": "category-4"
+          },
+          {
+            "count": 10,
+            "description": "",
+            "id": 5,
+            "name": "Category 5",
+            "slug": "category-5"
+          },
+          {
+            "count": 12,
+            "description": "",
+            "id": 6,
+            "name": "Category 6",
+            "slug": "category-6"
+          },
+          {
+            "count": 14,
+            "description": "",
+            "id": 7,
+            "name": "Category 7",
+            "slug": "category-7"
+          },
+          {
+            "count": 16,
+            "description": "",
+            "id": 8,
+            "name": "Category 8",
+            "slug": "category-8"
+          },
+          {
+            "count": 18,
+            "description": "",
+            "id": 9,
+            "name": "Category 9",
+            "slug": "category-9"
+          },
+          {
+            "count": 20,
+            "description": "",
+            "id": 10,
+            "name": "Category 10",
+            "slug": "category-10"
+          },
+          {
+            "count": 22,
+            "description": "",
+            "id": 11,
+            "name": "Category 11",
+            "slug": "category-11"
+          },
+          {
+            "count": 24,
+            "description": "",
+            "id": 12,
+            "name": "Category 12",
+            "slug": "category-12"
+          },
+          {
+            "count": 26,
+            "description": "",
+            "id": 13,
+            "name": "Category 13",
+            "slug": "category-13"
+          },
+          {
+            "count": 28,
+            "description": "",
+            "id": 14,
+            "name": "Category 14",
+            "slug": "category-14"
+          },
+          {
+            "count": 30,
+            "description": "",
+            "id": 15,
+            "name": "Category 15",
+            "slug": "category-15"
+          },
+          {
+            "count": 32,
+            "description": "",
+            "id": 16,
+            "name": "Category 16",
+            "slug": "category-16"
+          },
+          {
+            "count": 34,
+            "description": "",
+            "id": 17,
+            "name": "Category 17",
+            "slug": "category-17"
+          },
+          {
+            "count": 36,
+            "description": "",
+            "id": 18,
+            "name": "Category 18",
+            "slug": "category-18"
+          },
+          {
+            "count": 38,
+            "description": "",
+            "id": 19,
+            "name": "Category 19",
+            "slug": "category-19"
+          },
+          {
+            "count": 40,
+            "description": "",
+            "id": 20,
+            "name": "Category 20",
+            "slug": "category-20"
+          },
+          {
+            "count": 42,
+            "description": "",
+            "id": 21,
+            "name": "Category 21",
+            "slug": "category-21"
+          },
+          {
+            "count": 44,
+            "description": "",
+            "id": 22,
+            "name": "Category 22",
+            "slug": "category-22"
+          },
+          {
+            "count": 46,
+            "description": "",
+            "id": 23,
+            "name": "Category 23",
+            "slug": "category-23"
+          },
+          {
+            "count": 48,
+            "description": "",
+            "id": 24,
+            "name": "Category 24",
+            "slug": "category-24"
+          },
+          {
+            "count": 50,
+            "description": "",
+            "id": 25,
+            "name": "Category 25",
+            "slug": "category-25"
+          },
+          {
+            "count": 52,
+            "description": "",
+            "id": 26,
+            "name": "Category 26",
+            "slug": "category-26"
+          },
+          {
+            "count": 54,
+            "description": "",
+            "id": 27,
+            "name": "Category 27",
+            "slug": "category-27"
+          },
+          {
+            "count": 56,
+            "description": "",
+            "id": 28,
+            "name": "Category 28",
+            "slug": "category-28"
+          },
+          {
+            "count": 58,
+            "description": "",
+            "id": 29,
+            "name": "Category 29",
+            "slug": "category-29"
+          },
+          {
+            "count": 60,
+            "description": "",
+            "id": 30,
+            "name": "Category 30",
+            "slug": "category-30"
+          },
+          {
+            "count": 62,
+            "description": "",
+            "id": 31,
+            "name": "Category 31",
+            "slug": "category-31"
+          },
+          {
+            "count": 64,
+            "description": "",
+            "id": 32,
+            "name": "Category 32",
+            "slug": "category-32"
+          },
+          {
+            "count": 66,
+            "description": "",
+            "id": 33,
+            "name": "Category 33",
+            "slug": "category-33"
+          },
+          {
+            "count": 68,
+            "description": "",
+            "id": 34,
+            "name": "Category 34",
+            "slug": "category-34"
+          },
+          {
+            "count": 70,
+            "description": "",
+            "id": 35,
+            "name": "Category 35",
+            "slug": "category-35"
+          },
+          {
+            "count": 72,
+            "description": "",
+            "id": 36,
+            "name": "Category 36",
+            "slug": "category-36"
+          },
+          {
+            "count": 74,
+            "description": "",
+            "id": 37,
+            "name": "Category 37",
+            "slug": "category-37"
+          },
+          {
+            "count": 76,
+            "description": "",
+            "id": 38,
+            "name": "Category 38",
+            "slug": "category-38"
+          },
+          {
+            "count": 78,
+            "description": "",
+            "id": 39,
+            "name": "Category 39",
+            "slug": "category-39"
+          },
+          {
+            "count": 80,
+            "description": "",
+            "id": 40,
+            "name": "Category 40",
+            "slug": "category-40"
+          },
+          {
+            "count": 82,
+            "description": "",
+            "id": 41,
+            "name": "Category 41",
+            "slug": "category-41"
+          },
+          {
+            "count": 84,
+            "description": "",
+            "id": 42,
+            "name": "Category 42",
+            "slug": "category-42"
+          },
+          {
+            "count": 86,
+            "description": "",
+            "id": 43,
+            "name": "Category 43",
+            "slug": "category-43"
+          },
+          {
+            "count": 88,
+            "description": "",
+            "id": 44,
+            "name": "Category 44",
+            "slug": "category-44"
+          },
+          {
+            "count": 90,
+            "description": "",
+            "id": 45,
+            "name": "Category 45",
+            "slug": "category-45"
+          },
+          {
+            "count": 92,
+            "description": "",
+            "id": 46,
+            "name": "Category 46",
+            "slug": "category-46"
+          },
+          {
+            "count": 94,
+            "description": "",
+            "id": 47,
+            "name": "Category 47",
+            "slug": "category-47"
+          },
+          {
+            "count": 96,
+            "description": "",
+            "id": 48,
+            "name": "Category 48",
+            "slug": "category-48"
+          },
+          {
+            "count": 98,
+            "description": "",
+            "id": 49,
+            "name": "Category 49",
+            "slug": "category-49"
+          },
+          {
+            "count": 100,
+            "description": "",
+            "id": 50,
+            "name": "Category 50",
+            "slug": "category-50"
+          },
+          {
+            "count": 102,
+            "description": "",
+            "id": 51,
+            "name": "Category 51",
+            "slug": "category-51"
+          },
+          {
+            "count": 104,
+            "description": "",
+            "id": 52,
+            "name": "Category 52",
+            "slug": "category-52"
+          },
+          {
+            "count": 106,
+            "description": "",
+            "id": 53,
+            "name": "Category 53",
+            "slug": "category-53"
+          },
+          {
+            "count": 108,
+            "description": "",
+            "id": 54,
+            "name": "Category 54",
+            "slug": "category-54"
+          },
+          {
+            "count": 110,
+            "description": "",
+            "id": 55,
+            "name": "Category 55",
+            "slug": "category-55"
+          },
+          {
+            "count": 112,
+            "description": "",
+            "id": 56,
+            "name": "Category 56",
+            "slug": "category-56"
+          },
+          {
+            "count": 114,
+            "description": "",
+            "id": 57,
+            "name": "Category 57",
+            "slug": "category-57"
+          },
+          {
+            "count": 116,
+            "description": "",
+            "id": 58,
+            "name": "Category 58",
+            "slug": "category-58"
+          },
+          {
+            "count": 118,
+            "description": "",
+            "id": 59,
+            "name": "Category 59",
+            "slug": "category-59"
+          },
+          {
+            "count": 120,
+            "description": "",
+            "id": 60,
+            "name": "Category 60",
+            "slug": "category-60"
+          },
+          {
+            "count": 122,
+            "description": "",
+            "id": 61,
+            "name": "Category 61",
+            "slug": "category-61"
+          },
+          {
+            "count": 124,
+            "description": "",
+            "id": 62,
+            "name": "Category 62",
+            "slug": "category-62"
+          },
+          {
+            "count": 126,
+            "description": "",
+            "id": 63,
+            "name": "Category 63",
+            "slug": "category-63"
+          },
+          {
+            "count": 128,
+            "description": "",
+            "id": 64,
+            "name": "Category 64",
+            "slug": "category-64"
+          },
+          {
+            "count": 130,
+            "description": "",
+            "id": 65,
+            "name": "Category 65",
+            "slug": "category-65"
+          },
+          {
+            "count": 132,
+            "description": "",
+            "id": 66,
+            "name": "Category 66",
+            "slug": "category-66"
+          },
+          {
+            "count": 134,
+            "description": "",
+            "id": 67,
+            "name": "Category 67",
+            "slug": "category-67"
+          },
+          {
+            "count": 136,
+            "description": "",
+            "id": 68,
+            "name": "Category 68",
+            "slug": "category-68"
+          },
+          {
+            "count": 138,
+            "description": "",
+            "id": 69,
+            "name": "Category 69",
+            "slug": "category-69"
+          },
+          {
+            "count": 140,
+            "description": "",
+            "id": 70,
+            "name": "Category 70",
+            "slug": "category-70"
+          },
+          {
+            "count": 142,
+            "description": "",
+            "id": 71,
+            "name": "Category 71",
+            "slug": "category-71"
+          },
+          {
+            "count": 144,
+            "description": "",
+            "id": 72,
+            "name": "Category 72",
+            "slug": "category-72"
+          },
+          {
+            "count": 146,
+            "description": "",
+            "id": 73,
+            "name": "Category 73",
+            "slug": "category-73"
+          },
+          {
+            "count": 148,
+            "description": "",
+            "id": 74,
+            "name": "Category 74",
+            "slug": "category-74"
+          },
+          {
+            "count": 150,
+            "description": "",
+            "id": 75,
+            "name": "Category 75",
+            "slug": "category-75"
+          },
+          {
+            "count": 152,
+            "description": "",
+            "id": 76,
+            "name": "Category 76",
+            "slug": "category-76"
+          },
+          {
+            "count": 154,
+            "description": "",
+            "id": 77,
+            "name": "Category 77",
+            "slug": "category-77"
+          },
+          {
+            "count": 156,
+            "description": "",
+            "id": 78,
+            "name": "Category 78",
+            "slug": "category-78"
+          },
+          {
+            "count": 158,
+            "description": "",
+            "id": 79,
+            "name": "Category 79",
+            "slug": "category-79"
+          },
+          {
+            "count": 160,
+            "description": "",
+            "id": 80,
+            "name": "Category 80",
+            "slug": "category-80"
+          },
+          {
+            "count": 162,
+            "description": "",
+            "id": 81,
+            "name": "Category 81",
+            "slug": "category-81"
+          },
+          {
+            "count": 164,
+            "description": "",
+            "id": 82,
+            "name": "Category 82",
+            "slug": "category-82"
+          },
+          {
+            "count": 166,
+            "description": "",
+            "id": 83,
+            "name": "Category 83",
+            "slug": "category-83"
+          },
+          {
+            "count": 168,
+            "description": "",
+            "id": 84,
+            "name": "Category 84",
+            "slug": "category-84"
+          },
+          {
+            "count": 170,
+            "description": "",
+            "id": 85,
+            "name": "Category 85",
+            "slug": "category-85"
+          },
+          {
+            "count": 172,
+            "description": "",
+            "id": 86,
+            "name": "Category 86",
+            "slug": "category-86"
+          },
+          {
+            "count": 174,
+            "description": "",
+            "id": 87,
+            "name": "Category 87",
+            "slug": "category-87"
+          },
+          {
+            "count": 176,
+            "description": "",
+            "id": 88,
+            "name": "Category 88",
+            "slug": "category-88"
+          },
+          {
+            "count": 178,
+            "description": "",
+            "id": 89,
+            "name": "Category 89",
+            "slug": "category-89"
+          },
+          {
+            "count": 180,
+            "description": "",
+            "id": 90,
+            "name": "Category 90",
+            "slug": "category-90"
+          },
+          {
+            "count": 182,
+            "description": "",
+            "id": 91,
+            "name": "Category 91",
+            "slug": "category-91"
+          },
+          {
+            "count": 184,
+            "description": "",
+            "id": 92,
+            "name": "Category 92",
+            "slug": "category-92"
+          },
+          {
+            "count": 186,
+            "description": "",
+            "id": 93,
+            "name": "Category 93",
+            "slug": "category-93"
+          },
+          {
+            "count": 188,
+            "description": "",
+            "id": 94,
+            "name": "Category 94",
+            "slug": "category-94"
+          },
+          {
+            "count": 190,
+            "description": "",
+            "id": 95,
+            "name": "Category 95",
+            "slug": "category-95"
+          },
+          {
+            "count": 192,
+            "description": "",
+            "id": 96,
+            "name": "Category 96",
+            "slug": "category-96"
+          },
+          {
+            "count": 194,
+            "description": "",
+            "id": 97,
+            "name": "Category 97",
+            "slug": "category-97"
+          },
+          {
+            "count": 196,
+            "description": "",
+            "id": 98,
+            "name": "Category 98",
+            "slug": "category-98"
+          },
+          {
+            "count": 198,
+            "description": "",
+            "id": 99,
+            "name": "Category 99",
+            "slug": "category-99"
+          },
+          {
+            "count": 200,
+            "description": "",
+            "id": 100,
+            "name": "Category 100",
+            "slug": "category-100"
+          }
+        ]
+      },
+      "name": "categories-full-page-then-empty",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/categories",
+          "query": "per_page=100&page=1"
+        },
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/categories",
+          "query": "per_page=100&page=2"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/categories?page=1&per_page=100": {
+          "body": "[{\"id\": 1, \"name\": \"Category 1\", \"slug\": \"category-1\", \"count\": 2, \"description\": \"\"}, {\"id\": 2, \"name\": \"Category 2\", \"slug\": \"category-2\", \"count\": 4, \"description\": \"\"}, {\"id\": 3, \"name\": \"Category 3\", \"slug\": \"category-3\", \"count\": 6, \"description\": \"\"}, {\"id\": 4, \"name\": \"Category 4\", \"slug\": \"category-4\", \"count\": 8, \"description\": \"\"}, {\"id\": 5, \"name\": \"Category 5\", \"slug\": \"category-5\", \"count\": 10, \"description\": \"\"}, {\"id\": 6, \"name\": \"Category 6\", \"slug\": \"category-6\", \"count\": 12, \"description\": \"\"}, {\"id\": 7, \"name\": \"Category 7\", \"slug\": \"category-7\", \"count\": 14, \"description\": \"\"}, {\"id\": 8, \"name\": \"Category 8\", \"slug\": \"category-8\", \"count\": 16, \"description\": \"\"}, {\"id\": 9, \"name\": \"Category 9\", \"slug\": \"category-9\", \"count\": 18, \"description\": \"\"}, {\"id\": 10, \"name\": \"Category 10\", \"slug\": \"category-10\", \"count\": 20, \"description\": \"\"}, {\"id\": 11, \"name\": \"Category 11\", \"slug\": \"category-11\", \"count\": 22, \"description\": \"\"}, {\"id\": 12, \"name\": \"Category 12\", \"slug\": \"category-12\", \"count\": 24, \"description\": \"\"}, {\"id\": 13, \"name\": \"Category 13\", \"slug\": \"category-13\", \"count\": 26, \"description\": \"\"}, {\"id\": 14, \"name\": \"Category 14\", \"slug\": \"category-14\", \"count\": 28, \"description\": \"\"}, {\"id\": 15, \"name\": \"Category 15\", \"slug\": \"category-15\", \"count\": 30, \"description\": \"\"}, {\"id\": 16, \"name\": \"Category 16\", \"slug\": \"category-16\", \"count\": 32, \"description\": \"\"}, {\"id\": 17, \"name\": \"Category 17\", \"slug\": \"category-17\", \"count\": 34, \"description\": \"\"}, {\"id\": 18, \"name\": \"Category 18\", \"slug\": \"category-18\", \"count\": 36, \"description\": \"\"}, {\"id\": 19, \"name\": \"Category 19\", \"slug\": \"category-19\", \"count\": 38, \"description\": \"\"}, {\"id\": 20, \"name\": \"Category 20\", \"slug\": \"category-20\", \"count\": 40, \"description\": \"\"}, {\"id\": 21, \"name\": \"Category 21\", \"slug\": \"category-21\", \"count\": 42, \"description\": \"\"}, {\"id\": 22, \"name\": \"Category 22\", \"slug\": \"category-22\", \"count\": 44, \"description\": \"\"}, {\"id\": 23, \"name\": \"Category 23\", \"slug\": \"category-23\", \"count\": 46, \"description\": \"\"}, {\"id\": 24, \"name\": \"Category 24\", \"slug\": \"category-24\", \"count\": 48, \"description\": \"\"}, {\"id\": 25, \"name\": \"Category 25\", \"slug\": \"category-25\", \"count\": 50, \"description\": \"\"}, {\"id\": 26, \"name\": \"Category 26\", \"slug\": \"category-26\", \"count\": 52, \"description\": \"\"}, {\"id\": 27, \"name\": \"Category 27\", \"slug\": \"category-27\", \"count\": 54, \"description\": \"\"}, {\"id\": 28, \"name\": \"Category 28\", \"slug\": \"category-28\", \"count\": 56, \"description\": \"\"}, {\"id\": 29, \"name\": \"Category 29\", \"slug\": \"category-29\", \"count\": 58, \"description\": \"\"}, {\"id\": 30, \"name\": \"Category 30\", \"slug\": \"category-30\", \"count\": 60, \"description\": \"\"}, {\"id\": 31, \"name\": \"Category 31\", \"slug\": \"category-31\", \"count\": 62, \"description\": \"\"}, {\"id\": 32, \"name\": \"Category 32\", \"slug\": \"category-32\", \"count\": 64, \"description\": \"\"}, {\"id\": 33, \"name\": \"Category 33\", \"slug\": \"category-33\", \"count\": 66, \"description\": \"\"}, {\"id\": 34, \"name\": \"Category 34\", \"slug\": \"category-34\", \"count\": 68, \"description\": \"\"}, {\"id\": 35, \"name\": \"Category 35\", \"slug\": \"category-35\", \"count\": 70, \"description\": \"\"}, {\"id\": 36, \"name\": \"Category 36\", \"slug\": \"category-36\", \"count\": 72, \"description\": \"\"}, {\"id\": 37, \"name\": \"Category 37\", \"slug\": \"category-37\", \"count\": 74, \"description\": \"\"}, {\"id\": 38, \"name\": \"Category 38\", \"slug\": \"category-38\", \"count\": 76, \"description\": \"\"}, {\"id\": 39, \"name\": \"Category 39\", \"slug\": \"category-39\", \"count\": 78, \"description\": \"\"}, {\"id\": 40, \"name\": \"Category 40\", \"slug\": \"category-40\", \"count\": 80, \"description\": \"\"}, {\"id\": 41, \"name\": \"Category 41\", \"slug\": \"category-41\", \"count\": 82, \"description\": \"\"}, {\"id\": 42, \"name\": \"Category 42\", \"slug\": \"category-42\", \"count\": 84, \"description\": \"\"}, {\"id\": 43, \"name\": \"Category 43\", \"slug\": \"category-43\", \"count\": 86, \"description\": \"\"}, {\"id\": 44, \"name\": \"Category 44\", \"slug\": \"category-44\", \"count\": 88, \"description\": \"\"}, {\"id\": 45, \"name\": \"Category 45\", \"slug\": \"category-45\", \"count\": 90, \"description\": \"\"}, {\"id\": 46, \"name\": \"Category 46\", \"slug\": \"category-46\", \"count\": 92, \"description\": \"\"}, {\"id\": 47, \"name\": \"Category 47\", \"slug\": \"category-47\", \"count\": 94, \"description\": \"\"}, {\"id\": 48, \"name\": \"Category 48\", \"slug\": \"category-48\", \"count\": 96, \"description\": \"\"}, {\"id\": 49, \"name\": \"Category 49\", \"slug\": \"category-49\", \"count\": 98, \"description\": \"\"}, {\"id\": 50, \"name\": \"Category 50\", \"slug\": \"category-50\", \"count\": 100, \"description\": \"\"}, {\"id\": 51, \"name\": \"Category 51\", \"slug\": \"category-51\", \"count\": 102, \"description\": \"\"}, {\"id\": 52, \"name\": \"Category 52\", \"slug\": \"category-52\", \"count\": 104, \"description\": \"\"}, {\"id\": 53, \"name\": \"Category 53\", \"slug\": \"category-53\", \"count\": 106, \"description\": \"\"}, {\"id\": 54, \"name\": \"Category 54\", \"slug\": \"category-54\", \"count\": 108, \"description\": \"\"}, {\"id\": 55, \"name\": \"Category 55\", \"slug\": \"category-55\", \"count\": 110, \"description\": \"\"}, {\"id\": 56, \"name\": \"Category 56\", \"slug\": \"category-56\", \"count\": 112, \"description\": \"\"}, {\"id\": 57, \"name\": \"Category 57\", \"slug\": \"category-57\", \"count\": 114, \"description\": \"\"}, {\"id\": 58, \"name\": \"Category 58\", \"slug\": \"category-58\", \"count\": 116, \"description\": \"\"}, {\"id\": 59, \"name\": \"Category 59\", \"slug\": \"category-59\", \"count\": 118, \"description\": \"\"}, {\"id\": 60, \"name\": \"Category 60\", \"slug\": \"category-60\", \"count\": 120, \"description\": \"\"}, {\"id\": 61, \"name\": \"Category 61\", \"slug\": \"category-61\", \"count\": 122, \"description\": \"\"}, {\"id\": 62, \"name\": \"Category 62\", \"slug\": \"category-62\", \"count\": 124, \"description\": \"\"}, {\"id\": 63, \"name\": \"Category 63\", \"slug\": \"category-63\", \"count\": 126, \"description\": \"\"}, {\"id\": 64, \"name\": \"Category 64\", \"slug\": \"category-64\", \"count\": 128, \"description\": \"\"}, {\"id\": 65, \"name\": \"Category 65\", \"slug\": \"category-65\", \"count\": 130, \"description\": \"\"}, {\"id\": 66, \"name\": \"Category 66\", \"slug\": \"category-66\", \"count\": 132, \"description\": \"\"}, {\"id\": 67, \"name\": \"Category 67\", \"slug\": \"category-67\", \"count\": 134, \"description\": \"\"}, {\"id\": 68, \"name\": \"Category 68\", \"slug\": \"category-68\", \"count\": 136, \"description\": \"\"}, {\"id\": 69, \"name\": \"Category 69\", \"slug\": \"category-69\", \"count\": 138, \"description\": \"\"}, {\"id\": 70, \"name\": \"Category 70\", \"slug\": \"category-70\", \"count\": 140, \"description\": \"\"}, {\"id\": 71, \"name\": \"Category 71\", \"slug\": \"category-71\", \"count\": 142, \"description\": \"\"}, {\"id\": 72, \"name\": \"Category 72\", \"slug\": \"category-72\", \"count\": 144, \"description\": \"\"}, {\"id\": 73, \"name\": \"Category 73\", \"slug\": \"category-73\", \"count\": 146, \"description\": \"\"}, {\"id\": 74, \"name\": \"Category 74\", \"slug\": \"category-74\", \"count\": 148, \"description\": \"\"}, {\"id\": 75, \"name\": \"Category 75\", \"slug\": \"category-75\", \"count\": 150, \"description\": \"\"}, {\"id\": 76, \"name\": \"Category 76\", \"slug\": \"category-76\", \"count\": 152, \"description\": \"\"}, {\"id\": 77, \"name\": \"Category 77\", \"slug\": \"category-77\", \"count\": 154, \"description\": \"\"}, {\"id\": 78, \"name\": \"Category 78\", \"slug\": \"category-78\", \"count\": 156, \"description\": \"\"}, {\"id\": 79, \"name\": \"Category 79\", \"slug\": \"category-79\", \"count\": 158, \"description\": \"\"}, {\"id\": 80, \"name\": \"Category 80\", \"slug\": \"category-80\", \"count\": 160, \"description\": \"\"}, {\"id\": 81, \"name\": \"Category 81\", \"slug\": \"category-81\", \"count\": 162, \"description\": \"\"}, {\"id\": 82, \"name\": \"Category 82\", \"slug\": \"category-82\", \"count\": 164, \"description\": \"\"}, {\"id\": 83, \"name\": \"Category 83\", \"slug\": \"category-83\", \"count\": 166, \"description\": \"\"}, {\"id\": 84, \"name\": \"Category 84\", \"slug\": \"category-84\", \"count\": 168, \"description\": \"\"}, {\"id\": 85, \"name\": \"Category 85\", \"slug\": \"category-85\", \"count\": 170, \"description\": \"\"}, {\"id\": 86, \"name\": \"Category 86\", \"slug\": \"category-86\", \"count\": 172, \"description\": \"\"}, {\"id\": 87, \"name\": \"Category 87\", \"slug\": \"category-87\", \"count\": 174, \"description\": \"\"}, {\"id\": 88, \"name\": \"Category 88\", \"slug\": \"category-88\", \"count\": 176, \"description\": \"\"}, {\"id\": 89, \"name\": \"Category 89\", \"slug\": \"category-89\", \"count\": 178, \"description\": \"\"}, {\"id\": 90, \"name\": \"Category 90\", \"slug\": \"category-90\", \"count\": 180, \"description\": \"\"}, {\"id\": 91, \"name\": \"Category 91\", \"slug\": \"category-91\", \"count\": 182, \"description\": \"\"}, {\"id\": 92, \"name\": \"Category 92\", \"slug\": \"category-92\", \"count\": 184, \"description\": \"\"}, {\"id\": 93, \"name\": \"Category 93\", \"slug\": \"category-93\", \"count\": 186, \"description\": \"\"}, {\"id\": 94, \"name\": \"Category 94\", \"slug\": \"category-94\", \"count\": 188, \"description\": \"\"}, {\"id\": 95, \"name\": \"Category 95\", \"slug\": \"category-95\", \"count\": 190, \"description\": \"\"}, {\"id\": 96, \"name\": \"Category 96\", \"slug\": \"category-96\", \"count\": 192, \"description\": \"\"}, {\"id\": 97, \"name\": \"Category 97\", \"slug\": \"category-97\", \"count\": 194, \"description\": \"\"}, {\"id\": 98, \"name\": \"Category 98\", \"slug\": \"category-98\", \"count\": 196, \"description\": \"\"}, {\"id\": 99, \"name\": \"Category 99\", \"slug\": \"category-99\", \"count\": 198, \"description\": \"\"}, {\"id\": 100, \"name\": \"Category 100\", \"slug\": \"category-100\", \"count\": 200, \"description\": \"\"}]",
+          "content_type": "application/json",
+          "status": 200
+        },
+        "GET /wp-json/wp/v2/categories?page=2&per_page=100": {
+          "body": "[]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "list_categories"
+      },
+      "expected": {
+        "error": "WordPress API error: Internal server error",
+        "status_code": 500
+      },
+      "name": "categories-error-on-second-page",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/categories",
+          "query": "per_page=100&page=1"
+        },
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/categories",
+          "query": "per_page=100&page=2"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/categories?page=1&per_page=100": {
+          "body": "[{\"id\": 1, \"name\": \"Category 1\", \"slug\": \"category-1\", \"count\": 2, \"description\": \"\"}, {\"id\": 2, \"name\": \"Category 2\", \"slug\": \"category-2\", \"count\": 4, \"description\": \"\"}, {\"id\": 3, \"name\": \"Category 3\", \"slug\": \"category-3\", \"count\": 6, \"description\": \"\"}, {\"id\": 4, \"name\": \"Category 4\", \"slug\": \"category-4\", \"count\": 8, \"description\": \"\"}, {\"id\": 5, \"name\": \"Category 5\", \"slug\": \"category-5\", \"count\": 10, \"description\": \"\"}, {\"id\": 6, \"name\": \"Category 6\", \"slug\": \"category-6\", \"count\": 12, \"description\": \"\"}, {\"id\": 7, \"name\": \"Category 7\", \"slug\": \"category-7\", \"count\": 14, \"description\": \"\"}, {\"id\": 8, \"name\": \"Category 8\", \"slug\": \"category-8\", \"count\": 16, \"description\": \"\"}, {\"id\": 9, \"name\": \"Category 9\", \"slug\": \"category-9\", \"count\": 18, \"description\": \"\"}, {\"id\": 10, \"name\": \"Category 10\", \"slug\": \"category-10\", \"count\": 20, \"description\": \"\"}, {\"id\": 11, \"name\": \"Category 11\", \"slug\": \"category-11\", \"count\": 22, \"description\": \"\"}, {\"id\": 12, \"name\": \"Category 12\", \"slug\": \"category-12\", \"count\": 24, \"description\": \"\"}, {\"id\": 13, \"name\": \"Category 13\", \"slug\": \"category-13\", \"count\": 26, \"description\": \"\"}, {\"id\": 14, \"name\": \"Category 14\", \"slug\": \"category-14\", \"count\": 28, \"description\": \"\"}, {\"id\": 15, \"name\": \"Category 15\", \"slug\": \"category-15\", \"count\": 30, \"description\": \"\"}, {\"id\": 16, \"name\": \"Category 16\", \"slug\": \"category-16\", \"count\": 32, \"description\": \"\"}, {\"id\": 17, \"name\": \"Category 17\", \"slug\": \"category-17\", \"count\": 34, \"description\": \"\"}, {\"id\": 18, \"name\": \"Category 18\", \"slug\": \"category-18\", \"count\": 36, \"description\": \"\"}, {\"id\": 19, \"name\": \"Category 19\", \"slug\": \"category-19\", \"count\": 38, \"description\": \"\"}, {\"id\": 20, \"name\": \"Category 20\", \"slug\": \"category-20\", \"count\": 40, \"description\": \"\"}, {\"id\": 21, \"name\": \"Category 21\", \"slug\": \"category-21\", \"count\": 42, \"description\": \"\"}, {\"id\": 22, \"name\": \"Category 22\", \"slug\": \"category-22\", \"count\": 44, \"description\": \"\"}, {\"id\": 23, \"name\": \"Category 23\", \"slug\": \"category-23\", \"count\": 46, \"description\": \"\"}, {\"id\": 24, \"name\": \"Category 24\", \"slug\": \"category-24\", \"count\": 48, \"description\": \"\"}, {\"id\": 25, \"name\": \"Category 25\", \"slug\": \"category-25\", \"count\": 50, \"description\": \"\"}, {\"id\": 26, \"name\": \"Category 26\", \"slug\": \"category-26\", \"count\": 52, \"description\": \"\"}, {\"id\": 27, \"name\": \"Category 27\", \"slug\": \"category-27\", \"count\": 54, \"description\": \"\"}, {\"id\": 28, \"name\": \"Category 28\", \"slug\": \"category-28\", \"count\": 56, \"description\": \"\"}, {\"id\": 29, \"name\": \"Category 29\", \"slug\": \"category-29\", \"count\": 58, \"description\": \"\"}, {\"id\": 30, \"name\": \"Category 30\", \"slug\": \"category-30\", \"count\": 60, \"description\": \"\"}, {\"id\": 31, \"name\": \"Category 31\", \"slug\": \"category-31\", \"count\": 62, \"description\": \"\"}, {\"id\": 32, \"name\": \"Category 32\", \"slug\": \"category-32\", \"count\": 64, \"description\": \"\"}, {\"id\": 33, \"name\": \"Category 33\", \"slug\": \"category-33\", \"count\": 66, \"description\": \"\"}, {\"id\": 34, \"name\": \"Category 34\", \"slug\": \"category-34\", \"count\": 68, \"description\": \"\"}, {\"id\": 35, \"name\": \"Category 35\", \"slug\": \"category-35\", \"count\": 70, \"description\": \"\"}, {\"id\": 36, \"name\": \"Category 36\", \"slug\": \"category-36\", \"count\": 72, \"description\": \"\"}, {\"id\": 37, \"name\": \"Category 37\", \"slug\": \"category-37\", \"count\": 74, \"description\": \"\"}, {\"id\": 38, \"name\": \"Category 38\", \"slug\": \"category-38\", \"count\": 76, \"description\": \"\"}, {\"id\": 39, \"name\": \"Category 39\", \"slug\": \"category-39\", \"count\": 78, \"description\": \"\"}, {\"id\": 40, \"name\": \"Category 40\", \"slug\": \"category-40\", \"count\": 80, \"description\": \"\"}, {\"id\": 41, \"name\": \"Category 41\", \"slug\": \"category-41\", \"count\": 82, \"description\": \"\"}, {\"id\": 42, \"name\": \"Category 42\", \"slug\": \"category-42\", \"count\": 84, \"description\": \"\"}, {\"id\": 43, \"name\": \"Category 43\", \"slug\": \"category-43\", \"count\": 86, \"description\": \"\"}, {\"id\": 44, \"name\": \"Category 44\", \"slug\": \"category-44\", \"count\": 88, \"description\": \"\"}, {\"id\": 45, \"name\": \"Category 45\", \"slug\": \"category-45\", \"count\": 90, \"description\": \"\"}, {\"id\": 46, \"name\": \"Category 46\", \"slug\": \"category-46\", \"count\": 92, \"description\": \"\"}, {\"id\": 47, \"name\": \"Category 47\", \"slug\": \"category-47\", \"count\": 94, \"description\": \"\"}, {\"id\": 48, \"name\": \"Category 48\", \"slug\": \"category-48\", \"count\": 96, \"description\": \"\"}, {\"id\": 49, \"name\": \"Category 49\", \"slug\": \"category-49\", \"count\": 98, \"description\": \"\"}, {\"id\": 50, \"name\": \"Category 50\", \"slug\": \"category-50\", \"count\": 100, \"description\": \"\"}, {\"id\": 51, \"name\": \"Category 51\", \"slug\": \"category-51\", \"count\": 102, \"description\": \"\"}, {\"id\": 52, \"name\": \"Category 52\", \"slug\": \"category-52\", \"count\": 104, \"description\": \"\"}, {\"id\": 53, \"name\": \"Category 53\", \"slug\": \"category-53\", \"count\": 106, \"description\": \"\"}, {\"id\": 54, \"name\": \"Category 54\", \"slug\": \"category-54\", \"count\": 108, \"description\": \"\"}, {\"id\": 55, \"name\": \"Category 55\", \"slug\": \"category-55\", \"count\": 110, \"description\": \"\"}, {\"id\": 56, \"name\": \"Category 56\", \"slug\": \"category-56\", \"count\": 112, \"description\": \"\"}, {\"id\": 57, \"name\": \"Category 57\", \"slug\": \"category-57\", \"count\": 114, \"description\": \"\"}, {\"id\": 58, \"name\": \"Category 58\", \"slug\": \"category-58\", \"count\": 116, \"description\": \"\"}, {\"id\": 59, \"name\": \"Category 59\", \"slug\": \"category-59\", \"count\": 118, \"description\": \"\"}, {\"id\": 60, \"name\": \"Category 60\", \"slug\": \"category-60\", \"count\": 120, \"description\": \"\"}, {\"id\": 61, \"name\": \"Category 61\", \"slug\": \"category-61\", \"count\": 122, \"description\": \"\"}, {\"id\": 62, \"name\": \"Category 62\", \"slug\": \"category-62\", \"count\": 124, \"description\": \"\"}, {\"id\": 63, \"name\": \"Category 63\", \"slug\": \"category-63\", \"count\": 126, \"description\": \"\"}, {\"id\": 64, \"name\": \"Category 64\", \"slug\": \"category-64\", \"count\": 128, \"description\": \"\"}, {\"id\": 65, \"name\": \"Category 65\", \"slug\": \"category-65\", \"count\": 130, \"description\": \"\"}, {\"id\": 66, \"name\": \"Category 66\", \"slug\": \"category-66\", \"count\": 132, \"description\": \"\"}, {\"id\": 67, \"name\": \"Category 67\", \"slug\": \"category-67\", \"count\": 134, \"description\": \"\"}, {\"id\": 68, \"name\": \"Category 68\", \"slug\": \"category-68\", \"count\": 136, \"description\": \"\"}, {\"id\": 69, \"name\": \"Category 69\", \"slug\": \"category-69\", \"count\": 138, \"description\": \"\"}, {\"id\": 70, \"name\": \"Category 70\", \"slug\": \"category-70\", \"count\": 140, \"description\": \"\"}, {\"id\": 71, \"name\": \"Category 71\", \"slug\": \"category-71\", \"count\": 142, \"description\": \"\"}, {\"id\": 72, \"name\": \"Category 72\", \"slug\": \"category-72\", \"count\": 144, \"description\": \"\"}, {\"id\": 73, \"name\": \"Category 73\", \"slug\": \"category-73\", \"count\": 146, \"description\": \"\"}, {\"id\": 74, \"name\": \"Category 74\", \"slug\": \"category-74\", \"count\": 148, \"description\": \"\"}, {\"id\": 75, \"name\": \"Category 75\", \"slug\": \"category-75\", \"count\": 150, \"description\": \"\"}, {\"id\": 76, \"name\": \"Category 76\", \"slug\": \"category-76\", \"count\": 152, \"description\": \"\"}, {\"id\": 77, \"name\": \"Category 77\", \"slug\": \"category-77\", \"count\": 154, \"description\": \"\"}, {\"id\": 78, \"name\": \"Category 78\", \"slug\": \"category-78\", \"count\": 156, \"description\": \"\"}, {\"id\": 79, \"name\": \"Category 79\", \"slug\": \"category-79\", \"count\": 158, \"description\": \"\"}, {\"id\": 80, \"name\": \"Category 80\", \"slug\": \"category-80\", \"count\": 160, \"description\": \"\"}, {\"id\": 81, \"name\": \"Category 81\", \"slug\": \"category-81\", \"count\": 162, \"description\": \"\"}, {\"id\": 82, \"name\": \"Category 82\", \"slug\": \"category-82\", \"count\": 164, \"description\": \"\"}, {\"id\": 83, \"name\": \"Category 83\", \"slug\": \"category-83\", \"count\": 166, \"description\": \"\"}, {\"id\": 84, \"name\": \"Category 84\", \"slug\": \"category-84\", \"count\": 168, \"description\": \"\"}, {\"id\": 85, \"name\": \"Category 85\", \"slug\": \"category-85\", \"count\": 170, \"description\": \"\"}, {\"id\": 86, \"name\": \"Category 86\", \"slug\": \"category-86\", \"count\": 172, \"description\": \"\"}, {\"id\": 87, \"name\": \"Category 87\", \"slug\": \"category-87\", \"count\": 174, \"description\": \"\"}, {\"id\": 88, \"name\": \"Category 88\", \"slug\": \"category-88\", \"count\": 176, \"description\": \"\"}, {\"id\": 89, \"name\": \"Category 89\", \"slug\": \"category-89\", \"count\": 178, \"description\": \"\"}, {\"id\": 90, \"name\": \"Category 90\", \"slug\": \"category-90\", \"count\": 180, \"description\": \"\"}, {\"id\": 91, \"name\": \"Category 91\", \"slug\": \"category-91\", \"count\": 182, \"description\": \"\"}, {\"id\": 92, \"name\": \"Category 92\", \"slug\": \"category-92\", \"count\": 184, \"description\": \"\"}, {\"id\": 93, \"name\": \"Category 93\", \"slug\": \"category-93\", \"count\": 186, \"description\": \"\"}, {\"id\": 94, \"name\": \"Category 94\", \"slug\": \"category-94\", \"count\": 188, \"description\": \"\"}, {\"id\": 95, \"name\": \"Category 95\", \"slug\": \"category-95\", \"count\": 190, \"description\": \"\"}, {\"id\": 96, \"name\": \"Category 96\", \"slug\": \"category-96\", \"count\": 192, \"description\": \"\"}, {\"id\": 97, \"name\": \"Category 97\", \"slug\": \"category-97\", \"count\": 194, \"description\": \"\"}, {\"id\": 98, \"name\": \"Category 98\", \"slug\": \"category-98\", \"count\": 196, \"description\": \"\"}, {\"id\": 99, \"name\": \"Category 99\", \"slug\": \"category-99\", \"count\": 198, \"description\": \"\"}, {\"id\": 100, \"name\": \"Category 100\", \"slug\": \"category-100\", \"count\": 200, \"description\": \"\"}]",
+          "content_type": "application/json",
+          "status": 200
+        },
+        "GET /wp-json/wp/v2/categories?page=2&per_page=100": {
+          "body": "{\"message\": \"Internal server error\"}",
+          "content_type": "application/json",
+          "status": 500
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/blog/wp-json/wp/v2",
+      "call": {
+        "fn": "list_categories"
+      },
+      "expected": {
+        "result": [
+          {
+            "count": 14,
+            "description": "",
+            "id": 7,
+            "name": "Category 7",
+            "slug": "category-7"
+          }
+        ]
+      },
+      "name": "categories-through-subdirectory-install",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/blog/wp-json/wp/v2/categories",
+          "query": "per_page=100&page=1"
+        }
+      ],
+      "routes": {
+        "GET /blog/wp-json/wp/v2/categories?page=1&per_page=100": {
+          "body": "[{\"id\": 7, \"name\": \"Category 7\", \"slug\": \"category-7\", \"count\": 14, \"description\": \"\"}]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "site_url": "{BASE}/blog/wp-json",
+      "url": "{BASE}/blog"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "list_users"
+      },
+      "expected": {
+        "result": [
+          {
+            "id": 1,
+            "link": "https://x/",
+            "name": "Author 1",
+            "slug": "author-1"
+          },
+          {
+            "id": 2,
+            "link": "https://x/",
+            "name": "Author 2",
+            "slug": "author-2"
+          }
+        ]
+      },
+      "name": "users-default-roles",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/users",
+          "query": "per_page=100&page=1&roles=administrator%2Ceditor%2Cauthor"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/users?page=1&per_page=100&roles=administrator,editor,author": {
+          "body": "[{\"id\": 1, \"name\": \"Author 1\", \"slug\": \"author-1\", \"link\": \"https://x/\"}, {\"id\": 2, \"name\": \"Author 2\", \"slug\": \"author-2\", \"link\": \"https://x/\"}]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "list_users",
+        "roles": [
+          "subscriber"
+        ]
+      },
+      "expected": {
+        "result": [
+          {
+            "id": 5,
+            "link": "https://x/",
+            "name": "Author 5",
+            "slug": "author-5"
+          }
+        ]
+      },
+      "name": "users-custom-roles",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/users",
+          "query": "per_page=100&page=1&roles=subscriber"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/users?page=1&per_page=100&roles=subscriber": {
+          "body": "[{\"id\": 5, \"name\": \"Author 5\", \"slug\": \"author-5\", \"link\": \"https://x/\"}]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "list_users",
+        "roles": []
+      },
+      "expected": {
+        "result": [
+          {
+            "id": 9,
+            "link": "https://x/",
+            "name": "Author 9",
+            "slug": "author-9"
+          }
+        ]
+      },
+      "name": "users-empty-roles-list",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/users",
+          "query": "per_page=100&page=1&roles="
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/users?page=1&per_page=100&roles=": {
+          "body": "[{\"id\": 9, \"name\": \"Author 9\", \"slug\": \"author-9\", \"link\": \"https://x/\"}]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "list_users"
+      },
+      "expected": {
+        "result": [
+          {
+            "id": 1,
+            "link": "https://x/",
+            "name": "Author 1",
+            "slug": "author-1"
+          },
+          {
+            "id": 2,
+            "link": "https://x/",
+            "name": "Author 2",
+            "slug": "author-2"
+          },
+          {
+            "id": 3,
+            "link": "https://x/",
+            "name": "Author 3",
+            "slug": "author-3"
+          },
+          {
+            "id": 4,
+            "link": "https://x/",
+            "name": "Author 4",
+            "slug": "author-4"
+          },
+          {
+            "id": 5,
+            "link": "https://x/",
+            "name": "Author 5",
+            "slug": "author-5"
+          },
+          {
+            "id": 6,
+            "link": "https://x/",
+            "name": "Author 6",
+            "slug": "author-6"
+          },
+          {
+            "id": 7,
+            "link": "https://x/",
+            "name": "Author 7",
+            "slug": "author-7"
+          },
+          {
+            "id": 8,
+            "link": "https://x/",
+            "name": "Author 8",
+            "slug": "author-8"
+          },
+          {
+            "id": 9,
+            "link": "https://x/",
+            "name": "Author 9",
+            "slug": "author-9"
+          },
+          {
+            "id": 10,
+            "link": "https://x/",
+            "name": "Author 10",
+            "slug": "author-10"
+          },
+          {
+            "id": 11,
+            "link": "https://x/",
+            "name": "Author 11",
+            "slug": "author-11"
+          },
+          {
+            "id": 12,
+            "link": "https://x/",
+            "name": "Author 12",
+            "slug": "author-12"
+          },
+          {
+            "id": 13,
+            "link": "https://x/",
+            "name": "Author 13",
+            "slug": "author-13"
+          },
+          {
+            "id": 14,
+            "link": "https://x/",
+            "name": "Author 14",
+            "slug": "author-14"
+          },
+          {
+            "id": 15,
+            "link": "https://x/",
+            "name": "Author 15",
+            "slug": "author-15"
+          },
+          {
+            "id": 16,
+            "link": "https://x/",
+            "name": "Author 16",
+            "slug": "author-16"
+          },
+          {
+            "id": 17,
+            "link": "https://x/",
+            "name": "Author 17",
+            "slug": "author-17"
+          },
+          {
+            "id": 18,
+            "link": "https://x/",
+            "name": "Author 18",
+            "slug": "author-18"
+          },
+          {
+            "id": 19,
+            "link": "https://x/",
+            "name": "Author 19",
+            "slug": "author-19"
+          },
+          {
+            "id": 20,
+            "link": "https://x/",
+            "name": "Author 20",
+            "slug": "author-20"
+          },
+          {
+            "id": 21,
+            "link": "https://x/",
+            "name": "Author 21",
+            "slug": "author-21"
+          },
+          {
+            "id": 22,
+            "link": "https://x/",
+            "name": "Author 22",
+            "slug": "author-22"
+          },
+          {
+            "id": 23,
+            "link": "https://x/",
+            "name": "Author 23",
+            "slug": "author-23"
+          },
+          {
+            "id": 24,
+            "link": "https://x/",
+            "name": "Author 24",
+            "slug": "author-24"
+          },
+          {
+            "id": 25,
+            "link": "https://x/",
+            "name": "Author 25",
+            "slug": "author-25"
+          },
+          {
+            "id": 26,
+            "link": "https://x/",
+            "name": "Author 26",
+            "slug": "author-26"
+          },
+          {
+            "id": 27,
+            "link": "https://x/",
+            "name": "Author 27",
+            "slug": "author-27"
+          },
+          {
+            "id": 28,
+            "link": "https://x/",
+            "name": "Author 28",
+            "slug": "author-28"
+          },
+          {
+            "id": 29,
+            "link": "https://x/",
+            "name": "Author 29",
+            "slug": "author-29"
+          },
+          {
+            "id": 30,
+            "link": "https://x/",
+            "name": "Author 30",
+            "slug": "author-30"
+          },
+          {
+            "id": 31,
+            "link": "https://x/",
+            "name": "Author 31",
+            "slug": "author-31"
+          },
+          {
+            "id": 32,
+            "link": "https://x/",
+            "name": "Author 32",
+            "slug": "author-32"
+          },
+          {
+            "id": 33,
+            "link": "https://x/",
+            "name": "Author 33",
+            "slug": "author-33"
+          },
+          {
+            "id": 34,
+            "link": "https://x/",
+            "name": "Author 34",
+            "slug": "author-34"
+          },
+          {
+            "id": 35,
+            "link": "https://x/",
+            "name": "Author 35",
+            "slug": "author-35"
+          },
+          {
+            "id": 36,
+            "link": "https://x/",
+            "name": "Author 36",
+            "slug": "author-36"
+          },
+          {
+            "id": 37,
+            "link": "https://x/",
+            "name": "Author 37",
+            "slug": "author-37"
+          },
+          {
+            "id": 38,
+            "link": "https://x/",
+            "name": "Author 38",
+            "slug": "author-38"
+          },
+          {
+            "id": 39,
+            "link": "https://x/",
+            "name": "Author 39",
+            "slug": "author-39"
+          },
+          {
+            "id": 40,
+            "link": "https://x/",
+            "name": "Author 40",
+            "slug": "author-40"
+          },
+          {
+            "id": 41,
+            "link": "https://x/",
+            "name": "Author 41",
+            "slug": "author-41"
+          },
+          {
+            "id": 42,
+            "link": "https://x/",
+            "name": "Author 42",
+            "slug": "author-42"
+          },
+          {
+            "id": 43,
+            "link": "https://x/",
+            "name": "Author 43",
+            "slug": "author-43"
+          },
+          {
+            "id": 44,
+            "link": "https://x/",
+            "name": "Author 44",
+            "slug": "author-44"
+          },
+          {
+            "id": 45,
+            "link": "https://x/",
+            "name": "Author 45",
+            "slug": "author-45"
+          },
+          {
+            "id": 46,
+            "link": "https://x/",
+            "name": "Author 46",
+            "slug": "author-46"
+          },
+          {
+            "id": 47,
+            "link": "https://x/",
+            "name": "Author 47",
+            "slug": "author-47"
+          },
+          {
+            "id": 48,
+            "link": "https://x/",
+            "name": "Author 48",
+            "slug": "author-48"
+          },
+          {
+            "id": 49,
+            "link": "https://x/",
+            "name": "Author 49",
+            "slug": "author-49"
+          },
+          {
+            "id": 50,
+            "link": "https://x/",
+            "name": "Author 50",
+            "slug": "author-50"
+          },
+          {
+            "id": 51,
+            "link": "https://x/",
+            "name": "Author 51",
+            "slug": "author-51"
+          },
+          {
+            "id": 52,
+            "link": "https://x/",
+            "name": "Author 52",
+            "slug": "author-52"
+          },
+          {
+            "id": 53,
+            "link": "https://x/",
+            "name": "Author 53",
+            "slug": "author-53"
+          },
+          {
+            "id": 54,
+            "link": "https://x/",
+            "name": "Author 54",
+            "slug": "author-54"
+          },
+          {
+            "id": 55,
+            "link": "https://x/",
+            "name": "Author 55",
+            "slug": "author-55"
+          },
+          {
+            "id": 56,
+            "link": "https://x/",
+            "name": "Author 56",
+            "slug": "author-56"
+          },
+          {
+            "id": 57,
+            "link": "https://x/",
+            "name": "Author 57",
+            "slug": "author-57"
+          },
+          {
+            "id": 58,
+            "link": "https://x/",
+            "name": "Author 58",
+            "slug": "author-58"
+          },
+          {
+            "id": 59,
+            "link": "https://x/",
+            "name": "Author 59",
+            "slug": "author-59"
+          },
+          {
+            "id": 60,
+            "link": "https://x/",
+            "name": "Author 60",
+            "slug": "author-60"
+          },
+          {
+            "id": 61,
+            "link": "https://x/",
+            "name": "Author 61",
+            "slug": "author-61"
+          },
+          {
+            "id": 62,
+            "link": "https://x/",
+            "name": "Author 62",
+            "slug": "author-62"
+          },
+          {
+            "id": 63,
+            "link": "https://x/",
+            "name": "Author 63",
+            "slug": "author-63"
+          },
+          {
+            "id": 64,
+            "link": "https://x/",
+            "name": "Author 64",
+            "slug": "author-64"
+          },
+          {
+            "id": 65,
+            "link": "https://x/",
+            "name": "Author 65",
+            "slug": "author-65"
+          },
+          {
+            "id": 66,
+            "link": "https://x/",
+            "name": "Author 66",
+            "slug": "author-66"
+          },
+          {
+            "id": 67,
+            "link": "https://x/",
+            "name": "Author 67",
+            "slug": "author-67"
+          },
+          {
+            "id": 68,
+            "link": "https://x/",
+            "name": "Author 68",
+            "slug": "author-68"
+          },
+          {
+            "id": 69,
+            "link": "https://x/",
+            "name": "Author 69",
+            "slug": "author-69"
+          },
+          {
+            "id": 70,
+            "link": "https://x/",
+            "name": "Author 70",
+            "slug": "author-70"
+          },
+          {
+            "id": 71,
+            "link": "https://x/",
+            "name": "Author 71",
+            "slug": "author-71"
+          },
+          {
+            "id": 72,
+            "link": "https://x/",
+            "name": "Author 72",
+            "slug": "author-72"
+          },
+          {
+            "id": 73,
+            "link": "https://x/",
+            "name": "Author 73",
+            "slug": "author-73"
+          },
+          {
+            "id": 74,
+            "link": "https://x/",
+            "name": "Author 74",
+            "slug": "author-74"
+          },
+          {
+            "id": 75,
+            "link": "https://x/",
+            "name": "Author 75",
+            "slug": "author-75"
+          },
+          {
+            "id": 76,
+            "link": "https://x/",
+            "name": "Author 76",
+            "slug": "author-76"
+          },
+          {
+            "id": 77,
+            "link": "https://x/",
+            "name": "Author 77",
+            "slug": "author-77"
+          },
+          {
+            "id": 78,
+            "link": "https://x/",
+            "name": "Author 78",
+            "slug": "author-78"
+          },
+          {
+            "id": 79,
+            "link": "https://x/",
+            "name": "Author 79",
+            "slug": "author-79"
+          },
+          {
+            "id": 80,
+            "link": "https://x/",
+            "name": "Author 80",
+            "slug": "author-80"
+          },
+          {
+            "id": 81,
+            "link": "https://x/",
+            "name": "Author 81",
+            "slug": "author-81"
+          },
+          {
+            "id": 82,
+            "link": "https://x/",
+            "name": "Author 82",
+            "slug": "author-82"
+          },
+          {
+            "id": 83,
+            "link": "https://x/",
+            "name": "Author 83",
+            "slug": "author-83"
+          },
+          {
+            "id": 84,
+            "link": "https://x/",
+            "name": "Author 84",
+            "slug": "author-84"
+          },
+          {
+            "id": 85,
+            "link": "https://x/",
+            "name": "Author 85",
+            "slug": "author-85"
+          },
+          {
+            "id": 86,
+            "link": "https://x/",
+            "name": "Author 86",
+            "slug": "author-86"
+          },
+          {
+            "id": 87,
+            "link": "https://x/",
+            "name": "Author 87",
+            "slug": "author-87"
+          },
+          {
+            "id": 88,
+            "link": "https://x/",
+            "name": "Author 88",
+            "slug": "author-88"
+          },
+          {
+            "id": 89,
+            "link": "https://x/",
+            "name": "Author 89",
+            "slug": "author-89"
+          },
+          {
+            "id": 90,
+            "link": "https://x/",
+            "name": "Author 90",
+            "slug": "author-90"
+          },
+          {
+            "id": 91,
+            "link": "https://x/",
+            "name": "Author 91",
+            "slug": "author-91"
+          },
+          {
+            "id": 92,
+            "link": "https://x/",
+            "name": "Author 92",
+            "slug": "author-92"
+          },
+          {
+            "id": 93,
+            "link": "https://x/",
+            "name": "Author 93",
+            "slug": "author-93"
+          },
+          {
+            "id": 94,
+            "link": "https://x/",
+            "name": "Author 94",
+            "slug": "author-94"
+          },
+          {
+            "id": 95,
+            "link": "https://x/",
+            "name": "Author 95",
+            "slug": "author-95"
+          },
+          {
+            "id": 96,
+            "link": "https://x/",
+            "name": "Author 96",
+            "slug": "author-96"
+          },
+          {
+            "id": 97,
+            "link": "https://x/",
+            "name": "Author 97",
+            "slug": "author-97"
+          },
+          {
+            "id": 98,
+            "link": "https://x/",
+            "name": "Author 98",
+            "slug": "author-98"
+          },
+          {
+            "id": 99,
+            "link": "https://x/",
+            "name": "Author 99",
+            "slug": "author-99"
+          },
+          {
+            "id": 100,
+            "link": "https://x/",
+            "name": "Author 100",
+            "slug": "author-100"
+          },
+          {
+            "id": 101,
+            "link": "https://x/",
+            "name": "Author 101",
+            "slug": "author-101"
+          }
+        ]
+      },
+      "name": "users-two-pages",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/users",
+          "query": "per_page=100&page=1&roles=administrator%2Ceditor%2Cauthor"
+        },
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/users",
+          "query": "per_page=100&page=2&roles=administrator%2Ceditor%2Cauthor"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/users?page=1&per_page=100&roles=administrator,editor,author": {
+          "body": "[{\"id\": 1, \"name\": \"Author 1\", \"slug\": \"author-1\", \"link\": \"https://x/\"}, {\"id\": 2, \"name\": \"Author 2\", \"slug\": \"author-2\", \"link\": \"https://x/\"}, {\"id\": 3, \"name\": \"Author 3\", \"slug\": \"author-3\", \"link\": \"https://x/\"}, {\"id\": 4, \"name\": \"Author 4\", \"slug\": \"author-4\", \"link\": \"https://x/\"}, {\"id\": 5, \"name\": \"Author 5\", \"slug\": \"author-5\", \"link\": \"https://x/\"}, {\"id\": 6, \"name\": \"Author 6\", \"slug\": \"author-6\", \"link\": \"https://x/\"}, {\"id\": 7, \"name\": \"Author 7\", \"slug\": \"author-7\", \"link\": \"https://x/\"}, {\"id\": 8, \"name\": \"Author 8\", \"slug\": \"author-8\", \"link\": \"https://x/\"}, {\"id\": 9, \"name\": \"Author 9\", \"slug\": \"author-9\", \"link\": \"https://x/\"}, {\"id\": 10, \"name\": \"Author 10\", \"slug\": \"author-10\", \"link\": \"https://x/\"}, {\"id\": 11, \"name\": \"Author 11\", \"slug\": \"author-11\", \"link\": \"https://x/\"}, {\"id\": 12, \"name\": \"Author 12\", \"slug\": \"author-12\", \"link\": \"https://x/\"}, {\"id\": 13, \"name\": \"Author 13\", \"slug\": \"author-13\", \"link\": \"https://x/\"}, {\"id\": 14, \"name\": \"Author 14\", \"slug\": \"author-14\", \"link\": \"https://x/\"}, {\"id\": 15, \"name\": \"Author 15\", \"slug\": \"author-15\", \"link\": \"https://x/\"}, {\"id\": 16, \"name\": \"Author 16\", \"slug\": \"author-16\", \"link\": \"https://x/\"}, {\"id\": 17, \"name\": \"Author 17\", \"slug\": \"author-17\", \"link\": \"https://x/\"}, {\"id\": 18, \"name\": \"Author 18\", \"slug\": \"author-18\", \"link\": \"https://x/\"}, {\"id\": 19, \"name\": \"Author 19\", \"slug\": \"author-19\", \"link\": \"https://x/\"}, {\"id\": 20, \"name\": \"Author 20\", \"slug\": \"author-20\", \"link\": \"https://x/\"}, {\"id\": 21, \"name\": \"Author 21\", \"slug\": \"author-21\", \"link\": \"https://x/\"}, {\"id\": 22, \"name\": \"Author 22\", \"slug\": \"author-22\", \"link\": \"https://x/\"}, {\"id\": 23, \"name\": \"Author 23\", \"slug\": \"author-23\", \"link\": \"https://x/\"}, {\"id\": 24, \"name\": \"Author 24\", \"slug\": \"author-24\", \"link\": \"https://x/\"}, {\"id\": 25, \"name\": \"Author 25\", \"slug\": \"author-25\", \"link\": \"https://x/\"}, {\"id\": 26, \"name\": \"Author 26\", \"slug\": \"author-26\", \"link\": \"https://x/\"}, {\"id\": 27, \"name\": \"Author 27\", \"slug\": \"author-27\", \"link\": \"https://x/\"}, {\"id\": 28, \"name\": \"Author 28\", \"slug\": \"author-28\", \"link\": \"https://x/\"}, {\"id\": 29, \"name\": \"Author 29\", \"slug\": \"author-29\", \"link\": \"https://x/\"}, {\"id\": 30, \"name\": \"Author 30\", \"slug\": \"author-30\", \"link\": \"https://x/\"}, {\"id\": 31, \"name\": \"Author 31\", \"slug\": \"author-31\", \"link\": \"https://x/\"}, {\"id\": 32, \"name\": \"Author 32\", \"slug\": \"author-32\", \"link\": \"https://x/\"}, {\"id\": 33, \"name\": \"Author 33\", \"slug\": \"author-33\", \"link\": \"https://x/\"}, {\"id\": 34, \"name\": \"Author 34\", \"slug\": \"author-34\", \"link\": \"https://x/\"}, {\"id\": 35, \"name\": \"Author 35\", \"slug\": \"author-35\", \"link\": \"https://x/\"}, {\"id\": 36, \"name\": \"Author 36\", \"slug\": \"author-36\", \"link\": \"https://x/\"}, {\"id\": 37, \"name\": \"Author 37\", \"slug\": \"author-37\", \"link\": \"https://x/\"}, {\"id\": 38, \"name\": \"Author 38\", \"slug\": \"author-38\", \"link\": \"https://x/\"}, {\"id\": 39, \"name\": \"Author 39\", \"slug\": \"author-39\", \"link\": \"https://x/\"}, {\"id\": 40, \"name\": \"Author 40\", \"slug\": \"author-40\", \"link\": \"https://x/\"}, {\"id\": 41, \"name\": \"Author 41\", \"slug\": \"author-41\", \"link\": \"https://x/\"}, {\"id\": 42, \"name\": \"Author 42\", \"slug\": \"author-42\", \"link\": \"https://x/\"}, {\"id\": 43, \"name\": \"Author 43\", \"slug\": \"author-43\", \"link\": \"https://x/\"}, {\"id\": 44, \"name\": \"Author 44\", \"slug\": \"author-44\", \"link\": \"https://x/\"}, {\"id\": 45, \"name\": \"Author 45\", \"slug\": \"author-45\", \"link\": \"https://x/\"}, {\"id\": 46, \"name\": \"Author 46\", \"slug\": \"author-46\", \"link\": \"https://x/\"}, {\"id\": 47, \"name\": \"Author 47\", \"slug\": \"author-47\", \"link\": \"https://x/\"}, {\"id\": 48, \"name\": \"Author 48\", \"slug\": \"author-48\", \"link\": \"https://x/\"}, {\"id\": 49, \"name\": \"Author 49\", \"slug\": \"author-49\", \"link\": \"https://x/\"}, {\"id\": 50, \"name\": \"Author 50\", \"slug\": \"author-50\", \"link\": \"https://x/\"}, {\"id\": 51, \"name\": \"Author 51\", \"slug\": \"author-51\", \"link\": \"https://x/\"}, {\"id\": 52, \"name\": \"Author 52\", \"slug\": \"author-52\", \"link\": \"https://x/\"}, {\"id\": 53, \"name\": \"Author 53\", \"slug\": \"author-53\", \"link\": \"https://x/\"}, {\"id\": 54, \"name\": \"Author 54\", \"slug\": \"author-54\", \"link\": \"https://x/\"}, {\"id\": 55, \"name\": \"Author 55\", \"slug\": \"author-55\", \"link\": \"https://x/\"}, {\"id\": 56, \"name\": \"Author 56\", \"slug\": \"author-56\", \"link\": \"https://x/\"}, {\"id\": 57, \"name\": \"Author 57\", \"slug\": \"author-57\", \"link\": \"https://x/\"}, {\"id\": 58, \"name\": \"Author 58\", \"slug\": \"author-58\", \"link\": \"https://x/\"}, {\"id\": 59, \"name\": \"Author 59\", \"slug\": \"author-59\", \"link\": \"https://x/\"}, {\"id\": 60, \"name\": \"Author 60\", \"slug\": \"author-60\", \"link\": \"https://x/\"}, {\"id\": 61, \"name\": \"Author 61\", \"slug\": \"author-61\", \"link\": \"https://x/\"}, {\"id\": 62, \"name\": \"Author 62\", \"slug\": \"author-62\", \"link\": \"https://x/\"}, {\"id\": 63, \"name\": \"Author 63\", \"slug\": \"author-63\", \"link\": \"https://x/\"}, {\"id\": 64, \"name\": \"Author 64\", \"slug\": \"author-64\", \"link\": \"https://x/\"}, {\"id\": 65, \"name\": \"Author 65\", \"slug\": \"author-65\", \"link\": \"https://x/\"}, {\"id\": 66, \"name\": \"Author 66\", \"slug\": \"author-66\", \"link\": \"https://x/\"}, {\"id\": 67, \"name\": \"Author 67\", \"slug\": \"author-67\", \"link\": \"https://x/\"}, {\"id\": 68, \"name\": \"Author 68\", \"slug\": \"author-68\", \"link\": \"https://x/\"}, {\"id\": 69, \"name\": \"Author 69\", \"slug\": \"author-69\", \"link\": \"https://x/\"}, {\"id\": 70, \"name\": \"Author 70\", \"slug\": \"author-70\", \"link\": \"https://x/\"}, {\"id\": 71, \"name\": \"Author 71\", \"slug\": \"author-71\", \"link\": \"https://x/\"}, {\"id\": 72, \"name\": \"Author 72\", \"slug\": \"author-72\", \"link\": \"https://x/\"}, {\"id\": 73, \"name\": \"Author 73\", \"slug\": \"author-73\", \"link\": \"https://x/\"}, {\"id\": 74, \"name\": \"Author 74\", \"slug\": \"author-74\", \"link\": \"https://x/\"}, {\"id\": 75, \"name\": \"Author 75\", \"slug\": \"author-75\", \"link\": \"https://x/\"}, {\"id\": 76, \"name\": \"Author 76\", \"slug\": \"author-76\", \"link\": \"https://x/\"}, {\"id\": 77, \"name\": \"Author 77\", \"slug\": \"author-77\", \"link\": \"https://x/\"}, {\"id\": 78, \"name\": \"Author 78\", \"slug\": \"author-78\", \"link\": \"https://x/\"}, {\"id\": 79, \"name\": \"Author 79\", \"slug\": \"author-79\", \"link\": \"https://x/\"}, {\"id\": 80, \"name\": \"Author 80\", \"slug\": \"author-80\", \"link\": \"https://x/\"}, {\"id\": 81, \"name\": \"Author 81\", \"slug\": \"author-81\", \"link\": \"https://x/\"}, {\"id\": 82, \"name\": \"Author 82\", \"slug\": \"author-82\", \"link\": \"https://x/\"}, {\"id\": 83, \"name\": \"Author 83\", \"slug\": \"author-83\", \"link\": \"https://x/\"}, {\"id\": 84, \"name\": \"Author 84\", \"slug\": \"author-84\", \"link\": \"https://x/\"}, {\"id\": 85, \"name\": \"Author 85\", \"slug\": \"author-85\", \"link\": \"https://x/\"}, {\"id\": 86, \"name\": \"Author 86\", \"slug\": \"author-86\", \"link\": \"https://x/\"}, {\"id\": 87, \"name\": \"Author 87\", \"slug\": \"author-87\", \"link\": \"https://x/\"}, {\"id\": 88, \"name\": \"Author 88\", \"slug\": \"author-88\", \"link\": \"https://x/\"}, {\"id\": 89, \"name\": \"Author 89\", \"slug\": \"author-89\", \"link\": \"https://x/\"}, {\"id\": 90, \"name\": \"Author 90\", \"slug\": \"author-90\", \"link\": \"https://x/\"}, {\"id\": 91, \"name\": \"Author 91\", \"slug\": \"author-91\", \"link\": \"https://x/\"}, {\"id\": 92, \"name\": \"Author 92\", \"slug\": \"author-92\", \"link\": \"https://x/\"}, {\"id\": 93, \"name\": \"Author 93\", \"slug\": \"author-93\", \"link\": \"https://x/\"}, {\"id\": 94, \"name\": \"Author 94\", \"slug\": \"author-94\", \"link\": \"https://x/\"}, {\"id\": 95, \"name\": \"Author 95\", \"slug\": \"author-95\", \"link\": \"https://x/\"}, {\"id\": 96, \"name\": \"Author 96\", \"slug\": \"author-96\", \"link\": \"https://x/\"}, {\"id\": 97, \"name\": \"Author 97\", \"slug\": \"author-97\", \"link\": \"https://x/\"}, {\"id\": 98, \"name\": \"Author 98\", \"slug\": \"author-98\", \"link\": \"https://x/\"}, {\"id\": 99, \"name\": \"Author 99\", \"slug\": \"author-99\", \"link\": \"https://x/\"}, {\"id\": 100, \"name\": \"Author 100\", \"slug\": \"author-100\", \"link\": \"https://x/\"}]",
+          "content_type": "application/json",
+          "status": 200
+        },
+        "GET /wp-json/wp/v2/users?page=2&per_page=100&roles=administrator,editor,author": {
+          "body": "[{\"id\": 101, \"name\": \"Author 101\", \"slug\": \"author-101\", \"link\": \"https://x/\"}]",
+          "content_type": "application/json",
+          "status": 200
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    },
+    {
+      "api_url": "{BASE}/wp-json/wp/v2",
+      "call": {
+        "fn": "list_users"
+      },
+      "expected": {
+        "error": "WordPress API error: Sorry, you are not allowed to list users.",
+        "status_code": 401
+      },
+      "name": "users-401",
+      "requests": [
+        {
+          "authorization": "Basic cGlwZWxpbmUtYm90OmFiY2QgZWZnaCBpamtsIG1ub3A=",
+          "method": "GET",
+          "path": "/wp-json/wp/v2/users",
+          "query": "per_page=100&page=1&roles=administrator%2Ceditor%2Cauthor"
+        }
+      ],
+      "routes": {
+        "GET /wp-json/wp/v2/users?page=1&per_page=100&roles=administrator,editor,author": {
+          "body": "{\"message\": \"Sorry, you are not allowed to list users.\"}",
+          "content_type": "application/json",
+          "status": 401
+        }
+      },
+      "site_url": "{BASE}/wp-json",
+      "url": "{BASE}"
+    }
+  ],
+  "source": "api/src/services/wordpress.py"
+}

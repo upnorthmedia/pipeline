@@ -17171,7 +17171,304 @@ three pieces are separately verifiable, so they are separate items.
 
       Python counts unchanged from those recorded under 5.8a to 5.8d-i. No Python
       changed in this iteration.
-- [ ] 5.9 `wordpress`
+- [ ] 5.9 `wordpress` (split: three endpoints sitting on a REST client that has no
+  TypeScript equivalent at all, so the client has to land before the handlers can.
+  Split into 5.9a the client's read half, 5.9b the three route handlers.)
+  - [x] 5.9a The read half of `api/src/services/wordpress.py`, ported to TypeScript.
+
+    Ported to `web/src/mastra/wordpress/index.ts`: `WordPressError`, the constructor's
+    URL normalisation and Basic credential, `_request`'s error grammar, and
+    `test_connection`, `list_categories` and `list_users` with their pagination.
+
+    **`upload_media`, `create_post` and `update_post` are deliberately not ported.**
+    Their only caller is `api/src/pipeline/publish.py`, which ledger item 5.3c-iii-b
+    owns, and porting a method with no consumer is speculative. The module comment
+    records this so the gap is not mistaken for an oversight.
+
+    **The oracle is a live-server capture, not a reading of the Python.**
+    `api/scripts/export_wordpress_parity.py` stands up a local HTTP server, runs the
+    real `WordPressClient` against it, and records for every scenario the routing
+    table, every request the server saw (path, raw query string and `Authorization`),
+    and the value returned or the `WordPressError` raised. It also exports a
+    constructor table over 27 spellings of a site URL. This matters because
+    `api/tests/phase10/test_wordpress_service.py` replaces `client._client.request`
+    with an `AsyncMock`, so nothing in the pytest suite has ever exercised the
+    pagination query string, the `>= 400` error grammar or the non-JSON branch against
+    a real response. Nothing is mocked on either side of this oracle.
+
+    ```
+    $ cd api && uv run python scripts/export_wordpress_parity.py
+    local server on http://127.0.0.1:56402
+      test-connection-success: 1 request(s), returned {"name": "Test Site", "description": "Just another site", "u
+      test-connection-through-stripped-wp-admin: 1 request(s), returned {"name": "Stripped"}
+      test-connection-subdirectory-install: 1 request(s), returned {"name": "Blog"}
+      test-connection-401-with-message: 1 request(s), raised WordPress API error: You are not currently logged in.
+      test-connection-404-long-html: 1 request(s), raised WordPress API error: <html><body>nginx 404 not found. nginx 404 not found. nginx 404 not found.  [...truncated in this paste at 150 of 275 chars; the committed oracle holds it in full...]
+      test-connection-400-json-without-message: 1 request(s), raised WordPress API error: {"code": "rest_bad", "data": {}}
+      test-connection-500-json-array: 1 request(s), raised WordPress API error: ["boom", "again"]
+      test-connection-500-long-json-array: 1 request(s), raised WordPress API error: ["error number 0", "error number 1", "error number 2", "error number  [...truncated in this paste at 150 of 281 chars; the committed oracle holds it in full...]
+      test-connection-500-json-null: 1 request(s), raised WordPress API error: null
+      test-connection-200-json-null: 1 request(s), returned null
+      test-connection-403-empty-body: 1 request(s), raised WordPress API error: 
+      test-connection-200-non-json: 1 request(s), raised WordPress returned non-JSON response — check that the site URL is correct
+      test-connection-200-json-array: 1 request(s), returned [1, 2, 3]
+      test-connection-200-json-with-html-content-type: 1 request(s), returned {"name": "Sniffed"}
+      categories-single-page: 1 request(s), returned [{"id": 1, "name": "Category 1", "slug": "category-1", "coun
+      categories-empty: 1 request(s), returned []
+      categories-two-pages: 2 request(s), returned [{"id": 1, "name": "Category 1", "slug": "category-1", "coun
+      categories-full-page-then-empty: 2 request(s), returned [{"id": 1, "name": "Category 1", "slug": "category-1", "coun
+      categories-error-on-second-page: 2 request(s), raised WordPress API error: Internal server error
+      categories-through-subdirectory-install: 1 request(s), returned [{"id": 7, "name": "Category 7", "slug": "category-7", "coun
+      users-default-roles: 1 request(s), returned [{"id": 1, "name": "Author 1", "slug": "author-1", "link": "
+      users-custom-roles: 1 request(s), returned [{"id": 5, "name": "Author 5", "slug": "author-5", "link": "
+      users-empty-roles-list: 1 request(s), returned [{"id": 9, "name": "Author 9", "slug": "author-9", "link": "
+      users-two-pages: 2 request(s), returned [{"id": 1, "name": "Author 1", "slug": "author-1", "link": "
+      users-401: 1 request(s), raised WordPress API error: Sorry, you are not allowed to list users.
+    wrote /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web/src/mastra/wordpress/data/wordpress-parity.json (25 scenarios)
+    ```
+
+    **The exact wire format the port has to reproduce**, dumped out of the same oracle:
+
+    ```
+    $ python3 -c "import json; d=json.load(open('web/src/mastra/wordpress/data/wordpress-parity.json')); [print(s['name'],'|',r['path'],'|',repr(r['query'])) for s in d['scenarios'] for r in s['requests']]" | tail -8
+    categories-through-subdirectory-install | /blog/wp-json/wp/v2/categories | 'per_page=100&page=1'
+    users-default-roles | /wp-json/wp/v2/users | 'per_page=100&page=1&roles=administrator%2Ceditor%2Cauthor'
+    users-custom-roles | /wp-json/wp/v2/users | 'per_page=100&page=1&roles=subscriber'
+    users-empty-roles-list | /wp-json/wp/v2/users | 'per_page=100&page=1&roles='
+    users-two-pages | /wp-json/wp/v2/users | 'per_page=100&page=1&roles=administrator%2Ceditor%2Cauthor'
+    users-two-pages | /wp-json/wp/v2/users | 'per_page=100&page=2&roles=administrator%2Ceditor%2Cauthor'
+    users-401 | /wp-json/wp/v2/users | 'per_page=100&page=1&roles=administrator%2Ceditor%2Cauthor'
+    ```
+
+    `per_page` before `page` before `roles`, and the role separator percent-encoded.
+    `URLSearchParams` reproduces both when the keys are set in that order. `roles=[]` is
+    not the same as a missing argument: Python's default only applies to `roles is None`,
+    so an explicitly empty list sends `roles=`, and the port's
+    `roles: string[] = DEFAULT_ROLES` default matches that exactly.
+
+    **Deviation 1: one whole-request deadline instead of per-phase timeouts.**
+    `httpx.Timeout(30.0, read=120.0)` is per connect/read/write/pool phase, where
+    `AbortSignal.timeout` is a deadline over the whole request. The port uses the read
+    value, the larger of the two, so it is the more patient of the pair on connect and
+    the less patient only on a response that takes over two minutes in total. The same
+    tradeoff is already recorded for the `link_validator` and `sitemap` ports.
+
+    **Deviation 2: `resp.text[:200]` slices code points, `String.slice` slices UTF-16
+    code units.** Observable only for an error body carrying astral characters inside
+    its first 200.
+
+    **Deviation 3: `json.loads` accepts `NaN`, `Infinity` and `-Infinity`; `JSON.parse`
+    rejects all three.** A WordPress install emitting one would be a non-JSON response
+    here and a parsed one in Python. No real install emits them.
+
+    **Deviation 4: a paginated `< 400` body that is a JSON object.**
+    `results.extend(data)` extends the list with that object's *keys* in Python;
+    spreading a non-iterable throws here. Only a `< 400` response reaches that line and
+    every paginated WordPress collection endpoint answers with an array, so it is
+    unreachable through a real install.
+
+    **The em dash in `"WordPress returned non-JSON response — check that the site URL is
+    correct"` is copied from the Python source string, not authored.**
+    `GET /wordpress/test` hands that string to the dashboard as `error`, so changing its
+    punctuation would change what a user sees.
+
+    **Redundancy found, not a gap.** The `_STRIP_SUFFIXES` tuple order is unobservable:
+    the four suffixes are mutually exclusive as `endswith` tests, because a string ending
+    in `/wp-json/wp/v2` does not end in `/wp-json`. The negative control that reorders
+    them fails nothing, and that is the correct result. The `break` is *not* redundant,
+    and needed a case the first oracle did not have:
+    `https://example.com/wp-json/wp-admin` strips to `https://example.com/wp-json` with
+    the `break` and to `https://example.com` without it, because `/wp-admin` is earlier
+    in the tuple than `/wp-json`. That case was added to the constructor table once the
+    control exposed the hole, and three more scenarios (`test-connection-500-json-null`,
+    `test-connection-200-json-null`, `test-connection-500-long-json-array`) were added
+    for the same reason.
+
+    **`Array.isArray` was removed from `errorDetail` because a control proved it dead.**
+    Python needs the guard, since `[].get` raises `AttributeError`. JavaScript does not:
+    a JSON array can never carry a `message` property, so it reaches the same raw-body
+    fallback anyway. `parsed === null` is a different matter and is load bearing, since
+    reading a property off `null` throws; the `test-connection-500-json-null` scenario
+    added above is what covers it.
+
+    **Confirmed defect, ported faithfully rather than fixed** (recorded in `todo.md`):
+    the constructor appends its REST paths to the raw URL after nothing but a
+    trailing-slash strip and a suffix strip, so `https://example.com/?a=1` yields
+    `api_url = https://example.com/?a=1/wp-json/wp/v2`. That row is in the oracle as
+    `keeps-query-string`, so the port reproduces it deliberately. The fix belongs with
+    the profile form's `wp_url` validation, not with the client.
+
+    Failing first, with the implementation moved aside:
+
+    ```
+    $ cd web && mv src/mastra/wordpress/index.ts /tmp/ && npx vitest run src/mastra/wordpress/wordpress.test.ts
+     ❯ src/mastra/wordpress/wordpress.test.ts (0 test)
+    ⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+     FAIL  src/mastra/wordpress/wordpress.test.ts [ src/mastra/wordpress/wordpress.test.ts ]
+    Error: Cannot find module './index' imported from
+    '/Users/cody/.../web/src/mastra/wordpress/wordpress.test.ts'
+     Test Files  1 failed (1)
+          Tests  no tests
+    ```
+
+    Passing, with every case named (the repeated
+    `src/mastra/wordpress/wordpress.test.ts > ` prefix vitest prints on each line is
+    elided here for width, and nothing else is changed):
+
+    ```
+    $ cd web && npx vitest run src/mastra/wordpress/wordpress.test.ts --reporter=verbose
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for plain-origin 1ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for one-trailing-slash 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for many-trailing-slashes 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for subdirectory-install 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for subdirectory-trailing-slash 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for strips-wp-admin 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for strips-wp-admin-slash 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for strips-wp-admin-uppercase 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for strips-wp-admin-mixed-case 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for strips-wp-login 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for strips-wp-json 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for strips-wp-json-slash 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for strips-wp-json-wp-v2 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for strips-wp-json-wp-v2-slash 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for strips-one-suffix-only 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for strips-one-suffix-only-reversed 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for leaves-unslashed-lookalike 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for leaves-inner-occurrence 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for subdirectory-with-wp-json 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for empty-url 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for bare-slash 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for no-scheme 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for keeps-query-string 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for empty-password 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for colon-in-password 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for empty-username 0ms
+     ✓ WordPressClient constructor > derives the same urls and credential as Python for non-ascii-credentials 0ms
+     ✓ WordPressClient constructor > strips at most one suffix, leaving the one underneath 0ms
+     ✓ WordPressClient constructor > requires the suffix to start at a path segment 0ms
+     ✓ WordPressClient against a live server > matches Python for test-connection-success 11ms
+     ✓ WordPressClient against a live server > matches Python for test-connection-through-stripped-wp-admin 1ms
+     ✓ WordPressClient against a live server > matches Python for test-connection-subdirectory-install 1ms
+     ✓ WordPressClient against a live server > matches Python for test-connection-401-with-message 1ms
+     ✓ WordPressClient against a live server > matches Python for test-connection-404-long-html 1ms
+     ✓ WordPressClient against a live server > matches Python for test-connection-400-json-without-message 0ms
+     ✓ WordPressClient against a live server > matches Python for test-connection-500-json-array 1ms
+     ✓ WordPressClient against a live server > matches Python for test-connection-500-long-json-array 1ms
+     ✓ WordPressClient against a live server > matches Python for test-connection-500-json-null 1ms
+     ✓ WordPressClient against a live server > matches Python for test-connection-200-json-null 1ms
+     ✓ WordPressClient against a live server > matches Python for test-connection-403-empty-body 0ms
+     ✓ WordPressClient against a live server > matches Python for test-connection-200-non-json 0ms
+     ✓ WordPressClient against a live server > matches Python for test-connection-200-json-array 0ms
+     ✓ WordPressClient against a live server > matches Python for test-connection-200-json-with-html-content-type 0ms
+     ✓ WordPressClient against a live server > matches Python for categories-single-page 0ms
+     ✓ WordPressClient against a live server > matches Python for categories-empty 0ms
+     ✓ WordPressClient against a live server > matches Python for categories-two-pages 1ms
+     ✓ WordPressClient against a live server > matches Python for categories-full-page-then-empty 1ms
+     ✓ WordPressClient against a live server > matches Python for categories-error-on-second-page 0ms
+     ✓ WordPressClient against a live server > matches Python for categories-through-subdirectory-install 0ms
+     ✓ WordPressClient against a live server > matches Python for users-default-roles 0ms
+     ✓ WordPressClient against a live server > matches Python for users-custom-roles 0ms
+     ✓ WordPressClient against a live server > matches Python for users-empty-roles-list 0ms
+     ✓ WordPressClient against a live server > matches Python for users-two-pages 1ms
+     ✓ WordPressClient against a live server > matches Python for users-401 0ms
+     ✓ behaviour the oracle cannot cover > lets a transport failure out unwrapped, as Python lets httpx errors out 0ms
+     ✓ behaviour the oracle cannot cover > reports the status the non-JSON body arrived with, not 200 by assumption 0ms
+     ✓ behaviour the oracle cannot cover > sends the Basic credential on every page of a paginated call 2ms
+     Test Files  1 passed (1)
+          Tests  57 passed (57)
+    ```
+
+    **Negative controls.** Each mutates `web/src/mastra/wordpress/index.ts`, checks with
+    `cmp` that the file actually changed (the trap iteration 103 recorded), runs the
+    file, and restores from a saved copy. Twenty controls, nineteen with teeth:
+
+    | Control | Result |
+    | --- | --- |
+    | drop the suffix strip entirely | 14 of 57 tests failed |
+    | strip every matching suffix instead of one | 1 of 57 tests failed |
+    | compare the suffix case-sensitively | 2 of 57 tests failed |
+    | strip only one trailing slash | 1 of 57 tests failed |
+    | reorder the strip suffixes so `/wp-json` comes last | 0 of 57 tests failed |
+    | encode the credential as latin1 | 1 of 57 tests failed |
+    | treat 400 itself as a success | 1 of 57 tests failed |
+    | keep the whole error body instead of 200 characters | 2 of 57 tests failed |
+    | read `.message` off a JSON null too | 1 of 57 tests failed |
+    | drop the missing-message fallback | 3 of 57 tests failed |
+    | reword the non-JSON error | 2 of 57 tests failed |
+    | report no status on the non-JSON error | 2 of 57 tests failed |
+    | stop paginating only on an empty page | 7 of 57 tests failed |
+    | ask for 50 per page | 12 of 57 tests failed |
+    | order the query as page then per_page | 11 of 57 tests failed |
+    | join roles with a comma and a space | 3 of 57 tests failed |
+    | drop author from the default roles | 3 of 57 tests failed |
+    | treat an empty roles list as unset | 1 of 57 tests failed |
+    | test the connection against the v2 root | 15 of 57 tests failed |
+    | send no Authorization header | 26 of 57 tests failed |
+
+    The single zero is analysed above: `_STRIP_SUFFIXES`' order genuinely cannot be
+    observed. A first pass of the same twenty had **four** zeros; the other three
+    (`strip every matching suffix`, `keep the whole error body`, and a control on the
+    JSON-array branch) were real holes, and each was closed by adding an oracle case or,
+    for the array branch, by deleting the dead guard. Both fixes are described above.
+
+    Gates:
+
+    ```
+    $ cd web && npx tsc --noEmit
+    (no output, exit 0)
+
+    $ cd web && npx eslint
+    (no output, exit 0)
+
+    $ cd web && npx vitest run                 # three consecutive runs, this item present
+     Test Files  2 failed | 100 passed (102)
+          Tests  9 failed | 2101 passed | 7 skipped (2117)
+     Test Files  4 failed | 98 passed (102)
+          Tests  11 failed | 2099 passed | 7 skipped (2117)
+     Test Files  2 failed | 100 passed (102)
+          Tests  9 failed | 2101 passed | 7 skipped (2117)
+
+    $ cd web && npx vitest run                 # this item's directory moved aside
+     Test Files  3 failed | 98 passed (101)
+          Tests  10 failed | 2043 passed | 7 skipped (2060)
+
+    $ cd web && npx next build
+    build exit=0
+    (plus the standing 15 BetterAuthError lines, count unchanged)
+
+    $ set -a && . ./.env && set +a && cd api && uv run pytest -q
+    120 failed, 241 passed, 25 errors in 15.23s
+
+    $ cd api && uv run ruff check .
+    Found 32 errors.
+    [*] 17 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).
+
+    $ cd api && uv run ruff format --check .
+    9 files would be reformatted, 132 files already formatted
+    ```
+
+    Both sides of the frontend suite sit at the recorded 9 (6 `image-preview` +
+    3 `PostDetail`). Runs 1 and 3 hit exactly those; run 2 added the two load-sensitive
+    flakes already in `todo.md` (`scaffold-check > emits the workflow lifecycle events`
+    and `pipeline-events > carries Python's log payload and nothing else`), and the
+    HEAD-side run hit one of them. 57 new tests, 2043 to 2101 passing.
+
+    Python counts unchanged: 120/241/25 and 32 ruff errors are the recorded baseline.
+    `ruff format --check` moves from 131 to 132 already-formatted files, which is this
+    item's export script and nothing else.
+
+    **The pytest baseline only reproduces with the repo `.env` sourced.** Without it,
+    `uv run pytest -q` answers `4 failed, 205 passed, 177 errors` with
+    `asyncpg.exceptions.InvalidPasswordError: password authentication failed for user
+    "pipeline"`, because `api/tests/conftest.py` falls back to defaults that no longer
+    match the running container. Recorded in `todo.md` as `[investigate]`; every earlier
+    ledger entry that pastes a pytest count depends on the caller remembering this.
+  - [ ] 5.9b The three route handlers,
+    `GET /api/profiles/{profile_id}/wordpress/{test,categories,authors}`, on top of
+    5.9a's client. Includes `_get_wp_client`'s two 400s (missing credentials, and a
+    `wp_app_password` that will not decrypt), `_get_user_profile`'s user-scoped 404, and
+    the fact that `/test` swallows both of those into `{connected: false, error}` while
+    `/categories` and `/authors` let them out as real 400s.
 - [ ] 5.10 `nextjs` (HMAC signing from `hmac_signing.py` and the webhook contract with
   `packages/create-mdx-blog` preserved exactly)
 
