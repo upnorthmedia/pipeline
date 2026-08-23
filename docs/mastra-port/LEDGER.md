@@ -1241,8 +1241,22 @@ pages that use it work with the Python API stopped.
   `node`-environment suites that load the same file.
 
   Evidence: [`evidence/phase-6.md` #6.3](../mastra-port/evidence/phase-6.md)
-- [ ] 6.4 Test asserts that changing a stage's model in the UI changes the model in the outbound
-  provider request payload.
+- [x] 6.4 Test asserts that changing a stage's model in the UI changes the model in the outbound
+  provider request payload. `stage-models-to-provider.test.tsx` runs the whole chain in one
+  process with nothing standing in for a link: the real `StageModelsCard` driven through its
+  Radix selects by `userEvent`, the real `@/lib/api` client, the real `PATCH /api/settings`
+  handler behind a real BetterAuth session, a real row in Postgres, `resolveStageModels()`, the
+  agent's dynamic resolvers, and the serialized request. Only `fetch` is routed rather than
+  sent, in both directions. Both provider shapes are covered because they fail differently:
+  Anthropic carries the id in a body field with the effort beside it, Gemini carries it in the
+  URL path and has no effort. Each chain asserts the verified default on the wire before the UI
+  is touched, and the Anthropic one again after the UI reverts, so a resolver that ignored the
+  setting could not pass by agreeing with it. One shared-fixture change: the global
+  `stage_models` row now has an advisory lock of its own (`src/test/stage-models-row.ts`, over
+  the mechanics extracted from `api-keys-row.ts` into `row-lock.ts`), taken by the three files
+  that write it. 6 tests, 9 of 9 mutations killed. This closes Phase 6.
+
+  Evidence: [`evidence/phase-6.md` #6.4](../mastra-port/evidence/phase-6.md)
 
 ## Phase 7: Cutover
 

@@ -995,3 +995,132 @@ on its own immediately afterwards, so it is load-dependent flake and not a regre
 build's 15 `BetterAuthError: You are using the default secret` lines are pre-existing noise
 from prerendering without `BETTER_AUTH_SECRET` in the build environment. No Python file was
 touched, so the pytest gate is unchanged.
+
+---
+
+## 6.4 A model chosen in the UI changes the outbound provider request
+
+Phase 6's exit criterion, and the first test in the phase that does not supply one of the
+chain's links by hand.
+
+### Why a new test rather than a claim from the three that exist
+
+Item 6.2a proved the row wins the merge, 6.2b proved the agent reads the merge, 6.3 proved the
+page writes the row. Each of the three hands itself the previous link's output: 6.2a inserts
+the row it then resolves, 6.2b inserts the row the agent then reads, and 6.3's component tests
+assert on a mocked `stageModels.update`. All three can pass while a seam between them is
+broken, which is not hypothetical: the mismatch recorded under 6.2a, where
+`settings.update()` wraps every value in `{value: ...}` and the validated `stage_models` key
+rejects that wrapper, is exactly a seam defect that the per-link tests could not see.
+
+`web/src/app/settings/stage-models-to-provider.test.tsx` runs the chain in one process:
+
+```
+StageModelsCard (real component, driven by userEvent through its Radix selects)
+  -> @/lib/api (real client)
+  -> PATCH /api/settings (real handler, real BetterAuth session)
+  -> settings row in Postgres (real)
+  -> resolveStageModels()
+  -> the agent's dynamic model / defaultOptions resolvers
+  -> the serialized HTTP request
+```
+
+Two things are not real, both of them transport. `fetch` is routed: dashboard calls are
+dispatched into the route-handler modules with the session cookie attached (no Next.js server
+is running and jsdom has no cookie jar), and provider calls are captured and answered from a
+canned response. Anything the router does not recognise throws rather than reaching the
+network.
+
+Both provider shapes are covered because they fail differently: Anthropic carries the id in a
+JSON body field with the effort beside it, Gemini carries it in the URL path and has no effort
+parameter at all. The Gemini half runs the production `imagesGenerateStep`, so the assertion is
+on the URL the step's own client built.
+
+Each chain asserts the verified default on the wire *before* the UI is touched, and the
+Anthropic chain asserts it again after the UI reverts the stage. Without those controls a
+resolver that ignored the setting entirely could pass by happening to agree with it.
+
+### The test
+
+```
+$ cd web && npx vitest run src/app/settings/stage-models-to-provider.test.tsx
+
+ ✓ src/app/settings/stage-models-to-provider.test.tsx (6 tests) 614ms
+     ✓ stores what the settings page saved, through the real handler  345ms
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+```
+
+The six, in the order they run (they share the row they write, so the order is the point):
+
+| # | Test | What it pins |
+| --- | --- | --- |
+| 1 | sends the verified default while the user has configured nothing | negative control, Anthropic |
+| 2 | stores what the settings page saved, through the real handler | UI -> handler -> row |
+| 3 | puts that model and effort on the wire | row -> agent -> request body |
+| 4 | goes back to the default when the page reverts the stage | revert -> row -> request body |
+| 5 | sends the verified default while the user has configured nothing | negative control, Gemini |
+| 6 | carries the chosen model in the request path after the page saves it | UI -> handler -> row -> URL |
+
+### Mutations
+
+Nine mutations across the five files the chain runs through, each reverted before the next.
+Verdicts are the test command's exit code, not a grep of its output, per the trap recorded
+under 6.2b.
+
+| # | File | Mutation | Verdict |
+| --- | --- | --- | --- |
+| M1 | `mastra/stage-models.ts` | drop the `user` layer from the merge | KILLED |
+| M2 | `app/api/settings/route.ts` | `PATCH` stores nothing | KILLED |
+| M3 | `mastra/agents/claude.ts` | model ignores the setting, uses the default | KILLED |
+| M4 | `mastra/agents/claude.ts` | effort ignores the setting, uses `CLAUDE_DEFAULT_EFFORT` | KILLED |
+| M5 | `mastra/steps/images-generate.ts` | pass no model, let the client default | KILLED |
+| M6 | `app/settings/stage-models-card.tsx` | write a non-object override value | KILLED |
+| M7 | `mastra/stage-models.ts` | `settingsUserIdForPost` always null | KILLED |
+| M8 | `app/settings/stage-models-card.tsx` | card sends the model without the effort | KILLED |
+| M9 | `app/api/settings/stage-models/route.ts` | `GET` resolves without the caller | KILLED |
+
+Control runs exit 0 before the sweep and the working tree is clean after it (`git status
+--porcelain` lists only the new test file), so no verdict was measured against a mutated
+baseline.
+
+### One shared-fixture change: a lock on the global `stage_models` row
+
+Alembic 012 allows exactly one `user_id IS NULL` `stage_models` row, and it is the operator
+layer every resolution falls through, so a file that sets it sets it for every file running at
+the same time. Two files already did (`mastra/stage-models.test.ts` and
+`app/api/settings/stage-models/route.test.ts`); this one is the third and the most sensitive to
+it, because its negative controls assert the hardcoded default is what reaches the provider.
+
+`src/test/row-lock.ts` now holds the advisory-lock mechanics that `api-keys-row.ts` had inline,
+`api-keys-row.ts` is a thin wrapper over it keeping its two exported names (so its eight
+importers are untouched), and `src/test/stage-models-row.ts` is a second wrapper on its own
+lock key. The three files that write the global row take it in `beforeAll` and release it in
+`afterAll` before `closeDb()`. The ordering rule is documented in `row-lock.ts`: `api_keys`
+first, `stage_models` second, so two files cannot deadlock on the pair. Only the new file takes
+both.
+
+### Gates
+
+```
+$ cd web && npx tsc --noEmit
+(exit 0, no output)
+
+$ cd web && pnpm lint
+(exit 0, no output)
+
+$ cd web && pnpm test
+ Test Files  2 failed | 128 passed (130)
+      Tests  9 failed | 4461 passed | 7 skipped (4477)
+(exit 1)
+
+$ cd web && pnpm build
+(exit 0)
+```
+
+The nine failures are the recorded baseline and nothing else: 6 in `image-preview.test.tsx` and
+3 in `PostDetail.test.tsx`, the same nine as under #6.3. The passing count moved from 4455 to
+4461, which is this item's six tests and nothing else. The build's 15 `BetterAuthError: You are
+using the default secret` lines are the same pre-existing prerender noise. No Python file was
+touched, so the pytest gate is unchanged.

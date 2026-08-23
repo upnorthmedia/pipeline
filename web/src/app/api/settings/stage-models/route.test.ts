@@ -21,6 +21,10 @@ import {
   type StageModelSettings,
 } from "@/mastra/stage-models"
 import { STAGES } from "@/mastra/state"
+import {
+  lockGlobalStageModelsRow,
+  unlockGlobalStageModelsRow,
+} from "@/test/stage-models-row"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { GET } from "./route"
@@ -59,6 +63,7 @@ async function stageRow(stage: string, cookie: string) {
 }
 
 beforeAll(async () => {
+  await lockGlobalStageModelsRow()
   globalRowBefore = (
     await db
       .select({ value: settings.value })
@@ -82,6 +87,7 @@ afterAll(async () => {
   await clearOwn()
   await setGlobal(globalRowBefore ? (globalRowBefore.value as StageModelSettings) : null)
   await deleteTestSessions(PREFIX)
+  await unlockGlobalStageModelsRow()
   await closeDb()
 })
 

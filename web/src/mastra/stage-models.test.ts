@@ -18,6 +18,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, posts, settings, websiteProfiles } from "@/db"
 import { createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
+import {
+  lockGlobalStageModelsRow,
+  unlockGlobalStageModelsRow,
+} from "@/test/stage-models-row"
 
 import { IMAGES_MODEL_ID } from "./agents/images"
 import { CLAUDE_DEFAULT_EFFORT } from "./agents/claude"
@@ -82,6 +86,7 @@ async function clearRows() {
 }
 
 beforeAll(async () => {
+  await lockGlobalStageModelsRow()
   const rows = await db
     .select({ value: settings.value, updatedAt: settings.updatedAt })
     .from(settings)
@@ -107,6 +112,7 @@ afterAll(async () => {
     })
   }
   await deleteTestSessions(PREFIX)
+  await unlockGlobalStageModelsRow()
   await closeDb()
 })
 
