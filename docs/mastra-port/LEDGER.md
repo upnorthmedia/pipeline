@@ -9495,6 +9495,220 @@ three pieces are separately verifiable, so they are separate items.
         5.3c-iii-b-2 the Next.js workflow (HMAC signing preserved exactly) plus its branch
         and the trailing 400 for every other `output_format`. Item 5.9 and item 5.10 cover
         the two routers, not the publishing itself, so the workflows land here.
+
+        5.3c-iii-b-1 is itself larger than one iteration: the WordPress publish path needs
+        the write half of the REST client (three unported methods), the
+        markdown-to-Gutenberg converter (`api/src/services/wp_html.py`, 127 lines), and
+        then the Mastra workflow that assembles them. Split into:
+
+        - [x] 5.3c-iii-b-1-a The write half of the WordPress REST client:
+          `upload_media`, `create_post`, `update_post`.
+
+          `web/src/mastra/wordpress/index.ts` gains `uploadMedia`, `createPost` and
+          `updatePost`, and the private `get()` it had is generalised into a `request()`
+          that takes a method, a body and extra headers. 5.9a ported the read half and
+          deliberately left these three, because their only caller is
+          `api/src/pipeline/publish.py`.
+
+          The oracle is new: `api/scripts/export_wordpress_write_parity.py` runs the real
+          Python client against a local HTTP server and records, per scenario, the
+          routing table it served, **every byte of every request the server saw**, and
+          the value returned or the `WordPressError` raised.
+          `web/src/mastra/wordpress/wordpress-write.test.ts` stands up a Node server from
+          the same exported table and asserts both halves. Recording request bodies is
+          the whole point of this item: everything interesting about these three methods
+          is in what goes out, not in what comes back, and
+          `api/tests/phase10/test_wordpress_service.py` replaces the transport with an
+          `AsyncMock`, so it asserts the arguments httpx *would* have been handed rather
+          than the bytes httpx sent.
+
+          ```
+          $ cd api && uv run python scripts/export_wordpress_write_parity.py
+          local server on http://127.0.0.1:64922
+            upload-media-with-alt-text-patches-the-attachment: 2 request(s), returned {"id": 42, "source_url": "https://example.com/wp-content/upl
+            upload-media-returns-the-first-response-not-the-patch: 2 request(s), returned {"id": 7, "source_url": "https://x/7.png"}
+            upload-media-without-alt-text-sends-one-request: 1 request(s), returned {"id": 9, "source_url": "https://x/9.png"}
+            ...
+            update-post-forwards-the-publish-hook-kwargs-nulls-included: 1 request(s), returned {"id": 100, "link": "https://example.com/updated/"}
+            update-post-with-no-kwargs-sends-an-empty-object: 1 request(s), returned {"id": 101, "link": "https://x/"}
+            update-post-404: 1 request(s), raised WordPress API error: Invalid post ID.
+            update-post-500-with-no-message-key: 1 request(s), raised WordPress API error: {"code": "internal_error"}
+          wrote .../web/src/mastra/wordpress/data/wordpress-write-parity.json (29 scenarios)
+          ```
+
+          **httpx 0.28.1 serialises `json=` exactly the way `JSON.stringify` does.** The
+          captured bodies are compact (`separators=(",", ":")`) and not ASCII-escaped
+          (`ensure_ascii=False`), so `{"title":"A title","content":"<p>Body</p>",...}`
+          matches byte for byte and no custom serialiser is needed. That is asserted
+          rather than assumed: the oracle stores `body_b64` per request.
+
+          ```
+          $ cd api && uv run python -c "import httpx; print(httpx.__version__); \
+            print(repr(httpx.Request('POST','http://x/', json={'a':'é','c':None}).content))"
+          0.28.1
+          b'{"a":"\xc3\xa9","c":null}'
+          ```
+
+          Four behaviours the return value cannot show, all preserved:
+
+          - **`upload_media` sends the bytes raw, not as multipart**, under
+            `Content-Disposition: attachment; filename="..."` and a `Content-Type` of the
+            caller's mime type (default `image/png`). The filename is interpolated with
+            no escaping, so `my "best" shot.png` produces a header with unbalanced
+            quotes; that is Python's behaviour and the oracle pins it.
+          - **The alt-text patch is a second request, gated on two truthiness tests.**
+            An empty `alt_text` sends nothing, and so does a response whose `id` is
+            missing *or* `0`. `upload_media` returns the upload response, never the
+            patch response, so alt text written by the second call is not reflected in
+            what the caller sees. A failing patch throws after the upload has already
+            committed, leaving an attachment with no alt text on the site; the publish
+            workflow's error path has to cope with that.
+          - **`create_post` drops falsy optional fields.** `if categories:`, `if author:`,
+            `if featured_media:` and `if excerpt:` mean an empty list, an author or
+            featured-media id of `0`, and an empty excerpt are all indistinguishable from
+            absent, while `title`, `content` and `status` ride along even when empty.
+          - **`update_post` forwards its `**kwargs` untouched, nulls included.** The
+            publish hook calls it with `author=None`, `featured_media=None` and
+            `excerpt=""`, which reach WordPress as `"author":null,"featured_media":null,
+            "excerpt":""` and clear those fields, the opposite of what `create_post` does
+            with the same values. `JSON.stringify` drops an `undefined` property but
+            keeps a `null`, so `updatePost` takes an explicit `Record<string, unknown>`
+            of already-wire-shaped keys and its caller must spell a cleared field `null`.
+
+          One divergence, in the guard rather than the behaviour: `media.get("id")` on a
+          `null` upload response raises `AttributeError` in Python and `upload_media` does
+          not catch it, so the call fails with a non-`WordPressError`. Reading `.id` off
+          `null` throws in TypeScript too, so the port guards the lookup and answers the
+          `null` body instead. A WordPress install that returns a bare `null` with a
+          `2xx` is not reachable through the REST API; the test that covers it exists to
+          hold the guard in place, not to claim the branch is real.
+
+          A typing note worth recording: `Uint8Array<ArrayBufferLike>` is not assignable
+          to `BodyInit`, whose `ArrayBufferView` arm is pinned to `ArrayBuffer` in the
+          installed lib. `request()`'s body is spelled `string | Uint8Array<ArrayBuffer>`
+          rather than widened with a cast, and `uploadMedia` takes the same narrower type.
+
+          **A trap in the oracle format, found by a failing test rather than by reading.**
+          The export writes JSON with `sort_keys=True`, which silently reordered the
+          `update_post` kwargs dict and so reordered the body the TypeScript side
+          reproduced, while `body_b64` still held Python's real insertion order. The
+          scenario now carries the kwargs as a list of pairs, which survives sorting:
+
+          ```
+          - "body_b64": "eyJ0aXRsZSI6IlVwZGF0ZWQiLCJjb250ZW50Ijoi...   (expected, from Python)
+          + "body_b64": "eyJhdXRob3IiOm51bGwsImNhdGVnb3JpZXMiOltd...   (received, alphabetical)
+           Tests  1 failed | 32 passed (33)
+          ```
+
+          Thirty-three tests, twenty-nine of them driven by the oracle, four covering what
+          the oracle cannot reach (the credential on the patch request, a refused
+          connection, the `null`-body guard, and `updatePost` keeping a null where
+          `createPost` drops it):
+
+          ```
+          $ pnpm -C web vitest run src/mastra/wordpress/
+           v src/mastra/wordpress/wordpress.test.ts (57 tests) 32ms
+           v src/mastra/wordpress/wordpress-write.test.ts (33 tests) 34ms
+           Test Files  2 passed (2)
+                Tests  90 passed (90)
+          ```
+
+          Seven negative controls, each reverted after measuring:
+
+          ```
+          # 1. presence tests instead of truthiness on altText and id
+          Tests  7 failed | 26 passed (33)
+            x upload-media-without-alt-text-sends-one-request
+            x upload-media-omitting-alt-text-uses-the-empty-default
+            x upload-media-omitting-mime-type-uses-the-image-png-default
+            x upload-media-jpeg-mime-type
+            x upload-media-alt-text-but-id-is-zero
+            x upload-media-filename-with-spaces-and-a-quote
+            x upload-media-empty-bytes
+
+          # 2. return the patch response instead of the upload response
+          Tests  2 failed | 31 passed (33)
+            x upload-media-with-alt-text-patches-the-attachment
+            x upload-media-returns-the-first-response-not-the-patch
+
+          # 3. presence tests instead of truthiness in createPost
+          Tests  3 failed | 30 passed (33)
+            x create-post-empty-categories-list-is-dropped
+            x create-post-zero-author-and-zero-featured-media-are-dropped
+            x create-post-none-author-and-none-featured-media-are-dropped
+
+          # 4. updatePost drops nullish fields, as createPost does
+          Tests  2 failed | 31 passed (33)
+            x update-post-forwards-the-publish-hook-kwargs-nulls-included
+            x keeps a null in an updatePost field where createPost would drop it
+
+          # 5. default mimeType application/octet-stream
+          Tests  2 failed | 31 passed (33)
+            x upload-media-omitting-alt-text-uses-the-empty-default
+            x upload-media-omitting-mime-type-uses-the-image-png-default
+
+          # 6. patch alt text whenever altText is set, ignoring the id
+          Tests  3 failed | 30 passed (33)
+            x upload-media-alt-text-but-response-carries-no-id
+            x upload-media-alt-text-but-id-is-zero
+            x treats a null upload response as having no id rather than throwing
+
+          # 7. drop the Content-Disposition header from the upload
+          Tests  15 failed | 18 passed (33)
+            (every upload_media scenario)
+          ```
+
+          Gates:
+
+          ```
+          $ pnpm -C web tsc --noEmit
+          TSC EXIT=0
+
+          $ pnpm -C web lint
+          LINT EXIT=0
+
+          $ pnpm -C web test
+           Test Files  3 failed | 102 passed (105)
+                Tests  10 failed | 2281 passed | 7 skipped (2298)
+          # 10 failed is the recorded state: the Phase 0 baseline of 9 (6 in
+          # image-preview.test.tsx, 3 in PostDetail.test.tsx) plus the known
+          # scaffold-check.test.ts flake logged in todo.md, which passes in isolation:
+          #   $ pnpm -C web vitest run src/mastra/workflows/scaffold-check.test.ts
+          #    Test Files  1 passed (1)
+          #         Tests  5 passed (5)
+          # Passing count 2248 -> 2281 (+33).
+
+          $ pnpm -C web build
+          BUILD EXIT=0
+          v Compiled successfully in 4.3s
+          # No route changed; this item touches only the client and its tests.
+
+          $ cd api && uv run pytest -q        # .env sourced
+          120 failed, 241 passed, 25 errors in 15.00s
+
+          $ cd api && uv run ruff check .
+          Found 32 errors.
+
+          $ cd api && uv run ruff check scripts/export_wordpress_write_parity.py
+          All checks passed!
+
+          $ cd api && uv run ruff format --check .
+          9 files would be reformatted, 135 files already formatted
+
+          $ cd api && uv run ruff format --check scripts/export_wordpress_write_parity.py
+          1 file already formatted
+          ```
+
+        - [ ] 5.3c-iii-b-1-b `markdown_to_wp_html` (`api/src/services/wp_html.py`), the
+          markdown-to-Gutenberg-block converter the publish hook runs the article
+          through.
+        - [ ] 5.3c-iii-b-1-c The Mastra WordPress publish workflow
+          (`api/src/pipeline/publish.py`): the media-directory sweep, the manifest-driven
+          featured image and alt text, the local-to-remote URL rewrite, the create/update
+          branch, the `wp_publish_status` transitions and the `publish_start` /
+          `publish_complete` / `publish_error` events.
+        - [ ] 5.3c-iii-b-1-d The `output_format == "wordpress"` branch of
+          `POST /{post_id}/publish`, starting the workflow above.
   - [x] 5.3d Exports, logs and analytics (split: five endpoints, and `/export/all`
     needs a zip writer this repo does not have while `/analytics` needs the analytics
     service wired to the route. Split into 5.3d-i the two plain exports, 5.3d-ii
