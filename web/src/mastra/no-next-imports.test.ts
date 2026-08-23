@@ -97,6 +97,11 @@ describe("mastra entry point", () => {
       // its own clients private, so the completion step opens one of its own.
       "redis",
       "sharp",
+      // Registering the `nextjsPublish` workflow pulls in the PyYAML port,
+      // which uses the `yaml` package for syntax only: it parses to a node
+      // tree, and `nextjs/pyyaml/load.ts` re-resolves the scalars with PyYAML's
+      // own YAML 1.1 rules on top.
+      "yaml",
       "zod",
     ])
   })

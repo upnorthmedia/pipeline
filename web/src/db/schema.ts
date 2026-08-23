@@ -89,7 +89,11 @@ export const websiteProfiles = pgTable(
     nextjsWebhookUrl: text("nextjs_webhook_url"),
     nextjsWebhookSecret: text("nextjs_webhook_secret"),
     // json, not jsonb: Alembic 011 created this one as `json`.
-    nextjsFrontmatterMap: json("nextjs_frontmatter_map").$type<Record<string, string>>(),
+    // `unknown` rather than `string`: a mapping target is stored as either a
+    // bare field name or a dict of options (`{key, default, transform}`), and
+    // `apply_frontmatter_mapping` reads both. The narrower type contradicted
+    // the column and `lib/api.ts` already described it as `unknown`.
+    nextjsFrontmatterMap: json("nextjs_frontmatter_map").$type<Record<string, unknown>>(),
   },
   (table) => [
     index("ix_website_profiles_user_id").using(

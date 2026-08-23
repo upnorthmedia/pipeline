@@ -14241,3 +14241,170 @@ All checks passed!
 $ cd api && uv run ruff format --check scripts/export_nextjs_payload_parity.py
 1 file already formatted
 ```
+
+## 5.3c-iii-b-2-d
+
+The Mastra step and workflow for `publish_to_nextjs` (`api/src/services/nextjs_publish.py`):
+the profile, webhook-configuration and decrypt guards, the `nextjs_publish_status`
+transitions with `nextjs_published_at`, the webhook `POST` with `X-Jena-Signature` and its
+200 check, and the `publish_start` / `publish_complete` / `publish_error` events with
+`_fail`.
+
+- `web/src/mastra/steps/nextjs-publish.ts`: the step.
+- `web/src/mastra/workflows/nextjs-publish.ts`: the one-step workflow, registered as
+  `nextjsPublish` in `web/src/mastra/index.ts`.
+
+The three content transforms it composes were ported and pinned in the three preceding
+sub-items (`applyFrontmatterMapping`, `applyMappingToContent`, `buildNextjsPayload`) and the
+signature in `web/src/lib/hmac-signing.ts`, so what is new here is only the part with no
+pure oracle.
+
+Two housekeeping changes the ledger item called for, both done:
+
+- `web/src/db/schema.ts` widens `nextjs_frontmatter_map` from `Record<string, string>` to
+  `Record<string, unknown>`. A mapping target is stored as either a bare field name or a
+  dict of options (`{key, default, transform}`), so the narrower type contradicted the
+  column; `web/src/lib/api.ts` and `web/src/app/api/profiles/serialize.ts` already described
+  it as `unknown`.
+- `web/src/mastra/no-next-imports.test.ts` gains `yaml`. Registering this workflow is what
+  first pulls `web/src/mastra/nextjs/pyyaml/` into the entry point's import graph. The test
+  failed with exactly that one-package diff before the list was updated, which is the
+  negative control for the change.
+
+### Preserved behaviours
+
+1. **The payload build is outside the `try`.** Python wraps only the `httpx` call. An
+   `AttributeError` out of the manifest walk, a `TypeError` out of the frontmatter mapping
+   or an `OSError` off the filesystem all propagate out of the job, leaving the row reading
+   `publishing` and letting ARQ retry. Reproduced by letting the exception leave the step,
+   with `retryConfig: { attempts: MAX_ATTEMPTS - 1 }` on the workflow standing in for
+   `max_tries = 3` (one fewer because the evented engine counts retries after the first
+   execution). Its WordPress sibling deliberately catches everything and carries no
+   `retryConfig`; the two are asserted against each other in `index.test.ts`.
+2. **`_fail` writes no execution log.** The WordPress hook's does. Copying that here would
+   put an entry in `GET /posts/{id}/logs` that Python never wrote. Asserted empty on both
+   the success path and the three guard failures.
+3. **Only 200 is success.** No `raise_for_status()` and no `< 300`: a receiver answering
+   `201 Created` fails the publish with `Webhook returned 201: …`, and the row says
+   `failed`.
+4. **The guards are truthiness, not null checks.** `if not profile.nextjs_webhook_url or
+   not profile.nextjs_webhook_secret` treats the empty string the profile form saves for a
+   cleared field as missing.
+5. **`{"target": "nextjs"}` is the whole event payload**, where the WordPress events carry
+   human-readable `message` fields. `web/src/hooks/use-sse.ts` forwards what arrives, so the
+   difference is visible in the dashboard and is preserved.
+6. **`_fail` logs before it writes the column**, which is the opposite order from the
+   WordPress hook's. Kept as written: nothing depends on the ordering, and reordering to
+   match its sibling would be a change with no reason behind it.
+
+### Divergences
+
+1. **`response.text[:200]` slices code points.** `String.prototype.slice` counts UTF-16
+   units, so an astral character in a webhook's error body would be cut in half and the
+   recorded message would end in a lone surrogate. `sliceCodePoints` slices by code point;
+   the test drives a 260-character body led by U+1F41D and asserts both the correct result
+   and that it differs from the naive slice.
+2. **Body decoding.** `httpx` decodes using the charset from `Content-Type` and falls back
+   to charset detection; `Response.text()` is always UTF-8. A receiver answering
+   `text/plain; charset=latin-1` therefore produces a different recorded message. Not worth
+   a decoder: the failure and its status code are what the dashboard shows.
+3. **`Webhook request failed: {exc}`** interpolates the `httpx` exception's `str`. `fetch`
+   reports Node's. The prefix is asserted; the tail is matched with a regex.
+
+### The test
+
+`web/src/mastra/steps/nextjs-publish.test.ts`, 19 tests, nothing mocked: the receiving blog
+is a Node `http.Server` on a loopback port that records every request, the images are real
+files under a real `MEDIA_DIR`, the rows are real rows in the dev database, the secret is a
+real Fernet token, and the signature is recomputed from the bytes the server received rather
+than from the bytes the step thought it sent. `publishing` is observed from inside the
+server's handler, which is the only place that transient value exists.
+
+```
+$ set -a; source .env; set +a
+$ pnpm -C web exec vitest run src/mastra/steps/nextjs-publish.test.ts
+ Test Files  1 passed (1)
+      Tests  19 passed (19)
+
+$ pnpm -C web exec vitest run src/mastra/index.test.ts
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+
+$ pnpm -C web exec vitest run src/mastra/no-next-imports.test.ts
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+```
+
+### Mutations
+
+Thirty-two mutations, each applied to `nextjs-publish.ts` alone with
+`nextjs-publish.test.ts` and `index.test.ts` re-run and the file restored. A control run of
+the unmutated file exits 0 first, per the iteration-128 finding that a broken vitest
+invocation reads as perfect coverage.
+
+| Mutation | Verdict |
+| --- | --- |
+| missing post: `fail` instead of the bare return | killed |
+| no-profile message text | killed |
+| unconfigured message text | killed |
+| url/secret guard: `&&` instead of `\|\|` | killed |
+| url guard: null check instead of truthiness | killed |
+| decrypt failure message | killed |
+| skip the `publishing` write | killed |
+| `publish_start` payload has no `target` | killed |
+| `publish_start` not sent | killed |
+| frontmatter map not passed | killed |
+| content selection reversed | killed |
+| sign the payload with the ciphertext | killed |
+| signature header renamed | killed |
+| `Content-Type` dropped | killed |
+| `GET` instead of `POST` | killed |
+| status check accepts any 2xx | killed |
+| slice by UTF-16 units | killed |
+| slice limit 100 | killed |
+| request-failure prefix reworded | killed |
+| non-200 message drops the status code | killed |
+| `nextjs_published_at` not written | killed |
+| status left `publishing` on success | killed |
+| `publish_complete` not sent | killed |
+| `_fail` does not write the column | killed |
+| `_fail` does not publish the event | killed |
+| `_fail` event `target` dropped | killed |
+| payload build wrapped so it cannot throw | killed |
+| missing-image log callback dropped | killed |
+| `_fail` writes an execution log | killed |
+| `mediaDir` ignores `MEDIA_DIR` | killed |
+| `delivery_id` constant | killed |
+| `slug` not sent | killed |
+
+32/32. Four survived the first pass and all four were real test gaps rather than
+equivalences, fixed by strengthening the test:
+
+- the two guard messages were only asserted through the exported constants, which mutate
+  with the implementation. Both are now asserted as literals as well.
+- nothing exercised a 2xx that is not 200, so `!== 200` and `>= 300` were
+  indistinguishable. A `201 Created` case was added.
+- the "writes no execution log" assertion covered only the success path, so a `_fail` that
+  appended one survived. The three guard failures now assert it too.
+
+### Gates
+
+```
+$ pnpm -C web tsc --noEmit
+(exit 0)
+
+$ pnpm -C web lint
+(exit 0)
+
+$ pnpm -C web test
+ Test Files  2 failed | 122 passed (124)
+      Tests  9 failed | 4357 passed | 7 skipped (4373)
+(the Phase 0 baseline of 9, confirmed by running the two files alone:
+ 6 in src/components/__tests__/image-preview.test.tsx and 3 in src/app/posts/PostDetail.test.tsx)
+
+$ pnpm -C web build
+(exit 0, compiled successfully)
+```
+
+No Python file is touched by this item (`git status --porcelain` lists only files under
+`web/`), so the pytest and ruff baselines recorded under 5.3c-iii-b-2-c stand unchanged.

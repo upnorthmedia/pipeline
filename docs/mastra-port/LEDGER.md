@@ -767,18 +767,23 @@ pages that use it work with the Python API stopped.
             divergences.
 
             Evidence: [`evidence/phase-5.md` #5.3c-iii-b-2-c](../mastra-port/evidence/phase-5.md)
-          - [ ] 5.3c-iii-b-2-d The Mastra step and workflow for `publish_to_nextjs`: the
+          - [x] 5.3c-iii-b-2-d The Mastra step and workflow for `publish_to_nextjs`: the
             profile, webhook-configuration and decrypt guards, the
             `nextjs_publish_status` transitions with `nextjs_published_at`, the webhook
             `POST` with `X-Jena-Signature` and its 200 check, and the `publish_start` /
-            `publish_complete` / `publish_error` events with `_fail`. `web/src/db/schema.ts`
-            types `nextjs_frontmatter_map` as `Record<string, string>`, which the dict
-            shaped targets contradict; widen it to `Record<string, unknown>` here, where
-            the column is first read. Note: registering this step is what first pulls
-            `web/src/mastra/nextjs/pyyaml/` (and with it the `yaml` package) into the
-            Mastra entry point's import graph, so
-            `web/src/mastra/no-next-imports.test.ts`, which asserts the exact package set
-            that graph reaches, needs `yaml` added in the same iteration.
+            `publish_complete` / `publish_error` events with `_fail`. Registered as
+            `nextjsPublish`. `web/src/db/schema.ts` widened
+            `nextjs_frontmatter_map` to `Record<string, unknown>` and
+            `web/src/mastra/no-next-imports.test.ts` gained `yaml`, both as the item
+            called for. Unlike its WordPress sibling this workflow carries
+            `retryConfig: { attempts: MAX_ATTEMPTS - 1 }`: Python left the payload build
+            outside its `try`, so ARQ's `max_tries = 3` applied to it, and the step lets
+            that exception through rather than catching it. Verified against a real
+            loopback webhook receiver, real files and real rows, with 19 tests and
+            32/32 mutations killed.
+
+            Evidence: [`evidence/phase-5.md` #5.3c-iii-b-2-d](../mastra-port/evidence/phase-5.md)
+
           - [ ] 5.3c-iii-b-2-e The `output_format == "nextjs"` branch of
             `POST /{post_id}/publish`: `nextjs_publish_status = "pending"`, the start of
             the new workflow, and the removal of the temporary fall-through recorded under

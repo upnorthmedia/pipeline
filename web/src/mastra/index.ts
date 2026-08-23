@@ -30,6 +30,7 @@ import { researchAgent } from "./agents/research"
 import { writeAgent } from "./agents/write"
 import { createWorkerEvents } from "./failure-recorder"
 import { imagesWorkflow } from "./workflows/images"
+import { nextjsPublishWorkflow } from "./workflows/nextjs-publish"
 import { pipelineWorkflow } from "./workflows/pipeline"
 import { recrawlCheckWorkflow } from "./workflows/recrawl-check"
 import { scaffoldCheckWorkflow } from "./workflows/scaffold-check"
@@ -142,6 +143,10 @@ export const mastra = new Mastra({
   // carries its own cron, so registering it here is what schedules it. The
   // scheduler only runs where `startWorkers()` was called, so it fires in the
   // `worker` service and never in `web`.
+  // `wordpressPublish` and `nextjsPublish` are the two ARQ publish jobs. They
+  // are separate workflows because Python registered two separate functions
+  // and `POST /{post_id}/publish` branched on `output_format` to choose one;
+  // they share no state and only one ever runs for a given post.
   workflows: {
     pipeline: pipelineWorkflow,
     images: imagesWorkflow,
@@ -149,6 +154,7 @@ export const mastra = new Mastra({
     sitemapCrawl: sitemapCrawlWorkflow,
     recrawlCheck: recrawlCheckWorkflow,
     wordpressPublish: wordpressPublishWorkflow,
+    nextjsPublish: nextjsPublishWorkflow,
   },
   events: workerEvents,
   agents: {

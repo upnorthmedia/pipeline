@@ -21,7 +21,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getPool, toNodePostgresUrl } from "../db"
 import { logger, mastra, pubsub, storage } from "./index"
+import { MAX_ATTEMPTS } from "./state"
 import { RECRAWL_CHECK_CRON, recrawlCheckWorkflow } from "./workflows/recrawl-check"
+import { nextjsPublishWorkflow } from "./workflows/nextjs-publish"
 import { wordpressPublishWorkflow } from "./workflows/wordpress-publish"
 import { sitemapCrawlWorkflow } from "./workflows/sitemap-crawl"
 
@@ -124,6 +126,28 @@ describe("mastra instance", () => {
     }[]
     expect(graph.map((entry) => entry.type)).toEqual(["step"])
     expect(graph[0].step?.id).toBe("wordpress-publish")
+  })
+
+  /**
+   * The Next.js publish hook's registration (item 5.3c-iii-b-2-d). Unlike its
+   * WordPress sibling it carries a retry policy, because Python left the
+   * payload build outside its `try` and ARQ's `max_tries = 3` therefore applied
+   * to it; `attempts` is one fewer because the engine counts retries after the
+   * first execution.
+   */
+  it("registers the Next.js publish hook as a one-step workflow that retries", () => {
+    expect(mastra.getWorkflow("nextjsPublish")).toBe(nextjsPublishWorkflow)
+    expect(Object.keys(mastra.listWorkflows())).toContain("nextjsPublish")
+    expect(nextjsPublishWorkflow.id).toBe("nextjs-publish")
+    expect(nextjsPublishWorkflow.retryConfig).toEqual({ attempts: MAX_ATTEMPTS - 1 })
+    expect(wordpressPublishWorkflow.retryConfig?.attempts ?? 0).toBe(0)
+
+    const graph = nextjsPublishWorkflow.serializedStepGraph as {
+      type: string
+      step?: { id?: string }
+    }[]
+    expect(graph.map((entry) => entry.type)).toEqual(["step"])
+    expect(graph[0].step?.id).toBe("nextjs-publish")
   })
 })
 
