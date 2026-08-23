@@ -119,12 +119,12 @@ type Replay = ReturnType<typeof replayOf>
 
 type LogLine = { level: string; message: string }
 
-/** Records the prompts the step sends and the warnings it logs. */
+/** Records the prompts the step sends and the events and errors it emits. */
 function replayMastra(reply: Replay) {
   const prompts: string[] = []
   const logs: LogLine[] = []
   const record = (level: string) => (message: string) => logs.push({ level, message })
-  const announced: unknown[] = []
+  const announced: Record<string, unknown>[] = []
   const mastra = {
     /**
      * The step announces itself on the event bus before it calls its provider
@@ -133,7 +133,7 @@ function replayMastra(reply: Replay) {
      * Streams topic and asserts the payload it carries.
      */
     pubsub: {
-      publish: async (_topic: string, event: { data: unknown }) => {
+      publish: async (_topic: string, event: { data: Record<string, unknown> }) => {
         announced.push(event.data)
       },
     },
@@ -241,6 +241,23 @@ afterAll(async () => {
   await closeDb()
 })
 
+/**
+ * The stored progress lines for a post, in the order the step wrote them.
+ *
+ * Read back off `posts.execution_logs` rather than off the recorded publishes,
+ * because `publishStageLog` publishes before it appends: the row is written by
+ * the same process in the same order, where a subscriber's view is not.
+ */
+async function progressLines(postId: string) {
+  const [row] = await db
+    .select({ logs: posts.executionLogs })
+    .from(posts)
+    .where(eq(posts.id, postId))
+  return ((row?.logs ?? []) as Record<string, unknown>[])
+    .filter((entry) => entry.event === "log")
+    .map((entry) => [entry.level, entry.message])
+}
+
 describe("edit step prompt parity", () => {
   for (const [index, slug] of FIXTURE_SLUGS.entries()) {
     it(`sends the prompt the Python stage sent for ${slug}`, async () => {
@@ -317,14 +334,18 @@ describe("edit step output validation", () => {
 
     const { logs } = await runStep(fixtureIds[1], replayOf(fixture))
 
-    const warnings = logs.filter((line) => line.level === "warn").map((line) => line.message)
+    const warnings = (await progressLines(fixtureIds[1]))
+      .filter(([level]) => level === "warning")
+      .map(([, message]) => message)
     // The edit output this fixture recorded still fails several checks, which is
-    // exactly the case Python logs rather than blocks on.
+    // exactly the case Python reports rather than blocks on.
     expect(warnings).toContainEqual(
       expect.stringMatching(/^SEO checks still failing after edit: /),
     )
-    // A quality problem is a warning, never an error: the run continues.
-    expect(logs.filter((line) => line.level === "error")).toEqual([])
+    // A quality problem is a warning, never an error: the run continues, and
+    // nothing reaches the logger, which after item 5.5c-iv-c carries only the
+    // one exception Python sent to `logger.exception`.
+    expect(logs).toEqual([])
   })
 
   it("counts em-dashes in the output the way Python's str.count does", async () => {
@@ -336,6 +357,142 @@ describe("edit step output validation", () => {
     )
     expect(warnings[0].message).toBe("Edit output contains 2 em-dash(es) — should be zero")
     expect(fixture.stage_output.final_md).not.toContain("—")
+  })
+})
+
+describe("edit step progress lines", () => {
+  it("writes Python's three info lines around the provider call", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    await runStep(fixtureIds[0], replayOf(fixture))
+
+    const lines = await progressLines(fixtureIds[0])
+    expect(lines.slice(0, 2)).toEqual([
+      ["info", "Rules loaded, building prompt..."],
+      // Python named the stage's job in the message rather than the model, so
+      // this line is the same whatever `edit`'s configured model turns out to be.
+      ["info", "Calling Claude for editing + SEO polish..."],
+    ])
+    expect(lines[2][0]).toBe("info")
+    // The token count is the fixture's; the duration is real elapsed time
+    // around the replayed call, rendered to one decimal the way Python's
+    // `f"{timer.duration:.1f}"` did.
+    expect(lines[2][1]).toMatch(
+      new RegExp(`^Received ${fixture.stage_output._stage_meta.tokens_out} tokens in \\d+\\.\\ds$`),
+    )
+  })
+
+  it("reports every quality problem the edit left behind, in Python's order", async () => {
+    const fixture = fixtures[1]
+    vi.setSystemTime(new Date(fixture.captured_at))
+    // An answer that trips all three of `_validate_edit_output`'s branches at
+    // once, which no recorded fixture output does: the recorded answers are
+    // clean of em-dashes by construction, so the branch that counts them is
+    // only reachable from a hand-built answer.
+    const edited = [
+      "# T — u",
+      "",
+      "Notwithstanding the aforementioned, the subsequent ramifications of the aforementioned",
+      "methodological considerations necessitate substantial reconsideration.",
+    ].join("\n")
+
+    await runStep(fixtureIds[1], { ...replayOf(fixture), text: edited })
+
+    const lines = await progressLines(fixtureIds[1])
+    expect(lines.slice(3)).toEqual([
+      ["warning", "Edit output contains 1 em-dash(es) — should be zero"],
+      [
+        "warning",
+        expect.stringMatching(
+          /^Flesch reading ease is -?[\d.]+ \(target 60-70, still too hard to read\)$/,
+        ),
+      ],
+      ["warning", expect.stringMatching(/^SEO checks still failing after edit: /)],
+    ])
+  })
+
+  it("writes nothing about quality when the edit has nothing left to report", async () => {
+    const fixture = fixtures[1]
+    vi.setSystemTime(new Date(fixture.captured_at))
+    // An answer with no em-dash, short easy sentences and every boolean SEO
+    // check satisfied, so all three of `_validate_edit_output`'s conditions are
+    // false and Python publishes none of its three lines. The three info lines
+    // still go out, which is what separates "nothing to report" from "the
+    // validation never ran". Both the keyword and the title have to be pinned
+    // because the checks read them off the row rather than off the answer.
+    await db
+      .update(posts)
+      .set({ relatedKeywords: ["cats"], topic: "Cats" })
+      .where(eq(posts.id, fixtureIds[1]))
+    const clean = [
+      "---",
+      "description: All about cats.",
+      "---",
+      "",
+      "# Cats",
+      "",
+      "Cats are fun. We like cats. See [our guide](/guide) and [a study](https://example.org/s).",
+      "",
+      "## Cats at home",
+      "",
+      "Cats nap a lot. Cats play too.",
+    ].join("\n")
+
+    await runStep(fixtureIds[1], { ...replayOf(fixture), text: clean })
+
+    expect(await progressLines(fixtureIds[1])).toEqual([
+      ["info", "Rules loaded, building prompt..."],
+      ["info", "Calling Claude for editing + SEO polish..."],
+      ["info", expect.stringMatching(/^Received /)],
+    ])
+  })
+
+  it("publishes each line, interleaved with the two announcements", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { announced } = await runStep(fixtureIds[0], replayOf(fixture))
+
+    // The stub records inside `publish`, which the step awaits, so this array
+    // is in publish order. All three info lines sit between the two
+    // announcements and ahead of anything the validation has to say.
+    const opening = announced.slice(0, 4).map((event) => [event.event, event.level ?? event.message])
+    expect(opening).toEqual([
+      ["stage_start", "Starting edit..."],
+      ["log", "info"],
+      ["log", "info"],
+      ["log", "info"],
+    ])
+    expect(announced.at(-1)).toMatchObject({ event: "stage_complete", stage: "edit" })
+  })
+
+  it("carries Python's payload on a progress line and stores no data key", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { announced } = await runStep(fixtureIds[0], replayOf(fixture))
+
+    expect(announced.find((event) => event.event === "log")).toEqual({
+      event: "log",
+      post_id: fixtureIds[0],
+      stage: "edit",
+      message: "Rules loaded, building prompt...",
+      level: "info",
+      timestamp: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T[\d:.]+\+00:00$/),
+    })
+
+    const [row] = await db
+      .select({ logs: posts.executionLogs })
+      .from(posts)
+      .where(eq(posts.id, fixtureIds[0]))
+    for (const entry of ((row?.logs ?? []) as Record<string, unknown>[]).filter(
+      (item) => item.event === "log",
+    )) {
+      // Python's `**({"data": data} if data else {})`: none of edit's seven
+      // call sites passes `data`, so no entry carries the key at all.
+      expect(Object.keys(entry).sort()).toEqual(["event", "level", "message", "stage", "ts"])
+    }
   })
 })
 
@@ -366,14 +523,24 @@ describe("edit step link validation", () => {
     stub.impl = null
     const edited = `See [live](${base}/ok) and [dead](${base}/gone).`
 
-    const { logs } = await runStep(fixtureIds[0], { ...replayOf(fixture), text: edited })
+    await runStep(fixtureIds[0], { ...replayOf(fixture), text: edited })
 
     const [row] = await db.select().from(posts).where(eq(posts.id, fixtureIds[0]))
     expect(row.finalMdContent).toBe(`See [live](${base}/ok) and dead.`)
-    expect(logs).toContainEqual({
-      level: "warn",
-      message: `Stripped 1 dead link(s): ${base}/gone`,
-    })
+    // Python's only progress line about a side effect on the content itself,
+    // and the one place the reader learns a citation the model offered was not
+    // real. It reports what was stripped from the model's answer, so it names
+    // the dead url even though the committed column no longer contains it.
+    const lines = await progressLines(fixtureIds[0])
+    expect(lines.at(-1)).toEqual(["warning", `Stripped 1 dead link(s): ${base}/gone`])
+    // And it comes last, because Python validates the model's own answer before
+    // it validates the links in it. Running the two the other way round would
+    // both reorder the log and change what the quality warnings describe, since
+    // stripping a link changes the external-link check they read.
+    expect(lines.slice(3, -1)).toContainEqual([
+      "warning",
+      expect.stringMatching(/^SEO checks still failing after edit: /),
+    ])
   })
 
   it("commits the model's own output when link validation throws", async () => {
@@ -388,9 +555,15 @@ describe("edit step link validation", () => {
     expect(output.stage).toBe("edit")
     const [row] = await db.select().from(posts).where(eq(posts.id, fixtureIds[0]))
     expect(row.finalMdContent).toBe(fixture.stage_output.final_md)
-    expect(logs.filter((line) => line.level === "error")).toEqual([
-      { level: "error", message: "link validation failed, skipping" },
-    ])
+    // Python sent this one to `logger.exception`, not to `publish_stage_log`,
+    // so it stays off the event bus: a browser is told nothing about a link
+    // check that never ran, only about links that were actually removed.
+    expect(logs).toEqual([{ level: "error", message: "link validation failed, skipping" }])
+    expect(
+      (await progressLines(fixtureIds[0])).filter(([, message]) =>
+        String(message).startsWith("Stripped "),
+      ),
+    ).toEqual([])
   })
 })
 
@@ -442,7 +615,10 @@ describe("edit step announcement", () => {
   it("announces the stage on the event bus, in Python's payload shape", async () => {
     const { announced } = await runStep(fixtureIds[0], replayOf(fixtures[0]))
 
-    expect(announced).toEqual([
+    // Filtered, because item 5.5c-iv-c interleaved four `log` events between
+    // these two. The whole ordered sequence, announcements and progress lines
+    // together, is asserted in the progress-line suite above.
+    expect(announced.filter((event) => event.event !== "log")).toEqual([
       {
         event: "stage_start",
         post_id: fixtureIds[0],

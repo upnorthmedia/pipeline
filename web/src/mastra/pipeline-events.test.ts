@@ -308,7 +308,14 @@ afterAll(async () => {
  * a stage that quietly stopped logging, and a stage that started, both have to
  * fail here rather than be absorbed by a looser assertion.
  */
-const LOGGING_STAGES = ["research", "outline", "write", "ready"] as const
+/** How many progress lines each ported stage writes on this run. */
+const LOG_LINES_PER_STAGE: Partial<Record<(typeof STAGES)[number], number>> = {
+  research: 3,
+  outline: 3,
+  write: 3,
+  edit: 5,
+  ready: 3,
+}
 
 describe("a run that executes every stage", () => {
   it("announces each of the six stages exactly once, in pipeline order", () => {
@@ -397,7 +404,7 @@ describe("a run that executes every stage", () => {
     expect(currentStageOnDelivery[`${FULL_POST_ID}/pipeline_complete`]).toBe("complete")
   })
 
-  it("delivers three progress lines for each ported stage and none for the others", () => {
+  it("delivers each ported stage's progress lines and none for the others", () => {
     const perStage = Object.fromEntries(
       STAGES.map((stage) => [
         stage,
@@ -417,7 +424,11 @@ describe("a run that executes every stage", () => {
       research: 3,
       outline: 3,
       write: 3,
-      edit: 0,
+      // Five, because `edit` is the one stage whose lines are not fixed: three
+      // info lines plus one per condition `_validate_edit_output` finds true.
+      // The stubbed edit output is four words long with no keyword in it, so it
+      // trips the Flesch branch and the SEO branch and not the em-dash one.
+      edit: 5,
       images: 0,
       ready: 3,
     })
@@ -605,18 +616,13 @@ describe("what a run writes to execution_logs", () => {
       ...STAGES.flatMap((stage) => [
         ["stage_start", stage],
         // The stage's own progress lines, item 5.5c-iv, sitting between the two
-        // announcements the runner made around the node. Four stages have them
-        // so far, all three lines each: `research` reaches only three of its
-        // five here because the stub validates on the first attempt. `edit` and
-        // `images` are later sub-items, and this list is what will say so when
-        // they land.
-        ...((LOGGING_STAGES as readonly string[]).includes(stage)
-          ? [
-              ["log", stage],
-              ["log", stage],
-              ["log", stage],
-            ]
-          : []),
+        // announcements the runner made around the node. Five stages have them
+        // so far: four write three lines each (`research` reaches only three of
+        // its five here because the stub validates on the first attempt) and
+        // `edit` writes five, its three plus the two quality warnings the
+        // stubbed output earns. `images` is the last sub-item, and this list is
+        // what will say so when it lands.
+        ...Array.from({ length: LOG_LINES_PER_STAGE[stage] ?? 0 }, () => ["log", stage]),
         ["stage_complete", stage],
       ]),
       ["pipeline_complete", ""],
@@ -687,7 +693,7 @@ describe("what a run writes to execution_logs", () => {
     expect(entries.map((entry) => [entry.event, entry.stage])).toEqual([["pipeline_start", ""]])
   })
 
-  it("carries each stage's three progress lines, in the order the node wrote them", async () => {
+  it("carries each stage's progress lines, in the order the node wrote them", async () => {
     const entries = await logsFor(FULL_POST_ID)
     const messagesFor = (stage: string) =>
       entries
@@ -710,6 +716,18 @@ describe("what a run writes to execution_logs", () => {
       "Calling Claude for draft (up to 16k tokens)...",
       expect.stringMatching(/^Received 20 tokens in \d+\.\ds$/),
     ])
+    expect(messagesFor("edit")).toEqual([
+      "Rules loaded, building prompt...",
+      "Calling Claude for editing + SEO polish...",
+      expect.stringMatching(/^Received 20 tokens in \d+\.\ds$/),
+      // `_validate_edit_output` runs before link validation, so both warnings
+      // are about the model's own answer. The stubbed answer is four words with
+      // no keyword in it, which is unreadable by Flesch and fails every check.
+      expect.stringMatching(
+        /^Flesch reading ease is -?[\d.]+ \(target 60-70, still too hard to read\)$/,
+      ),
+      expect.stringMatching(/^SEO checks still failing after edit: /),
+    ])
     expect(messagesFor("ready")).toEqual([
       "Rules loaded, building prompt...",
       "Calling Claude for final assembly...",
@@ -719,10 +737,18 @@ describe("what a run writes to execution_logs", () => {
 
   it("stores a progress line with no data key, as Python's `if data:` did", async () => {
     const entries = await logsFor(FULL_POST_ID)
-    for (const entry of entries.filter((item) => item.event === "log")) {
+    const lines = entries.filter((item) => item.event === "log")
+    // None of the 21 call sites in the five non-`images` stages passes `data`,
+    // so no stored line carries the key, whatever its level.
+    for (const entry of lines) {
       expect(Object.keys(entry).sort()).toEqual(["event", "level", "message", "stage", "ts"])
-      expect(entry.level).toBe("info")
     }
+    // `info` everywhere but `edit`'s two quality warnings, which are the only
+    // lines on this run that Python raised the level on.
+    expect(lines.filter((entry) => entry.level !== "info").map((entry) => entry.stage)).toEqual([
+      "edit",
+      "edit",
+    ])
   })
 
   it("records only the named stage for a rerun, and nothing about the pipeline", async () => {
@@ -731,6 +757,10 @@ describe("what a run writes to execution_logs", () => {
     const entries = await logsFor(RERUN_POST_ID)
     expect(entries.map((entry) => [entry.event, entry.stage])).toEqual([
       ["stage_start", "edit"],
+      // The stage's own progress lines are not gated on the run being a full
+      // one: they are the node reporting on itself, so a rerun of one stage
+      // records exactly what that stage would have recorded inside a full run.
+      ...Array.from({ length: LOG_LINES_PER_STAGE.edit ?? 0 }, () => ["log", "edit"]),
       ["stage_complete", "edit"],
     ])
   })

@@ -30,9 +30,11 @@ import { STATUS_COMPLETE } from "../state"
 import {
   announceStageComplete,
   announceStageStart,
+  formatSeconds,
   gateResumeSchema,
   gateSuspendSchema,
   markRerunComplete,
+  publishStageLog,
   recordStageRetry,
   reviewGate,
   shouldRunStage,
@@ -173,12 +175,14 @@ export interface EditWarning {
 }
 
 /**
- * `_validate_edit_output`, returned rather than published.
+ * `_validate_edit_output`, assembled rather than published.
  *
- * Python sends these to the dashboard through `publish_stage_log(..., level=
- * "warning")`. The event bus that carries them is ledger item 5.5, so for now
- * the step logs them; returning them keeps the decision in one place and makes
- * them assertable without a logger spy.
+ * Python publishes each of these from inside `_validate_edit_output` through
+ * `publish_stage_log(..., level="warning")`, and so does the step: it walks
+ * this list and publishes every entry, in this order. The assembly stays a pure
+ * function because the three conditions are the interesting part and the
+ * numbers behind them come out of `computeAnalytics`; keeping them separable
+ * lets a test name the message without standing up a transport.
  */
 export function editOutputWarnings(state: PipelineState, content: string): EditWarning[] {
   const warnings: EditWarning[] = []
@@ -229,19 +233,38 @@ export const editStep = createStep({
       const gate = await reviewGate("edit", inputData, state.stageSettings, resumeData)
       if (gate) return suspend(gate)
       await announceStageStart(mastra, "edit", inputData)
-      const rulesPrompt = buildStagePrompt("edit", loadRules("edit"), state)
+      const rules = loadRules("edit")
+      // Python's seven progress lines, in `edit_node`'s own positions. Three
+      // are the same info lines the three stages before this one write; the
+      // other four are warnings, and they are what makes this stage's log worth
+      // reading: three from `_validate_edit_output` about the quality problems
+      // the edit did not fix, and one about the links it cost the post.
+      await publishStageLog(mastra, postId, "edit", "Rules loaded, building prompt...")
+      const rulesPrompt = buildStagePrompt("edit", rules, state)
       const analyticsSection = buildAnalyticsSection(state)
       const prompt = analyticsSection
         ? rulesPrompt + ANALYTICS_SEPARATOR + analyticsSection
         : rulesPrompt
 
+      await publishStageLog(mastra, postId, "edit", "Calling Claude for editing + SEO polish...")
       const startedAt = Date.now()
       const result = await mastra.getAgent("edit").generate(prompt)
       const durationMs = Date.now() - startedAt
 
-      const logger = mastra.getLogger()
+      const tokensOut = result.usage?.outputTokens ?? 0
+      const durationS = durationMs / 1000
+      await publishStageLog(
+        mastra,
+        postId,
+        "edit",
+        `Received ${tokensOut} tokens in ${formatSeconds(durationS)}s`,
+      )
+
+      // Python runs its output validation before it validates links, so the
+      // quality warnings are about the model's own answer rather than about the
+      // stripped-down text that gets committed.
       for (const warning of editOutputWarnings(state, result.text)) {
-        logger?.warn(warning.message, { postId, stage: "edit" })
+        await publishStageLog(mastra, postId, "edit", warning.message, { level: "warning" })
       }
 
       let validation: ValidationResult
@@ -250,15 +273,18 @@ export const editStep = createStep({
       } catch (error) {
         // Never blocks the pipeline: an unreachable network leaves the model's own
         // links in place rather than throwing away a paid-for edit.
-        logger?.error("link validation failed, skipping", { postId, error })
+        mastra.getLogger()?.error("link validation failed, skipping", { postId, error })
         validation = { content: result.text, removed: [] }
       }
 
       if (validation.removed.length > 0) {
-        logger?.warn(
+        await publishStageLog(
+          mastra,
+          postId,
+          "edit",
           `Stripped ${validation.removed.length} dead link(s): ` +
             validation.removed.map((link) => link.url).join(", "),
-          { postId, stage: "edit" },
+          { level: "warning" },
         )
       }
 
@@ -274,8 +300,8 @@ export const editStep = createStep({
         // silent server-side alias shows up in the run trace.
         model: result.response?.modelId ?? "",
         tokensIn: result.usage?.inputTokens ?? 0,
-        tokensOut: result.usage?.outputTokens ?? 0,
-        durationS: durationMs / 1000,
+        tokensOut,
+        durationS,
       }
       await announceStageComplete(mastra, output)
       return output

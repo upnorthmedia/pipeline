@@ -345,3 +345,10 @@
   snapshot failed intermittently. Measured at HEAD before the 5.5c-iv-b change (12 failed
   against the 9-failure baseline), so it was pre-existing. Fixed by having the poll also
   require the entry to be present.
+- [optimization 2026-08-23] `web/src/mastra/steps/edit.ts` carries three literal U+2014 em
+  dashes in source (the `em-dash(es)` warning message, the `ACTION REQUIRED` prompt line,
+  and one comment), where the port's writing rule bans the character and item 5.5c-iv-b
+  established the `\u2014` escape for the one message that needs it. All three predate
+  that convention. The two product strings are wire and prompt contracts, so any rewrite
+  has to keep the bytes identical; a byte-comparison test against the Python source would
+  make that safe. Left alone under item 5.5c-iv-c to keep the diff scoped.

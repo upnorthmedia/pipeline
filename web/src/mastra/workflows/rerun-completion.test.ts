@@ -227,9 +227,20 @@ describe("a named-stage run that completes the last outstanding stage", () => {
     expect(row.stageStatus).toEqual(Object.fromEntries(STAGES.map((s) => [s, STATUS_COMPLETE])))
   })
 
-  it("routes the stage's quality warnings to the instance logger", () => {
-    expect(warnings.some((w) => w.startsWith("Flesch reading ease"))).toBe(true)
-    expect(warnings.some((w) => w.startsWith("SEO checks still failing"))).toBe(true)
+  it("reports the stage's quality warnings on the post's own log, not to the logger", async () => {
+    // Item 5.5c-iv-c moved these off `logger.warn` and onto
+    // `publish_stage_log(..., level="warning")`, which is where Python wrote
+    // them. The logger assertion is the other half of that: a warning that
+    // still reached it would mean the stage reports the same problem twice.
+    const row = await readPost(FILLS_GAP_POST_ID)
+    const stored = (row.executionLogs ?? []) as Record<string, unknown>[]
+    const reported = stored
+      .filter((entry) => entry.event === "log" && entry.level === "warning")
+      .map((entry) => String(entry.message))
+
+    expect(reported.some((message) => message.startsWith("Flesch reading ease"))).toBe(true)
+    expect(reported.some((message) => message.startsWith("SEO checks still failing"))).toBe(true)
+    expect(warnings).toEqual([])
   })
 })
 

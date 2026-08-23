@@ -342,8 +342,20 @@ describe("four full pipelines at once on four different posts", () => {
     }
   })
 
-  it("routes the stages' quality warnings to the instance logger", () => {
-    expect(warnings.some((w) => w.startsWith("Flesch reading ease"))).toBe(true)
+  it("reports each stage's quality warnings on its own post's log, not to the logger", async () => {
+    // Item 5.5c-iv-c moved these off `logger.warn` and onto
+    // `publish_stage_log(..., level="warning")`. On four concurrent runs that
+    // also pins the routing per post: a warning filed against the wrong row
+    // would leave one of these four empty.
+    for (const postId of MARKED_POST_IDS) {
+      const stored = ((await readPost(postId)).executionLogs ?? []) as Record<string, unknown>[]
+      const reported = stored
+        .filter((entry) => entry.event === "log" && entry.level === "warning")
+        .map((entry) => String(entry.message))
+
+      expect(reported.some((message) => message.startsWith("Flesch reading ease"))).toBe(true)
+    }
+    expect(warnings).toEqual([])
   })
 })
 

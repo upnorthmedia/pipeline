@@ -13622,8 +13622,219 @@ three pieces are separately verifiable, so they are separate items.
         $ cd api && uv run ruff format --check .
         9 files would be reformatted, 131 files already formatted
         ```
-      - [ ] 5.5c-iv-c `edit`'s seven call sites, which report the link-validation and
-        quality passes and are the only ones in the six stages that carry `data`.
+      - [x] 5.5c-iv-c `edit`'s seven call sites, which report the link-validation and
+        quality passes.
+
+        **Correction to this item's own wording.** It said these seven "are the only
+        ones in the six stages that carry `data`". They are not: none of them carries
+        `data`, and the only three call sites in the six stages that do are all in
+        `images`, which is 5.5c-iv-d. Measured:
+
+        ```
+        $ grep -rn 'data=' api/src/pipeline/stages/
+        api/src/pipeline/stages/images.py:90:                data={"error": error_msg, "raw_snippet": raw_snippet},
+        api/src/pipeline/stages/images.py:184:                        data={"index": i, "bytes": len(image_bytes), "path": image_url},
+        api/src/pipeline/stages/images.py:200:                        data={"index": i, "error": str(e)},
+        ```
+
+        What is actually distinctive about `edit`'s seven is the level: four of them are
+        `level="warning"`, where the other 21 non-`images` call sites are all the
+        default `info`.
+
+        The seven, from `api/src/pipeline/stages/edit.py`: the rules-loaded line at :36,
+        the provider-call line at :48, the received line at :74, the stripped-links line
+        at :91, and the three inside `_validate_edit_output` at :203, :224 and :239.
+        Ported into `web/src/mastra/steps/edit.ts` at the same seven positions.
+
+        **Decision 1: the four warnings move off `logger.warn` and onto the event bus.**
+        Item 3.4e landed `editOutputWarnings()` returning its messages and the step
+        sending them to `mastra.getLogger()?.warn`, with a comment saying the event bus
+        that should carry them was item 5.5. This is that item, so the step now walks
+        the same list and publishes each through `publishStageLog(..., {level:
+        "warning"})`, and the stripped-links line goes the same way. Nothing is reported
+        twice: a warning that still reached the logger would mean the stage reports the
+        same problem in two places, so the four run-level tests that used to assert on
+        the logger now assert the message is on the row and that the logger saw nothing.
+
+        **Decision 2: `editOutputWarnings()` stays a pure function returning messages.**
+        Python publishes from inside `_validate_edit_output`. Keeping the assembly
+        separate from the publishing lets a test name an exact message without standing
+        up a transport (`counts em-dashes in the output the way Python's str.count
+        does` does exactly that), and the step preserves Python's order by walking the
+        list in order. The three conditions and their order are the parity-relevant
+        part, and they are unchanged.
+
+        **Decision 3: `logger.exception` stays on the logger.** Python's link-validation
+        failure branch calls `logger.exception("Link validation failed, skipping")`, not
+        `publish_stage_log`. So a browser is told nothing when the link check itself
+        could not run, and is told only about links that were actually removed. Kept, and
+        asserted both ways: the logger gets exactly that one line, and no `Stripped`
+        line is published.
+
+        **Decision 4: `_validate_edit_output` keeps running before `validate_links`.**
+        Python's order, and it is load-bearing rather than incidental: the quality
+        warnings describe the model's own answer, dead links included, and stripping a
+        link changes the `has_external_links` check they read. Pinned by asserting the
+        stripped-links line is last and that a quality warning precedes it. This was
+        found by a negative control that passed (see the table below), and the assertion
+        exists because of it.
+
+        **Decision 5: the em dash in the em-dash warning stays the literal character it
+        has carried since item 3.4e.** The message is a wire contract, rendered into
+        `debug-log-panel.tsx`, so its bytes matter. Item 5.5c-iv-b wrote `research`'s one
+        such message as `\u2014` to keep the character out of source; `edit.ts` already
+        held it literally from before that convention, alongside the same character in
+        the `ACTION REQUIRED` prompt text, and rewriting either is churn this item does
+        not need. Confirmed U+2014 on both sides:
+
+        ```
+        $ grep -n 'em-dash(es)' api/src/pipeline/stages/edit.py | head -1 | hexdump -C | grep -A1 'e2 80'
+        00000030  7d 20 65 6d 2d 64 61 73  68 28 65 73 29 20 e2 80  |} em-dash(es) ..|
+        00000040  94 20 73 68 6f 75 6c 64  20 62 65 20 7a 65 72 6f  |. should be zero|
+        ```
+
+        Python's own rendering of the seven distinct messages, for byte comparison
+        against the stored entries below. **Every — in this item's pasted output is a
+        transcription of the em dash character, which the commands actually printed and
+        which this document may not otherwise contain.**
+
+        ```
+        $ cd api && uv run python -c '<the seven f-strings, with sample values>'
+        'Rules loaded, building prompt...'
+        'Calling Claude for editing + SEO polish...'
+        'Received 5953 tokens in 0.0s'
+        'Edit output contains 2 em-dash(es) — should be zero'
+        'Flesch reading ease is 47.8 (target 60-70, still too hard to read)'
+        'SEO checks still failing after edit: Keyword In Title, Has Internal Links'
+        'Stripped 1 dead link(s): http://127.0.0.1:65436/gone'
+        ```
+
+        Failing before the implementation, with the new and updated tests in place and
+        `web/src/mastra/steps/edit.ts` reverted to HEAD:
+
+        ```
+        $ npx vitest run src/mastra/steps/edit.test.ts src/mastra/pipeline-events.test.ts \
+            src/mastra/workflows/pipeline.test.ts
+         Test Files  3 failed (3)
+              Tests  14 failed | 55 passed (69)
+        ```
+
+        A real stored trail, read off `posts.execution_logs` after the step ran against
+        the real database with the real link validator over real sockets (the
+        `strips a dead link over real sockets` test, dumped by a temporary failing
+        assertion that was then removed). Five of the seven lines are here; the em-dash
+        and Flesch branches are false for this content, which is what the separate
+        `reports every quality problem` test is for:
+
+        ```
+        [
+          { event: "stage_start", level: "info", message: "Starting edit...",
+            stage: "edit", ts: "2026-08-22T00:51:48.813+00:00" },
+          { event: "log", level: "info", message: "Rules loaded, building prompt...",
+            stage: "edit", ts: "2026-08-22T00:51:48.813+00:00" },
+          { event: "log", level: "info", message: "Calling Claude for editing + SEO polish...",
+            stage: "edit", ts: "2026-08-22T00:51:48.813+00:00" },
+          { event: "log", level: "info", message: "Received 5953 tokens in 0.0s",
+            stage: "edit", ts: "2026-08-22T00:51:48.833+00:00" },
+          { event: "log", level: "warning",
+            message: "SEO checks still failing after edit: Keyword In Title, Keyword In First 100 Words, Keyword In H2, Has H2 Headings, Has Internal Links, Has Meta Description",
+            stage: "edit", ts: "2026-08-22T00:51:48.833+00:00" },
+          { event: "log", level: "warning",
+            message: "Stripped 1 dead link(s): http://127.0.0.1:65436/gone",
+            stage: "edit", ts: "2026-08-22T00:51:48.833+00:00" },
+          { event: "stage_complete", level: "info", message: "Stage edit complete", stage: "edit",
+            data: { cost_usd: 0.57333, duration_s: 0, model: "claude-opus-4-6",
+                    tokens_in: 8457, tokens_out: 5953 }, ts: "2026-08-22T00:51:48.833+00:00" },
+        ]
+        ```
+
+        And the matching published events, from the real Redis Streams run in
+        `pipeline-events.test.ts`:
+
+        ```
+        { event: "log", level: "info", message: "Rules loaded, building prompt...",
+          post_id: "00000000-0000-4000-8000-00000000055a", stage: "edit",
+          timestamp: "2026-08-23T01:50:08.460+00:00" }
+        { event: "log", level: "info", message: "Calling Claude for editing + SEO polish...",
+          post_id: "00000000-0000-4000-8000-00000000055a", stage: "edit",
+          timestamp: "2026-08-23T01:50:08.460+00:00" }
+        { event: "log", level: "info", message: "Received 5953 tokens in 0.0s",
+          post_id: "00000000-0000-4000-8000-00000000055a", stage: "edit",
+          timestamp: "2026-08-23T01:50:08.460+00:00" }
+        { event: "log", level: "warning",
+          message: "SEO checks still failing after edit: Keyword In Title, Has Internal Links",
+          post_id: "00000000-0000-4000-8000-00000000055a", stage: "edit",
+          timestamp: "2026-08-23T01:50:08.460+00:00" }
+        ```
+
+        Negative controls, each run against
+        `src/mastra/steps/edit.test.ts src/mastra/pipeline-events.test.ts
+        src/mastra/workflows/pipeline.test.ts` (69 tests), or the first two only where
+        marked (60 tests):
+
+        | Control | Result |
+        | --- | --- |
+        | Ship it | 69 passed |
+        | Drop the three `info` lines | 9 failed, 60 passed |
+        | Drop the three quality-warning publishes | 8 failed, 61 passed |
+        | Drop the stripped-links publish (2 files) | 1 failed, 59 passed |
+        | Publish all four warnings at the default `info` level | 6 failed, 63 passed |
+        | Run `editOutputWarnings` after `validateLinks`, on the stripped content (2 files) | 1 failed, 59 passed |
+
+        The last control is the one that changed the shipped tests. It passed 60/60
+        before the ordering assertion was added, so Python's "validate the answer, then
+        the links" order was unpinned: the log came out in the wrong order and the
+        warnings described post-strip content, and nothing noticed. The assertion in
+        `strips a dead link over real sockets` (the stripped line is last, a quality
+        warning precedes it) is what makes it fail.
+
+        Test counts: `edit.test.ts` 15 -> 20, `pipeline-events.test.ts` 40 -> 40 (five
+        assertions changed rather than added, because `edit`'s lines belong in the
+        existing per-stage lists), and one assertion rewritten in each of
+        `pipeline.test.ts`, `pipeline-completion.test.ts`, `rerun-completion.test.ts`
+        and `concurrency.test.ts`. Across the six touched files, 98 -> 103.
+
+        Behaviour changes, stated rather than smuggled in as test edits: the four
+        `logger.warn` assertions in the run-level workflow tests now assert the same
+        messages on `posts.execution_logs` and assert the logger is empty, because the
+        destination changed by design; `pipeline-events.test.ts`'s per-stage line count
+        for `edit` moves 0 -> 5 and its rerun trail gains five `log` entries.
+
+        Gates:
+
+        ```
+        $ npx tsc --noEmit
+        TSC EXIT=0
+        (no output)
+
+        $ npx eslint
+        LINT EXIT=0
+        (no output)
+
+        $ npx vitest run
+         Test Files  2 failed | 91 passed (93)
+              Tests  9 failed | 1642 passed | 7 skipped (1658)
+        # 9 failed is the recorded baseline: 6 in image-preview.test.tsx and 3 in
+        # PostDetail.test.tsx, both pre-existing. Passing count 1637 -> 1642 (+5).
+        # 1637 is HEAD measured now, not the 1632 pasted under 5.5c-iv-b: that entry's
+        # gate output was captured before its own last tests were added.
+
+        $ npx next build
+        BUILD EXIT=0
+        v Compiled successfully in 4.1s
+        # The first full vitest run of this pair hit the known scaffold-check.test.ts
+        # flake (3 failed files, 12 skipped, 1637 passed). Rerunning gave the numbers
+        # above, which is the same pattern recorded under 5.5c-iii-b-1.
+
+        $ cd api && uv run pytest -q
+        120 failed, 241 passed, 25 errors in 15.17s
+
+        $ cd api && uv run ruff check .
+        Found 32 errors.
+
+        $ cd api && uv run ruff format --check .
+        9 files would be reformatted, 131 files already formatted
+        ```
       - [ ] 5.5c-iv-d `images`' seven call sites, spread across the nested workflow's
         three sub-steps, including the per-image lines inside the `.foreach()` fan-out.
   - [ ] 5.5d `GET /api/events/{post_id}` and `GET /api/events`, as Next.js route handlers
