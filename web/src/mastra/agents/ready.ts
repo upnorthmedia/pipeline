@@ -36,11 +36,12 @@ export const READY_SYSTEM_MESSAGE =
 export const READY_MAX_TOKENS = 16_000
 
 /**
- * The incumbent model, carried over unchanged from `ClaudeClient.chat()`'s
- * default. Choosing a stronger model is ledger item 6.1, where the live
- * verification and the cost comparison for every stage happen together.
+ * The strongest Anthropic model this account can reach at the incumbent's
+ * per-token price, adopted in ledger item 6.1 over `claude-opus-4-6`. Its
+ * request shape differs: see `claudeStageOptions` for the thinking parameter
+ * that came with it.
  */
-export const READY_MODEL_ID = "anthropic/claude-opus-4-6" as const
+export const READY_MODEL_ID = "anthropic/claude-opus-5" as const
 
 export const readyAgent = new Agent({
   id: "ready",

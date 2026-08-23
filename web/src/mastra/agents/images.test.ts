@@ -39,6 +39,7 @@ import { API_KEYS_SETTING_KEY } from "../api-keys"
 import { parseManifest } from "../images/manifest"
 import { mastra, pubsub } from "../index"
 import {
+  CLAUDE_DEFAULT_EFFORT,
   CLAUDE_MIN_TEXT_TOKENS,
   CLAUDE_PROVIDER,
   CLAUDE_THINKING_BUDGET_TOKENS,
@@ -175,11 +176,14 @@ describe("images agent registration", () => {
     }
   })
 
-  it("carries the model the golden fixtures were captured with", () => {
+  it("carries the model item 6.1 verified, on the provider the fixtures used", () => {
+    expect(IMAGES_MODEL_ID).toBe("anthropic/claude-opus-5")
     for (const slug of GOLDEN_SLUGS) {
       const fixture = loadFixture(slug)
       const call = fixture.provider_calls[0]
-      expect(`${call.provider}/${call.request.model}`).toBe(IMAGES_MODEL_ID)
+      // Item 6.1 moved this call off `claude-opus-4-6`, so the fixtures pin
+      // the prompt and the token budget from here on, not the model id.
+      expect(`${call.provider}/${call.request.model}`).not.toBe(IMAGES_MODEL_ID)
       // `_stage_meta.model` is what the dashboard's cost view reads, and it is
       // the manifest call's model, not Gemini's.
       expect(fixture.stage_output._stage_meta.model).toBe(call.request.model)
@@ -222,7 +226,7 @@ function captureAnthropicRequests() {
         id: "msg_capture",
         type: "message",
         role: "assistant",
-        model: "claude-opus-4-6",
+        model: "claude-opus-5",
         content: [
           { type: "thinking", thinking: "planning the image set", signature: "sig" },
           { type: "text", text: '{"images": [], "style_brief": {}}' },
@@ -246,7 +250,7 @@ describe("images agent provider request", () => {
   })
 
   for (const slug of GOLDEN_SLUGS) {
-    it(`puts Python's model, max_tokens, thinking budget and prompt on the wire (${slug})`, async () => {
+    it(`puts item 6.1's model and thinking config on the wire, at Python's max_tokens (${slug})`, async () => {
       await writeAnthropicKey("sk-ant-not-a-real-key")
       const fixture = loadFixture(slug)
       const recorded = fixture.provider_calls[0].request
@@ -258,9 +262,18 @@ describe("images agent provider request", () => {
       expect(capture.captured).toHaveLength(1)
       const sent = capture.captured[0]
       expect(sent.url).toBe("https://api.anthropic.com/v1/messages")
-      expect(sent.body.model).toBe(recorded.model)
+      // The model and the thinking parameter both moved in item 6.1: the fixed
+      // budget Python sent is rejected by `claude-opus-5`, and adaptive
+      // thinking plus `output_config.effort` replaces it.
+      expect(sent.body.model).toBe("claude-opus-5")
+      expect(sent.body.model).not.toBe(recorded.model)
+      expect(sent.body.thinking).toEqual({ type: "adaptive" })
+      expect(sent.body.output_config).toEqual({ effort: CLAUDE_DEFAULT_EFFORT })
+
+      // `max_tokens` did not move. Under adaptive thinking the provider stops
+      // adding a budget term to it, so passing Python's `effective_max` as
+      // `maxOutputTokens` puts the fixture's value back on the wire unchanged.
       expect(sent.body.max_tokens).toBe(recorded.max_tokens)
-      expect(sent.body.thinking).toEqual(recorded.thinking)
 
       // Python sends `system` as a bare string and the AI SDK sends the same
       // text as a one-element block list, as recorded under item 3.2.
@@ -294,7 +307,7 @@ describe("images agent credential resolution", () => {
     await writeAnthropicKey("sk-ant-not-a-real-key")
 
     const model = await imagesAgent.getModel()
-    expect(model.modelId).toBe("claude-opus-4-6")
+    expect(model.modelId).toBe("claude-opus-5")
     expect(model.provider).toContain("anthropic")
   })
 
@@ -312,7 +325,7 @@ describe.skipIf(!LIVE_KEY)("images agent live smoke test", () => {
     const result = await imagesAgent.generate("Reply with the single word OK.")
     const response = await result.response
 
-    expect(response?.modelId).toBe("claude-opus-4-6")
+    expect(response?.modelId).toBe("claude-opus-5")
     expect(result.text.trim().length).toBeGreaterThan(0)
     expect(result.usage?.outputTokens).toBeGreaterThan(0)
   }, 300_000)

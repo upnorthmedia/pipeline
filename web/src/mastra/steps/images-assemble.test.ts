@@ -148,6 +148,15 @@ function fixtureResults(fixture: Fixture): GeneratedImageOutput[] {
  * made no call; the pairing is checked against the corpus' own 14 recorded
  * calls before it is used.
  */
+/**
+ * The model the 3.5e corpus was recorded against, which is Python's default
+ * rather than the one ledger item 6.1 adopted. The synthesized usage below has
+ * to name it, because the assertions downstream compare the meta record the
+ * step builds against what the corpus recorded, and the step reports whichever
+ * model the calls actually billed.
+ */
+const CORPUS_GEMINI_MODEL = corpus.stage_meta_gemini.model
+
 function corpusResults(): GeneratedImageOutput[] {
   const inputs = corpus.input_manifest.images as Record<string, unknown>[]
   let call = 0
@@ -167,7 +176,7 @@ function corpusResults(): GeneratedImageOutput[] {
       usage:
         prompt === "RAISE"
           ? null
-          : { tokensIn: 10 + call, tokensOut: 100 + call, model: GEMINI_IMAGE_MODEL_ID },
+          : { tokensIn: 10 + call, tokensOut: 100 + call, model: CORPUS_GEMINI_MODEL },
     }
   })
 }
@@ -314,10 +323,14 @@ describe("images assemble step against the golden fixtures", () => {
       expect(output.tokensOut).toBe(fixture.stage_output._stage_meta.tokens_out)
 
       // Every recorded Gemini call was a 429, so the stage billed nothing and
-      // still reports the model id it would have used.
+      // still reports the model id it would have used. That is the current
+      // default, not the one the fixture recorded: ledger item 6.1 moved the
+      // stage to `gemini-3-pro-image`, and this fallback is the one place the
+      // change is observable without a billed call.
+      expect(fixture.stage_output._stage_meta_gemini.model).not.toBe(GEMINI_IMAGE_MODEL_ID)
       expect(output.gemini).toEqual({
         stage: "images_gemini",
-        model: fixture.stage_output._stage_meta_gemini.model,
+        model: GEMINI_IMAGE_MODEL_ID,
         tokensIn: fixture.stage_output._stage_meta_gemini.tokens_in,
         tokensOut: fixture.stage_output._stage_meta_gemini.tokens_out,
         durationS: STAGE_ELAPSED_MS / 1000,

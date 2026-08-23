@@ -31,6 +31,7 @@ import { API_KEYS_SETTING_KEY } from "../api-keys"
 import { mastra, pubsub } from "../index"
 import {
   CLAUDE_MIN_TEXT_TOKENS,
+  CLAUDE_DEFAULT_EFFORT,
   CLAUDE_PROVIDER,
   CLAUDE_THINKING_BUDGET_TOKENS,
   claudeEffectiveMaxTokens,
@@ -132,11 +133,16 @@ describe("ready agent registration", () => {
     expect(READY_SYSTEM_MESSAGE).toContain("stripping publishing notes")
   })
 
-  it("carries the model the golden fixtures were captured with", () => {
+  it("carries the model item 6.1 verified, on the provider the fixtures used", () => {
+    expect(READY_MODEL_ID).toBe("anthropic/claude-opus-5")
     for (const slug of GOLDEN_SLUGS) {
       const call = loadFixture(slug).provider_calls[0]
       expect(call.provider).toBe(CLAUDE_PROVIDER)
-      expect(`${call.provider}/${call.request.model}`).toBe(READY_MODEL_ID)
+      // The provider is still the fixtures'; the model deliberately is not.
+      // Item 6.1 moved every Claude stage off `claude-opus-4-6`, so the
+      // fixtures pin the prompt and the token budget from here on, not the
+      // model id.
+      expect(`${call.provider}/${call.request.model}`).not.toBe(READY_MODEL_ID)
     }
   })
 })
@@ -159,7 +165,7 @@ function captureAnthropicRequests() {
         id: "msg_capture",
         type: "message",
         role: "assistant",
-        model: "claude-opus-4-6",
+        model: "claude-opus-5",
         content: [
           { type: "thinking", thinking: "placing the featured image", signature: "sig" },
           { type: "text", text: "# The Published Article" },
@@ -182,7 +188,7 @@ describe("ready agent provider request", () => {
     restoreFetch = undefined
   })
 
-  it("puts Python's model, max_tokens and thinking budget on the wire", async () => {
+  it("puts item 6.1's model and thinking config on the wire, at Python's max_tokens", async () => {
     await writeAnthropicKey("sk-ant-not-a-real-key")
     const fixture = loadFixture(GOLDEN_SLUGS[0])
     const recorded = fixture.provider_calls[0].request
@@ -194,9 +200,18 @@ describe("ready agent provider request", () => {
     expect(capture.captured).toHaveLength(1)
     const sent = capture.captured[0]
     expect(sent.url).toBe("https://api.anthropic.com/v1/messages")
-    expect(sent.body.model).toBe(recorded.model)
+    // The model and the thinking parameter both moved in item 6.1: the fixed
+    // budget Python sent is rejected by `claude-opus-5`, and adaptive thinking
+    // plus `output_config.effort` replaces it.
+    expect(sent.body.model).toBe("claude-opus-5")
+    expect(sent.body.model).not.toBe(recorded.model)
+    expect(sent.body.thinking).toEqual({ type: "adaptive" })
+    expect(sent.body.output_config).toEqual({ effort: CLAUDE_DEFAULT_EFFORT })
+
+    // `max_tokens` did not move. Under adaptive thinking the provider stops
+    // adding a budget term to it, so passing Python's `effective_max` as
+    // `maxOutputTokens` puts the fixture's value back on the wire unchanged.
     expect(sent.body.max_tokens).toBe(recorded.max_tokens)
-    expect(sent.body.thinking).toEqual(recorded.thinking)
 
     // Python sends `system` as a bare string and the AI SDK sends the same text
     // as a one-element block list, as recorded under item 3.2.
@@ -226,7 +241,7 @@ describe("ready agent credential resolution", () => {
     await writeAnthropicKey("sk-ant-not-a-real-key")
 
     const model = await readyAgent.getModel()
-    expect(model.modelId).toBe("claude-opus-4-6")
+    expect(model.modelId).toBe("claude-opus-5")
     expect(model.provider).toContain("anthropic")
   })
 
@@ -244,7 +259,7 @@ describe.skipIf(!LIVE_KEY)("ready agent live smoke test", () => {
     const result = await readyAgent.generate("Reply with the single word OK.")
     const response = await result.response
 
-    expect(response?.modelId).toBe("claude-opus-4-6")
+    expect(response?.modelId).toBe("claude-opus-5")
     expect(result.text.trim().length).toBeGreaterThan(0)
     expect(result.usage?.outputTokens).toBeGreaterThan(0)
   }, 300_000)

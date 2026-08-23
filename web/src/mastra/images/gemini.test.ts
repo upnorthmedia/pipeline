@@ -71,12 +71,25 @@ const CORPUS = JSON.parse(
   fs.readFileSync(path.join(__dirname, "data", "gemini-parity.json"), "utf8"),
 ) as { wire: WireCase[]; responses: ResponseCase[] }
 
+/**
+ * The model every corpus case that passed no explicit `model` was recorded
+ * against, which is Python's `generate_image` default.
+ *
+ * It is pinned here rather than read from `GEMINI_IMAGE_MODEL_ID` because the
+ * corpus is a recording: ledger item 6.1 moved the stage's default to
+ * `gemini-3-pro-image`, and letting the new default flow into these cases
+ * would compare a request for one model against a recording of another and
+ * fail for a reason that has nothing to do with request construction. Which
+ * model the stage defaults to is asserted separately, below.
+ */
+const CORPUS_DEFAULT_MODEL = "gemini-3.1-flash-image-preview"
+
 /** The corpus records Python's argument names; the port uses camelCase. */
 function toOptions(args: WireCase["args"], apiKey = "test-key-not-a-real-credential") {
   return {
     prompt: args.prompt,
     apiKey,
-    model: args.model,
+    model: args.model ?? CORPUS_DEFAULT_MODEL,
     aspectRatio: args.aspect_ratio,
     imageSize: args.image_size,
   }
@@ -179,10 +192,22 @@ describe("the request", () => {
     expect(captured).toHaveLength(0)
   })
 
-  it("defaults to the model id the incumbent stage used", () => {
-    expect(GEMINI_IMAGE_MODEL_ID).toBe("gemini-3.1-flash-image-preview")
-    expect(CORPUS.wire[0].request.url).toBe(
+  it("defaults to the model ledger item 6.1 verified, not the one Python used", async () => {
+    expect(GEMINI_IMAGE_MODEL_ID).toBe("gemini-3-pro-image")
+    expect(GEMINI_IMAGE_MODEL_ID).not.toBe(CORPUS_DEFAULT_MODEL)
+
+    // The default is what actually reaches the wire when no model is passed,
+    // which the corpus cases deliberately no longer exercise.
+    const captured = stubFetch([jsonAnswer(200, { candidates: [] })])
+    await generateImage({ prompt: "p", apiKey: "k" }).catch(() => undefined)
+    expect(captured[0].url).toBe(
       `${GEMINI_API_BASE}/models/${GEMINI_IMAGE_MODEL_ID}:generateContent`,
+    )
+
+    // The corpus still records the old default, which is what makes
+    // `CORPUS_DEFAULT_MODEL` load-bearing above.
+    expect(CORPUS.wire[0].request.url).toBe(
+      `${GEMINI_API_BASE}/models/${CORPUS_DEFAULT_MODEL}:generateContent`,
     )
   })
 })
@@ -323,11 +348,14 @@ describe("live smoke", () => {
   }, 30_000)
 
   /**
-   * The end-to-end call, gated a second time because the developer key's
-   * project has no image quota at all: the live 429 reports
-   * `generate_content_free_tier_requests, limit: 0` for this model, which is
-   * also why every Gemini call in the golden fixtures is a 429. Set
-   * `GEMINI_IMAGE_QUOTA=1` on a project with image quota to run it.
+   * The end-to-end call, gated a second time because it bills a real image,
+   * about $0.134 on `gemini-3-pro-image` and about 14s. Set
+   * `GEMINI_IMAGE_QUOTA=1` alongside the key to run it.
+   *
+   * The gate used to exist because the developer key's project had no image
+   * quota at all, which is why every Gemini call in the golden fixtures is a
+   * 429. That is no longer true: the key rotated before item 6.1 and this test
+   * now passes, so what the gate protects is the bill, not availability.
    */
   it.skipIf(!key || !process.env.GEMINI_IMAGE_QUOTA)(
     "reaches Gemini and returns bytes for the configured model id",
@@ -340,8 +368,11 @@ describe("live smoke", () => {
 
       expect(result.model).toBe(GEMINI_IMAGE_MODEL_ID)
       expect(result.imageBytes.length).toBeGreaterThan(0)
-      // The PNG magic number, which is what the stage hands to `optimizeImage`.
-      expect(result.imageBytes.subarray(0, 4)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+      // The JPEG SOI/APP0 marker. `gemini-3-pro-image` answers with
+      // `image/jpeg`, not the PNG this assertion used to guess at while it was
+      // skipped; `optimizeImage` re-encodes either to webp through sharp, so
+      // what matters is that the bytes are a decodable image.
+      expect(result.imageBytes.subarray(0, 4)).toEqual(Buffer.from([0xff, 0xd8, 0xff, 0xe0]))
       expect(result.tokensOut).toBeGreaterThan(0)
     },
     200_000,

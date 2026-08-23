@@ -17,11 +17,16 @@ import { analytics, type ModelAnalytics } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
+// Named per model rather than per provider: ledger item 6.1 moved Anthropic and
+// Gemini onto new models, so runs recorded before and after the change sit in
+// the same table and both have to stay selectable.
 const MODEL_FILTERS = [
   { label: "All Models", value: "" },
-  { label: "Perplexity", value: "sonar-pro" },
-  { label: "Anthropic", value: "claude-opus-4-6" },
-  { label: "Gemini", value: "gemini-3.1-flash-image-preview" },
+  { label: "Perplexity sonar-pro", value: "sonar-pro" },
+  { label: "Claude Opus 5", value: "claude-opus-5" },
+  { label: "Claude Opus 4.6", value: "claude-opus-4-6" },
+  { label: "Gemini 3 Pro Image", value: "gemini-3-pro-image" },
+  { label: "Gemini 3.1 Flash Image", value: "gemini-3.1-flash-image-preview" },
 ] as const;
 
 const durationChartConfig = {

@@ -13,6 +13,13 @@
  * reference the same response ships. Repricing is a product decision, not part
  * of the port.
  *
+ * The two models ledger item 6.1 adopted are appended rather than substituted,
+ * for the same reason: runs recorded before the cutover were priced against the
+ * rows above and keep them. The new rows carry the providers' current published
+ * rates, checked on 2026-08-23 (see `evidence/phase-6.md` #6.1). Gemini's image
+ * output is billed per image rather than per token, and the number below is the
+ * per-million-token rate the provider quotes alongside it.
+ *
  * This is not the table `web/src/mastra/execution-log.ts` uses. That file
  * reproduces the two rates `api/src/worker.py:244` hardcoded for its
  * `stage_complete` log entry, which are Opus prices applied to every stage.
@@ -28,4 +35,6 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   "sonar-pro": { input: 3.0, output: 15.0 },
   "claude-opus-4-6": { input: 15.0, output: 75.0 },
   "gemini-3.1-flash-image-preview": { input: 0.1, output: 60.0 },
+  "claude-opus-5": { input: 5.0, output: 25.0 },
+  "gemini-3-pro-image": { input: 2.0, output: 120.0 },
 }

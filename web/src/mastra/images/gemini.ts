@@ -25,8 +25,17 @@
  * retry, and those are ported.
  */
 
-/** `generate_image`'s `model` default, unchanged from Python. */
-export const GEMINI_IMAGE_MODEL_ID = "gemini-3.1-flash-image-preview"
+/**
+ * The image model, `gemini-3-pro-image` since ledger item 6.1 replaced Python's
+ * `gemini-3.1-flash-image-preview` default. It is the highest-quality image
+ * tier this key can reach, verified live in item 6.1 by a `generateContent`
+ * call that returned real JPEG bytes.
+ *
+ * It costs more on both axes: about $0.134 per 1K image against the flash
+ * tier's $0.067, and roughly 14s per image against 9s, so a five-image article
+ * spends about $0.34 more and waits about 25s longer in `images`.
+ */
+export const GEMINI_IMAGE_MODEL_ID = "gemini-3-pro-image"
 
 /** `generate_image`'s `aspect_ratio` default. */
 export const GEMINI_DEFAULT_ASPECT_RATIO = "4:3"

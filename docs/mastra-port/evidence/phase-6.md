@@ -263,3 +263,208 @@ deleted. The `pageinspect` extension installed to inspect the heap was dropped a
 The underlying hazard, that these suites borrow a live credentials row from the dev
 database and can lose it if their restore throws, is now in `todo.md` tagged
 `[confirmed]`. It is a test-harness redesign, not part of this item.
+
+## 6.1
+
+Six stages, three providers, one decision each. Every id below was checked twice: against
+the provider's own live documentation, and against a real minimal API call billed to the
+key in `settings.api_keys`. Two of the three providers moved.
+
+### The choices
+
+| Stage | Model | Verified | Source | Rationale |
+| --- | --- | --- | --- | --- |
+| research | `sonar-pro` (kept) | 2026-08-23 | `docs.perplexity.ai/getting-started/models` + live call | The only Sonar tier above it with live grounding and citations is `sonar-deep-research`, a report generator priced and paced for a different job; `sonar` is weaker. |
+| outline | `claude-opus-5` | 2026-08-23 | `platform.claude.com/docs/en/about-claude/pricing` + live call | Strongest Anthropic tier reachable at the incumbent's per-token price. |
+| write | `claude-opus-5` | 2026-08-23 | same | same |
+| edit | `claude-opus-5` | 2026-08-23 | same | same |
+| ready | `claude-opus-5` | 2026-08-23 | same | same |
+| images (prompt half) | `claude-opus-5` | 2026-08-23 | same | The manifest call is a reasoning call like the other four and shares their agent options. |
+| images (generation half) | `gemini-3-pro-image` | 2026-08-23 | `ai.google.dev/gemini-api/docs/pricing` + live call | Highest-quality image tier this key reaches, mandated by the objective and re-confirmed here. |
+
+### The live calls
+
+`web/src/mastra/scripts/verify-models.mjs` reads the same `user_id IS NULL` credentials row
+`getApiKeys()` reads, and sends each provider its real request shape. The Anthropic body is
+the one the four reasoning stages now send: adaptive thinking plus `output_config.effort`.
+No key is printed.
+
+```
+$ cd web && set -a && . ../.env && set +a && node \
+    --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types \
+    src/mastra/scripts/verify-models.mjs
+anthropic claude-opus-5: HTTP 200 model=claude-opus-5 stop_reason=end_turn text="ok" usage={"input_tokens":16,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":4,"output_tokens_details":{"thinking_tokens":0},"service_tier":"standard","inference_geo":"global"} 1.3s
+anthropic claude-fable-5: HTTP 200 model=claude-fable-5 stop_reason=end_turn text="ok" usage={"input_tokens":16,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":10,"output_tokens_details":{"thinking_tokens":6},"service_tier":"standard","inference_geo":"global"} 5.9s
+anthropic claude-opus-4-6: HTTP 200 model=claude-opus-4-6 stop_reason=end_turn text="ok" usage={"input_tokens":14,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":4,"output_tokens_details":{"thinking_tokens":0},"service_tier":"standard","inference_geo":"global"} 1.2s
+perplexity sonar-pro: HTTP 200 model=sonar-pro citations=17 usage={"completion_tokens":34,"cost":{"input_tokens_cost":0.00004,"output_tokens_cost":0.00051,"request_cost":0.006,"total_cost":0.00655},"prompt_tokens":12,"search_context_size":"low","total_tokens":46} 4.0s
+gemini gemini-3-pro-image: HTTP 200 modelVersion=gemini-3-pro-image mimeType=image/jpeg bytes=592750 usage={"promptTokenCount":10,"candidatesTokenCount":1180,"totalTokenCount":1292,"promptTokensDetails":[{"modality":"TEXT","tokenCount":10}],"candidatesTokensDetails":[{"modality":"IMAGE","tokenCount":1120}],"thoughtsTokenCount":102,"serviceTier":"standard"} 14.0s
+gemini gemini-3.1-flash-image-preview: HTTP 200 modelVersion=gemini-3.1-flash-image-preview mimeType=image/jpeg bytes=458960 usage={"promptTokenCount":10,"candidatesTokenCount":1460,"totalTokenCount":1470,"promptTokensDetails":[{"modality":"TEXT","tokenCount":10}],"candidatesTokensDetails":[{"modality":"IMAGE","tokenCount":1120}],"serviceTier":"standard"} 9.7s
+```
+
+Each provider reports the id back in its own field: Anthropic in `model`, Perplexity in
+`model`, Gemini in `modelVersion`. `sonar-pro` returned 17 citations, so the grounding the
+`research` stage's link extraction depends on is intact.
+
+### Why not `claude-fable-5`
+
+It answers, and Anthropic documents it as the more capable model. It is not adopted because
+it costs $10/$50 per MTok against Opus 5's $5/$25: double the incumbent for a long-form
+blog-writing workload where the marginal reasoning is not the constraint. Opus 5 is the
+strongest tier available at *no* per-token increase over `claude-opus-4-6`, which makes it
+the free upgrade and Fable 5 a deliberate 2x that nobody asked for. Recorded here rather
+than silently skipped, because "strongest available" and "strongest at this price" are
+different answers and this port picked the second.
+
+### The parameter that had to change with the model
+
+Python sent `thinking={"type": "enabled", "budget_tokens": 10000}`. That form is removed on
+this tier: Anthropic's documentation states `budget_tokens` is rejected with a 400 on Opus
+5, replaced by adaptive thinking plus `output_config.effort`. The live call above is proof
+the replacement shape is accepted, since it is exactly what the script sent.
+
+The installed provider supports both halves. `@mastra/core`'s bundled Anthropic provider
+options schema carries `thinking: {type: "adaptive", display?}` and `effort: low | medium |
+high | xhigh | max`:
+
+```
+$ grep -n 'adaptive\|effort' node_modules/.pnpm/@mastra+core@1.61.0_*/node_modules/@mastra/core/\
+    dist/_types/@ai-sdk_anthropic-v6/dist/index.d.ts
+209:        type: z.ZodLiteral<"adaptive">;
+247:    effort: z.ZodOptional<z.ZodEnum<{
+```
+
+Default effort is `high`, which is both the provider's own default and what the objective
+asks for on the reasoning-heavy stages. Item 6.2 makes it per-user and per-stage.
+
+**`max_tokens` did not move, and that is checked rather than assumed.** The provider computes
+`baseArgs.max_tokens = maxTokens + (thinkingBudget != null ? thinkingBudget : 0)` and reads
+`thinkingBudget` only from the `enabled` variant, so under adaptive thinking the second term
+is zero. `claudeStageOptions` therefore passes Python's `effective_max` straight through as
+`maxOutputTokens` and every stage's wire budget is byte-identical to the golden fixtures.
+The four wire-payload tests assert `sent.body.max_tokens === recorded.max_tokens` against the
+fixtures, unchanged.
+
+### The stages reach the new models through the real agent path
+
+Not the script: the registered Mastra agents, with the key read out of the settings table,
+same as a production run. Every Claude stage's live smoke test now runs instead of skipping.
+
+```
+$ cd web && set -a && . ../.env && set +a && export ANTHROPIC_API_KEY=<decrypted from settings> \
+    && pnpm test --run src/mastra/agents/{outline,write,edit,ready,images}.test.ts
+ ✓ src/mastra/agents/images.test.ts (12 tests) 3300ms
+     ✓ reaches Anthropic and reports back the configured model id  3209ms
+ ✓ src/mastra/agents/ready.test.ts (9 tests) 4582ms
+     ✓ reaches Anthropic and reports back the configured model id  1207ms
+ ✓ src/mastra/agents/write.test.ts (8 tests) 5810ms
+     ✓ reaches Anthropic and reports back the configured model id  1152ms
+ ✓ src/mastra/agents/outline.test.ts (8 tests) 9186ms
+     ✓ reaches Anthropic and reports back the configured model id  3299ms
+ ✓ src/mastra/agents/edit.test.ts (10 tests) 10265ms
+     ✓ reaches Anthropic and reports back the configured model id  981ms
+
+ Test Files  5 passed (5)
+      Tests  47 passed (47)
+```
+
+Each of those asserts `response.modelId === "claude-opus-5"`, so the id is confirmed at the
+provider's response, not at the request.
+
+### The images golden-capture gap the objective flagged is closed
+
+`gemini.test.ts`'s end-to-end live test had never run: the old key's project reported
+`generate_content_free_tier_requests, limit: 0`, which is also why every Gemini call in the
+golden fixtures is a 429. The rotated key has quota, so it runs now.
+
+```
+$ cd web && ... GEMINI_API_KEY=<decrypted> GEMINI_IMAGE_QUOTA=1 \
+    pnpm test --run src/mastra/images/gemini.test.ts
+ ✓ src/mastra/images/gemini.test.ts (38 tests) 14365ms
+     ✓ reaches Gemini and returns bytes for the configured model id  14222ms
+
+ Test Files  1 passed (1)
+      Tests  38 passed (38)
+```
+
+It failed first, for a real reason worth recording: the assertion asserted PNG magic bytes
+and `gemini-3-pro-image` answers with JPEG.
+
+```
+-     137, 80, 78, 71,        (PNG)
++     255, 216, 255, 224,     (JPEG SOI/APP0)
+```
+
+That assertion had never executed, so it was a guess rather than a regression. It now
+asserts JPEG. Nothing downstream cares: `optimizeImage` re-encodes to webp through sharp,
+which reads either.
+
+### Cost delta per article
+
+| Stage | Before | After | Per-article delta |
+| --- | --- | --- | --- |
+| research | `sonar-pro`, unchanged | same | $0 |
+| outline / write / edit / ready / images-prompt | `claude-opus-4-6` $5/$25 per MTok | `claude-opus-5` $5/$25 per MTok | $0 per token, but see the tokenizer note |
+| images generation | `gemini-3.1-flash-image-preview`, ~$0.067 per 1K image | `gemini-3-pro-image`, ~$0.134 per 1K image | +$0.067 per image, so about **+$0.34** on a five-image article |
+
+Two second-order costs, both real:
+
+- **Tokenizer.** Anthropic's pricing page states Claude 4.7 and later use a tokenizer that
+  produces roughly 30% more tokens for the same text. Same rate card, more tokens: the four
+  reasoning stages should be budgeted at about **1.3x** their previous spend even though
+  the per-MTok price is identical. Adaptive thinking moves this in the other direction on
+  easy requests (the verification call above spent 0 thinking tokens where a fixed 10000
+  budget would have been available), so the net is not predictable from the rate card and
+  wants a real measurement once Phase 8's trace view reports `stream.usage`.
+- **Latency.** Images go from about 9s to about 14s per image, so a five-image article
+  spends roughly 25s longer in `images`. The objective accepts this tradeoff explicitly.
+
+`MODEL_COSTS` gains rows for both new models rather than having its existing rows edited:
+those priced every `stage_logs` entry already in the database, and the analytics response
+ships the table as its own reference. `execution-log.ts`'s hardcoded $15/$75 is untouched
+and still wrong in the same way it was wrong in Python; correcting it is a repricing
+decision, not this item.
+
+### Gates
+
+```
+$ pnpm -C web tsc --noEmit ; echo EXIT=$?
+EXIT=0
+$ pnpm -C web lint ; echo EXIT=$?
+EXIT=0
+$ pnpm -C web build ; echo EXIT=$?
+EXIT=0
+$ pnpm -C web test --run
+ Test Files  4 failed | 122 passed (126)
+      Tests  11 failed | 4390 passed | 7 skipped (4408)
+```
+
+Nine of those eleven are the Phase 0 baseline (6 in `image-preview.test.tsx`, 3 in
+`PostDetail.test.tsx`). The other two are flakes in files this item does not touch
+(`git diff --name-only` lists neither `pipeline-events.test.ts` nor `steps/outline.ts`):
+
+- `pipeline-events.test.ts > carries Python's log payload and nothing else` uses `.find()`
+  over an array the same file's own comment says is "the order those reads resolved in and
+  not the order the topic delivered". It passed on the next run and failed on the one after.
+- `workflows/scaffold-check.test.ts > emits the workflow lifecycle events` failed once and
+  passed on both reruns.
+
+Both are logged in `todo.md` tagged `[confirmed]`. Neither is chased here. A second full
+run of the same tree landed on nine baseline failures plus the `scaffold-check` flake alone,
+which is what the flake reading predicts:
+
+```
+$ pnpm -C web test --run
+ Test Files  3 failed | 123 passed (126)
+      Tests  10 failed | 4391 passed | 7 skipped (4408)
+```
+
+Python is untouched and lands exactly on the numbers item 6.0 recorded:
+
+```
+$ cd api && uv run pytest -q
+120 failed, 241 passed, 25 errors in 13.56s
+$ cd api && uv run ruff check .
+Found 32 errors.
+$ cd api && uv run ruff format --check .
+9 files would be reformatted, 153 files already formatted
+```

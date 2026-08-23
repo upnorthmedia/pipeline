@@ -28,9 +28,12 @@ export const RESEARCH_SYSTEM_MESSAGE =
  * Mastra's model-router id for the incumbent research model.
  *
  * `sonar-pro` is carried over unchanged from `PerplexityClient.chat()`'s
- * default. Choosing a stronger research model is ledger item 6.1, which is
- * where the live verification and cost comparison for every stage happens;
- * changing it here would be an unverified model choice.
+ * default, and ledger item 6.1 kept it. Of the four Sonar models Perplexity
+ * documents, only `sonar` and `sonar-pro` pair live web grounding with the
+ * citations this stage's link extraction depends on, `sonar` is the weaker of
+ * the two, and `sonar-deep-research` is a report generator priced and paced
+ * for a different job. A live call in item 6.1 returned 17 citations, so the
+ * grounding the stage relies on is intact.
  *
  * The router resolves `perplexity/*` from `@mastra/core`'s bundled provider
  * registry, so no `@ai-sdk/perplexity` dependency is needed.

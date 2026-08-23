@@ -642,3 +642,9 @@
   because the loss was noticed within the WAL retention window. The fix is for these
   suites to hold their own row rather than borrowing the real one, or to restore per test
   rather than per file.
+- [confirmed] 2026-08-23 Perplexity's Sonar Chat Completions endpoint is deprecated with
+  support ending 2026-09-27, per `docs.perplexity.ai/getting-started/models`. The
+  `research` stage reaches `sonar-pro` through Mastra's model router, which uses the
+  OpenAI-compatible `/chat/completions` shape, so research calls stop working after that
+  date unless the stage moves to Perplexity's Agent API. Found while verifying model IDs
+  for ledger item 6.1; out of scope there, but it has a hard deadline.

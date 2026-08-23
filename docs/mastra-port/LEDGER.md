@@ -1179,10 +1179,22 @@ pages that use it work with the Python API stopped.
 
   Evidence: [`evidence/phase-6.md` #6.0](../mastra-port/evidence/phase-6.md)
 
-- [ ] 6.1 Verify the model ID for each of the six stages against live provider documentation and
-  a real minimal API call. Record per stage: chosen ID, verification date, source, one-sentence
-  rationale, and the pasted live response's reported model field. Keep the incumbent and say why
-  if nothing better can be verified. Note any per-article cost delta.
+- [x] 6.1 Model IDs, verified against live provider documentation and a real minimal API call
+  billed to the key in `settings.api_keys`. `research` keeps `sonar-pro`, the only Sonar tier
+  at its level that pairs live grounding with the citations the stage's link extraction needs.
+  The five Claude calls (`outline`, `write`, `edit`, `ready`, and the `images` manifest call)
+  move to `claude-opus-5`, the strongest tier reachable at `claude-opus-4-6`'s per-token price;
+  `claude-fable-5` verified too and was declined at 2x the cost. `images` generation moves to
+  `gemini-3-pro-image` per the objective's verified table, re-confirmed here. The model change
+  forced a parameter change: `budget_tokens` is rejected on this tier, so `claudeStageOptions`
+  now sends adaptive thinking plus `output_config.effort: high`, with the wire `max_tokens`
+  unchanged because the provider stops adding a budget term to it. Two costs recorded: about
+  +$0.34 per five-image article, and a ~1.3x token-count increase from the 4.7-and-later
+  tokenizer at an unchanged rate card. Closing this also closed the images half of the Phase 0
+  golden capture that the zero-quota key had blocked, and turned up one wrong assertion (the
+  live image test guessed PNG; `gemini-3-pro-image` returns JPEG) that had never executed.
+
+  Evidence: [`evidence/phase-6.md` #6.1](../mastra-port/evidence/phase-6.md)
 - [ ] 6.2 Extend the `api_settings`-backed settings pattern so each stage has a configurable
   model and, where supported, a reasoning/effort setting, persisted per user, validated on write
   against the allowlist from 6.1, falling back to the verified hardcoded defaults when unset.
