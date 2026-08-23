@@ -20,10 +20,11 @@
  * It also carries the run-level records Python wrote from the same `except`
  * block: the `stage_error` event on the bus and the `error` / `stage_error`
  * entry in `execution_logs`. The `warning` / `retry` entry beside it is not
- * here, and ledger item 5.5c-iii-b holds why: the evented engine only publishes
- * `workflow.fail` once `retryConfig.attempts` is exhausted, and the workflow
- * sets no retry policy, so a run that reaches this listener has no attempts
- * left by construction.
+ * here, and ledger item 5.5c-iii-b-2 holds why: the evented engine only
+ * publishes `workflow.fail` once `retryConfig.attempts` is exhausted, so a run
+ * that reaches this listener has no attempts left by construction. The entry
+ * for the attempts that remained has to be written from inside the step, where
+ * `retryCount` and the thrown error are both in hand.
  *
  * The hook is a listener on the `workflows-finish` topic, registered through
  * `events` on the Mastra instance. That keeps it inside a Mastra primitive and
@@ -61,9 +62,9 @@ import { pipelineWorkflow } from "./workflows/pipeline"
  * The evented engine republishes `workflow.step.run` while
  * `retryCount < retryConfig.attempts` and only fails the run once that is
  * exhausted, so a run that reaches `workflow.fail` has executed the failing
- * step `attempts + 1` times. `pipelineWorkflow.retryConfig` is `{attempts: 0}`
- * (the engine's default; the workflow sets none), so today this is 1 and a
- * later retry policy moves it without touching this module.
+ * step `attempts + 1` times. `pipelineWorkflow` sets `attempts` to
+ * `MAX_ATTEMPTS - 1`, so this is Python's `MAX_ATTEMPTS`, and a change to the
+ * policy moves it without touching this module.
  */
 function executionsBeforeFailure(): number {
   return (pipelineWorkflow.retryConfig?.attempts ?? 0) + 1

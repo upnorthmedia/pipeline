@@ -34,6 +34,7 @@ import { researchAgent } from "@/mastra/agents/research"
 import { writeAgent } from "@/mastra/agents/write"
 import { createWorkerEvents } from "@/mastra/failure-recorder"
 import { pubsub as productionPubsub } from "@/mastra/index"
+import { MAX_ATTEMPTS } from "@/mastra/state"
 import { imagesWorkflow } from "@/mastra/workflows/images"
 import { pipelineWorkflow } from "@/mastra/workflows/pipeline"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
@@ -296,8 +297,10 @@ describe("GET /api/queue/dead-letter, a real failed run", () => {
 
   it("reports how many times the run executed, Python's attempts", async () => {
     const { entries } = await listEntries(user.cookie)
-    // `pipelineWorkflow.retryConfig` is `{attempts: 0}`, so the failing step ran once.
-    expect(forPost(entries, realPostId)[0].attempts).toBe(1)
+    // `pipelineWorkflow.retryConfig` is `{attempts: MAX_ATTEMPTS - 1}`, so the
+    // failing step ran `MAX_ATTEMPTS` times, which is the count Python always
+    // reached the dead-letter queue carrying.
+    expect(forPost(entries, realPostId)[0].attempts).toBe(MAX_ATTEMPTS)
   })
 
   it("reports failed_at as a timestamp close to the run", async () => {

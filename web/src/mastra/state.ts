@@ -81,6 +81,18 @@ export const CURRENT_STAGE_FAILED = "failed"
  */
 export const STATUS_REVIEW = "review"
 
+/**
+ * How many times a failing stage is executed before the run is given up on,
+ * ported from `MAX_ATTEMPTS` in `api/src/worker.py:51`.
+ *
+ * Python spent it as ARQ's `max_tries`, which re-ran the whole job and let the
+ * stage loop skip everything already marked complete. The port spends it as the
+ * workflow's `retryConfig.attempts` (one fewer, because the engine counts
+ * retries after the first execution rather than executions), which retries only
+ * the step that threw and so lands on the same provider calls.
+ */
+export const MAX_ATTEMPTS = 3
+
 export const STATUS_PENDING = "pending"
 export const STATUS_RUNNING = "running"
 export const STATUS_COMPLETE = "complete"

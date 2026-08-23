@@ -55,6 +55,7 @@ import { pipelineCompleteStep } from "../steps/pipeline-complete"
 import { pipelineStartStep } from "../steps/pipeline-start"
 import { readyStep } from "../steps/ready"
 import { researchStep } from "../steps/research"
+import { MAX_ATTEMPTS } from "../state"
 import { stageStepInputSchema, stageStepOutputSchema } from "../steps/stage-io"
 import { writeStep } from "../steps/write"
 import { imagesWorkflow } from "./images"
@@ -70,6 +71,23 @@ export const pipelineWorkflow = createWorkflow({
   id: "pipeline",
   inputSchema: stageStepInputSchema,
   outputSchema: stageStepOutputSchema,
+  // Python's `max_tries = MAX_ATTEMPTS` on `WorkerSettings`, spent one level
+  // down. ARQ re-ran the whole job and the stage loop skipped everything
+  // already `complete`, so a retry only ever re-ran the stage that threw and
+  // the ones after it; the engine retries the failing step and then carries
+  // on down the chain, which is the same set of provider calls. `attempts` is
+  // one fewer than `MAX_ATTEMPTS` because the engine counts retries after the
+  // first execution: it republishes `workflow.step.run` while
+  // `retryCount < attempts` and only fails the run once that is spent.
+  //
+  // `delay` is deliberately absent rather than set to Python's
+  // `retry_delay = 10`: the evented processor reads `retryConfig.attempts` and
+  // nothing else (its only `retryConfig` reference is the retry branch at
+  // `workflow-event-processor-Dp87-e6z.js:3434`), so a delay here would be a
+  // value that reads as honoured and is not. Retries are immediate. Logged in
+  // `todo.md`, since it costs a provider that rate-limited us three rapid
+  // failures where Python spaced them 10 seconds apart.
+  retryConfig: { attempts: MAX_ATTEMPTS - 1 },
 })
   .then(pipelineStartStep)
   .then(researchStep)

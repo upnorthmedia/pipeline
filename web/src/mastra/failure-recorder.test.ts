@@ -39,6 +39,7 @@ import { researchAgent } from "./agents/research"
 import { writeAgent } from "./agents/write"
 import { createWorkerEvents, recordRunFailure } from "./failure-recorder"
 import { TOPIC_PIPELINE_EVENTS } from "./pipeline-events"
+import { MAX_ATTEMPTS } from "./state"
 import { pubsub as productionPubsub } from "./index"
 import { imagesWorkflow } from "./workflows/images"
 import { pipelineWorkflow } from "./workflows/pipeline"
@@ -326,8 +327,10 @@ describe("a pipeline run that fails", () => {
 
   it("records how many times the run was executed, Python's job_try", () => {
     const logs = failedRow.stageLogs as StageLogs
-    // `pipelineWorkflow.retryConfig` is `{attempts: 0}`, so the failing step ran once.
-    expect(logs._error?.attempts).toBe(1)
+    // `pipelineWorkflow.retryConfig` is `{attempts: MAX_ATTEMPTS - 1}`, so the
+    // failing step ran `MAX_ATTEMPTS` times before the run was given up on,
+    // which is the number Python reached the dead-letter queue carrying.
+    expect(logs._error?.attempts).toBe(MAX_ATTEMPTS)
   })
 
   it("records failed_at as a timestamp, close to the run", () => {
@@ -349,6 +352,22 @@ describe("a pipeline run that fails", () => {
 
   it("leaves the failing stage's column unwritten", () => {
     expect(failedRow.draftContent ?? "").toBe("")
+  })
+
+  it("re-executes the failing stage MAX_ATTEMPTS times, Python's max_tries", () => {
+    // ARQ re-ran the whole job up to `MAX_ATTEMPTS` times
+    // (`api/src/worker.py:609`). The engine retries the failing step instead,
+    // which lands on the same number of provider calls because Python's rerun
+    // skipped every stage already marked complete.
+    expect(vi.mocked(writeAgent.generate)).toHaveBeenCalledTimes(MAX_ATTEMPTS)
+  })
+
+  it("does not re-run the stages that already completed", () => {
+    // Python's skip check (`stage_status[stage] == "complete"`, worker.py:151)
+    // is what kept a retry from re-billing finished stages. Here the retry is
+    // scoped to the step that threw, so the same property holds for free.
+    expect(vi.mocked(researchAgent.generate)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(outlineAgent.generate)).toHaveBeenCalledTimes(1)
   })
 
   it("is published a terminal failure event more than once for one run", () => {
@@ -405,8 +424,8 @@ describe("a pipeline run that fails", () => {
       event: "stage_error",
       // Python's `f"Pipeline failed after {job_try} attempts: {e}"`, with the
       // attempt count the engine's retry policy makes true here.
-      message: `Pipeline failed after 1 attempts: ${BOOM}`,
-      data: { error: BOOM, attempts: 1, moved_to_dlq: true },
+      message: `Pipeline failed after ${MAX_ATTEMPTS} attempts: ${BOOM}`,
+      data: { error: BOOM, attempts: MAX_ATTEMPTS, moved_to_dlq: true },
     })
   })
 
@@ -419,13 +438,16 @@ describe("a pipeline run that fails", () => {
     // The failing run's whole trail, which is what `GET /posts/{id}/logs`
     // serves to an operator who was not watching: it started, two stages ran,
     // and it died in the third.
+    // `stage_start/write` appears once per attempt. Python's retry re-entered
+    // `_run_pipeline()` and re-announced the stage it resumed on for the same
+    // reason, so the trail an operator reads is the one it always was.
     expect(executionLogsOf(failedRow).map((entry) => `${entry.event}/${entry.stage}`)).toEqual([
       "pipeline_start/",
       "stage_start/research",
       "stage_complete/research",
       "stage_start/outline",
       "stage_complete/outline",
-      "stage_start/write",
+      ...Array(MAX_ATTEMPTS).fill("stage_start/write"),
       "stage_error/write",
     ])
   })
@@ -539,8 +561,8 @@ describe("recordRunFailure", () => {
       stage: "edit",
       level: "error",
       event: "stage_error",
-      message: `Pipeline failed after 1 attempts: ${BOOM}`,
-      data: { error: BOOM, attempts: 1, moved_to_dlq: true },
+      message: `Pipeline failed after ${MAX_ATTEMPTS} attempts: ${BOOM}`,
+      data: { error: BOOM, attempts: MAX_ATTEMPTS, moved_to_dlq: true },
     })
   })
 

@@ -111,7 +111,8 @@ function failedStageOf(snapshot: Snapshot): Stage | null {
 
 /**
  * How many times a failing run executed its failing step, which is what Python
- * passed as `attempts` (ARQ's `job_try`). Derived the same way
+ * passed as `attempts` (ARQ's `job_try`, always `MAX_ATTEMPTS` by the time a
+ * job reached the dead-letter queue). Derived the same way
  * `failure-recorder.ts` derives it, from the engine's retry policy, because the
  * snapshot does not count executions.
  */

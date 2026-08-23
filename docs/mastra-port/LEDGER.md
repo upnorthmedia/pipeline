@@ -12477,13 +12477,143 @@ three pieces are separately verifiable, so they are separate items.
         $ cd api && uv run ruff format --check .
         9 files would be reformatted, 131 files already formatted
         ```
-      - [ ] 5.5c-iii-b The `warning` / `retry` entry while attempts remain, which means
-        deciding the port's retry policy first: whether `pipelineWorkflow` carries a
-        `retryConfig` at all (Python retried the whole pipeline three times, skipping
-        already-complete stages), and if it does, writing the entry from inside the step
-        where `retryCount` and the error are both available. Moving `retryConfig` also
-        moves `attempts` in `stage_logs._error`, in the dead-letter list's `attempts`,
-        and in 5.5c-iii-a's entry, all of which derive it from the same accessor.
+      - [ ] 5.5c-iii-b The `warning` / `retry` entry while attempts remain (split: the
+        entry cannot be written until the port has a retry policy to write it about, and
+        deciding that policy moves `attempts` in three places that already have tests.
+        Split into 5.5c-iii-b-1 the retry policy, 5.5c-iii-b-2 the entry.)
+        - [x] 5.5c-iii-b-1 The retry policy: `pipelineWorkflow.retryConfig`, and the
+          `attempts` every failure record derives from it.
+
+          `MAX_ATTEMPTS = 3` now lives in `web/src/mastra/state.ts` beside the status
+          vocabulary, ported from `api/src/worker.py:51`, and
+          `web/src/mastra/workflows/pipeline.ts` spends it as
+          `retryConfig: { attempts: MAX_ATTEMPTS - 1 }`.
+
+          **The minus one is the engine's counting, read off the processor rather than
+          guessed.** The evented engine republishes `workflow.step.run` while
+          `retryCount < attempts` and routes to `workflow.step.end` (and so
+          `workflow.fail`) once it is spent, so `attempts` is retries *after* the first
+          execution while Python's `MAX_ATTEMPTS` was executions:
+
+          ```
+          $ sed -n '3434p' web/node_modules/.pnpm/@mastra+core@1.61.0_express@5.2.1_zod@4.4.3/node_modules/@mastra/core/dist/workflow-event-processor-Dp87-e6z.js
+          		if (stepResult.status === "failed") if (retryCount >= (getEntryRetries(leaf) ?? workflow.retryConfig.attempts ?? 0) || stepResult.nonRetryable) await this.mastra.pubsub.publish("workflows", {
+          ```
+
+          **Decision 1: the retry is per step, where Python's was per job, and that is
+          the closer port rather than a compromise.** ARQ re-ran the whole job
+          (`max_tries = MAX_ATTEMPTS`, `api/src/worker.py:609`), but `_run_pipeline()`
+          opened each iteration with `if ss.get(stage) == "complete": continue`
+          (`api/src/worker.py:151`), so a retry only ever re-ran the stage that threw and
+          the ones after it. The engine retries the failing step and then carries on down
+          the chain: the same set of provider calls, and so the same bill. Pinned by its
+          own test, which asserts `research` and `outline` were each generated once while
+          `write` was generated three times.
+
+          **Decision 2: `delay` is left unset rather than set to Python's
+          `retry_delay = 10`.** The processor's only `retryConfig` reference is the line
+          pasted above; `delay` is never read, and the file's one sleep helper
+          (`abortableSleep`, line 255) is exported for sleep steps and never called on the
+          retry path. Setting it would be a value that reads as honoured and is not. So
+          the three attempts are immediate where Python spaced them ten seconds apart,
+          which is a real regression against a rate-limiting provider and is logged in
+          `todo.md` with the shape of a fix (a backoff inside the step, which can read
+          `retryCount`).
+
+          **Decision 3: `executionsBeforeFailure()` stays derived from the workflow's
+          `retryConfig` in both `failure-recorder.ts` and `dead-letter.ts`.** It now
+          reports 3 rather than 1 with no change to either module, which is what the two
+          accessors were written for. The limit is measured, not assumed: negative control
+          3 below puts `retries: 0` on the `write` step and the accessor keeps reporting
+          3, because `getEntryRetries(leaf) ?? workflow.retryConfig.attempts` lets a step
+          override the workflow and the accessor cannot see it. No step sets `retries`
+          today; one that did would make `_error.attempts` lie.
+
+          **Two assertions changed rather than being written fresh, because the intended
+          behaviour changed.** `_error.attempts`, the dead-letter list's `attempts` and
+          the `stage_error` entry's `Pipeline failed after N attempts` all moved from 1 to
+          `MAX_ATTEMPTS`, and the failing run's `execution_logs` trail now carries one
+          `stage_start/write` per attempt. That last one is parity, not a new artefact:
+          Python's retry re-entered `_run_pipeline()` and re-announced the stage it
+          resumed on.
+
+          Two new tests on the file's existing real failing run (real evented engine, real
+          Redis Streams, real database, `write` throwing):
+
+          ```
+          $ pnpm vitest run src/mastra/failure-recorder.test.ts src/app/api/queue/dead-letter.test.ts --reporter=verbose
+           ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > records how many times the run was executed, Python's job_try 0ms
+           ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > re-executes the failing stage MAX_ATTEMPTS times, Python's max_tries 0ms
+           ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > does not re-run the stages that already completed 0ms
+           ✓ src/mastra/failure-recorder.test.ts > a pipeline run that fails > closes the log with the failure, after the stages that did complete 0ms
+           ✓ src/app/api/queue/dead-letter.test.ts > GET /api/queue/dead-letter, a real failed run > reports how many times the run executed, Python's attempts 21ms
+           Test Files  2 passed (2)
+                Tests  53 passed (53)
+             Start at  19:31:09
+             Duration  3.94s (transform 242ms, setup 170ms, import 1.37s, tests 4.35s, environment 0ms)
+          ```
+
+          The test proving the policy was written first and failed for the right reason
+          before `retryConfig` existed:
+
+          ```
+          $ pnpm vitest run src/mastra/failure-recorder.test.ts
+          AssertionError: expected "generate" to be called 3 times, but got 1 times
+                Tests  1 failed | 31 passed (32)
+          ```
+
+          Negative controls, each reverted after measuring:
+
+          | # | Mutation | Result |
+          | --- | --- | --- |
+          | 1 | `attempts: MAX_ATTEMPTS` (off by one) | 6 failed, 47 passed of 53 |
+          | 2 | `attempts: 0` (no policy, the previous state) | 6 failed, 47 passed of 53 |
+          | 3 | `retries: 0` on the `write` step, policy left alone | 2 failed, 30 passed of 32 |
+
+          Control 3 is the interesting one: only the two execution-count assertions fail.
+          `_error.attempts` still reads 3, which is the accessor limitation recorded as
+          decision 3.
+
+          Gates:
+
+          ```
+          $ pnpm exec tsc --noEmit
+          TSC EXIT=0
+          (no output)
+
+          $ pnpm lint
+          LINT EXIT=0
+          (no output)
+
+          $ pnpm test
+           Test Files  2 failed | 86 passed (88)
+                Tests  9 failed | 1587 passed | 7 skipped (1603)
+          # 9 failed is the recorded baseline: 6 in image-preview.test.tsx and 3 in
+          # PostDetail.test.tsx. Passing count 1585 -> 1587 (+2). An earlier full run of
+          # the same command reported 10 failed, the extra one being the
+          # scaffold-check.test.ts lifecycle-events flake already tracked in todo.md;
+          # it passed alone (5 passed) and on the rerun above.
+
+          $ pnpm build
+          BUILD EXIT=0
+          ✓ Compiled successfully in 3.8s
+          ✓ Generating static pages using 15 workers (35/35) in 465.2ms
+
+          $ cd api && uv run pytest -q
+          120 failed, 241 passed, 25 errors in 13.41s
+          # Better than the Phase 0 baseline of 125 failed / 235 passed / 25 errors, and
+          # untouched by this item: no Python file changed.
+
+          $ cd api && uv run ruff check .
+          Found 32 errors.
+
+          $ cd api && uv run ruff format --check .
+          9 files would be reformatted, 131 files already formatted
+          ```
+
+        - [ ] 5.5c-iii-b-2 The `warning` / `retry` entry itself, written from inside the
+          step where `retryCount` and the thrown error are both in hand, since the
+          `workflows-finish` listener only ever sees a run whose attempts are spent.
     - [ ] 5.5c-iv `publishStageLog()` and the `log` event: the 28 call sites inside the
       six stage nodes, and the module-level `set_event_context` /
       `clear_event_context` they read, which has no equivalent in a step that already
