@@ -42,14 +42,21 @@
  * instead. Rule 7 is the only one that cannot interrupt a paragraph and the
  * only one that can decline, leaving its line to the paragraph fallback.
  *
- * Not ported yet: `ref_link` (5.3c-iii-b-1-b-ii-3-b-2, whose `escape_url`
- * half is done and lives in `escape-url.ts`) and the inline rules
- * `escape`, `codespan`, `emphasis`, `link`, `auto_link`, `auto_email` and
- * `inline_html` (5.3c-iii-b-1-b-iii). Their *patterns* are registered here in
- * mistune's rule order, because rule order is what decides whether `- - -` is a
- * thematic break or a list, and their handlers throw `UnportedMarkdownError`. A
- * half-ported converter that silently dropped a link would be worse than one
- * that stops.
+ * Ported here too (ledger 5.3c-iii-b-1-b-ii-3-b-2): `ref_link`, the one block
+ * rule that emits no token. Everything it produces goes into
+ * `state.env.refLinks`, which the Gutenberg renderer never reads, so the only
+ * thing the rendered HTML shows is whether the definition line was consumed.
+ * The rule is fussy about position: it cannot interrupt a paragraph, its href
+ * scan has a bracketed form that forbids backslashes outright, and both the
+ * title and (failing that) the href must be followed by `[ \t]*\n` or the whole
+ * definition is abandoned and the line falls back to a paragraph.
+ *
+ * Not ported yet: the inline rules `escape`, `codespan`, `emphasis`, `link`,
+ * `auto_link`, `auto_email` and `inline_html` (5.3c-iii-b-1-b-iii). Their
+ * *patterns* are registered here in mistune's rule order, because rule order is
+ * what decides whether `- - -` is a thematic break or a list, and their handlers
+ * throw `UnportedMarkdownError`. A half-ported converter that silently dropped a
+ * link would be worse than one that stops.
  *
  * Regex translation notes:
  *
@@ -70,6 +77,8 @@
  *   appears in article markdown, and the difference is confined to the
  *   whitespace runs `indent_code` and the inline break rules skip over.
  */
+
+import { escapeUrl } from "./escape-url";
 
 /** A mistune token. `text` is inline source, `raw` is not parsed further. */
 type Token = {
@@ -255,6 +264,21 @@ function stripChars(s: string, chars: string): string {
 /** `string.whitespace`. */
 const PY_WHITESPACE = " \t\n\r\v\f";
 
+/**
+ * Python's `\s` for `str` patterns, spelled out. It is `str.isspace()`'s set,
+ * which holds `\x1c`-`\x1f` and `\x85` where JavaScript's `\s` does not, and
+ * lacks `\ufeff`, which JavaScript's has.
+ */
+const PY_SPACE =
+  "\\t\\n\\v\\f\\r \\x1c-\\x1f\\x85\\xa0\\u1680\\u2000-\\u200a" +
+  "\\u2028\\u2029\\u202f\\u205f\\u3000";
+const PY_SPACE_RUN = new RegExp(`[${PY_SPACE}]+`, "g");
+
+/** `str.split()` with no separator: split on runs of whitespace, drop the ends. */
+function pySplitWhitespace(s: string): string[] {
+  return s.split(PY_SPACE_RUN).filter((part) => part !== "");
+}
+
 const EXPAND_TAB_RE = new RegExp(`${SOL}( {0,3})\\t`, "g");
 
 /** `util.expand_leading_tab`. */
@@ -272,6 +296,16 @@ function expandTab(text: string, space = "    "): string {
 const INDENT_CODE_TRIM = new RegExp(`${SOL} {1,4}`, "g");
 const ATX_HEADING_TRIM = /(\s+|^)#+\s*$/;
 
+/**
+ * A reference-link definition, as `parse_ref_link` stores it. `label` is the
+ * raw label from the source, not the folded key it is filed under.
+ */
+export type RefLink = {
+  url: string;
+  label: string;
+  title?: string;
+};
+
 /** `BlockState`. */
 class BlockState {
   src = "";
@@ -279,9 +313,17 @@ class BlockState {
   cursor = 0;
   cursorMax = 0;
   readonly parent?: BlockState;
+  /**
+   * `state.env`, shared with the parent state so a definition inside a block
+   * quote or a list item is visible to the whole document. A `Map` rather than
+   * an object because Python looks the key up in a `dict`, where `in` cannot
+   * reach a prototype.
+   */
+  readonly env: { refLinks: Map<string, RefLink> };
 
   constructor(parent?: BlockState) {
     this.parent = parent;
+    this.env = parent ? parent.env : { refLinks: new Map() };
   }
 
   childState(src: string): BlockState {
@@ -404,7 +446,7 @@ function parseBlockMethod(
     case "block_html":
       return parseRawHtml(m, state);
     case "ref_link":
-      throw new UnportedMarkdownError(rule, "5.3c-iii-b-1-b-ii-3-b-2");
+      return parseRefLink(m, state);
     /* istanbul ignore next: BLOCK_RULES is exhaustive above */
     default:
       throw new Error(`markdownToWpHtml: unknown block rule "${rule}"`);
@@ -1049,6 +1091,161 @@ function parseRawHtml(
   return undefined;
 }
 
+/** `re.match(src, pos)`: anchored at `pos`, but still looking at the whole string. */
+function anchoredMatch(
+  re: RegExp,
+  src: string,
+  pos: number,
+): RegExpExecArray | null {
+  re.lastIndex = pos;
+  return re.exec(src);
+}
+
+/** `helpers.LINK_BRACKET_START`. */
+const LINK_BRACKET_START = /[ \t]*\n?[ \t]*</y;
+/** `helpers.LINK_BRACKET_RE`. A backslash inside the brackets kills the match. */
+const LINK_BRACKET_RE = /<([^<>\n\\\x00]*)>/y;
+/** `helpers.LINK_HREF_BLOCK_RE`, compiled without `re.M`, so its `$` is `EOS`. */
+const LINK_HREF_BLOCK_RE = new RegExp(
+  `[ \\t]*\\n?[ \\t]*([^${PY_SPACE}]+)(?:[${PY_SPACE}]|${EOS})`,
+  "y",
+);
+/** `helpers.LINK_TITLE_RE`. */
+const LINK_TITLE_RE = new RegExp(
+  `[ \\t\\n]+(` +
+    `"(?:\\\\${PUNCTUATION}|[^"\\x00])*"|` +
+    `'(?:\\\\${PUNCTUATION}|[^'\\x00])*'` +
+    `)`,
+  "y",
+);
+/** `block_parser._BLANK_TO_LINE`. */
+const BLANK_TO_LINE = /[ \t]*\n/y;
+
+/**
+ * `helpers.parse_link_href` in its `block=True` form. Python returns the pair
+ * `(href, end_pos)` or `(None, None)`; this returns the pair as an object, or
+ * `undefined`, because the two halves are never independently absent.
+ *
+ * The `block=False` branch (`LINK_HREF_INLINE_RE`) belongs to the inline `link`
+ * rule and lands with ledger item 5.3c-iii-b-1-b-iii, so it is not ported here.
+ *
+ * The end position is off by one depending on how the bare form stopped: the
+ * trailing `(?:\s|$)` consumes a whitespace character when there is one, and
+ * mistune backs the cursor off it by comparing the last character of the match
+ * with the last character of the href.
+ */
+function parseLinkHref(
+  src: string,
+  startPos: number,
+): { href: string; endPos: number } | undefined {
+  const bracket = anchoredMatch(LINK_BRACKET_START, src, startPos);
+  if (bracket) {
+    const openPos = startPos + bracket[0].length - 1;
+    const closed = anchoredMatch(LINK_BRACKET_RE, src, openPos);
+    if (closed) return { href: closed[1], endPos: openPos + closed[0].length };
+    return undefined;
+  }
+
+  const m = anchoredMatch(LINK_HREF_BLOCK_RE, src, startPos);
+  if (!m) return undefined;
+
+  const endPos = startPos + m[0].length;
+  const href = m[1];
+  if (src[endPos - 1] === href[href.length - 1]) return { href, endPos };
+  return { href, endPos: endPos - 1 };
+}
+
+/**
+ * `helpers.parse_link_title`. `maxPos` truncates the subject rather than
+ * limiting the match, which is what stops a title from being found across the
+ * blank line that ends the definition's paragraph.
+ */
+function parseLinkTitle(
+  src: string,
+  startPos: number,
+  maxPos: number,
+): { title: string; endPos: number } | undefined {
+  const m = boundedMatch(LINK_TITLE_RE, src, startPos, maxPos);
+  if (!m) return undefined;
+  return {
+    title: unescapeChar(m[1].slice(1, -1)),
+    endPos: startPos + m[0].length,
+  };
+}
+
+/**
+ * `util.unikey`. `" ".join(s.split())` collapses every run of whitespace, and
+ * `.lower().upper()` is a two-step case fold, not a plain upper-casing: it is
+ * what maps `ß` to `SS` and the Kelvin sign to a plain `K`.
+ */
+function unikey(s: string): string {
+  return pySplitWhitespace(s).join(" ").toLowerCase().toUpperCase();
+}
+
+/**
+ * `BlockParser.parse_ref_link`. Emits no token: the definition goes into
+ * `state.env.refLinks` and the rendered output simply loses the line.
+ *
+ * The first definition for a key wins, including its title, so a later
+ * definition of the same key is consumed and discarded rather than merged.
+ */
+function parseRefLink(
+  m: RegExpExecArray,
+  state: BlockState,
+): number | undefined {
+  const absorbed = state.appendParagraph();
+  if (absorbed) return absorbed;
+
+  const label = m.groups?.reflink_1 ?? "";
+  const key = unikey(label);
+  if (!key) return undefined;
+
+  const hrefMatch = parseLinkHref(state.src, m.index + m[0].length);
+  if (!hrefMatch) return undefined;
+  let href: string | undefined = hrefMatch.href;
+  let hrefPos: number | undefined = hrefMatch.endPos;
+
+  const blank = search(BLANK_LINE_SEARCH, state.src, hrefPos);
+  const maxPos = blank ? blank.index : state.cursorMax;
+
+  const titleMatch = parseLinkTitle(state.src, hrefPos, maxPos);
+  let title: string | undefined = titleMatch?.title;
+  let titlePos: number | undefined = titleMatch?.endPos;
+  if (titlePos) {
+    const afterTitle = anchoredMatch(BLANK_TO_LINE, state.src, titlePos);
+    if (afterTitle) {
+      titlePos += afterTitle[0].length;
+    } else {
+      titlePos = undefined;
+      title = undefined;
+    }
+  }
+
+  if (titlePos === undefined) {
+    const afterHref = anchoredMatch(BLANK_TO_LINE, state.src, hrefPos);
+    if (afterHref) {
+      hrefPos += afterHref[0].length;
+    } else {
+      hrefPos = undefined;
+      href = undefined;
+    }
+  }
+
+  const endPos = titlePos || hrefPos;
+  if (!endPos) return undefined;
+
+  const refLinks = state.env.refLinks;
+  if (!refLinks.has(key)) {
+    const data: RefLink = {
+      url: escapeUrl(unescapeChar(href as string)),
+      label,
+    };
+    if (title) data.title = title;
+    refLinks.set(key, data);
+  }
+  return endPos;
+}
+
 /** `BlockParser.parse`. */
 function parseBlocks(
   state: BlockState,
@@ -1211,4 +1408,26 @@ export function markdownToWpHtml(markdownContent: string): string {
   parseBlocks(state);
   resolveChildren(state.tokens);
   return renderTokens(state.tokens);
+}
+
+/**
+ * The `state.env['ref_links']` map a document produces, as a plain object.
+ *
+ * `parse_ref_link` emits no token and `_GutenbergRenderer` never reads the env,
+ * so this is the only way to observe the rule until the inline `link` rule
+ * lands (ledger item 5.3c-iii-b-1-b-iii). It stops after the block parse, which
+ * is where Python fills the env, so it works on documents whose inline layer is
+ * still unported.
+ */
+export function parseRefLinks(
+  markdownContent: string,
+): Record<string, RefLink> {
+  const content = markdownContent.replace(FRONTMATTER_RE, "");
+  let src = content.trim().replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (!src.endsWith("\n")) src += "\n";
+
+  const state = new BlockState();
+  state.process(src);
+  parseBlocks(state);
+  return Object.fromEntries(state.env.refLinks);
 }

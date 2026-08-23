@@ -9809,12 +9809,16 @@ three pieces are separately verifiable, so they are separate items.
             3 in `PostDetail.test.tsx`). pytest is above its baseline of 125 failed /
             236 passed / 25 errors. ruff's 32 and 9 are the recorded baselines.
 
-          - [ ] 5.3c-iii-b-1-b-ii The container blocks and the two remaining block
+          - [x] 5.3c-iii-b-1-b-ii The container blocks and the two remaining block
             rules. (Split: `block_quote` alone is `extract_block_quote`'s two scan
             strategies plus the child-state recursion, `list` is the whole 269-line
             `list_parser.py` with the tight/loose rule and the per-item break scanner,
             and `ref_link`/`raw_html` share nothing with either. One oracle each:
             -ii-1 block quotes, -ii-2 lists, -ii-3 reference links and raw HTML.)
+
+            Closed by -ii-3-b-2. Every rule in `BlockParser.DEFAULT_RULES` is now
+            ported; the block layer of `markdown_to_wp_html` is complete and only the
+            inline rules (item -b-iii) are left.
             - [x] 5.3c-iii-b-1-b-ii-1 `block_quote`: `extract_block_quote`'s
               require-marker and lazy-continuation branches, the child `BlockState` and
               its nesting depth, `prepend_token`, and the `block_quote` renderer method.
@@ -10057,7 +10061,7 @@ three pieces are separately verifiable, so they are separate items.
               enough to change how often it lands; no `wp-html` code touches Redis.
               pytest is above its baseline of 125 failed / 236 passed / 25 errors, and
               ruff's 32 and 9 are the recorded baselines.
-            - [ ] 5.3c-iii-b-1-b-ii-3 `ref_link` (with `parse_link_href`,
+            - [x] 5.3c-iii-b-1-b-ii-3 `ref_link` (with `parse_link_href`,
               `parse_link_title`, `unikey` and `escape_url`, and the `ref_links` env the
               inline layer reads) and `raw_html`/`block_html` (the seven CommonMark HTML
               block rules and the `BLOCK_TAGS`/`PRE_TAGS` tables), plus the `block_html`
@@ -10070,6 +10074,9 @@ three pieces are separately verifiable, so they are separate items.
               writes `state.env["ref_links"]`, whose only reader is the inline `link`
               rule in -b-iii, and it drags in `escape_url`, which needs Python's
               `urllib.parse.quote` and mistune's CommonMark-flavoured `html.unescape`.
+
+              Closed by -3-b-2: both halves and both of -3-b's sub-items are done,
+              with their evidence under each.
               - [x] 5.3c-iii-b-1-b-ii-3-a `raw_html`/`block_html`: the seven CommonMark
                 HTML block rules, the `BLOCK_TAGS`/`PRE_TAGS` tables,
                 `_parse_html_to_end`/`_parse_html_to_newline`, the `_OPEN_TAG_END` /
@@ -10225,7 +10232,7 @@ three pieces are separately verifiable, so they are separate items.
                 $ cd api && uv run ruff format --check .
                 9 files would be reformatted, 139 files already formatted
                 ```
-              - [ ] 5.3c-iii-b-1-b-ii-3-b `ref_link`, with `parse_link_href`,
+              - [x] 5.3c-iii-b-1-b-ii-3-b `ref_link`, with `parse_link_href`,
                 `parse_link_title`, `unikey`, `escape_url` (and the `unescape` /
                 percent-encoding it needs) and the `ref_links` env.
 
@@ -10370,9 +10377,175 @@ three pieces are separately verifiable, so they are separate items.
                   The formatted-file count moves from 139 to 140 because of the new
                   exporter, which was run through `ruff format` and `ruff check` before
                   it generated the committed data.
-                - [ ] 5.3c-iii-b-1-b-ii-3-b-2 `parse_ref_link` itself, with
+                - [x] 5.3c-iii-b-1-b-ii-3-b-2 `parse_ref_link` itself, with
                   `parse_link_href`, `parse_link_title`, `unikey` and the `ref_links`
                   env the inline `link` rule reads.
+
+                  `web/src/mastra/wordpress/wp-html.ts` gains `parseRefLink`,
+                  `parseLinkHref` (its `block=True` form), `parseLinkTitle`, `unikey`,
+                  the four helper patterns and `BlockState.env`, which is shared with
+                  the parent state so a definition inside a block quote or list item is
+                  visible to the whole document. This finishes the block layer: every
+                  rule in `BlockParser.DEFAULT_RULES` is now ported and only the inline
+                  rules are left (item -b-iii).
+
+                  `parse_ref_link` is the one block rule that emits no token, so the
+                  rendered HTML only shows whether the definition line was consumed.
+                  The definition itself is asserted through the new exported
+                  `parseRefLinks`, which stops after the block parse exactly where
+                  Python fills the env. Both channels are compared for every case.
+
+                  **Command run and its real output.** Generate the oracle:
+
+                  ```
+                  $ cd api && PYTHONPATH=. uv run python scripts/export_wp_html_ref_link_parity.py
+                  wrote 99 cases and 24 declines to /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web/src/mastra/wordpress/data/wp-html-ref-link-parity.json
+                  ```
+
+                  **Failing first.** With `parse_ref_link` still the pre-port stub that
+                  throws `UnportedMarkdownError`, the new suite fails:
+
+                  ```
+                  $ pnpm -C web exec vitest run src/mastra/wordpress/wp-html-ref-link.test.ts
+                   Test Files  1 failed (1)
+                        Tests  237 failed | 16 passed (253)
+                  ```
+
+                  (The 16 that passed are the oracle-shape check and the 15 decline
+                  cases, which expect a throw either way.)
+
+                  **Passing.** With the port in place, and after eight further corpus
+                  cases were added to kill mutation 16 below:
+
+                  ```
+                  $ pnpm -C web exec vitest run src/mastra/wordpress/wp-html-ref-link.test.ts
+                   Test Files  1 passed (1)
+                        Tests  261 passed (261)
+                  ```
+
+                  ```
+                  $ pnpm -C web exec vitest run src/mastra/wordpress/
+                   Test Files  8 passed (8)
+                        Tests  841 passed (841)
+                  ```
+
+                  **The oracle has teeth.** Sixteen mutations of the finished
+                  implementation, each run against the full 261-test suite:
+
+                  | # | Mutation | Tests failed |
+                  | --- | --- | --- |
+                  | 1 | `ref_link` may interrupt a paragraph (drop `appendParagraph`) | 6 |
+                  | 2 | `unikey` upper-cases without the lower-case step | 1 |
+                  | 3 | `unikey` trims instead of collapsing whitespace | 6 |
+                  | 4 | href end position is never backed off | 174 |
+                  | 5 | href end position is always backed off | **0** |
+                  | 6 | angle bracket href allows a backslash | 3 |
+                  | 7 | title scan ignores the blank-line bound (`match` not `boundedMatch`) | 3 |
+                  | 8 | title keeps its backslash escapes (drop `unescapeChar`) | 2 |
+                  | 9 | no end-of-line check after the title | 2 |
+                  | 10 | no end-of-line check after the href | 11 |
+                  | 11 | the last definition for a key wins (drop `has`) | 8 |
+                  | 12 | an empty title is stored (`!== undefined` not truthiness) | 3 |
+                  | 13 | href is not unescaped before encoding | 3 |
+                  | 14 | end position prefers the href over the title | 22 |
+                  | 15 | a child state gets its own env | 8 |
+                  | 16 | bare href uses JavaScript's `\s` instead of Python's | 6 (was 0) |
+
+                  Mutation 16 survived the first corpus, because Python's `\s` and
+                  JavaScript's differ only on `\x1c`-`\x1f`, `\x85` and `\ufeff` and no
+                  case used one. Four cases were added and it now fails 6 tests:
+                  `[a]: /ur\ufeffl` is accepted by Python (the mark stays in the href
+                  and is percent encoded) and refused by a `\s`-based port, and
+                  `[a]: /ur\x85l`, `[a]: /ur\x1cl` and `[a]: /ur\xa0l` are the reverse.
+
+                  **Mutation 5 is unreachable, and is kept for faithfulness rather than
+                  papered over.** `LINK_HREF_BLOCK_RE` ends `(?:\s|$)`, and the ordered
+                  alternation means `$` is only reached when there is no whitespace at
+                  all after the href, that is when the href runs to the very end of
+                  `state.src`. The off-by-one that `$` enables is therefore reachable
+                  only from a block state whose `src` lacks a trailing newline. Fuzzing
+                  3928 documents built from list, quote, code and definition fragments
+                  found no such state:
+
+                  ```
+                  $ cd api && PYTHONPATH=. uv run python -c "<instrument BlockState.process, fuzz 4000 documents>"
+                  docs: 3928 states whose src lacks a trailing newline: 0
+                  ```
+
+                  and instrumenting `parse_link_href` over all 123 corpus inputs
+                  confirms the branch is never taken:
+
+                  ```
+                  $ cd api && PYTHONPATH=. uv run python -c "<instrument helpers.parse_link_href over the corpus>"
+                  EOS-branch hits: 0 of 109
+                  ```
+
+                  **Three existing probes were retargeted, not deleted.**
+                  `wp-html-blocks.test.ts` had a one-entry table asserting that
+                  `ref_link` throws; with the block layer complete that table is gone and
+                  its describe comment now records the full history (`block_quote` at
+                  -ii-1, `list` at -ii-2, `raw_html` at -ii-3-a, `ref_link` here). The
+                  "still refuses unported rules" probes in `wp-html-quotes.test.ts` and
+                  `wp-html-lists.test.ts` used `> [label]: https://example.com` and
+                  `- [label]: https://example.com` as their unported construct; both are
+                  now replay cases in the new oracle, so both probes swap to
+                  `an *emphasised* word`, which is the inline `emphasis` rule and still
+                  unported. No assertion was weakened.
+
+                  **Twelve hand-written controls**, added after the replay passed and
+                  each checked against the real Python function before being committed:
+
+                  ```
+                  $ cd api && PYTHONPATH=. uv run python -c "<call the real block parser on each control input>"
+                  '[constructor]: /url\n' -> {"CONSTRUCTOR": {"url": "/url", "label": "constructor"}}
+                  '> [a]: /inside\n\n[b]: /outside\n' -> {"A": {"url": "/inside", "label": "a"}, "B": {"url": "/outside", "label": "b"}}
+                  '[a]: /x?u=&amp;v=&lt;\n' -> {"A": {"url": "/x?u=&v=%3C", "label": "a"}}
+                  '[a]: /url\\_x\n' -> {"A": {"url": "/url_x", "label": "a"}}
+                  '[a]: /url\\x\n' -> {"A": {"url": "/url%5Cx", "label": "a"}}
+                  '[a]: /url ""\n' -> {"A": {"url": "/url", "label": "a"}}
+                  '[  Foo   Bar  ]: /url\n' -> {"FOO BAR": {"url": "/url", "label": "  Foo   Bar  "}}
+                  '[a]: /url x\n' -> {}
+                  '[a]: /url\n\n"title"\n' -> {"A": {"url": "/url", "label": "a"}}
+                  '[a]: /url\n"title"\n' -> {"A": {"url": "/url", "label": "a", "title": "title"}}
+                  '[a]: <a\\b>\n' -> {}
+                  '[a]: <>\n' -> {"A": {"url": "", "label": "a"}}
+                  ```
+
+                  **Gates.** Frontend:
+
+                  ```
+                  $ pnpm -C web exec tsc --noEmit
+                  tsc exit=0
+                  $ pnpm -C web lint
+                  lint exit=0
+                  $ pnpm -C web test   (three consecutive runs, for the known flake)
+                   Test Files  3 failed | 108 passed (111)   Tests  10 failed | 3032 passed | 7 skipped (3049)
+                   Test Files  2 failed | 109 passed (111)   Tests   9 failed | 3033 passed | 7 skipped (3049)
+                   Test Files  3 failed | 108 passed (111)   Tests  10 failed | 3032 passed | 7 skipped (3049)
+                  $ pnpm -C web build
+                  build exit=0
+                  ```
+
+                  The 9-failure floor is the recorded baseline: the 6 known
+                  `image-preview.test.tsx` failures plus 3 flaky `PostDetail.test.tsx`
+                  tests. No `src/mastra/wordpress/` test is among them.
+
+                  Backend, unchanged at its baseline (this iteration adds one script
+                  under `api/scripts/`, which was run through `ruff format` and
+                  `ruff check --fix` before committing):
+
+                  ```
+                  $ cd api && uv run pytest -q
+                  120 failed, 241 passed, 25 errors in 15.13s
+                  $ cd api && uv run ruff check .
+                  Found 32 errors.
+                  $ cd api && uv run ruff format --check .
+                  9 files would be reformatted, 141 files already formatted
+                  $ cd api && uv run ruff check scripts/export_wp_html_ref_link_parity.py
+                  All checks passed!
+                  $ cd api && uv run ruff format --check scripts/export_wp_html_ref_link_parity.py
+                  1 file already formatted
+                  ```
           - [ ] 5.3c-iii-b-1-b-iii The inline rules: `escape`, `codespan`, `emphasis`,
             `strong`, `link`, `image`, `auto_link`, `auto_email` and `inline_html`, plus
             the `emphasis`, `strong`, `link`, `codespan` and `image` renderer methods.

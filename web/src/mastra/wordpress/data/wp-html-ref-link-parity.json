@@ -1,0 +1,1272 @@
+{
+  "generated_by": "api/scripts/export_wp_html_ref_link_parity.py",
+  "source": "api/src/services/wp_html.py::markdown_to_wp_html",
+  "mistune_version": "3.2.0",
+  "scope": "the ref_link block rule: unikey, parse_link_href in block mode, parse_link_title, the blank-line-to-end-of-line guards and the state.env['ref_links'] map",
+  "cases": [
+    {
+      "name": "definition with title, referenced above",
+      "markdown": "[example]: https://example.com\n",
+      "ref_links": {
+        "EXAMPLE": {
+          "url": "https://example.com",
+          "label": "example"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "definition with a double quoted title",
+      "markdown": "[example]: https://example.com \"Optional title\"\n",
+      "ref_links": {
+        "EXAMPLE": {
+          "url": "https://example.com",
+          "label": "example",
+          "title": "Optional title"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "definition with a single quoted title",
+      "markdown": "[example]: https://example.com 'Optional title'\n",
+      "ref_links": {
+        "EXAMPLE": {
+          "url": "https://example.com",
+          "label": "example",
+          "title": "Optional title"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "bare definition",
+      "markdown": "[a]: /url\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "definition then a paragraph",
+      "markdown": "[a]: /url\n\nPara.\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "paragraph, blank line, then a definition",
+      "markdown": "Para.\n\n[a]: /url\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "two definitions in a row",
+      "markdown": "[a]: /one\n[b]: /two\n",
+      "ref_links": {
+        "A": {
+          "url": "/one",
+          "label": "a"
+        },
+        "B": {
+          "url": "/two",
+          "label": "b"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "three definitions in a row",
+      "markdown": "[a]: /one\n[b]: /two\n[c]: /three\n",
+      "ref_links": {
+        "A": {
+          "url": "/one",
+          "label": "a"
+        },
+        "B": {
+          "url": "/two",
+          "label": "b"
+        },
+        "C": {
+          "url": "/three",
+          "label": "c"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "two definitions with titles in a row",
+      "markdown": "[a]: /one \"first\"\n[b]: /two \"second\"\n",
+      "ref_links": {
+        "A": {
+          "url": "/one",
+          "label": "a",
+          "title": "first"
+        },
+        "B": {
+          "url": "/two",
+          "label": "b",
+          "title": "second"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "definition with no trailing newline",
+      "markdown": "[a]: /url",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "definition with a trailing blank line",
+      "markdown": "[a]: /url\n\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "definition with several trailing blank lines",
+      "markdown": "[a]: /url\n\n\n\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "duplicate key keeps the first url",
+      "markdown": "[a]: /first\n[a]: /second\n",
+      "ref_links": {
+        "A": {
+          "url": "/first",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "duplicate key keeps the first title",
+      "markdown": "[a]: /first \"one\"\n[a]: /second \"two\"\n",
+      "ref_links": {
+        "A": {
+          "url": "/first",
+          "label": "a",
+          "title": "one"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "duplicate key does not gain a title from the second",
+      "markdown": "[a]: /first\n[a]: /second \"two\"\n",
+      "ref_links": {
+        "A": {
+          "url": "/first",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "duplicate key does not lose a title to the second",
+      "markdown": "[a]: /first \"one\"\n[a]: /second\n",
+      "ref_links": {
+        "A": {
+          "url": "/first",
+          "label": "a",
+          "title": "one"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "duplicate key differing only in case",
+      "markdown": "[Foo]: /first\n[FOO]: /second\n",
+      "ref_links": {
+        "FOO": {
+          "url": "/first",
+          "label": "Foo"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "duplicate key differing only in inner whitespace",
+      "markdown": "[foo  bar]: /first\n[foo bar]: /second\n",
+      "ref_links": {
+        "FOO BAR": {
+          "url": "/first",
+          "label": "foo  bar"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label is case folded",
+      "markdown": "[MiXeD]: /url\n",
+      "ref_links": {
+        "MIXED": {
+          "url": "/url",
+          "label": "MiXeD"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label inner whitespace is collapsed",
+      "markdown": "[foo   bar]: /url\n",
+      "ref_links": {
+        "FOO BAR": {
+          "url": "/url",
+          "label": "foo   bar"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label leading and trailing whitespace is stripped",
+      "markdown": "[  foo  ]: /url\n",
+      "ref_links": {
+        "FOO": {
+          "url": "/url",
+          "label": "  foo  "
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label tabs are collapsed to a single space",
+      "markdown": "[foo\t\tbar]: /url\n",
+      "ref_links": {
+        "FOO BAR": {
+          "url": "/url",
+          "label": "foo\t\tbar"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label spanning two lines",
+      "markdown": "[foo\nbar]: /url\n",
+      "ref_links": {
+        "FOO BAR": {
+          "url": "/url",
+          "label": "foo\nbar"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label spanning two lines with indentation",
+      "markdown": "[foo\n  bar]: /url\n",
+      "ref_links": {
+        "FOO BAR": {
+          "url": "/url",
+          "label": "foo\n  bar"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label with a turkish dotless i",
+      "markdown": "[\u0131]: /url\n",
+      "ref_links": {
+        "I": {
+          "url": "/url",
+          "label": "\u0131"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label with a german sharp s",
+      "markdown": "[stra\u00dfe]: /url\n",
+      "ref_links": {
+        "STRASSE": {
+          "url": "/url",
+          "label": "stra\u00dfe"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label with a kelvin sign",
+      "markdown": "[\u212a]: /url\n",
+      "ref_links": {
+        "K": {
+          "url": "/url",
+          "label": "\u212a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label holding an escaped bracket",
+      "markdown": "[a\\]b]: /url\n",
+      "ref_links": {
+        "A\\]B": {
+          "url": "/url",
+          "label": "a\\]b"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label holding an escaped backslash",
+      "markdown": "[a\\\\b]: /url\n",
+      "ref_links": {
+        "A\\\\B": {
+          "url": "/url",
+          "label": "a\\\\b"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label holding punctuation",
+      "markdown": "[a.b-c_d]: /url\n",
+      "ref_links": {
+        "A.B-C_D": {
+          "url": "/url",
+          "label": "a.b-c_d"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label of exactly 500 characters",
+      "markdown": "[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]: /url\n",
+      "ref_links": {
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": {
+          "url": "/url",
+          "label": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label named constructor",
+      "markdown": "[constructor]: /url\n",
+      "ref_links": {
+        "CONSTRUCTOR": {
+          "url": "/url",
+          "label": "constructor"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label named toString",
+      "markdown": "[toString]: /url\n",
+      "ref_links": {
+        "TOSTRING": {
+          "url": "/url",
+          "label": "toString"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label named __proto__",
+      "markdown": "[__proto__]: /url\n",
+      "ref_links": {
+        "__PROTO__": {
+          "url": "/url",
+          "label": "__proto__"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "label named hasOwnProperty",
+      "markdown": "[hasOwnProperty]: /url\n",
+      "ref_links": {
+        "HASOWNPROPERTY": {
+          "url": "/url",
+          "label": "hasOwnProperty"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "duplicate label named constructor keeps the first",
+      "markdown": "[constructor]: /first\n[constructor]: /second\n",
+      "ref_links": {
+        "CONSTRUCTOR": {
+          "url": "/first",
+          "label": "constructor"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "definition indented one space",
+      "markdown": " [a]: /url\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "definition indented three spaces",
+      "markdown": "   [a]: /url\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "definition after a paragraph and a blank, indented",
+      "markdown": "Para.\n\n   [a]: /url\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "href in angle brackets",
+      "markdown": "[a]: <https://example.com>\n",
+      "ref_links": {
+        "A": {
+          "url": "https://example.com",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href in empty angle brackets",
+      "markdown": "[a]: <>\n",
+      "ref_links": {
+        "A": {
+          "url": "",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href in angle brackets holding a space",
+      "markdown": "[a]: <a b>\n",
+      "ref_links": {
+        "A": {
+          "url": "a%20b",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href in angle brackets on the next line",
+      "markdown": "[a]: \n<https://example.com>\n",
+      "ref_links": {
+        "A": {
+          "url": "https://example.com",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href in angle brackets with a title",
+      "markdown": "[a]: <https://example.com> \"t\"\n",
+      "ref_links": {
+        "A": {
+          "url": "https://example.com",
+          "label": "a",
+          "title": "t"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href on the line after the colon",
+      "markdown": "[a]:\n/url\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href on the line after the colon, indented",
+      "markdown": "[a]:\n   /url\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href after a tab",
+      "markdown": "[a]:\t/url\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href after several spaces",
+      "markdown": "[a]:     /url\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding percent encoding",
+      "markdown": "[a]: /url%20x\n",
+      "ref_links": {
+        "A": {
+          "url": "/url%20x",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding a bare percent",
+      "markdown": "[a]: /url%x\n",
+      "ref_links": {
+        "A": {
+          "url": "/url%x",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding an ampersand",
+      "markdown": "[a]: /url?x=1&y=2\n",
+      "ref_links": {
+        "A": {
+          "url": "/url?x=1&y=2",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding an html entity",
+      "markdown": "[a]: /url?x=1&amp;y=2\n",
+      "ref_links": {
+        "A": {
+          "url": "/url?x=1&y=2",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding a less than entity",
+      "markdown": "[a]: /url?x=&lt;y\n",
+      "ref_links": {
+        "A": {
+          "url": "/url?x=%3Cy",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding a unicode path",
+      "markdown": "[a]: /caf\u00e9\n",
+      "ref_links": {
+        "A": {
+          "url": "/caf%C3%A9",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding an escaped underscore",
+      "markdown": "[a]: /url\\_x\n",
+      "ref_links": {
+        "A": {
+          "url": "/url_x",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding an escaped bracket",
+      "markdown": "[a]: /url\\[x\\]\n",
+      "ref_links": {
+        "A": {
+          "url": "/url%5Bx%5D",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding a backslash before a letter",
+      "markdown": "[a]: /url\\x\n",
+      "ref_links": {
+        "A": {
+          "url": "/url%5Cx",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding a hash",
+      "markdown": "[a]: /url#frag\n",
+      "ref_links": {
+        "A": {
+          "url": "/url#frag",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href that is a bare fragment",
+      "markdown": "[a]: #frag\n",
+      "ref_links": {
+        "A": {
+          "url": "#frag",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding a numeric character reference",
+      "markdown": "[a]: /url?x=&#65;\n",
+      "ref_links": {
+        "A": {
+          "url": "/url?x=A",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding a space entity",
+      "markdown": "[a]: /a&#32;b\n",
+      "ref_links": {
+        "A": {
+          "url": "/a%20b",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding a double quote",
+      "markdown": "[a]: /url?q=%22x%22\n",
+      "ref_links": {
+        "A": {
+          "url": "/url?q=%22x%22",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding a pipe",
+      "markdown": "[a]: /url|x\n",
+      "ref_links": {
+        "A": {
+          "url": "/url%7Cx",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding a caret",
+      "markdown": "[a]: /url^x\n",
+      "ref_links": {
+        "A": {
+          "url": "/url%5Ex",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding a backtick",
+      "markdown": "[a]: /url`x\n",
+      "ref_links": {
+        "A": {
+          "url": "/url%60x",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding a tilde",
+      "markdown": "[a]: /url~x\n",
+      "ref_links": {
+        "A": {
+          "url": "/url~x",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding a non breaking space entity",
+      "markdown": "[a]: /a&nbsp;b\n",
+      "ref_links": {
+        "A": {
+          "url": "/a%C2%A0b",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "href holding a byte order mark",
+      "markdown": "[a]: /ur\ufeffl\n",
+      "ref_links": {
+        "A": {
+          "url": "/ur%EF%BB%BFl",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "title on the next line",
+      "markdown": "[a]: /url\n\"title\"\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a",
+          "title": "title"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "title on the next line indented",
+      "markdown": "[a]: /url\n   \"title\"\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a",
+          "title": "title"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "title after a tab",
+      "markdown": "[a]: /url\t\"title\"\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a",
+          "title": "title"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "empty double quoted title is dropped",
+      "markdown": "[a]: /url \"\"\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "empty single quoted title is dropped",
+      "markdown": "[a]: /url ''\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "title spanning two lines",
+      "markdown": "[a]: /url \"one\ntwo\"\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a",
+          "title": "one\ntwo"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "title holding an escaped quote",
+      "markdown": "[a]: /url \"a \\\" b\"\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a",
+          "title": "a \" b"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "title holding an escaped punctuation mark",
+      "markdown": "[a]: /url \"a \\* b\"\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a",
+          "title": "a * b"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "title holding a backslash before a letter",
+      "markdown": "[a]: /url \"a \\x b\"\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a",
+          "title": "a \\x b"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "single quoted title holding a double quote",
+      "markdown": "[a]: /url 'a \" b'\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a",
+          "title": "a \" b"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "double quoted title holding a single quote",
+      "markdown": "[a]: /url \"a ' b\"\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a",
+          "title": "a ' b"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "title holding an ampersand",
+      "markdown": "[a]: /url \"Tom & Jerry\"\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a",
+          "title": "Tom & Jerry"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "title holding a bracket",
+      "markdown": "[a]: /url \"a [b] c\"\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a",
+          "title": "a [b] c"
+        }
+      },
+      "html": ""
+    },
+    {
+      "name": "blank line between href and title abandons the title",
+      "markdown": "[a]: /url\n\n\"title\"\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": "<!-- wp:paragraph -->\n<p>\"title\"</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "definition inside a block quote",
+      "markdown": "> [a]: /url\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"></blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "definition inside a block quote with a title",
+      "markdown": "> [a]: /url \"t\"\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a",
+          "title": "t"
+        }
+      },
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"></blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "definition inside a block quote then a paragraph",
+      "markdown": "> [a]: /url\n\nPara.\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"></blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "definition inside a list item",
+      "markdown": "- [a]: /url\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": "<!-- wp:list -->\n<ul><li></li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "definition inside a nested block quote",
+      "markdown": "> > [a]: /url\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"></blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "definition in a block quote and another outside it",
+      "markdown": "> [a]: /one\n\n[b]: /two\n",
+      "ref_links": {
+        "A": {
+          "url": "/one",
+          "label": "a"
+        },
+        "B": {
+          "url": "/two",
+          "label": "b"
+        }
+      },
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"></blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "same key defined inside and outside a block quote",
+      "markdown": "> [a]: /inside\n\n[a]: /outside\n",
+      "ref_links": {
+        "A": {
+          "url": "/inside",
+          "label": "a"
+        }
+      },
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"></blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "definition then a heading",
+      "markdown": "[a]: /url\n\n# Heading\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>Heading</h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "heading then a definition",
+      "markdown": "# Heading\n\n[a]: /url\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>Heading</h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "definition then a thematic break",
+      "markdown": "[a]: /url\n\n***\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": "<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n"
+    },
+    {
+      "name": "definition then a fenced code block",
+      "markdown": "[a]: /url\n\n```\ncode\n```\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": "<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>code\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "definition then a list",
+      "markdown": "[a]: /url\n\n- one\n- two\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "fenced code holding a definition is not a definition",
+      "markdown": "```\n[a]: /url\n```\n",
+      "ref_links": {},
+      "html": "<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>[a]: /url\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "indented code holding a definition is not a definition",
+      "markdown": "Para.\n\n    [a]: /url\n",
+      "ref_links": {},
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>[a]: /url</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "setext underline after a definition",
+      "markdown": "[a]: /url\n---\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": "<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n"
+    },
+    {
+      "name": "definition with crlf line endings",
+      "markdown": "[a]: /url\r\n\r\nPara.\r\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "definition inside frontmatter is stripped",
+      "markdown": "---\ntitle: x\n---\n[a]: /url\n",
+      "ref_links": {
+        "A": {
+          "url": "/url",
+          "label": "a"
+        }
+      },
+      "html": ""
+    }
+  ],
+  "declines": [
+    {
+      "name": "empty label",
+      "markdown": "[]: /url\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[]: /url</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "whitespace only label",
+      "markdown": "[   ]: /url\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[   ]: /url</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "newline only label",
+      "markdown": "[\n]: /url\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[\n]: /url</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "label of 501 characters",
+      "markdown": "[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]: /url\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]: /url</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "no href at all",
+      "markdown": "[a]:\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[a]:</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "href is only whitespace",
+      "markdown": "[a]:   \n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[a]:</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "trailing text after the href",
+      "markdown": "[a]: /url extra\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[a]: /url extra</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "trailing text after the title",
+      "markdown": "[a]: /url \"t\" extra\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[a]: /url \"t\" extra</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "unterminated angle bracket href",
+      "markdown": "[a]: <https://example.com\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[a]: <https://example.com</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "angle bracket href holding a backslash",
+      "markdown": "[a]: <a\\b>\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[a]: <a\\b></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "angle bracket href holding a newline",
+      "markdown": "[a]: <a\nb>\n",
+      "ref_links": {},
+      "python_html": null
+    },
+    {
+      "name": "definition directly under a paragraph",
+      "markdown": "Para.\n[a]: /url\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>Para.\n[a]: /url</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "definition directly under a paragraph, with a title",
+      "markdown": "Para.\n[a]: /url \"t\"\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>Para.\n[a]: /url \"t\"</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "second definition directly under a paragraph",
+      "markdown": "Para.\n[a]: /one\n[b]: /two\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>Para.\n[a]: /one\n[b]: /two</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "label holding an unescaped bracket",
+      "markdown": "[a[b]: /url\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[a[b]: /url</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "colon missing",
+      "markdown": "[a] /url\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[a] /url</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "space before the colon",
+      "markdown": "[a] : /url\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[a] : /url</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "unterminated label",
+      "markdown": "[a: /url\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[a: /url</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "href then an unquoted title",
+      "markdown": "[a]: /url title\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[a]: /url title</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "href holding an escaped space",
+      "markdown": "[a]: /url\\ x\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[a]: /url\\ x</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "href holding a next line control",
+      "markdown": "[a]: /ur\u0085l\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[a]: /ur\u0085l</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "href holding a file separator control",
+      "markdown": "[a]: /ur\u001cl\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[a]: /ur\u001cl</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "href holding a non breaking space",
+      "markdown": "[a]: /ur\u00a0l\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[a]: /ur\u00a0l</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "title opened but not closed",
+      "markdown": "[a]: /url \"t\n",
+      "ref_links": {},
+      "python_html": "<!-- wp:paragraph -->\n<p>[a]: /url \"t</p>\n<!-- /wp:paragraph -->\n\n"
+    }
+  ]
+}

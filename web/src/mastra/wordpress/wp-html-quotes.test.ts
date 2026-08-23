@@ -121,13 +121,15 @@ describe("the quote oracle has teeth", () => {
   });
 
   it("still refuses the rules that are not ported yet, inside a quote", () => {
-    // A quote reparses its body with the full rule set, so an unported rule in
-    // a quote must stop the converter rather than flatten to a paragraph. This
-    // read `> - item` until 5.3c-iii-b-1-b-ii-2 ported `list` and
-    // `> <div>raw</div>` until -ii-3-a ported `raw_html`; both are now replay
-    // cases, in `wp-html-lists.test.ts` and `wp-html-raw-html.test.ts`.
-    expect(() =>
-      markdownToWpHtml("> [label]: https://example.com\n"),
-    ).toThrowError(UnportedMarkdownError);
+    // A quote reparses its body, so an unported rule in a quote must stop the
+    // converter rather than flatten to a paragraph. This read `> - item` until
+    // 5.3c-iii-b-1-b-ii-2 ported `list`, `> <div>raw</div>` until -ii-3-a ported
+    // `raw_html` and `> [label]: https://example.com` until -ii-3-b-2 ported
+    // `ref_link`, which finished the block layer; all three are now replay cases
+    // in `wp-html-lists.test.ts`, `wp-html-raw-html.test.ts` and
+    // `wp-html-ref-link.test.ts`, and only the inline rules are left to refuse.
+    expect(() => markdownToWpHtml("> an *emphasised* word\n")).toThrowError(
+      UnportedMarkdownError,
+    );
   });
 });

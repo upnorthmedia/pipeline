@@ -137,11 +137,13 @@ describe("the list oracle has teeth", () => {
   });
 
   it("still refuses the rules that are not ported yet, inside a list item", () => {
-    // An item reparses its body with the full rule set, so an unported rule in
-    // an item must stop the converter rather than flatten to text. This read
-    // `- <div>raw</div>` until 5.3c-iii-b-1-b-ii-3-a ported `raw_html`.
-    expect(() =>
-      markdownToWpHtml("- [label]: https://example.com\n"),
-    ).toThrowError(UnportedMarkdownError);
+    // An item reparses its body, so an unported rule in an item must stop the
+    // converter rather than flatten to text. This read `- <div>raw</div>` until
+    // 5.3c-iii-b-1-b-ii-3-a ported `raw_html` and `- [label]: https://example.com`
+    // until -ii-3-b-2 ported `ref_link`, which finished the block layer; only
+    // the inline rules are left to refuse.
+    expect(() => markdownToWpHtml("- an *emphasised* word\n")).toThrowError(
+      UnportedMarkdownError,
+    );
   });
 });

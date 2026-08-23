@@ -105,29 +105,15 @@ describe("the oracle has teeth", () => {
 describe("constructs whose handlers are not ported yet", () => {
   /**
    * These throw rather than falling through to a paragraph, so that wiring the
-   * converter into the publish workflow before 5.3c-iii-b-1-b-ii-3-b-2 and -b-iii
-   * land cannot silently drop a link.
+   * converter into the publish workflow before 5.3c-iii-b-1-b-iii lands cannot
+   * silently drop a link.
    *
-   * `block_quote` was in this list until 5.3c-iii-b-1-b-ii-1 ported it, `list`
-   * until -ii-2 and `raw_html` until -ii-3-a; their coverage is now
-   * `wp-html-quotes.test.ts`, `wp-html-lists.test.ts` and
-   * `wp-html-raw-html.test.ts`.
+   * Only inline rules are left. `block_quote` was listed here until
+   * 5.3c-iii-b-1-b-ii-1 ported it, `list` until -ii-2, `raw_html` until -ii-3-a
+   * and `ref_link` until -ii-3-b-2, which finished the block layer; their
+   * coverage is now `wp-html-quotes.test.ts`, `wp-html-lists.test.ts`,
+   * `wp-html-raw-html.test.ts` and `wp-html-ref-link.test.ts`.
    */
-
-  it.each([["ref_link", "[label]: https://example.com\n"]])(
-    "throws for the %s block rule",
-    (rule, markdown) => {
-      expect(() => markdownToWpHtml(markdown)).toThrowError(
-        UnportedMarkdownError,
-      );
-      try {
-        markdownToWpHtml(markdown);
-      } catch (error) {
-        expect((error as UnportedMarkdownError).rule).toBe(rule);
-        expect((error as Error).message).toContain("5.3c-iii-b-1-b-ii");
-      }
-    },
-  );
 
   it.each([
     ["emphasis", "an *emphasised* word\n"],
