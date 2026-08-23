@@ -757,9 +757,16 @@ pages that use it work with the Python API stopped.
             through the real function, with three documented divergences.
 
             Evidence: [`evidence/phase-5.md` #5.3c-iii-b-2-b](../mastra-port/evidence/phase-5.md)
-          - [ ] 5.3c-iii-b-2-c The payload: `post.ready_content or post.final_md_content
+          - [x] 5.3c-iii-b-2-c The payload: `post.ready_content or post.final_md_content
             or ""`, the `image_manifest` walk that reads each image off disk and
             base64-encodes it, and the `json.dumps` whose exact bytes the signature covers.
+            `json.dumps` is `ensure_ascii=True` with `", "` / `": "` separators, neither of
+            which `JSON.stringify` does, so `web/src/mastra/nextjs/json-dumps.ts` ports it
+            beside the block in `web/src/mastra/nextjs/payload.ts`. Verified against a
+            78-case oracle plus 30 recorded `json.dumps` cases, with four documented
+            divergences.
+
+            Evidence: [`evidence/phase-5.md` #5.3c-iii-b-2-c](../mastra-port/evidence/phase-5.md)
           - [ ] 5.3c-iii-b-2-d The Mastra step and workflow for `publish_to_nextjs`: the
             profile, webhook-configuration and decrypt guards, the
             `nextjs_publish_status` transitions with `nextjs_published_at`, the webhook

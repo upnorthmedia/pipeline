@@ -52,8 +52,13 @@ export interface MediaUploader {
   ): Promise<unknown>
 }
 
-/** Python's name for the type of a decoded JSON value, for `AttributeError`. */
-function pythonTypeName(value: unknown): string {
+/**
+ * Python's name for the type of a decoded JSON value, for `AttributeError`.
+ *
+ * Exported because the Next.js payload walk in `../nextjs/payload.ts` names
+ * the same set of values in the same messages.
+ */
+export function pythonTypeName(value: unknown): string {
   if (value === null) return "NoneType"
   if (Array.isArray(value)) return "list"
   switch (typeof value) {
@@ -67,7 +72,7 @@ function pythonTypeName(value: unknown): string {
     case "number":
       return Number.isInteger(value) ? "int" : "float"
     default:
-      return "object"
+      return "dict"
   }
 }
 

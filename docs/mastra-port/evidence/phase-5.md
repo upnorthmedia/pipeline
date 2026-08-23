@@ -14052,3 +14052,192 @@ baseline. `.env` has no `export` lines, so the variables stay shell-local and py
 reaches the compose default port; `set -a; source ../.env; set +a` is what exports them.
 Without it the run answers `4 failed, 205 passed, 177 errors`, and with only a partial
 export, `InvalidPasswordError` against whatever else is listening on 5433.
+
+## 5.3c-iii-b-2-c
+
+The Next.js webhook payload: `post.ready_content or post.final_md_content or ""`, the
+`image_manifest` walk that base64-encodes each image off disk, and the `json.dumps` whose
+exact bytes the HMAC signature covers.
+
+Ported in `web/src/mastra/nextjs/payload.ts` (the block) and
+`web/src/mastra/nextjs/json-dumps.ts` (`json.dumps` with CPython's defaults). Two helpers
+already written for the WordPress branch are exported rather than re-spelled:
+`pythonTypeName` from `web/src/mastra/wordpress/media-upload.ts` (with its unreachable
+`default` arm corrected from `object` to `dict`) and `statOrAbsent` from
+`web/src/mastra/wordpress/media-walk.ts`, which is `pathlib._IGNORED_ERRNOS` behind
+`is_file()`. `pyTruthy` is exported out of `apply-mapping-to-content.ts` with an arm added
+for a decoded JSON object, which `yaml.safe_load` never returns but the `image_manifest`
+and `nextjs_frontmatter_map` columns do.
+
+### Why `JSON.stringify` is not the port
+
+`json.dumps` differs from `JSON.stringify` on ordinary article content, not on edge cases:
+
+- `ensure_ascii` defaults to true, so every character outside `\x20`-`\x7e` becomes a
+  `\uXXXX` escape. That is every accented letter, CJK character and emoji in the post, and
+  it includes `\x7f`, which `JSON.stringify` emits literally.
+- With no `indent` the separators are `", "` and `": "`, not `","` and `":"`.
+
+Both are covered by the oracle and by direct `JSON.stringify` comparisons in the test.
+
+### Preserved behaviours
+
+1. `manifest.get`, `img.get`, `"/" in url` and `url.rsplit` are Python attribute lookup and
+   membership over a JSONB column holding model output. A manifest that is a string, an
+   `images` that is `null`, or an entry that is a list raises `AttributeError` or
+   `TypeError` out of `publish_to_nextjs`, which catches neither, so the publish fails
+   rather than skipping the entry. Twelve oracle cases record the raise and its message.
+2. `.get` reads a stored `null` as the value rather than as a missing key, so
+   `{"alt_text": null}` yields `null` in the payload where a `??` fallback would yield `""`.
+3. `post.image_manifest or {"images": []}` is Python truthiness: an empty dict, an empty
+   list and a stored `0` all take the default, and a stored `[]` therefore succeeds where a
+   JavaScript truthiness test would reach `[].get` and raise.
+4. `Path.is_file()` swallows `ENOENT`, `ENOTDIR`, `EBADF`, `ELOOP` and the `ValueError`
+   from an embedded NUL and lets everything else through, so a `url` ending in `..`, naming
+   a directory, or naming a file that is not there all record `"data": null`, while a name
+   too long for the filesystem raises `OSError` out of the publish.
+
+### Divergences
+
+1. **`OSError` message.** Node reports a symbolic code where CPython reports
+   `[Errno N] <strerror>`, and the numbering is platform specific (36 on Linux, 63 on
+   macOS). `PyOSError` preserves the code and the path only. The oracle's message is
+   asserted to contain `File name too long`; the port's is matched against
+   `/^ENAMETOOLONG: '.*\/media\/post-1\/a{300}\.webp'$/`.
+2. **Int versus float, and integers past 2^53.** Python reads a JSON number without a
+   fraction or exponent as an `int` and any other as a `float`, and re-emits them
+   differently (`1.0` stays `1.0`, `1e2` becomes `100.0`). The `pg` driver parses a JSONB
+   column with `JSON.parse`, which erases the tag before this module sees it, and loses
+   digits past 2^53. Eleven `dumps` cases are listed in `PARSE_DIVERGENCES` in the test with
+   the value the port actually produces, asserted both to equal that and to differ from
+   Python's. Not reachable from the payload's own seven keys or an image record's five,
+   which are fixed, non-numeric and string valued.
+3. **Object key order.** JavaScript reorders integer-like keys to the front of an object,
+   so a nested `{"2": …, "a": …, "1": …}` inside `alt_text` emits in a different order than
+   Python's insertion-ordered dict. Same root cause as (2), same reachability.
+4. **Timestamp precision.** `datetime.now(UTC).isoformat()` prints microseconds; a `Date`
+   only carries milliseconds, so `isoformatUtc` always ends `000+00:00`. It reproduces
+   Python's rule of omitting the fractional part entirely when the microseconds are zero.
+
+Divergences 2 and 3 are recorded in `todo.md`.
+
+### The oracle
+
+`api/scripts/export_nextjs_payload_parity.py` asserts via `inspect.getsource` that the
+twenty-five lines it describes are still in `publish_to_nextjs`, extracts the block between
+`content = post.ready_content …` and `signature = sign_payload(…)`, dedents it, compiles it
+and executes it against stubs for `post`, `profile`, `settings`, `uuid` and `datetime`, so
+the recorded answers cannot drift from the block they describe without the export raising.
+It runs inside the deployed image, matching the practice set in 5.3c-iii-b-1-c-ii-3.
+
+```
+$ docker run --rm -v "$PWD/api/scripts:/app/scripts:ro" \
+    -v "$PWD/web/src/mastra/nextjs/data:/out" jena-api-oracle \
+    python scripts/export_nextjs_payload_parity.py /out/nextjs-payload-parity.json
+wrote 78 cases and 30 dumps cases to /out/nextjs-payload-parity.json
+```
+
+78 payload cases (66 returning the exact `json.dumps` string, 12 raising) plus 30
+`json.dumps` cases recorded as raw JSON literals so the int/float distinction survives the
+file format.
+
+```
+$ pnpm -C web vitest run src/mastra/nextjs/payload.test.ts
+ Test Files  1 passed (1)
+      Tests  121 passed (121)
+```
+
+### Mutations
+
+Thirty-four mutations, each applied to `payload.ts` or `json-dumps.ts` alone with the
+oracle test re-run and the file restored. Thirty-one killed, three survive with an
+equivalence argument.
+
+| Mutation | Verdict | Failing tests |
+| --- | --- | --- |
+| payload: `??` instead of Python `or` for content | killed | 2 |
+| payload: JS truthiness for the manifest default | killed | 1 |
+| payload: subscript instead of `.get` for images | killed | 3 |
+| payload: JS truthiness for url | SURVIVED | 0 |
+| payload: drop the slash membership test | killed | 4 |
+| payload: drop the empty-filename guard | killed | 4 |
+| payload: `??` instead of `hasOwn` in `.get` | killed | 3 |
+| payload: wrong alt default | killed | 15 |
+| payload: wrong placement default | killed | 19 |
+| payload: `split` instead of `rsplit` | killed | 26 |
+| payload: image key order | killed | 23 |
+| payload: `base64url` instead of `base64` | killed | 16 |
+| payload: exists instead of `is_file` | killed | 3 |
+| payload: JS truthiness for the frontmatter map | killed | 1 |
+| payload: media dir without the post id | killed | 18 |
+| payload: iterating a string as one item | killed | 1 |
+| payload: iterating a dict as its values | killed | 1 |
+| payload: wrong event name | killed | 66 |
+| payload: no `+00:00` offset | killed | 1 |
+| payload: `null` instead of `""` as the url default | SURVIVED | 0 |
+| payload: list membership always false | killed | 1 |
+| payload: iterating a string by code unit | SURVIVED | 0 |
+| payload: let the embedded-NUL `ValueError` through | killed | 1 |
+| dumps: leave U+007F literal | killed | 3 |
+| dumps: escape only above U+00FF | killed | 9 |
+| dumps: no space after the array comma | killed | 5 |
+| dumps: no space after the key colon | killed | 70 |
+| dumps: no space after the object comma | killed | 69 |
+| dumps: unpadded escape | killed | 11 |
+| dumps: uppercase hex escape | killed | 11 |
+| dumps: `String()` for every number | killed | 3 |
+| dumps: `String()` instead of `BigInt` for an int | killed | 4 |
+| dumps: no backspace shortcut | killed | 3 |
+| dumps: `-0.0` for negative zero | killed | 2 |
+
+Equivalence proofs for the three survivors:
+
+- **JS truthiness for url.** The only JSON values on which Python and JavaScript truthiness
+  disagree are `{}` and `[]`. Both then fail `"/" in url` (`hasOwn` on an empty object,
+  `includes` on an empty array), produce an empty `actual_filename` and hit the next
+  `continue`, so the entry is skipped either way. Every other value (`0`, `false`, `""`,
+  `null`) is falsy in both languages.
+- **`null` instead of `""` as the url default.** Both defaults are falsy, and the guard on
+  the very next line skips the entry, so the default is never observable.
+- **Iterating a string by code unit rather than code point.** They differ only on an astral
+  character, and every element of either iteration is a `str`, which raises the same
+  `AttributeError: 'str' object has no attribute 'get'` on the next line.
+
+Two mutations found real gaps rather than equivalences and were fixed by adding oracle
+cases rather than controls, as in 5.3c-iii-b-1-c-ii-3: `{"images": ""}` and
+`{"images": {}}` are both iterable and both yield nothing, which is what separates
+iterating a string from wrapping it. Two more found dead code in the first draft: the
+`index === -1` arm of `rsplit` is unreachable behind the membership guard (`slice` from
+`lastIndexOf(…) + 1` is `rsplit`'s whole semantics with no branch), and the `1e21`
+threshold on the integral arm of `encodeNumber` is inert because `String(n)` and
+`BigInt(n).toString()` agree for every integral value below it. Both were removed.
+
+### Gates
+
+```
+$ pnpm -C web tsc --noEmit
+(exit 0)
+
+$ pnpm -C web lint
+(exit 0)
+
+$ pnpm -C web test
+ Test Files  2 failed | 121 passed (123)
+      Tests  9 failed | 4337 passed | 7 skipped (4353)
+(the Phase 0 baseline of 9: 6 in image-preview.test.tsx and 3 in PostDetail.test.tsx)
+
+$ pnpm -C web build
+(exit 0, compiled successfully)
+
+$ cd api && uv run pytest -q          # with `set -a; source ../.env; set +a`
+120 failed, 241 passed, 25 errors in 12.81s   # the recorded baseline, unchanged
+
+$ cd api && uv run ruff check .
+Found 32 errors.                              # all pre-existing; the new script is clean
+
+$ cd api && uv run ruff check scripts/export_nextjs_payload_parity.py
+All checks passed!
+
+$ cd api && uv run ruff format --check scripts/export_nextjs_payload_parity.py
+1 file already formatted
+```

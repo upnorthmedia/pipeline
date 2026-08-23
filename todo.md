@@ -592,3 +592,22 @@
   interference as the `scaffold-check` entry above (both drain a real Redis Streams
   subscription under load) rather than a defect in the assertion, but it has only been
   seen once, so it is recorded rather than diagnosed.
+- [confirmed] 2026-08-23 `pythonJsonDumps` in `web/src/mastra/prompts.ts` does not escape
+  U+007F. Its regex is `[\u0080-\uffff]`, but Python's `ESCAPE_ASCII` is `[^\ -~]`, so
+  `json.dumps("\x7f")` is `"\u007f"` while that function leaves the character literal. The
+  `ready` stage embeds the image manifest through it, so a manifest carrying a DEL renders
+  a prompt one character different from the Python stack's. Confirmed against the deployed
+  interpreter in `web/src/mastra/nextjs/data/nextjs-payload-parity.json` (case
+  "escaping: delete character"). The fix is to reuse `encodeBasestringAscii` from
+  `web/src/mastra/nextjs/json-dumps.ts`, which is a behaviour change to a rendered prompt
+  and therefore not part of ledger item 5.3c-iii-b-2-c.
+- [investigate] 2026-08-23 The `pg` driver parses a JSONB column with `JSON.parse`, which
+  erases Python's int/float distinction and loses digits past 2^53 before any port sees the
+  value. `json.dumps` re-emits the two differently (`1.0` stays `1.0`, `1e2` becomes
+  `100.0`), and JavaScript additionally reorders integer-like object keys to the front, so
+  a number or a nested numeric-keyed object inside `image_manifest.alt_text` signs
+  different bytes than Python did. Eleven cases are listed in `PARSE_DIVERGENCES` in
+  `web/src/mastra/nextjs/payload.test.ts`. Not reachable from anything the pipeline itself
+  writes, only from model output. The fix, if it is ever needed, is a custom `pg` type
+  parser for JSONB that produces the `PyFloat`/`bigint` markers
+  `web/src/mastra/nextjs/pyyaml/values.ts` already defines.

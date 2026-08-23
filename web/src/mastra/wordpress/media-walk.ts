@@ -44,8 +44,12 @@ const IGNORED_ERRNOS = new Set(["ENOENT", "ENOTDIR", "EBADF", "ELOOP"])
  * `Path.stat()` behind the `is_dir()` / `is_file()` guard: absence for the
  * four ignored errnos and for a path Python cannot encode, and a throw for
  * anything else.
+ *
+ * Exported because `is_file()` in the Next.js payload walk
+ * (`../nextjs/payload.ts`) swallows the same four errnos and the same
+ * `ValueError`.
  */
-async function statOrAbsent(target: string | Buffer): Promise<Stats | null> {
+export async function statOrAbsent(target: string | Buffer): Promise<Stats | null> {
   try {
     return await stat(target)
   } catch (error) {

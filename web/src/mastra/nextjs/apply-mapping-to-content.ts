@@ -44,8 +44,11 @@ function pySplit(text: string, separator: string, maxsplit: number): string[] {
   return parts
 }
 
-/** `bool(value)` for a value `yaml.safe_load` can return. */
-function pyTruthy(value: unknown): boolean {
+/**
+ * `bool(value)` for a value `yaml.safe_load` can return, and for the JSON
+ * values `payload.ts` tests the same way. Exported for the latter.
+ */
+export function pyTruthy(value: unknown): boolean {
   if (value === null || value === undefined) return false
   if (typeof value === "boolean") return value
   if (typeof value === "bigint") return value !== BigInt(0)
@@ -57,7 +60,16 @@ function pyTruthy(value: unknown): boolean {
   if (value instanceof Uint8Array) return value.length > 0
   if (value instanceof Map) return value.size > 0
   if (value instanceof Set) return value.size > 0
+  // A decoded JSON object, which `yaml.safe_load` never returns but the
+  // `image_manifest` and `nextjs_frontmatter_map` columns do. An empty dict is
+  // falsy in Python where every JavaScript object is truthy.
+  if (isPlainObject(value)) return Object.keys(value).length > 0
   return true
+}
+
+function isPlainObject(value: unknown): boolean {
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
 }
 
 /** `type(value).__name__`, for the error messages Python raises. */
