@@ -1724,3 +1724,317 @@ sub_sitemap_pages.xml  sub_sitemap_posts.xml  sub_sitemap_products.xml
 `api/` carried no other data: the textstat corpus the `edit` stage needs was written in
 TypeScript under `web/src/mastra/textstat/data`, generated `media/` has always lived at
 the repo root, and `api/src` contained nothing but `.py` files.
+
+## 7.6
+
+`docker compose up` brings up a working stack, and a post goes from creation to `ready` with
+images through the UI, executing in the `worker` service.
+
+### The stack
+
+Four services from `docker-compose.yml`, built from the repo root against `web/Dockerfile`
+(7.2a). `db` and `redis` were already up in this worktree; `web` and `worker` were built and
+started by this run.
+
+```
+$ docker compose up -d
+ Container objective-port-jena-46c1e6-1-db-1 Healthy
+ Container objective-port-jena-46c1e6-1-redis-1 Healthy
+ Container objective-port-jena-46c1e6-1-worker-1 Started
+ Container objective-port-jena-46c1e6-1-web-1 Started
+
+$ docker compose ps --format 'table {{.Service}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+SERVICE   IMAGE                                 STATUS                        PORTS
+db        postgres:17-alpine                    Up 7 hours (healthy)          0.0.0.0:5435->5432/tcp
+redis     redis:7-alpine                        Up 13 minutes (healthy)       0.0.0.0:6379->6379/tcp
+web       objective-port-jena-46c1e6-1-web      Up 12 minutes (healthy)       0.0.0.0:3000->3000/tcp
+worker    objective-port-jena-46c1e6-1-worker   Up About a minute (healthy)
+```
+
+### What blocked it first: Redis was OOM-killed by its own dataset
+
+The first attempt died 4 minutes in. Both application containers started logging
+`getaddrinfo ENOTFOUND redis` and `redis` had left the compose project entirely.
+
+```
+$ docker inspect objective-port-jena-46c1e6-1-redis-1 \
+    --format '{{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}'
+exited exit=137 oom=true
+
+$ docker compose logs redis --tail 5
+redis-1  | 1:M 23 Aug 2026 20:14:35.025 * 10000 changes in 60 seconds. Saving...
+redis-1  | 1:M 23 Aug 2026 20:14:35.046 * Background saving started by pid 2451
+redis-1  | 2451:C 23 Aug 2026 20:14:37.863 * DB saved on disk
+```
+
+It could not be restarted either: the replay of its own RDB was killed the same way, 12
+seconds in.
+
+```
+$ docker compose logs redis --tail 3
+redis-1  | 1:M 23 Aug 2026 20:18:18.629 * Loading RDB produced by version 7.4.7
+redis-1  | 1:M 23 Aug 2026 20:18:18.629 * RDB age 223 seconds
+redis-1  | 1:M 23 Aug 2026 20:18:18.629 * RDB memory usage when created 4258.55 Mb
+
+$ docker inspect objective-port-jena-46c1e6-1-redis-1 \
+    --format '{{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} \
+              started={{.State.StartedAt}} finished={{.State.FinishedAt}}'
+exited exit=137 oom=true started=2026-08-23T20:18:18.531524839Z finished=2026-08-23T20:18:30.211717177Z
+
+$ docker inspect objective-port-jena-46c1e6-1-redis-1 --format 'MemLimit={{.HostConfig.Memory}}'
+MemLimit=0
+$ docker info --format 'MemTotal={{.MemTotal}}'
+MemTotal=12528582656
+```
+
+No per-container limit; the 12.5 GB Docker VM was already carrying ~7 GB of other
+containers, so a 4.2 GB dataset plus a `BGSAVE` fork is what the kernel killed. The dataset
+itself was the cause: Mastra gives each run its own `workflow.events.v2.<runId>` stream and
+deletes it through `clearTopic` at the end of the run's lifecycle, and a run that never
+reaches that call (a killed worker, a crashed test) leaves the stream behind forever. This is
+the `[investigate]` entry logged in 7.2b, now confirmed and fixed.
+
+`streamIdleTtlMs` is the library's own backstop for exactly this and defaults to 0, meaning
+no expiry at all (`@mastra/redis-streams@0.4.0/dist/index.d.ts:27-38`). The app now sets it:
+
+```
+export const STREAM_IDLE_TTL_MS = 24 * 60 * 60_000
+
+export const pubsub = new RedisStreamsPubSub({
+  url: redisUrl(),
+  reclaimIdleMs: RECLAIM_IDLE_MS,
+  streamIdleTtlMs: STREAM_IDLE_TTL_MS,
+  logger: { debug: sink("debug"), warn: sink("warn") },
+})
+```
+
+Proven against the real Redis by `web/src/mastra/stream-retention.test.ts`, which publishes
+through the app's own `pubsub` and reads `PTTL` from an independent connection, with a
+control transport left on the library default:
+
+```
+$ pnpm -C web exec vitest run src/mastra/stream-retention.test.ts
+ ✓ src/mastra/stream-retention.test.ts (4 tests) 2021ms
+     ✓ slides forward on every write, so a stream in use is never collected mid-flight 2005ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+```
+
+Mutated back to the pre-fix state (the `streamIdleTtlMs` line commented out), the first test
+fails with the value that filled the dev Redis:
+
+```
+$ pnpm -C web exec vitest run src/mastra/stream-retention.test.ts -t "gives a stream it writes an expiry"
+     × gives a stream it writes an expiry, so an abandoned run's events cannot outlive it 4ms
+AssertionError: expected -1 to be greater than 0
+      Tests  1 failed | 3 skipped (4)
+```
+
+The TTL only applies to streams written from now on, so the existing orphans were dropped
+with the dev volume (`docker compose rm -sf redis && docker volume rm
+objective-port-jena-46c1e6-1_redisdata`). Nothing durable was lost: run state and posts live
+in Postgres, Redis carries transport and SSE fan-out. Redis after the whole end-to-end run
+below:
+
+```
+$ docker exec objective-port-jena-46c1e6-1-redis-1 redis-cli info memory | grep used_memory_human
+used_memory_human:6.16M
+$ docker exec objective-port-jena-46c1e6-1-redis-1 redis-cli dbsize
+5
+```
+
+### The run, driven through the UI
+
+Everything below was done in a browser against `http://localhost:3000`, served by the `web`
+container. The account was signed in through the sign-in form (a `credential` row was written
+directly rather than using sign-up, because BetterAuth's Stripe plugin calls
+`createCustomerOnSignUp` and this is a throwaway user).
+
+1. `/profiles` -> **New Profile** -> "Compose Stack Check". The dialog's defaults gave every
+   stage `auto`, which is what makes the run need no manual intervention:
+
+```
+$ psql -c "select name, user_id, default_stage_settings from website_profiles"
+ Compose Stack Check | e2e-7.6-74b19d5c-... | {"edit": "auto", "ready": "auto", "write": "auto",
+                                               "images": "auto", "outline": "auto", "research": "auto"}
+```
+
+2. `/posts/new` -> profile "Compose Stack Check", topic "How small businesses choose a local
+   SEO agency" (slug auto-filled), word count 800, two related keywords -> **Create Post**.
+3. `/posts/<id>` -> **Force Restart**, which is the UI's full-pipeline control:
+
+```
+web-1  |  POST /api/posts/272e38d1-bed9-4237-a48d-bda64aed9795/restart 202 in 1893ms
+```
+
+The run then walked all six stages with no further input. Polled from `posts` every 20 s:
+
+```
+15:37:31 research|{... "research": "running"}|0|0|0|0|0|0
+15:38:11 outline |{... "outline": "running", "research": "complete"}|19417|0|0|0|0|0
+15:39:31 write   |{... "write": "running", "outline": "complete"}|19417|12769|0|0|0|0
+15:39:51 edit    |{... "edit": "running", "write": "complete"}|19417|12769|6593|0|0|0
+15:41:12 images  |{... "images": "running", "edit": "complete"}|19417|12769|6593|9668|0|0
+15:42:52 ready   |{... "ready": "running", "images": "complete"}|19417|12769|6593|9668|0|5
+15:43:32 complete|{"edit": "complete", "ready": "complete", "write": "complete",
+                  "images": "complete", "outline": "complete", "research": "complete"}
+                 |19417|12769|6593|9668|7805|5
+```
+
+(columns: `current_stage | stage_status | research | outline | draft | final_md | ready |
+images in manifest`)
+
+The post's own execution log, which is what the dashboard's Debug Logs panel renders:
+
+```
+$ psql -c "select (e->>'ts')||' | '||coalesce(nullif(e->>'stage',''),'-')||' | '||(e->>'event')
+           from posts, jsonb_array_elements(execution_logs) e where id='272e38d1-...'"
+2026-08-23T20:36:57.273+00:00 | -        | pipeline_start
+2026-08-23T20:36:57.288+00:00 | research | stage_start
+2026-08-23T20:38:09.909+00:00 | research | stage_complete
+2026-08-23T20:38:09.919+00:00 | outline  | stage_start
+2026-08-23T20:39:17.824+00:00 | outline  | stage_complete
+2026-08-23T20:39:17.838+00:00 | write    | stage_start
+2026-08-23T20:39:44.427+00:00 | write    | stage_complete
+2026-08-23T20:39:44.434+00:00 | edit     | stage_start
+2026-08-23T20:41:00.279+00:00 | edit     | stage_complete
+2026-08-23T20:41:00.298+00:00 | images   | stage_start
+2026-08-23T20:42:44.472+00:00 | images   | stage_complete
+2026-08-23T20:42:44.498+00:00 | ready    | stage_start
+2026-08-23T20:43:23.768+00:00 | ready    | stage_complete
+2026-08-23T20:43:23.774+00:00 | -        | pipeline_complete
+```
+
+Six minutes 26 seconds, creation click to `pipeline_complete`.
+
+### With images
+
+Five images, generated and written to the `mediadata` volume that both services mount:
+
+```
+$ psql -c "select jsonb_pretty(image_manifest) ..." | head -20
+{
+    "model": "gemini-3-pro-image-preview",
+    "images": [
+        {
+            "id": "featured",
+            "url": "/media/272e38d1-bed9-4237-a48d-bda64aed9795/featured-082326-48.webp",
+            "type": "featured",
+            ...
+
+$ docker compose exec -T web ls -la /app/media/272e38d1-bed9-4237-a48d-bda64aed9795
+-rw-r--r--    1 root     root         56942 Aug 23 20:42 agency-vetting-questions.webp
+-rw-r--r--    1 root     root        123360 Aug 23 20:42 featured-082326-48.webp
+-rw-r--r--    1 root     root         37112 Aug 23 20:41 local-seo-service-components.webp
+-rw-r--r--    1 root     root         38340 Aug 23 20:42 ninety-day-timeline.webp
+-rw-r--r--    1 root     root         39238 Aug 23 20:41 seo-budget-tiers.webp
+```
+
+The manifest's `model` is the provider's own reported id, not the requested one
+(`steps/images-manifest.ts:130`): `stage-models.ts` asks for `gemini-3-pro-image` and Gemini
+answered as `gemini-3-pro-image-preview`.
+
+The screenshot `docs/mastra-port/compose/7.6-post-detail-complete.png` is the post detail page
+at the end of the run: `COMPLETE` badge, all eight step circles green, the Ready tab's live
+preview with a generated image rendered inline through `/media`, the Debug Logs panel with the
+per-stage timings that arrived over SSE, and the analytics bar. Browser console during the
+whole session:
+
+```
+$ npx -y chrome-devtools-axi console
+## Console messages
+Showing 1-8 of 8 (Page 1 of 1).
+msgid=63 [log] [Fast Refresh] rebuilding (1 args)
+msgid=64 [log] [Fast Refresh] done in 152ms (1 args)
+...
+```
+
+Eight messages, all Fast Refresh from the dev-mode container. No errors, no warnings.
+
+### Executing in the `worker` service
+
+`web` never calls `mastra.startWorkers()`, so it joins no consumer group and executes no
+step; it publishes onto Redis Streams and returns. Demonstrated rather than asserted: with
+`worker` stopped, **Rerun Stage** was clicked in the UI.
+
+```
+$ docker compose stop worker
+ Container objective-port-jena-46c1e6-1-worker-1 Stopped
+
+web-1  |  POST /api/posts/272e38d1-.../rerun 202 in 1951ms
+
+$ psql -c "select current_stage, length(ready_content), stage_status->>'ready' ..."
+pending | ready_len=0 | pending
+```
+
+`web` accepted the request, cleared `ready_content` and published. Ninety seconds later
+nothing had executed, and the event was still sitting undelivered in the stream:
+
+```
+$ psql -c "select now(), current_stage, length(ready_content), stage_status->>'ready' ..."
+2026-08-23 20:47:14.850206+00 -> pending | ready_len=0 | pending
+
+$ docker exec ... redis-cli xinfo groups mastra:topic:workflows | tail -8
+    5) "pending"
+    6) (integer) 0
+    9) "entries-read"
+   10) (integer) 37
+   11) "lag"
+   12) (integer) 1
+```
+
+Starting `worker` alone finished the stage, with no further UI action:
+
+```
+$ docker compose start worker    # 15:47:19
+ Container objective-port-jena-46c1e6-1-worker-1 Started
+
+$ psql -c "select current_stage, length(ready_content), stage_status->>'ready', updated_at ..."
+complete | ready_len=7805 | complete | 2026-08-23 20:48:15.184+00
+```
+
+The post's own log dates the execution to the worker's return, not to the accepted request:
+`web` answered 202 at 20:45:33, and `pipeline_start` (written by the `pipeline-start` step)
+is stamped 20:47:41, twenty-two seconds after the container came back and finished rebuilding
+its bundle.
+
+```
+2026-08-23T20:47:41.794+00:00 | -     | pipeline_start
+2026-08-23T20:47:41.863+00:00 | ready | stage_start
+2026-08-23T20:48:15.179+00:00 | ready | stage_complete
+2026-08-23T20:48:15.187+00:00 | -     | pipeline_complete
+```
+
+### Gates
+
+```
+$ pnpm -C web exec tsc --noEmit
+tsc exit=0
+
+$ pnpm -C web lint
+lint exit=0
+
+$ pnpm -C web test
+ Test Files  3 failed | 133 passed (136)
+      Tests  10 failed | 4513 passed | 7 skipped (4530)
+
+$ pnpm -C web build
+build exit=0
+```
+
+Nine of the ten failures are the standing baseline (six in `image-preview.test.tsx`, three in
+`PostDetail.test.tsx`). The tenth is `scaffold-check.test.ts > emits the workflow lifecycle
+events the trace view will read`, which is flaky under a full parallel run and passes in
+isolation:
+
+```
+$ pnpm -C web exec vitest run src/mastra/workflows/scaffold-check.test.ts
+ ✓ src/mastra/workflows/scaffold-check.test.ts (5 tests) 3212ms
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+```
+
+It also passed in one of the three full runs made during this item (9 failures, the exact
+baseline), and no worker process was running for any of them, which rules out the stray-worker
+explanation logged in 7.2a for this particular failure. Logged in `todo.md` for item 9.1.

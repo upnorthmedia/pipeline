@@ -691,13 +691,15 @@
   Either ship the migrator in the image and set a preDeploy command, or accept the manual step
   and keep it documented.
 
-- [investigate] 2026-08-23 The shared dev Redis had exited on its own during ledger item 7.2b
-  (`getaddrinfo ENOTFOUND redis` from inside the compose network while `docker ps` still
-  reported it healthy). Restarting it logged `RDB memory usage when created 4228.13 Mb` for
-  983 keys, which looks like an OOM kill. Mastra's Redis Streams entries are never trimmed, so
-  months of test runs accumulate; the stale backlog is the same one every worker boot drains.
-  Worth deciding on a `MAXLEN` trim or a separate Redis database for tests, which item 9.1
-  already has a related reason to want.
+- [confirmed] 2026-08-23 `scaffold-check.test.ts > emits the workflow lifecycle events the
+  trace view will read` fails under a full parallel `pnpm -C web test` while passing in
+  isolation in 3.2 s, and it did so during ledger item 7.6 with no worker process anywhere on
+  the machine (the compose `worker` was stopped for the run). That rules out the stray-worker
+  explanation logged above for this particular failure and leaves in-suite contention on the
+  shared orchestration topic as the remaining candidate. It failed in two of three full runs
+  made that day and passed in the third, taking the total to 10 failures against the standing
+  baseline of 9. Item 9.1 needs a green run, so the suites that drive a real Mastra worker
+  need their own key prefix or their own Redis database index.
 
 - [confirmed] 2026-08-23 The objective's literal typecheck gate `pnpm -C web tsc --noEmit`
   does not run on the installed pnpm (10.26.2): it exits 254 with

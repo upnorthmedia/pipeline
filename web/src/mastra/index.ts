@@ -100,9 +100,29 @@ function sink(level: "debug" | "warn") {
  */
 export const RECLAIM_IDLE_MS = 15 * 60_000
 
+/**
+ * Sliding expiry on every stream this transport writes, refreshed on each
+ * write, so a topic nothing will ever read again cannot live forever.
+ *
+ * Mastra gives each run its own `workflow.events.v2.<runId>` stream and deletes
+ * it through `clearTopic` when the run's lifecycle ends. A run that dies before
+ * that point (a killed worker, a crashed test, a failed stage) leaves its
+ * stream behind with no owner, and the library's default for this option is 0,
+ * meaning no expiry at all. The dev Redis reached 4.2 GB of those orphans and
+ * the container was OOM-killed twice while replaying its own RDB, which is what
+ * `docker compose up` had to survive for ledger item 7.6.
+ *
+ * A day is well past any live reader: the SSE trace replays a run's events
+ * while it executes and for as long as the tab stays open, and a run parked at
+ * a review gate resumes by publishing new events, which recreates the stream.
+ * The cost is that the trace of a run nobody touched for a day starts empty.
+ */
+export const STREAM_IDLE_TTL_MS = 24 * 60 * 60_000
+
 export const pubsub = new RedisStreamsPubSub({
   url: redisUrl(),
   reclaimIdleMs: RECLAIM_IDLE_MS,
+  streamIdleTtlMs: STREAM_IDLE_TTL_MS,
   logger: { debug: sink("debug"), warn: sink("warn") },
 })
 

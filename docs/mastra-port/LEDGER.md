@@ -1406,8 +1406,19 @@ pages that use it work with the Python API stopped.
   copied into `web/src/mastra/sitemap/data/fixtures/` in `6bf29f4`; `api/src` held nothing
   but `.py` files.
   Evidence: [`evidence/phase-7.md` #7.5](../mastra-port/evidence/phase-7.md)
-- [ ] 7.6 `docker-compose up` brings up a working stack and a post goes from creation to `ready`
+- [x] 7.6 `docker-compose up` brings up a working stack and a post goes from creation to `ready`
   with images through the UI, executing in the worker service.
+  All four services healthy from `docker compose up -d`; a profile and a post created through
+  the dashboard, started with **Force Restart**, walked `research` -> `outline` -> `write` ->
+  `edit` -> `images` -> `ready` in 6m26s with five generated images on the shared `/media`
+  volume and no manual intervention. Execution is in `worker`, shown by stopping it: `web`
+  answered the rerun 202 and published, the event sat undelivered (group lag 1) for 90s with
+  nothing executed, and starting `worker` alone finished the stage. First attempt was blocked
+  by `redis` being OOM-killed (exit 137) by its own 4.2 GB dataset, all of it orphaned
+  `workflow.events.v2.<runId>` streams from runs that never reached `clearTopic`; the app now
+  sets `streamIdleTtlMs`, which the library defaults to 0 (no expiry at all), with
+  `stream-retention.test.ts` proving the expiry against the real Redis.
+  Evidence: [`evidence/phase-7.md` #7.6](../mastra-port/evidence/phase-7.md)
 - [ ] 7.7 `grep -rn "alembic\|arq\|fastapi\|uvicorn"` returns nothing outside
   `docs/mastra-port/` and git history. Paste the empty result.
 
