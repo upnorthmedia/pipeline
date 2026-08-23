@@ -105,16 +105,15 @@ describe("the oracle has teeth", () => {
 describe("constructs whose handlers are not ported yet", () => {
   /**
    * These throw rather than falling through to a paragraph, so that wiring the
-   * converter into the publish workflow before 5.3c-iii-b-1-b-ii-2, -ii-3 and
-   * -b-iii land cannot silently flatten a list or drop a link.
+   * converter into the publish workflow before 5.3c-iii-b-1-b-ii-3 and -b-iii
+   * land cannot silently drop a link.
    *
-   * `block_quote` was in this list until 5.3c-iii-b-1-b-ii-1 ported it; its
-   * coverage is now `wp-html-quotes.test.ts`.
+   * `block_quote` was in this list until 5.3c-iii-b-1-b-ii-1 ported it and
+   * `list` until -ii-2; their coverage is now `wp-html-quotes.test.ts` and
+   * `wp-html-lists.test.ts`.
    */
 
   it.each([
-    ["list", "- one\n- two\n"],
-    ["list", "1. one\n2. two\n"],
     ["ref_link", "[label]: https://example.com\n"],
     ["raw_html", "<div>raw</div>\n"],
   ])("throws for the %s block rule", (rule, markdown) => {

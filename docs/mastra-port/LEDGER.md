@@ -9925,11 +9925,138 @@ three pieces are separately verifiable, so they are separate items.
               lands; it is not caused by anything in this item, and no `wp-html` code
               touches Redis. pytest is above its baseline of 125 failed / 236 passed /
               25 errors. ruff's 32 and 9 are the recorded baselines.
-            - [ ] 5.3c-iii-b-1-b-ii-2 `list` (`list_parser.py`): the per-item break
+            - [x] 5.3c-iii-b-1-b-ii-2 `list` (`list_parser.py`): the per-item break
               scanner, the continuation width, the tight/loose rule and the nesting
               depth, plus the `list`, `list_item` and `block_text` renderer methods. Its
               oracle must also carry the `list`-vs-`thematic_break` and
               `list`-vs-`setext` precedence cases.
+
+              `list` is the only mistune rule that lives in a module of its own, and
+              almost none of it is visible in the renderer's six lines of format string:
+
+              * **The continuation width** comes from the *first* item's text, not from
+                the marker. `_compile_continue_width` measures the whitespace run after
+                the marker, except that five or more spaces means indented code and only
+                one of them counts. Every later line of that item is a continuation only
+                if it starts with that many spaces.
+              * **A fresh break scanner is compiled per item** out of six other block
+                patterns (`thematic_break`, `fenced_code`, `atx_heading`, `block_quote`,
+                `block_html`, `list`) plus a `list_item` pattern built around the list's
+                own bullet, and when the item's leading width is under three, the *first
+                literal `3`* in each of those pattern strings, which is always the
+                `{0,3}` indent budget, is rewritten down to that width.
+              * **Tightness is decided from the child parse.** A tight list has its item
+                bodies rewritten from `paragraph` to `block_text`, which this renderer
+                emits with no wrapper at all, so a single blank line between two items
+                changes the published HTML without changing a word of the text.
+              * **A break inside an item is parsed on the outer state** and the list is
+                then spliced back in at the token index it recorded, the list-side twin
+                of `prepend_token`.
+
+              The oracle is `api/scripts/export_wp_html_list_parity.py`: 113 inputs run
+              through the real `markdown_to_wp_html` with its output recorded verbatim
+              into `web/src/mastra/wordpress/data/wp-html-list-parity.json`. Nothing in
+              the test file is a hand-written expectation.
+
+              ```
+              $ cd api && PYTHONPATH=. uv run python scripts/export_wp_html_list_parity.py
+              wrote 113 cases to /Users/cody/.../web/src/mastra/wordpress/data/wp-html-list-parity.json
+
+              $ cd web && pnpm exec vitest run src/mastra/wordpress/wp-html-lists.test.ts
+               ✓ src/mastra/wordpress/wp-html-lists.test.ts (128 tests) 16ms
+               Test Files  1 passed (1)
+                    Tests  128 passed (128)
+              ```
+
+              128 tests: the 113 replay cases, 14 negative controls, and 1 structural
+              check on the oracle file itself.
+
+              **The port passed all 78 of the first corpus's cases on its first run**,
+              which is not evidence on its own, so every load-bearing branch was mutated
+              against the finished implementation to prove the corpus has teeth. All six
+              mutations below were run against the final 113-case corpus:
+
+              | Mutation | Result |
+              | --- | --- |
+              | `_transform_tight_list` made a no-op | 90 failed \| 38 passed |
+              | splice-at-`_tok_index` replaced with append | 11 failed \| 117 passed |
+              | `{0,3}`-to-leading-width rewrite dropped | 9 failed \| 119 passed |
+              | `strip_end` made a no-op | 7 failed \| 121 passed |
+              | five-space rule dropped from `_compile_continue_width` | 4 failed \| 124 passed |
+              | the `(?<=\n)` prefix on every break alternative dropped | **128 passed** |
+
+              **The indent-budget mutation passed the first 78-case corpus**, so nine
+              cases were added to reach it, which is where the 9 failures above come
+              from. The rewrite is only observable for a line indented *wider than the
+              marker but narrower than the item's continuation width*, and since the
+              continuation width is at least the leading width plus one, that window is
+              empty unless more than one space follows the marker. `-   one` (three
+              spaces, continuation width four) with a two-space-indented `# Title` under
+              it is the smallest input that separates the two budgets.
+
+              **The `(?<=\n)` prefix is provably unobservable and is kept anyway.**
+              Removing it from every alternative in the per-item break scanner still
+              passes all 128 tests, because the scanner is only ever run at a cursor
+              that sits after the item's marker line, which cannot be position 0 even in
+              a child state. It is kept because Python has it; the ledger records that
+              no test covers it rather than pretending one does.
+
+              **`list` is removed from the unported-rule list in
+              `wp-html-blocks.test.ts`** (89 tests there now, was 91); `ref_link` and
+              `raw_html` still throw there. The block-quote negative control that used
+              `> - item` to prove an unported rule inside a quote still stops the
+              converter now reads `> <div>raw</div>`, since a quoted list is a replay
+              case in the new file; the assertion's intent is unchanged.
+
+              Gates, all from the repo root unless noted:
+
+              ```
+              $ cd web && pnpm exec tsc --noEmit
+              tsc exit=0
+
+              $ cd web && pnpm lint
+              lint exit=0
+
+              $ cd web && pnpm test
+               Test Files  3 failed | 105 passed (108)
+                    Tests  10 failed | 2565 passed | 7 skipped (2582)
+
+              $ cd web && pnpm build
+              ✓ Compiled successfully
+              build exit=0
+
+              $ cd api && uv run pytest -q     # .env sourced
+              120 failed, 241 passed, 25 errors in 15.21s
+
+              $ cd api && uv run ruff check .
+              Found 32 errors.
+
+              $ cd api && uv run ruff format --check .
+              9 files would be reformatted, 138 files already formatted
+
+              $ cd api && uv run ruff check scripts/export_wp_html_list_parity.py
+              All checks passed!
+
+              $ cd api && uv run ruff format --check scripts/export_wp_html_list_parity.py
+              1 file already formatted
+              ```
+
+              9 of the 10 frontend failures are the Phase 0 baseline (6 in
+              `image-preview.test.tsx`, 3 in `PostDetail.test.tsx`). The tenth is
+              `scaffold-check.test.ts > emits the workflow lifecycle events`, the
+              already-logged cross-file race on the shared Redis `workflows` topic
+              (`todo.md`, four entries), which passes in isolation:
+
+              ```
+              $ cd web && pnpm exec vitest run src/mastra/workflows/scaffold-check.test.ts
+               ✓ src/mastra/workflows/scaffold-check.test.ts (5 tests) 2662ms
+                    Tests  5 passed (5)
+              ```
+
+              Adding a 108th test file reshuffles vitest's file scheduling, which is
+              enough to change how often it lands; no `wp-html` code touches Redis.
+              pytest is above its baseline of 125 failed / 236 passed / 25 errors, and
+              ruff's 32 and 9 are the recorded baselines.
             - [ ] 5.3c-iii-b-1-b-ii-3 `ref_link` (with `parse_link_href`,
               `parse_link_title`, `unikey` and `escape_url`, and the `ref_links` env the
               inline layer reads) and `raw_html`/`block_html` (the seven CommonMark HTML

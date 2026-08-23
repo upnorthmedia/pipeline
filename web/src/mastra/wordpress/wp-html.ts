@@ -26,14 +26,22 @@
  * hand a following block (a fence, a thematic break) to the outer parser and
  * then *prepend* the quote before it, which is why `prepend_token` exists.
  *
- * Not ported yet: `list` (5.3c-iii-b-1-b-ii-2), `ref_link` and
+ * Ported here too (ledger 5.3c-iii-b-1-b-ii-2): `list`, which mistune keeps in
+ * a module of its own. Almost none of it is visible in the renderer: a fresh
+ * break scanner is compiled per item out of six other block patterns with
+ * their `{0,3}` indent budgets narrowed to the item's own leading width, the
+ * continuation width comes from the first item's text, and tightness is
+ * decided from the tokens the child parse produced. A tight list renders its
+ * item bodies as `block_text`, which emits no wrapper at all.
+ *
+ * Not ported yet: `ref_link` and
  * `raw_html`/`block_html` (5.3c-iii-b-1-b-ii-3), and the inline rules `escape`,
  * `codespan`, `emphasis`, `link`, `auto_link`, `auto_email` and `inline_html`
  * (5.3c-iii-b-1-b-iii). Their *patterns* are registered here in mistune's rule
  * order, because rule order is what decides whether `- - -` is a thematic
  * break or a list, and their handlers throw `UnportedMarkdownError`. A
- * half-ported converter that silently rendered a list as a paragraph would be
- * worse than one that stops.
+ * half-ported converter that silently dropped a link would be worse than one
+ * that stops.
  *
  * Regex translation notes:
  *
@@ -61,9 +69,23 @@ type Token = {
   raw?: string;
   text?: string;
   children?: Token[];
-  attrs?: { level?: number; info?: string };
+  attrs?: {
+    level?: number;
+    info?: string;
+    depth?: number;
+    ordered?: boolean;
+    start?: number;
+  };
   style?: string;
   marker?: string;
+  /** `list` only: false once a blank line or a second paragraph is seen. */
+  tight?: boolean;
+  /** `list` only: the marker character the list opened with. */
+  bullet?: string;
+  /** `list` only, transient: where the block that broke the list out ended. */
+  endPos?: number;
+  /** `list` only, transient: where in `state.tokens` the list must be inserted. */
+  tokIndex?: number;
 };
 
 /** Thrown when the input uses a construct whose handler is not ported yet. */
@@ -368,7 +390,7 @@ function parseBlockMethod(
     case "block_quote":
       return parseBlockQuote(m, state);
     case "list":
-      throw new UnportedMarkdownError(rule, "5.3c-iii-b-1-b-ii-2");
+      return parseList(m, state);
     case "ref_link":
     case "raw_html":
     case "block_html":
@@ -601,6 +623,299 @@ function parseBlockQuote(m: RegExpExecArray, state: BlockState): number {
   return state.cursor;
 }
 
+/** `list_parser._LINE_HAS_TEXT`, used with `.match` so it is anchored at 0. */
+const LINE_HAS_TEXT = /(\s*)\S/y;
+/** `BlockParser.BLANK_LINE`, used with `.match` so it is anchored at 0. */
+const BLANK_LINE_ANCHORED = new RegExp(`(?:${SOL}[ \\t\\v\\f]*\\n)+`, "y");
+/** `util.strip_end`, compiled without `re.M`. */
+const STRIP_END_RE = new RegExp(`\\n\\s+${EOS}`);
+
+/** `util.strip_end`. */
+function stripEnd(src: string): string {
+  return src.replace(STRIP_END_RE, "\n");
+}
+
+/**
+ * `list_parser._parse_list_item`'s break list, in its order. `fenced_directive`
+ * is skipped because it is a plugin and is not in this parser's specification.
+ */
+const LIST_ITEM_BREAKS = [
+  "thematic_break",
+  "fenced_code",
+  "atx_heading",
+  "block_quote",
+  "block_html",
+  "list",
+] as const;
+
+/** `list_parser._get_list_bullet`. */
+function getListBullet(c: string): string {
+  if (c === ".") return "\\d{0,9}\\.";
+  if (c === ")") return "\\d{0,9}\\)";
+  if (c === "*") return "\\*";
+  if (c === "+") return "\\+";
+  return "-";
+}
+
+/** `list_parser._compile_list_item_pattern`. */
+function compileListItemPattern(bullet: string, leadingWidth: number): string {
+  const width = leadingWidth > 3 ? 3 : leadingWidth;
+  return (
+    `${SOL}(?<listitem_1> {0,${width}})` +
+    `(?<listitem_2>${bullet})` +
+    `(?<listitem_3>[ \\t]*|[ \\t][^\\n]+)${EOL}`
+  );
+}
+
+/**
+ * The per-item break scanner. Every alternative is prefixed with `(?<=\n)`, so
+ * a break can only be recognised at the start of a line that is not the first
+ * in the document, and when the item's leading width is under three the first
+ * `3` in each pattern (always the `{0,3}` indent budget) is rewritten down to
+ * it, which is how a one-character marker keeps a two-space indent from
+ * reading as a sibling block.
+ */
+function compileListItemSc(
+  bullet: string,
+  leadingWidth: number,
+): [RegExp, string[]] {
+  let pairs: Array<[string, string]> = LIST_ITEM_BREAKS.map((name) => [
+    name,
+    BLOCK_SPECIFICATION[name],
+  ]);
+  if (leadingWidth < 3) {
+    const repl = String(leadingWidth);
+    pairs = pairs.map(([name, pattern]) => [name, pattern.replace("3", repl)]);
+  }
+  pairs.splice(1, 0, [
+    "list_item",
+    compileListItemPattern(bullet, leadingWidth),
+  ]);
+  const source = pairs
+    .map(([name, pattern]) => `(?<${name}>(?<=\\n)${pattern})`)
+    .join("|");
+  return [new RegExp(source, "y"), pairs.map(([name]) => name)];
+}
+
+/** `list_parser._compile_continue_width`. */
+function compileContinueWidth(
+  text: string,
+  leadingWidth: number,
+): [string, number] {
+  let body = expandLeadingTab(text, 3);
+  body = expandTab(body);
+
+  LINE_HAS_TEXT.lastIndex = 0;
+  const m2 = LINE_HAS_TEXT.exec(body);
+  let spaceWidth: number;
+  if (m2) {
+    // Five spaces means indented code, which keeps four of them.
+    spaceWidth = body.startsWith("     ") ? 1 : m2[1].length;
+    body = body.slice(spaceWidth) + "\n";
+  } else {
+    spaceWidth = 1;
+    body = "";
+  }
+  return [body, leadingWidth + spaceWidth];
+}
+
+/** `list_parser._clean_list_item_text`. */
+function cleanListItemText(src: string, continueWidth: number): string {
+  const trimSpace = " ".repeat(continueWidth);
+  return src
+    .split("\n")
+    .map((line) => {
+      if (!line.startsWith(trimSpace)) return line;
+      // CommonMark Example 5: the tab left behind counts as four spaces.
+      return expandTab(line.replace(trimSpace, ""));
+    })
+    .join("\n");
+}
+
+/** `list_parser._is_loose_list`. */
+function isLooseList(tokens: Token[]): boolean {
+  let paragraphCount = 0;
+  for (const token of tokens) {
+    if (token.type === "blank_line") return true;
+    if (token.type === "paragraph") {
+      paragraphCount += 1;
+      if (paragraphCount > 1) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * `list_parser._transform_tight_list`. A tight list renders its item bodies as
+ * `block_text`, which the Gutenberg renderer emits with no wrapper at all, so
+ * this is the whole visible difference between a tight and a loose list.
+ */
+function transformTightList(token: Token): void {
+  if (!token.tight) return;
+  for (const listItem of token.children ?? []) {
+    for (const child of listItem.children ?? []) {
+      if (child.type === "paragraph") {
+        child.type = "block_text";
+      } else if (child.type === "list") {
+        transformTightList(child);
+      }
+    }
+  }
+}
+
+/** `list_parser._parse_list_item`. Returns the next item's groups, if any. */
+function parseListItem(
+  bullet: string,
+  groups: [string, string, string],
+  token: Token,
+  state: BlockState,
+  rules: readonly string[],
+): [string, string, string] | undefined {
+  const [spaces, marker, rawText] = groups;
+
+  const leadingWidth = spaces.length + marker.length;
+  const [head, continueWidth] = compileContinueWidth(rawText, leadingWidth);
+  let text = head;
+  const [sc, names] = compileListItemSc(bullet, leadingWidth);
+
+  let src = "";
+  let nextGroup: [string, string, string] | undefined;
+  let prevBlankLine = false;
+  let pos = state.cursor;
+  const continueSpace = " ".repeat(continueWidth);
+
+  while (pos < state.cursorMax) {
+    pos = state.findLineEnd();
+    let line = state.getText(pos);
+
+    BLANK_LINE_ANCHORED.lastIndex = 0;
+    if (BLANK_LINE_ANCHORED.test(line)) {
+      src += "\n";
+      prevBlankLine = true;
+      state.cursor = pos;
+      continue;
+    }
+
+    line = expandLeadingTab(line);
+    if (line.startsWith(continueSpace)) {
+      if (prevBlankLine && !text && !src.trim()) {
+        // CommonMark Example 280: an item may begin with at most one blank line.
+        break;
+      }
+      src += line;
+      prevBlankLine = false;
+      state.cursor = pos;
+      continue;
+    }
+
+    sc.lastIndex = state.cursor;
+    const m = sc.exec(state.src);
+    if (m) {
+      const tokType = matchedRule(m, names);
+      if (tokType === "list_item") {
+        if (prevBlankLine) token.tight = false;
+        nextGroup = [
+          m.groups?.listitem_1 ?? "",
+          m.groups?.listitem_2 ?? "",
+          m.groups?.listitem_3 ?? "",
+        ];
+        state.cursor = m.index + m[0].length + 1;
+        break;
+      }
+
+      if (tokType === "list") break;
+
+      const tokIndex = state.tokens.length;
+      const endPos = parseBlockMethod(tokType, m, state);
+      if (endPos) {
+        token.tokIndex = tokIndex;
+        token.endPos = endPos;
+        break;
+      }
+    }
+
+    if (prevBlankLine && !line.startsWith(continueSpace)) {
+      break;
+    }
+
+    src += line;
+    state.cursor = pos;
+  }
+
+  text += cleanListItemText(src, continueWidth);
+  const child = state.childState(stripEnd(text));
+  parseBlocks(child, rules);
+
+  if (token.tight && isLooseList(child.tokens)) {
+    token.tight = false;
+  }
+
+  token.children?.push({ type: "list_item", children: child.tokens });
+  return nextGroup;
+}
+
+/** `list_parser.parse_list`. */
+function parseList(m: RegExpExecArray, state: BlockState): number | undefined {
+  const text = m.groups?.list_3 ?? "";
+  if (!text.trim()) {
+    // CommonMark Example 285: an empty item cannot interrupt a paragraph.
+    const absorbed = state.appendParagraph();
+    if (absorbed) return absorbed;
+  }
+
+  const marker = m.groups?.list_2 ?? "";
+  const ordered = marker.length > 1;
+  const depth = state.depth();
+  const token: Token = {
+    type: "list",
+    children: [],
+    tight: true,
+    bullet: marker[marker.length - 1],
+    attrs: { depth, ordered },
+  };
+
+  if (ordered) {
+    const start = Number.parseInt(marker.slice(0, -1), 10);
+    if (start !== 1) {
+      // CommonMark Example 304: only a list starting at 1 interrupts a paragraph.
+      const absorbed = state.appendParagraph();
+      if (absorbed) return absorbed;
+      token.attrs!.start = start;
+    }
+  }
+
+  state.cursor = m.index + m[0].length + 1;
+
+  const rules =
+    depth >= MAX_NESTED_LEVEL - 1
+      ? BLOCK_RULES.filter((rule) => rule !== "list")
+      : BLOCK_RULES;
+
+  const bullet = getListBullet(marker[marker.length - 1]);
+  let groups: [string, string, string] | undefined = [
+    m.groups?.list_1 ?? "",
+    marker,
+    text,
+  ];
+  while (groups) {
+    groups = parseListItem(bullet, groups, token, state, rules);
+  }
+
+  const endPos = token.endPos;
+  const tokIndex = token.tokIndex;
+  delete token.endPos;
+  delete token.tokIndex;
+
+  transformTightList(token);
+  if (endPos) {
+    state.tokens.splice(tokIndex!, 0, token);
+    return endPos;
+  }
+
+  state.tokens.push(token);
+  return state.cursor;
+}
+
 /** `BlockParser.parse`. */
 function parseBlocks(
   state: BlockState,
@@ -713,6 +1028,21 @@ function renderToken(token: Token): string {
         `<!-- /wp:code -->\n\n`
       );
     }
+    case "list": {
+      const body = renderChildren(token);
+      if (token.attrs?.ordered) {
+        return (
+          '<!-- wp:list {"ordered":true} -->\n' +
+          `<ol>${body}</ol>\n` +
+          "<!-- /wp:list -->\n\n"
+        );
+      }
+      return `<!-- wp:list -->\n<ul>${body}</ul>\n<!-- /wp:list -->\n\n`;
+    }
+    case "list_item":
+      return `<li>${renderChildren(token)}</li>\n`;
+    case "block_text":
+      return renderChildren(token);
     case "block_quote":
       return (
         "<!-- wp:quote -->\n" +
