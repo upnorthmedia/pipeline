@@ -12,7 +12,7 @@
  * The cost is one indexed single-row read per provider call; the alternative
  * is a secret in the run history of every pipeline that has ever run.
  */
-import { eq, sql } from "drizzle-orm"
+import { and, eq, isNull, sql } from "drizzle-orm"
 
 import { getDb, settings } from "../db"
 import { decrypt, encrypt } from "../lib/crypto"
@@ -22,7 +22,12 @@ export const PROVIDERS = ["anthropic", "perplexity", "gemini"] as const
 
 export type Provider = (typeof PROVIDERS)[number]
 
-/** The `settings.key` the encrypted key map is stored under. */
+/**
+ * The `settings.key` the encrypted key map is stored under, always on the row
+ * with a null `user_id`. Both reads below say so explicitly: since Alembic 012
+ * the same key can also exist per user, and `PATCH /api/settings` will happily
+ * write one, so a bare `key` predicate would pick an arbitrary row.
+ */
 export const API_KEYS_SETTING_KEY = "api_keys"
 
 /**
@@ -38,7 +43,7 @@ export async function getApiKeys(): Promise<Record<Provider, string>> {
   const rows = await getDb()
     .select({ value: settings.value })
     .from(settings)
-    .where(eq(settings.key, API_KEYS_SETTING_KEY))
+    .where(and(eq(settings.key, API_KEYS_SETTING_KEY), isNull(settings.userId)))
     .limit(1)
 
   const stored = (rows[0]?.value ?? {}) as Record<string, unknown>
@@ -90,7 +95,7 @@ export async function getValidationResults(): Promise<Partial<Record<Provider, b
   const rows = await getDb()
     .select({ value: settings.value })
     .from(settings)
-    .where(eq(settings.key, API_KEYS_VALIDATION_SETTING_KEY))
+    .where(and(eq(settings.key, API_KEYS_VALIDATION_SETTING_KEY), isNull(settings.userId)))
     .limit(1)
 
   const stored = (rows[0]?.value ?? {}) as Record<string, unknown>
@@ -179,6 +184,12 @@ export async function saveValidationResults(
  * Upsert one settings row, shallow-merging `patch` into whatever the row
  * already holds. Both callers own a single global row with no `user_id`, which
  * is why there is no user predicate here; see the note in `../app/api/settings/route.ts`.
+ *
+ * The conflict target is `(key, user_id)` rather than `key` alone, matching the
+ * unique constraint Alembic 012 put there. It still fires for these two rows
+ * even though their `user_id` is null, because that constraint is NULLS NOT
+ * DISTINCT: without it the arbiter would never match and every save would add
+ * another global `api_keys` row.
  */
 async function mergeSettingsValue(key: string, patch: Record<string, unknown>): Promise<void> {
   if (Object.keys(patch).length === 0) return
@@ -186,7 +197,7 @@ async function mergeSettingsValue(key: string, patch: Record<string, unknown>): 
     .insert(settings)
     .values({ key, value: patch })
     .onConflictDoUpdate({
-      target: settings.key,
+      target: [settings.key, settings.userId],
       set: { value: sql`${settings.value} || excluded.value`, updatedAt: new Date() },
     })
 }

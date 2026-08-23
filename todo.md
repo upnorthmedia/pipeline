@@ -629,3 +629,16 @@
   test's `.find()` over a set it assumes is ordered or a real ordering gap in the Redis
   Streams fan-out; the second reading would matter to the Phase 8 trace view, so this needs
   a real diagnosis rather than a retry.
+- [confirmed] 2026-08-23 The vitest suites that borrow the global `settings.api_keys` row
+  can destroy live credentials. `web/src/mastra/api-keys.test.ts` deletes the row in
+  `afterEach` and only writes the developer's saved value back in `afterAll`, so any
+  throw in that restore leaves the row gone for good, and these suites run against the
+  dev database (`DATABASE_URL_SYNC`), not a scratch one.
+  `web/src/app/api/settings/api-keys/route.test.ts` has the same shape. This is not
+  hypothetical: it happened during ledger item 6.0, when the Alembic 012 primary-key
+  change made the restore's `ON CONFLICT (key)` invalid and the row was lost. It was
+  recovered in full from the Docker volume's WAL (Fernet tokens re-extracted with page
+  headers stripped, then matched against the row's pre-change md5), but that only worked
+  because the loss was noticed within the WAL retention window. The fix is for these
+  suites to hold their own row rather than borrowing the real one, or to restore per test
+  rather than per file.

@@ -12,6 +12,12 @@
  * Alembic 010. Note that the `api_keys` row is written with a null `user_id`
  * (see `save_api_keys()` in `api/src/services/api_keys.py`), so it is invisible
  * to these endpoints in both stacks.
+ *
+ * Since Alembic 012 the natural key is `(key, user_id)`, so the lookup-then-
+ * write below inserts one row per user for a shared key instead of colliding
+ * on `settings_pkey`. Before that revision the second user to write a key got
+ * a unique violation, which is what made per-user stage configuration
+ * impossible.
  */
 import { and, asc, eq } from "drizzle-orm"
 

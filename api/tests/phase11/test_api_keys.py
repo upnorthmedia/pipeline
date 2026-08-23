@@ -3,9 +3,24 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import select
 from src.models.setting import Setting
 
 pytestmark = pytest.mark.anyio
+
+
+async def _get_api_keys_row(db_session):
+    """The `api_keys` row, looked up by key rather than by primary key.
+
+    Alembic 012 made the primary key a surrogate `id`, so `session.get()` no
+    longer takes the settings key. `save_api_keys()` never sets `user_id`, and
+    the unique constraint over `(key, user_id)` is NULLS NOT DISTINCT, so this
+    still names exactly one row.
+    """
+    result = await db_session.execute(
+        select(Setting).where(Setting.key == "api_keys", Setting.user_id.is_(None))
+    )
+    return result.scalar_one_or_none()
 
 
 async def test_get_api_keys_empty(client):
@@ -55,7 +70,7 @@ async def test_put_api_keys_encrypted_at_rest(client, db_session):
     assert resp.status_code == 200
 
     # Verify DB contains encrypted value
-    setting = await db_session.get(Setting, "api_keys")
+    setting = await _get_api_keys_row(db_session)
     assert setting is not None
     assert setting.value.get("anthropic") != "sk-ant-secret-value"
     assert len(setting.value.get("anthropic", "")) > 0

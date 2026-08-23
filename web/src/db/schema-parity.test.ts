@@ -20,7 +20,7 @@ import {
 } from "./schema-parity"
 
 /** The newest revision under `api/alembic/versions/`. */
-const ALEMBIC_HEAD = "011"
+const ALEMBIC_HEAD = "012"
 
 const connectionString =
   process.env.DATABASE_URL_SYNC?.replace("postgresql+asyncpg://", "postgresql://") ??
@@ -117,5 +117,62 @@ describe("schema.ts against the live Alembic database", () => {
       "settings",
       "website_profiles",
     ])
+  })
+
+  /**
+   * The column diff above cannot see constraints, and this one carries meaning
+   * the port depends on: `NULLS NOT DISTINCT` is what makes a null `user_id`
+   * exactly one global row per key rather than an unbounded set, which is the
+   * assumption `getApiKeys()` and `src/test/api-keys-row.ts` are built on.
+   */
+  it("keys settings on (key, user_id) with nulls treated as equal", async () => {
+    const { rows } = await pool.query<{
+      conname: string
+      contype: string
+      columns: string[]
+      indnullsnotdistinct: boolean
+    }>(
+      `SELECT c.conname,
+              c.contype,
+              array_agg(a.attname::text ORDER BY a.attname) AS columns,
+              i.indnullsnotdistinct
+         FROM pg_constraint c
+         JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+         LEFT JOIN pg_index i ON i.indexrelid = c.conindid
+        WHERE c.conrelid = 'settings'::regclass AND c.contype IN ('p', 'u')
+        GROUP BY c.conname, c.contype, i.indnullsnotdistinct
+        ORDER BY c.contype`,
+    )
+
+    expect(rows).toEqual([
+      { conname: "settings_pkey", contype: "p", columns: ["id"], indnullsnotdistinct: false },
+      {
+        conname: "uq_settings_key_user_id",
+        contype: "u",
+        columns: ["key", "user_id"],
+        indnullsnotdistinct: true,
+      },
+    ])
+  })
+
+  /** The behaviour that constraint buys, exercised rather than described. */
+  it("allows one settings row per key without an owner", async () => {
+    const client = await pool.connect()
+    try {
+      await client.query("BEGIN")
+      await client.query("INSERT INTO settings (key, value) VALUES ($1, $2)", [
+        "schema-parity-global",
+        JSON.stringify({ first: true }),
+      ])
+      await expect(
+        client.query("INSERT INTO settings (key, value) VALUES ($1, $2)", [
+          "schema-parity-global",
+          JSON.stringify({ second: true }),
+        ]),
+      ).rejects.toMatchObject({ code: "23505", constraint: "uq_settings_key_user_id" })
+    } finally {
+      await client.query("ROLLBACK")
+      client.release()
+    }
   })
 })

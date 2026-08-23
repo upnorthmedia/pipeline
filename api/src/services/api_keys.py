@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.setting import Setting
@@ -16,6 +17,20 @@ SETTING_KEY = "api_keys"
 VALIDATION_KEY = "api_keys_validation"
 
 PROVIDERS = ("anthropic", "perplexity", "gemini")
+
+
+async def _get_global_setting(session: AsyncSession, key: str) -> Setting | None:
+    """Load the settings row with no owner, which is where both keys below live.
+
+    Alembic 012 moved the primary key onto a surrogate `id`, so `session.get()`
+    no longer takes the settings key. The unique constraint over
+    `(key, user_id)` is NULLS NOT DISTINCT, so at most one row per key has a
+    null `user_id` and this names exactly one row.
+    """
+    result = await session.execute(
+        select(Setting).where(Setting.key == key, Setting.user_id.is_(None))
+    )
+    return result.scalar_one_or_none()
 
 
 async def get_api_keys(session: AsyncSession) -> dict[str, str]:
@@ -43,7 +58,7 @@ async def save_api_keys(session: AsyncSession, keys: dict[str, str]) -> None:
         if val:
             merged[provider] = encrypt(val)
 
-    setting = await session.get(Setting, SETTING_KEY)
+    setting = await _get_global_setting(session, SETTING_KEY)
     if setting:
         setting.value = merged
         setting.updated_at = datetime.now(UTC)
@@ -59,7 +74,7 @@ async def save_validation_results(
 ) -> None:
     """Persist validation results so they survive page reloads."""
     # Merge with any existing results
-    setting = await session.get(Setting, VALIDATION_KEY)
+    setting = await _get_global_setting(session, VALIDATION_KEY)
     existing = dict(setting.value) if setting and setting.value else {}
     existing.update(results)
 
@@ -102,7 +117,7 @@ async def get_masked_keys(session: AsyncSession) -> dict[str, dict]:
 
 async def _load_raw(session: AsyncSession) -> dict[str, str]:
     """Load raw encrypted values from the settings table."""
-    setting = await session.get(Setting, SETTING_KEY)
+    setting = await _get_global_setting(session, SETTING_KEY)
     if not setting or not setting.value:
         return {}
     return dict(setting.value)
@@ -124,7 +139,7 @@ async def _load_decrypted(session: AsyncSession) -> dict[str, str]:
 
 async def _load_validation(session: AsyncSession) -> dict[str, bool]:
     """Load persisted validation results."""
-    setting = await session.get(Setting, VALIDATION_KEY)
+    setting = await _get_global_setting(session, VALIDATION_KEY)
     if not setting or not setting.value:
         return {}
     return {k: bool(v) for k, v in setting.value.items()}

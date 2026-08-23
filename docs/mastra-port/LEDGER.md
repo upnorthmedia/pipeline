@@ -1163,6 +1163,22 @@ pages that use it work with the Python API stopped.
 
 ## Phase 6: Runtime model configuration
 
+- [x] 6.0 The `settings` primary key. `settings.key` was the whole primary key while
+  `user_id` was only an index, so two users could never hold different values for one key
+  and per-user per-stage model config was impossible. Alembic revision `012` replaces it
+  with a surrogate `id` plus `UNIQUE NULLS NOT DISTINCT (key, user_id)`, verified against
+  the running Postgres 17.8 before being relied on. It lands as an Alembic revision only,
+  because Alembic still owns the schema until Phase 7 and `conftest.py` builds pytest's
+  database from `metadata.create_all()`, so `api/src/models/setting.py` moved with it; the
+  post-cutover creation path for a fresh database is item 7.0. The `api_keys` row survives
+  the table rewrite byte-identical, and every caller that keyed on `settings.key` (four
+  `session.get(Setting, ...)` calls in Python, ten drizzle `onConflictDoUpdate` targets,
+  and the two global reads in `api-keys.ts`, which now say `user_id IS NULL` explicitly)
+  moved to the new key. One test changed meaning and says so: the case that asserted a
+  second user could not write a key now asserts that they can.
+
+  Evidence: [`evidence/phase-6.md` #6.0](../mastra-port/evidence/phase-6.md)
+
 - [ ] 6.1 Verify the model ID for each of the six stages against live provider documentation and
   a real minimal API call. Record per stage: chosen ID, verification date, source, one-sentence
   rationale, and the pasted live response's reported model field. Keep the incumbent and say why
@@ -1178,6 +1194,11 @@ pages that use it work with the Python API stopped.
 
 ## Phase 7: Cutover
 
+- [ ] 7.0 How a fresh database is created after Alembic is deleted. `schema.ts` mirrors
+  the Alembic-owned schema today and has no generate workflow (see `drizzle.config.ts`),
+  so once `api/` is gone nothing in the repo can build an empty database. Give Drizzle a
+  baseline migration generated from `schema.ts` and prove it produces the same shape the
+  Alembic chain does, including the settings key from 6.0.
 - [ ] 7.1 Delete `api/`. Remove the Python `api` and `worker` services from
   `docker-compose.yml` and `docker-compose.prod.yml` and replace them with the TypeScript
   `worker` service. Keep `db` and `redis`.

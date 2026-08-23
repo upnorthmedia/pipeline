@@ -5,11 +5,11 @@
  * `Record<string, ApiKeyStatus>` in `web/src/lib/api.ts`. It never contains a
  * key: `getMaskedKeys()` reduces each plaintext to a last-four hint.
  *
- * `api_keys` is a single global row (`settings.key` is the primary key and
- * `save_api_keys()` never set `user_id`), so unlike the collection endpoints in
- * `../route.ts` there is nothing to scope by user. The session is still
- * required, matching Python's `Depends(get_current_user)`. Changing the row to
- * be per user would be a schema change, which the port does not do.
+ * `api_keys` is a single global row: `save_api_keys()` never set `user_id`, and
+ * since Alembic 012 the unique constraint over `(key, user_id)` is NULLS NOT
+ * DISTINCT, so exactly one such row can exist. Unlike the collection endpoints
+ * in `../route.ts` there is nothing to scope by user. The session is still
+ * required, matching Python's `Depends(get_current_user)`.
  */
 import { z } from "zod"
 

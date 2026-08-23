@@ -74,7 +74,7 @@ async function writeAnthropicKey(plaintext: string) {
   await getDb()
     .insert(settings)
     .values({ key: API_KEYS_SETTING_KEY, value })
-    .onConflictDoUpdate({ target: settings.key, set: { value } })
+    .onConflictDoUpdate({ target: [settings.key, settings.userId], set: { value } })
 }
 
 async function clearKeys() {

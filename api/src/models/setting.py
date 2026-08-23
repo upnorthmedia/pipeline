@@ -1,16 +1,28 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.models.base import Base
+from src.models.base import Base, UUIDMixin
 
 
-class Setting(Base):
+class Setting(UUIDMixin, Base):
     __tablename__ = "settings"
 
-    key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    # A surrogate primary key, because `user_id` is nullable and Postgres
+    # rejects NULL in a primary key. NULLS NOT DISTINCT makes a null `user_id`
+    # mean exactly one global row per key (see Alembic revision 012).
+    __table_args__ = (
+        UniqueConstraint(
+            "key",
+            "user_id",
+            name="uq_settings_key_user_id",
+            postgresql_nulls_not_distinct=True,
+        ),
+    )
+
+    key: Mapped[str] = mapped_column(String(255))
     user_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("auth_users.id"), nullable=True, index=True
     )

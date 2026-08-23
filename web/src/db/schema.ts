@@ -210,19 +210,25 @@ export const internalLinks = pgTable(
 
 /**
  * Key/value application settings, including the encrypted provider API keys.
- * Note the primary key is `key` alone: `user_id` is an index, not part of the
- * key, so settings rows are global per key today.
+ *
+ * The primary key is a surrogate `id` (Alembic revision 012) because the
+ * natural key is `(key, user_id)` and `user_id` is nullable, which Postgres
+ * rejects in a primary key. The unique constraint is NULLS NOT DISTINCT, so a
+ * null `user_id` is one global row per key rather than an unbounded set; the
+ * encrypted `api_keys` row is that global row.
  */
 export const settings = pgTable(
   "settings",
   {
-    key: varchar({ length: 255 }).primaryKey().notNull(),
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    key: varchar({ length: 255 }).notNull(),
     value: jsonb().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow(),
     userId: varchar("user_id"),
   },
   (table) => [
     index("ix_settings_user_id").using("btree", table.userId.asc().nullsLast().op("text_ops")),
+    unique("uq_settings_key_user_id").on(table.key, table.userId).nullsNotDistinct(),
   ],
 )
 

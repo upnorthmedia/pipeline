@@ -71,7 +71,7 @@ async function restoreRow(key: string, saved: { value: unknown } | undefined) {
   await getDb()
     .insert(settings)
     .values({ key, value })
-    .onConflictDoUpdate({ target: settings.key, set: { value } })
+    .onConflictDoUpdate({ target: [settings.key, settings.userId], set: { value } })
 }
 
 beforeAll(async () => {
@@ -103,7 +103,7 @@ beforeAll(async () => {
   await getDb()
     .insert(settings)
     .values({ key: API_KEYS_SETTING_KEY, value })
-    .onConflictDoUpdate({ target: settings.key, set: { value } })
+    .onConflictDoUpdate({ target: [settings.key, settings.userId], set: { value } })
 }, 30_000)
 
 afterAll(async () => {
@@ -295,7 +295,7 @@ describe("PUT /api/settings/api-keys", () => {
     await getDb()
       .insert(settings)
       .values({ key: API_KEYS_SETTING_KEY, value })
-      .onConflictDoUpdate({ target: settings.key, set: { value } })
+      .onConflictDoUpdate({ target: [settings.key, settings.userId], set: { value } })
     await getDb().delete(settings).where(eq(settings.key, API_KEYS_VALIDATION_SETTING_KEY))
   })
 

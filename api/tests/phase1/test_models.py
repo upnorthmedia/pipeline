@@ -1,6 +1,7 @@
 """Tests for SQLAlchemy models — CRUD operations on all tables."""
 
 import pytest
+from sqlalchemy import select
 from src.models import InternalLink, Post, Setting, WebsiteProfile
 
 
@@ -172,6 +173,18 @@ class TestInternalLink:
             await db_session.commit()
 
 
+async def _get_setting(db_session, key: str) -> Setting | None:
+    """Look a setting up by key.
+
+    The primary key is the surrogate `id` since Alembic 012, so `session.get()`
+    no longer takes the key. Every row here has a null `user_id`, and the
+    UNIQUE NULLS NOT DISTINCT constraint allows only one of those per key, so
+    this still names exactly one row.
+    """
+    result = await db_session.execute(select(Setting).where(Setting.key == key))
+    return result.scalar_one_or_none()
+
+
 class TestSetting:
     async def test_create_and_read(self, db_session):
         setting = Setting(
@@ -181,7 +194,7 @@ class TestSetting:
         db_session.add(setting)
         await db_session.commit()
 
-        result = await db_session.get(Setting, "default_stage_settings")
+        result = await _get_setting(db_session, "default_stage_settings")
         assert result is not None
         assert result.value["research"] == "auto"
 
@@ -193,5 +206,5 @@ class TestSetting:
         setting.value = {"max_jobs": 5}
         await db_session.commit()
 
-        result = await db_session.get(Setting, "worker_concurrency")
+        result = await _get_setting(db_session, "worker_concurrency")
         assert result.value["max_jobs"] == 5

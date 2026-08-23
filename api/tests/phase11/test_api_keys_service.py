@@ -1,6 +1,7 @@
 """Tests for api_keys service — DB storage, encryption, masking."""
 
 import pytest
+from sqlalchemy import select
 from src.models.setting import Setting
 from src.services.api_keys import (
     get_api_keys,
@@ -9,6 +10,20 @@ from src.services.api_keys import (
 )
 
 pytestmark = pytest.mark.anyio
+
+
+async def _get_api_keys_row(db_session):
+    """The `api_keys` row, looked up by key rather than by primary key.
+
+    Alembic 012 made the primary key a surrogate `id`, so `session.get()` no
+    longer takes the settings key. `save_api_keys()` never sets `user_id`, and
+    the unique constraint over `(key, user_id)` is NULLS NOT DISTINCT, so this
+    still names exactly one row.
+    """
+    result = await db_session.execute(
+        select(Setting).where(Setting.key == "api_keys", Setting.user_id.is_(None))
+    )
+    return result.scalar_one_or_none()
 
 
 async def test_get_api_keys_returns_empty_when_no_db(db_session):
@@ -25,7 +40,7 @@ async def test_save_and_load_round_trip(db_session):
     )
 
     # DB has encrypted values (not plaintext)
-    setting = await db_session.get(Setting, "api_keys")
+    setting = await _get_api_keys_row(db_session)
     assert setting is not None
     assert setting.value.get("anthropic") != "sk-ant-test123"
 
@@ -42,7 +57,7 @@ async def test_save_empty_key_not_stored(db_session):
         db_session,
         {"anthropic": "sk-ant-test", "gemini": ""},
     )
-    setting = await db_session.get(Setting, "api_keys")
+    setting = await _get_api_keys_row(db_session)
     assert "gemini" not in setting.value
 
 

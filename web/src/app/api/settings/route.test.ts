@@ -164,12 +164,12 @@ describe("PATCH /api/settings", () => {
     expect(row.value).toEqual({ value: { claude: "on" } })
   })
 
-  it("refuses to write over a key another user already owns", async () => {
+  it("keeps one value per user for the same key", async () => {
     await db
       .insert(settings)
       .values({ key: `${PREFIX}shared`, userId: other.userId, value: { owner: "other" } })
 
-    const write = PATCH(
+    const response = await PATCH(
       apiRequest(URL, {
         method: "PATCH",
         cookie: user.cookie,
@@ -177,21 +177,38 @@ describe("PATCH /api/settings", () => {
       }),
     )
 
-    // `settings.key` is the whole primary key (Alembic 010 indexed `user_id`
-    // but left it out of the key), so a second owner for one key cannot exist.
-    // Python fails the same way, with an IntegrityError from the same INSERT.
-    // What matters for tenancy is the row afterwards: dropping the `user_id`
-    // filter from the lookup above turns this rejection into a silent
-    // cross-tenant overwrite. Tracked in todo.md.
-    // 23505 is Postgres' unique_violation; drizzle rewraps the message but keeps the driver error as `cause`.
-    await expect(write).rejects.toMatchObject({ cause: { code: "23505" } })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual([
+      expect.objectContaining({ key: `${PREFIX}shared`, value: { owner: "user" } }),
+    ])
 
-    const [untouched] = await db
+    const rows = await db
       .select()
       .from(settings)
-      .where(and(eq(settings.key, `${PREFIX}shared`), eq(settings.userId, other.userId)))
+      .where(eq(settings.key, `${PREFIX}shared`))
 
-    expect(untouched.value).toEqual({ owner: "other" })
+    expect(
+      Object.fromEntries(rows.map((row) => [row.userId, row.value])),
+    ).toEqual({ [user.userId]: { owner: "user" }, [other.userId]: { owner: "other" } })
+  })
+
+  it("coexists with the global row for the same key, which is where api_keys lives", async () => {
+    await db
+      .insert(settings)
+      .values({ key: `${PREFIX}shared`, userId: null, value: { owner: "global" } })
+
+    await PATCH(
+      apiRequest(URL, {
+        method: "PATCH",
+        cookie: user.cookie,
+        body: JSON.stringify({ [`${PREFIX}shared`]: { owner: "user" } }),
+      }),
+    )
+
+    const rows = await db.select().from(settings).where(eq(settings.key, `${PREFIX}shared`))
+
+    expect(rows).toHaveLength(2)
+    expect(rows.find((row) => row.userId === null)?.value).toEqual({ owner: "global" })
   })
 
   it("422s on a body that is not a JSON object", async () => {

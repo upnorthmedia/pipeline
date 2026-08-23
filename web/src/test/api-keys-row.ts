@@ -1,9 +1,10 @@
 /**
  * Cross-file mutual exclusion on the `settings.api_keys` row.
  *
- * `settings.key` is the primary key and Alembic never gave the row a
- * `user_id`, so there is exactly one `api_keys` row for the whole database and
- * no column to isolate a test file on. Eight test files swap it for a fixture
+ * Nothing ever writes an `api_keys` row with a `user_id`, and Alembic 012's
+ * NULLS NOT DISTINCT constraint allows only one row without one, so there is
+ * exactly one `api_keys` row for the whole database and no column to isolate a
+ * test file on. Eight test files swap it for a fixture
  * encrypted under their own throwaway `WP_ENCRYPTION_KEY` and restore it
  * afterwards. Vitest runs test files in parallel processes against that one
  * shared database, so without coordination one file's restore lands while
