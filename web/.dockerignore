@@ -27,3 +27,6 @@ Dockerfile
 # Misc
 *.md
 *.log
+
+# Mastra build output
+.mastra/

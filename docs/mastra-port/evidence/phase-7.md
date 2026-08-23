@@ -413,3 +413,286 @@ ended `4 passed (7.4m)` with failures across all four spec files. Reproduced in 
 first one is expectation drift, not a regression: it waits for a sidebar item named "Monitor"
 while the sidebar renders "Observability", and the page loaded normally. No Phase 0 baseline
 was ever recorded for this gate; logged in `todo.md` for item 9.1.
+
+## 7.1c
+
+Delete `api/`, and move `docker-compose.yml` and `docker-compose.prod.yml` onto the TypeScript
+`worker` service. `db` and `redis` stay: Postgres now holds Mastra run state alongside posts,
+and Redis is the event bus and the SSE fan-out.
+
+### What went
+
+```
+$ git rm -r api && ls
+176 files changed, 28368 deletions(-)
+
+docker-compose.prod.yml
+docker-compose.yml
+docs
+media
+packages
+README.md
+rules
+todo.md
+web
+```
+
+`rules/` was already at the repo root and is still the source of every stage prompt, so item 7.5
+has nothing left to move. Nothing under `api/` was a non-Python asset except its own Dockerfile,
+`alembic.ini`, `entrypoint.sh`, `pyproject.toml`, `uv.lock` and the sitemap XML test fixtures,
+all of which belonged to the Python stack.
+
+### The four services
+
+| Service | Dev command | Prod image | Role |
+| --- | --- | --- | --- |
+| `db` | postgres:17-alpine | same | posts, settings, Mastra run state |
+| `redis` | redis:7-alpine | same | Redis Streams event bus, SSE fan-out |
+| `web` | `pnpm dev` | Dockerfile `runner` | dashboard, route handlers, SSE, starts runs |
+| `worker` | `pnpm run worker:build && pnpm run worker` | Dockerfile `worker` | executes the workflow steps |
+
+Both `web` and `worker` reach the same `web/src/mastra/index.ts`: the `web` service imports it
+from the Next.js runtime, the `worker` service through the bundle `mastra worker build` produces
+from it.
+
+Three environment variables are set on the `worker` service that were not obvious, and are not
+conveniences. The bundle runs with its own output directory as the cwd, so every default path in
+the app resolves inside `.mastra/`:
+
+- `RULES_DIR=/app/rules`. Without it `loadRules` returns `""` for every missing file rather than
+  throwing, so each stage would silently run with its rule file stripped out of the prompt.
+- `TEXTSTAT_DATA_DIR=/app/src/mastra/textstat/data`. Without it the `edit` stage dies with
+  `ENOENT ... cmudict-syllables.txt.gz`. Set in the production image next to the corpus it
+  points at, and in the dev compose file where the corpus arrives on a bind mount.
+- `MEDIA_DIR=/app/media`, on both `web` and `worker`, now that `web` serves `/media` itself
+  (item 7.1a) and no longer proxies it to Python.
+
+### Two Dockerfile stages for the worker
+
+`mastra worker build` gets its own stage rather than riding along in the Next.js builder, because
+it is a genuinely different resolution environment: a dependency that `next build` resolves can
+still be unresolvable in the bundle. The runtime stage carries no application `node_modules` at
+all (the bundle brings its own), which is why the textstat corpus and the healthcheck script are
+copied in explicitly.
+
+```
+$ docker build --target worker -t jena-worker-7-1c ./web
+#13 [worker-builder 4/4] RUN pnpm run worker:build
+#13 1.026 > mastra worker build -o .mastra/worker
+#13 16.12 INFO (Mastra CLI): Bundling Mastra done
+#13 17.10 INFO (Mastra CLI): Done installing dependencies
+#13 18.46 INFO (Mastra CLI): Worker build complete.
+#13 18.46 INFO (Mastra CLI): Run with: mastra worker start [name] --dir .mastra/worker
+#13 18.46 INFO (Mastra CLI):   or:     node /app/.mastra/worker/index.mjs
+#13 DONE 18.6s
+
+#14 [worker 3/5] COPY --from=worker-builder /app/.mastra/worker ./.mastra/worker
+#15 [worker 4/5] COPY --from=worker-builder /app/src/mastra/textstat/data ./src/mastra/textstat/data
+#16 [worker 5/5] COPY --from=worker-builder /app/src/mastra/scripts/worker-healthcheck.mjs ./scripts/
+#17 naming to docker.io/library/jena-worker-7-1c:latest done
+```
+
+### A pre-existing Dockerfile defect this surfaced
+
+The first build failed before reaching any new stage:
+
+```
+#9 ERROR: process "/bin/sh -c pnpm install --frozen-lockfile || pnpm install" did not complete successfully: exit code: 1
+9.883 [ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: @prisma/engines@7.4.2, core-js@3.48.0,
+      esbuild@0.18.20, esbuild@0.25.12, esbuild@0.27.3, esbuild@0.28.2, msw@2.12.10,
+      prisma@7.4.2, sharp@0.34.5, unrs-resolver@1.11.1
+```
+
+Two causes, both fixed:
+
+1. The image installed `pnpm@latest` through corepack while the lockfile was written by 10.26.2.
+   `latest` had moved into a major that turns the ignored-build-scripts warning into an error.
+   `packageManager: "pnpm@10.26.2"` now sits in `web/package.json` and the Dockerfile just runs
+   `corepack enable`, so the image installs with the pnpm the lockfile belongs to.
+2. The deps stage copied only `package.json` and the lockfile, so `.npmrc` (the react hoist
+   patterns) and `pnpm-workspace.yaml` (the ignored-build-scripts list) were absent and the
+   container resolved differently from a local install. Both are now copied.
+
+`pnpm-workspace.yaml` also gained the four packages that had drifted onto the warning list since
+it was last touched. A clean install in an empty container is now silent:
+
+```
+$ docker run --rm -v .../package.json -v .../pnpm-lock.yaml -v .../.npmrc \
+    -v .../pnpm-workspace.yaml -w /app node:22-alpine \
+    sh -c "corepack enable && pnpm install --frozen-lockfile"
+...
++ vitest 4.0.18
+
+Done in 6.4s using pnpm v10.26.2
+```
+
+`.mastra/` was added to `web/.dockerignore`, so a local worker bundle cannot be copied into a
+build context and shadow the one the build produces.
+
+### The production worker image, run against the real db and redis
+
+```
+$ docker run -d --name jena-worker-smoke --network objective-port-jena-46c1e6-1_default \
+    -e DATABASE_URL_SYNC=postgresql://pipeline:pipeline@db:5432/content_pipeline \
+    -e REDIS_URL=redis://redis:6379 -e RULES_DIR=/app/rules -e MEDIA_DIR=/app/media \
+    -v "$PWD/rules:/app/rules:ro" jena-worker-7-1c
+
+$ docker logs jena-worker-smoke | head -1
+[mastra] Workers started
+```
+
+It did not just boot, it started draining the orchestration backlog that earlier test runs had
+left in Redis, which is the clearest possible evidence that the bundled worker is wired to the
+same topic the app publishes on:
+
+```
+Error executing step research: Error: post 65edface-18fd-480a-93a4-fcfdb51ae88d not found
+    at loadPipelineState (file:///app/.mastra/worker/mastra.mjs:279117:20)
+    at async Object.execute (file:///app/.mastra/worker/mastra.mjs:280456:21)
+    at async StepExecutor.execute (file:///app/.mastra/worker/mastra.mjs:157981:23)
+```
+
+The two disk assets resolve inside the container:
+
+```
+$ docker exec jena-worker-smoke sh -c 'ls /app/rules && ls /app/src/mastra/textstat/data && printenv TEXTSTAT_DATA_DIR'
+blog-edit.md
+blog-images.md
+blog-outline.md
+blog-ready.md
+blog-research.md
+blog-write.md
+README_hyph_en_US.txt
+cmudict-syllables.txt.gz
+hyph_en_US.dic
+textstat-parity.json
+/app/src/mastra/textstat/data
+```
+
+### The worker healthcheck
+
+The Python `worker` service's healthcheck opened a Redis connection and pinged it, which proved
+the container could reach Redis and nothing at all about ARQ. The Mastra worker can answer the
+real question: `mastra worker start` joins the orchestration consumer group, so `XINFO CONSUMERS`
+reports it with an `idle` that stays under a second while its read loop polls. That is the same
+signal `readWorkerHealth()` already serves to the dashboard, and
+`src/mastra/scripts/worker-healthcheck.mjs` re-reads it as a container healthcheck.
+
+It speaks RESP over a socket with no dependencies on purpose: the production worker image holds
+the bundle and no application `node_modules`, so a healthcheck that imported `redis` would pass
+in the dev image and fail in the one that matters.
+
+Live, and then after the same worker is stopped:
+
+```
+$ docker exec jena-worker-smoke node /app/scripts/worker-healthcheck.mjs
+exit=0
+
+$ docker stop jena-worker-smoke && sleep 20
+$ docker run --rm --network objective-port-jena-46c1e6-1_default \
+    -e REDIS_URL=redis://redis:6379 jena-worker-7-1c node /app/scripts/worker-healthcheck.mjs
+no live consumer in mastra-orchestration on mastra:topic:workflows
+exit=1
+```
+
+### Both compose files parse
+
+```
+$ docker compose config --quiet && echo "DEV OK"
+DEV OK
+$ docker compose -f docker-compose.prod.yml config --quiet && echo "PROD OK"
+PROD OK
+```
+
+Two fixes to `docker-compose.prod.yml` that the Python layout had hidden: the `web` service had
+no `env_file` at all (it needed nothing, because it proxied everything to the `api` service), and
+neither service mounted `rules/` or the media volume. Both now do.
+
+### Tests: 16, against a real Redis
+
+```
+$ pnpm exec vitest run src/mastra/scripts/worker-healthcheck.test.ts
+ ✓ src/mastra/scripts/worker-healthcheck.test.ts (16 tests) 203ms
+
+ Test Files  1 passed (1)
+      Tests  16 passed (16)
+```
+
+| Group | Covers |
+| --- | --- |
+| constants | topic, group, key prefix and idle limit compared against `worker-health.ts`, where a real `mastra.startWorkers()` already pins them |
+| `parseRedisUrl` | port and database defaults, a managed-Redis url with percent-encoded credentials and a database index, a rejected `rediss:` |
+| `parseReply` | the nested RESP2 arrays `XINFO CONSUMERS` returns, a half-delivered array, a half-delivered bulk string, an error reply surfaced as an `Error` |
+| `liveConsumerCount` | the idle limit, and reading `idle` by field name rather than by position |
+| `checkWorkerAlive` | a group that does not exist, a consumer that just read, a consumer past the idle limit, and AUTH actually being written |
+| the script as a healthcheck | exit 1 naming the group when no worker is consuming, exit 1 when `REDIS_URL` is unset |
+
+The AUTH case works without a password-protected Redis: pointing at the local one with a password
+makes it answer `ERR Client sent AUTH, but no password is set`, an error only reachable if the
+command was written. The "no worker consuming" case points at Redis database 14 rather than
+deleting the real orchestration stream out from under a running worker.
+
+### Mutation sweep, 9 of 10 killed
+
+| # | Mutation | Verdict |
+| --- | --- | --- |
+| M1 | `Number(parsed.port \|\| 6379)` to `Number(parsed.port)` | KILLED |
+| M2 | protocol check removed | KILLED |
+| M3 | `db === "" ? 0 : Number(db)` to `Number(db)` | SURVIVED, equivalent |
+| M4 | partial-bulk-string length guard removed | KILLED |
+| M5 | error reply returned as a string, not an `Error` | KILLED |
+| M6 | `idle` read by position instead of field name | KILLED |
+| M7 | idle limit ignored | KILLED |
+| M8 | missing group rethrown instead of reported as no worker | KILLED |
+| M9 | exits 0 when no worker is consuming | KILLED |
+| M10 | AUTH never sent for a url with a password | KILLED |
+
+M3 is equivalent, not a gap: `Number("")` is `0`, so the ternary and the bare conversion produce
+the same value for the empty path a url without a database index gives.
+
+M4 and M10 survived the first sweep and produced two new tests rather than an excuse. M4 survived
+because the existing partial-reply test truncated an item in the *middle* of an array, which the
+array's own item count catches anyway; only a truncated trailing bulk string reaches the length
+guard. M10 survived because nothing had ever driven the AUTH branch.
+
+### Gates
+
+```
+$ pnpm -C web tsc --noEmit
+exit 0
+
+$ pnpm -C web lint
+exit 0
+
+$ pnpm -C web test
+ Test Files  2 failed | 132 passed (134)
+      Tests  9 failed | 4507 passed | 7 skipped (4523)
+exit 1
+
+$ pnpm -C web build
+exit 0
+```
+
+The 9 failures are exactly the known baseline for this tree, unchanged by this item: 6 in
+`image-preview.test.tsx` (the Phase 0 baseline) and 3 in `PostDetail.test.tsx` (pre-existing,
+confirmed by stashing in iteration 136). Test count rose by 16.
+
+One run in three during this item also failed `scaffold-check.test.ts` at the file level with
+`Error: Hook timed out in 60000ms` in its `beforeAll`, which passes in isolation in 4.6 s. That
+is load contention on the shared Postgres and Redis under a full parallel run, not this item;
+logged in `todo.md`.
+
+`pytest` and `ruff` are no longer gates. `api/` does not exist.
+
+### What this item did not do
+
+- Item 7.7's `grep -rn "alembic\|arq\|fastapi\|uvicorn"` does not come back empty yet.
+  `web/src/db/schema.ts` and `web/drizzle/0000_baseline.sql` both declare `alembic_version` on
+  purpose, because the database Alembic built has that table and the baseline-parity check
+  compares against it, and `todo.md` quotes the word in entries documenting Python-era defects.
+  Logged in `todo.md`; 7.7 has to decide it explicitly rather than delete blindly.
+- `docker compose up` has not been run end to end. That is item 7.6, and it needs 7.2 and 7.4
+  first. What is proven here is that the production `worker` image builds, boots, reaches both
+  datastores, joins the orchestration group and reports itself healthy.
+- The dev `worker` service builds the bundle on start (`pnpm run worker:build && pnpm run worker`),
+  which is why its healthcheck has a 90 s `start_period`. It has not been timed under compose.

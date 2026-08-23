@@ -1,11 +1,5 @@
 # todo
 
-- [confirmed] 2026-08-21 `pytest` writes real image files into `media/test-123/` on every run,
-  and 39 of those artifacts are already committed to git. Running the backend suite from the
-  host leaves untracked junk in the working tree. The images stage should write to a tmp dir
-  under test. Out of scope for the Mastra port ledger; revisit when the images stage is ported
-  (Phase 3.5).
-
 - [confirmed] 2026-08-21 The `images` stage's featured-image handling never fires on real
   manifests. `images.py` tests `image_spec.get("placement") == "featured"`, but the manifest
   Claude actually produces (live capture, `docs/mastra-port/golden/how-to-choose-a-crm-for-a-small-team/images.json`)
@@ -82,12 +76,6 @@
   image is recorded as failed. `web/src/mastra/images/generate-one.ts` treats a non-string as
   absent instead. No rule asks the model for a null there and no fixture contains one, so the
   divergence is unobserved rather than tested; decide the intended behaviour before Phase 7.
-- [confirmed] 2026-08-22 `api/tests/phase3/test_images_stage.py` writes generated images into
-  the repo's real `media/test-123/` instead of a temp directory and never cleans up, so every
-  `pytest` run leaves new untracked `.webp` files in the working tree. 39 of them were already
-  committed by accident in 5f31ca4. Deleted when `api/` goes in Phase 7, so worth fixing only
-  if pytest stays around longer than expected.
-
 - [confirmed] 2026-08-22 A `pnpm test` run writes generated images into the repo's own
   `media/test-123/` rather than a temp directory, and 41 of them are already committed. The
   filenames carry a random suffix, so every run leaves new untracked files behind for the
@@ -496,15 +484,6 @@
   `web/src/mastra/wordpress/index.ts`, because changing it would change which URL a stored
   profile reaches. The fix belongs with the profile form's `wp_url` validation, not in the
   client: nothing today stops a user pasting a URL with a query string into it.
-- [investigate] 2026-08-23 `cd api && uv run pytest -q` reports `4 failed, 205 passed,
-  177 errors` with `asyncpg.exceptions.InvalidPasswordError: password authentication failed
-  for user "pipeline"` unless the repo `.env` is sourced first
-  (`set -a && . ./.env && set +a`), which restores the recorded `120 failed, 241 passed,
-  25 errors` baseline. `api/tests/conftest.py` builds its URL from environment variables with
-  defaults that no longer match the running container's credentials. Every ledger entry that
-  pastes a pytest count depends on the caller remembering to source `.env`, so the defaults
-  in `conftest.py` should either match the compose file or be removed so a missing variable
-  fails loudly instead of authenticating as the wrong user.
 - [confirmed] 2026-08-23 `GET /api/profiles/{profile_id}/wordpress/categories` and
   `/authors` answer a 500 for every failure the WordPress install reports, because
   `api/src/api/wordpress.py` catches no `WordPressError` in either handler. A profile with
@@ -656,3 +635,21 @@
   the page itself loaded fine. No baseline for this gate was ever recorded in Phase 0, so
   there is nothing to compare against; item 9.1 needs it green, which means auditing every
   spec against the current UI and giving the ones that need data a real session.
+
+- [confirmed] 2026-08-23 Ledger item 7.7 requires `grep -rn "alembic\|arq\|fastapi\|uvicorn"`
+  to return nothing outside `docs/mastra-port/`, and two live sources still match now that
+  `api/` is gone. `web/src/db/schema.ts` and `web/drizzle/0000_baseline.sql` both declare the
+  `alembic_version` table on purpose, because it exists in the database Alembic built and the
+  baseline-parity check compares against it; and `todo.md` itself quotes the word in entries
+  that document Python-era defects. Neither is a leftover to delete blindly, so 7.7 has to
+  decide each: keep the table and narrow the grep with a stated exclusion, or drop the table
+  from the TS schema and its parity check. Deciding it silently either way loses information.
+
+- [confirmed] 2026-08-23 `src/mastra/workflows/scaffold-check.test.ts` fails intermittently
+  under a full `pnpm -C web test` run with `Error: Hook timed out in 60000ms` in its
+  `beforeAll`, taking its five tests to skipped. Observed once in three full runs during
+  ledger item 7.1c; the same file passes in isolation in 4.6 s. The hook opens a `Pool`,
+  runs `storage.init()` and starts a Mastra worker, so it is contending for Postgres
+  connections and Redis with every other suite vitest is running in parallel. Item 9.1 needs
+  a green run, so either the hook needs a longer timeout or the suites that start workers
+  need to stop sharing a connection budget.

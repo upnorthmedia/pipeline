@@ -1278,7 +1278,7 @@ pages that use it work with the Python API stopped.
   001-012, so it builds an empty database only and has no downgrade path.
 
   Evidence: [`evidence/phase-7.md` #7.0](../mastra-port/evidence/phase-7.md)
-- [ ] 7.1 Delete `api/`. Remove the Python `api` and `worker` services from
+- [x] 7.1 Delete `api/`. Remove the Python `api` and `worker` services from
   `docker-compose.yml` and `docker-compose.prod.yml` and replace them with the TypeScript
   `worker` service. Keep `db` and `redis`.
 
@@ -1304,8 +1304,26 @@ pages that use it work with the Python API stopped.
     `fetch` and the `EventSource` resolve onto `localhost:3000` and return 200, with no
     console errors. 8 new tests, 8 of 8 mutations killed.
     Evidence: [`evidence/phase-7.md` #7.1b](../mastra-port/evidence/phase-7.md)
-  - [ ] 7.1c Delete `api/` and rewrite `docker-compose.yml` and `docker-compose.prod.yml`
+  - [x] 7.1c Delete `api/` and rewrite `docker-compose.yml` and `docker-compose.prod.yml`
     onto the TypeScript `worker` service, keeping `db` and `redis`.
+
+    176 files and 28,368 lines deleted. Both compose files now run four services, with
+    `web` and `worker` reaching the same `web/src/mastra/index.ts`: `web` from the
+    Next.js runtime, `worker` through the bundle `mastra worker build` produces. The
+    `worker` service sets `RULES_DIR`, `TEXTSTAT_DATA_DIR` and `MEDIA_DIR` explicitly,
+    because the bundle's cwd is its own output directory and the first two are otherwise
+    a silently stripped prompt and a fatal `ENOENT` in `edit`. Two new Dockerfile stages
+    build and run the worker; the production image carries no application `node_modules`,
+    so the textstat corpus and the healthcheck ship as explicit copies. Proven by building
+    that image and running it against the real Postgres and Redis: it logs
+    `[mastra] Workers started` and drains the orchestration backlog. The worker healthcheck
+    is new (`src/mastra/scripts/worker-healthcheck.mjs`, dependency-free RESP) and asks
+    whether a process is actually consuming the orchestration group, which the Python
+    healthcheck's Redis ping never did; 16 tests, 9 of 10 mutations killed (M3 equivalent).
+    A pre-existing Dockerfile defect had to be fixed first: `pnpm@latest` via corepack had
+    drifted off the lockfile's pnpm major, and `.npmrc`/`pnpm-workspace.yaml` were never
+    copied into the image.
+    Evidence: [`evidence/phase-7.md` #7.1c](../mastra-port/evidence/phase-7.md)
 - [ ] 7.2 Railway deployment configuration for `web` and `worker` from this repo, with start
   commands, shared Postgres and Redis references, and documented per-service environment
   variables. Both import the same `web/src/mastra/index.ts`.

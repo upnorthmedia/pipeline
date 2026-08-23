@@ -23,75 +23,67 @@ services:
       timeout: 5s
       retries: 5
 
-  api:
-    build:
-      context: ./api
-    entrypoint: ["sh", "/app/entrypoint.sh"]
-    expose:
-      - "8000"
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://pipeline:pipeline@db:5432/content_pipeline
-      DATABASE_URL_SYNC: postgresql://pipeline:pipeline@db:5432/content_pipeline
-      REDIS_URL: redis://redis:6379
-      RULES_DIR: /app/rules
-      MEDIA_DIR: /app/media
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
-    volumes:
-      - ./rules:/app/rules:ro
-      - mediadata:/app/media
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8055/health')\""]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-
-  worker:
-    build:
-      context: ./api
-    command: ["python", "-m", "src.worker"]
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://pipeline:pipeline@db:5432/content_pipeline
-      DATABASE_URL_SYNC: postgresql://pipeline:pipeline@db:5432/content_pipeline
-      REDIS_URL: redis://redis:6379
-      RULES_DIR: /app/rules
-      MEDIA_DIR: /app/media
-    volumes:
-      - ./rules:/app/rules:ro
-      - mediadata:/app/media
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import redis; redis.from_url('redis://redis:6379').ping()\""]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-
+  # Dashboard, route handlers and SSE. Starts pipeline runs by publishing onto
+  # Redis Streams; it never executes a step, so restarting it leaves an
+  # in-flight pipeline alone.
   web:
     build:
       context: ./web
       target: runner
     expose:
       - "3000"
+    env_file: .env
+    environment:
+      DATABASE_URL_SYNC: postgresql://pipeline:pipeline@db:5432/content_pipeline
+      REDIS_URL: redis://redis:6379
+      RULES_DIR: /app/rules
+      MEDIA_DIR: /app/media
+    volumes:
+      - ./rules:/app/rules:ro
+      - mediadata:/app/media
     depends_on:
-      - api
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # Executes the workflow steps. Same `web/src/mastra/index.ts` as the `web`
+  # service, reached through the bundle `mastra worker build` produces.
+  worker:
+    build:
+      context: ./web
+      target: worker
+    env_file: .env
+    environment:
+      DATABASE_URL_SYNC: postgresql://pipeline:pipeline@db:5432/content_pipeline
+      REDIS_URL: redis://redis:6379
+      # The bundle runs with its own directory as the cwd, so every default
+      # path in the app resolves somewhere inside `.mastra/`. Both are
+      # required, not conveniences: a missing RULES_DIR silently strips each
+      # stage's rule file out of its prompt. TEXTSTAT_DATA_DIR is set in the
+      # image, next to the corpus it points at.
+      RULES_DIR: /app/rules
+      MEDIA_DIR: /app/media
+    volumes:
+      - ./rules:/app/rules:ro
+      - mediadata:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node /app/scripts/worker-healthcheck.mjs"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   pgdata:
