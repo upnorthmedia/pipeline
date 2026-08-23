@@ -117,7 +117,10 @@ export const PipelineProgress = ({
               />
             )}
             <Tooltip>
-              <TooltipTrigger>
+              {/* The label is otherwise only in the tooltip, which leaves six
+                  unnamed buttons in the accessibility tree and nothing for a
+                  keyboard user to read. */}
+              <TooltipTrigger aria-label={`${STAGE_META[stage].label}: ${status}`}>
                 <div
                   className={cn(
                     "relative flex h-9 w-9 items-center justify-center rounded-full ring-2 transition-all",

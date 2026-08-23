@@ -1460,7 +1460,16 @@ screenshots via `npx -y chrome-devtools-axi` into
   only from first mount. Four before/after screenshot pairs, one loading capture, and a
   console that went from one open form-field issue to silent.
   Evidence: [`evidence/phase-8.md` #8.2](../mastra-port/evidence/phase-8.md)
-- [ ] 8.3 `/posts/[id]`: four states, plus visual hierarchy and spacing pass.
+- [x] 8.3 `/posts/[id]`: four states, plus visual hierarchy and spacing pass.
+  The page had no error state: a failed load raised a toast and pushed the browser to `/`, so
+  a 500 took the operator off the post with nothing to read. It now stays put with the
+  server's own message and a working Retry, keeps the last good render behind a banner when a
+  refetch fails mid-run, shares one skeleton with `loading.tsx` instead of three grey bars,
+  and gives a post that has never run a real empty state with the action that fills it
+  (**Run Pipeline**). The hierarchy pass removed the "Cost Tracking" card, which read a column
+  the ported pipeline never writes, and put every section card on one spacing rhythm. Three of
+  the nine standing vitest failures were this page's drift and are resolved, not silenced.
+  Evidence: [`evidence/phase-8.md` #8.3](../mastra-port/evidence/phase-8.md)
 - [ ] 8.4 posts list: four states, plus visual hierarchy and spacing pass.
   Same route as 8.2 (`web/src/app/page.tsx`), so the four states are already done and checked
   there. What remains under this item is only the visual hierarchy and spacing pass.

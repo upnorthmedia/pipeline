@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import PostDetailPage from "./[id]/page";
 import { renderWithProviders } from "@/test/render";
 import { makePost, makeCompletedPost, makeAnalytics } from "@/test/fixtures";
@@ -80,6 +81,8 @@ vi.mock("remark-gfm", () => ({
 const { posts } = await import("@/lib/api");
 const mockGet = vi.mocked(posts.get);
 const mockAnalytics = vi.mocked(posts.analytics);
+const mockRun = vi.mocked(posts.run);
+const mockRerun = vi.mocked(posts.rerun);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -136,26 +139,31 @@ describe("PostDetailPage", () => {
     renderWithProviders(<PostDetailPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Research")).toBeInTheDocument();
-      expect(screen.getByText("Outline")).toBeInTheDocument();
-      expect(screen.getByText("Draft")).toBeInTheDocument();
-      expect(screen.getByText("Final")).toBeInTheDocument();
-      expect(screen.getByText("Images")).toBeInTheDocument();
+      // By role: the run trace names the same stages in its own table.
+      expect(screen.getByRole("tab", { name: "Research" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Outline" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Draft" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Editing" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Images" })).toBeInTheDocument();
     });
   });
 
-  it("shows Run Next and Run All buttons when not running or complete", async () => {
-    const post = makePost({
-      current_stage: "research",
-      stage_status: {},
-    });
+  it("offers Run Pipeline on a post that has never run", async () => {
+    const post = makePost({ current_stage: "research", stage_status: {} });
     mockGet.mockResolvedValue(post);
+    mockRun.mockResolvedValue({ status: "queued", stage: "research" });
+    const user = userEvent.setup();
     renderWithProviders(<PostDetailPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Run Next")).toBeInTheDocument();
-      expect(screen.getByText("Run All")).toBeInTheDocument();
+      expect(screen.getByText("This post has not run yet")).toBeInTheDocument();
     });
+    // The two re-run controls are meaningless before a first run.
+    expect(screen.queryByText("Rerun Stage")).not.toBeInTheDocument();
+    expect(screen.queryByText("Force Restart")).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByText("Run Pipeline")[0]);
+    expect(mockRun).toHaveBeenCalledWith("post-1");
   });
 
   it("shows Pause button when a stage is running", async () => {
@@ -200,7 +208,7 @@ describe("PostDetailPage", () => {
   it("shows empty state for stages without content", async () => {
     const post = makePost({
       current_stage: "research",
-      stage_status: {},
+      stage_status: { research: "failed" },
     });
     mockGet.mockResolvedValue(post);
     renderWithProviders(<PostDetailPage />);
@@ -252,11 +260,27 @@ describe("PostDetailPage", () => {
     });
   });
 
-  it("renders stage logs when present", async () => {
+  it("reports per-stage cost through the run trace", async () => {
     const post = makePost({
+      execution_logs: [
+        {
+          ts: "2026-01-01T00:00:00.000Z",
+          stage: "research",
+          level: "info",
+          event: "stage_complete",
+          message: "Stage research complete",
+          data: {
+            model: "sonar-pro",
+            tokens_in: 500,
+            tokens_out: 1200,
+            duration_s: 4.5,
+            cost_usd: 0.012,
+          },
+        },
+      ],
       stage_logs: {
         research: {
-          model: "perplexity",
+          model: "sonar-pro",
           tokens_in: 500,
           tokens_out: 1200,
           duration_s: 4.5,
@@ -270,19 +294,89 @@ describe("PostDetailPage", () => {
     renderWithProviders(<PostDetailPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Execution Logs")).toBeInTheDocument();
-      expect(screen.getByText("perplexity")).toBeInTheDocument();
-      expect(screen.getByText("In: 500")).toBeInTheDocument();
-      expect(screen.getByText("Out: 1,200")).toBeInTheDocument();
+      expect(screen.getByText("Run Trace")).toBeInTheDocument();
     });
+    expect(screen.getByText("sonar-pro")).toBeInTheDocument();
+    expect(screen.getByText("500 / 1,200")).toBeInTheDocument();
+    expect(screen.getAllByText("$0.01").length).toBeGreaterThan(0);
+    // The separate "Cost Tracking" card said the same thing from a column the
+    // trace cross-checks against `stage_status`; only the trace is left.
+    expect(screen.queryByText("Cost Tracking")).not.toBeInTheDocument();
   });
 
-  it("redirects to home on load failure", async () => {
-    mockGet.mockRejectedValue(new Error("Not found"));
+  it("shows the server's message and a working retry when the load fails", async () => {
+    // Previously this redirected to `/` with a toast, which took the operator
+    // off the post with nothing to read and nothing to retry.
+    mockGet.mockRejectedValueOnce(new Error(JSON.stringify({ detail: "Post not found" })));
+    const user = userEvent.setup();
     renderWithProviders(<PostDetailPage />);
 
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith("/");
+      expect(screen.getByText("Could not load this post")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Post not found")).toBeInTheDocument();
+    expect(mockPush).not.toHaveBeenCalled();
+
+    mockGet.mockResolvedValue(makePost({ topic: "Back again" }));
+    await user.click(screen.getByText("Retry"));
+    await waitFor(() => {
+      expect(screen.getByText("Back again")).toBeInTheDocument();
+    });
+  });
+
+  it("falls back to its own wording when the failure carries no message", async () => {
+    mockGet.mockRejectedValue(new Error(""));
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("The request failed and the server gave no reason.")
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("keeps the post on screen when a refetch fails and offers a retry", async () => {
+    const post = makePost({
+      topic: "Still here",
+      stage_status: { research: "complete" },
+      research_content: "Content here",
+    });
+    mockGet.mockResolvedValueOnce(post);
+    mockRerun.mockResolvedValue({ status: "queued", mode: "rerun", rerun_from: "research" });
+    mockGet.mockRejectedValueOnce(new Error(JSON.stringify({ detail: "Database is down" })));
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Still here")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText("Rerun Stage"));
+    await waitFor(() => {
+      expect(screen.getByText("This post is out of date")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Database is down")).toBeInTheDocument();
+    // The last good render is still there behind the banner.
+    expect(screen.getByText("Still here")).toBeInTheDocument();
+  });
+
+  it("shows an analytics error with a retry when analytics fails", async () => {
+    mockGet.mockResolvedValue(makePost());
+    mockAnalytics.mockRejectedValueOnce(
+      new Error(JSON.stringify({ detail: "Analytics is unavailable" }))
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Analytics unavailable")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Analytics is unavailable")).toBeInTheDocument();
+
+    mockAnalytics.mockResolvedValue(makeAnalytics());
+    await user.click(screen.getByText("Retry"));
+    await waitFor(() => {
+      expect(screen.getByText("SEO Checklist")).toBeInTheDocument();
     });
   });
 });

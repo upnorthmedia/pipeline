@@ -356,3 +356,240 @@ from "No posts found" to "No posts yet" so that it no longer doubles as the fail
 15 `BetterAuthError: You are using the default secret` lines, which are pre-existing: this
 worktree's `.env` has no `BETTER_AUTH_SECRET` (`grep -c` returns 0) and `.env.example`
 documents it.
+
+## 8.3
+
+`/posts/[id]`: loading, empty, error and success states, plus the visual hierarchy and
+spacing pass.
+
+### What landed
+
+| Change | File |
+| --- | --- |
+| A load failure now stays on the post and shows the server's message with a Retry, instead of raising a toast and pushing the browser to `/` | `web/src/app/posts/[id]/page.tsx` |
+| A failed *refetch* over a page that already has a post shows a banner above the content rather than replacing it | `web/src/app/posts/[id]/page.tsx` |
+| One skeleton for both waits: the route's `loading.tsx` and the page's own client fetch | `web/src/app/posts/[id]/post-detail-skeleton.tsx`, `loading.tsx`, `page.tsx` |
+| A post that has never run gets a real empty state with the action that fills it (**Run Pipeline**, `POST /run`) in place of six disabled tabs and "No research content yet" | `web/src/app/posts/[id]/page.tsx` |
+| The analytics fetch no longer swallows its failure; it renders an error card with a Retry | `web/src/app/posts/[id]/page.tsx` |
+| The dead "Cost Tracking" card removed: it reads `stage_logs`, which the ported pipeline never writes except the `_error` key the card filters out | `web/src/app/posts/[id]/page.tsx` |
+| Card rhythm made consistent: `gap-0 py-0` on the section cards so the header/rule/content spacing is the card's own 12/16px and not the shadcn default's 24px bands | `page.tsx`, `web/src/components/run-trace.tsx` |
+| The six pipeline-progress circles carry their stage name and status as an `aria-label`; they were six unnamed buttons whose label existed only in a hover tooltip | `web/src/components/pipeline-progress.tsx` |
+
+### The removed card was dead, not redundant
+
+`stage_logs` on the post the ported pipeline ran end to end in item 7.6:
+
+```
+$ psql -tAc "select stage_logs::text, jsonb_typeof(stage_logs) from posts
+             where id='272e38d1-bed9-4237-a48d-bda64aed9795'"
+{}|object
+```
+
+Nothing in the TypeScript stack writes a stage key to that column:
+
+```
+$ grep -rn "stageLogs" web/src --include='*.ts' --include='*.tsx' | grep -v "\.test\."
+web/src/app/api/posts/query.ts:71:  ["stage_logs", posts.stageLogs],
+web/src/app/api/posts/serialize.ts:115:    stage_logs: row.stageLogs ?? {},
+web/src/app/api/posts/[id]/restart/route.ts:65:      stageLogs: {},
+web/src/mastra/dead-letter.ts:199:        sql`jsonb_exists(coalesce(${posts.stageLogs}, '{}'::jsonb), '_error')`,
+web/src/mastra/post-state.ts:309:      stageLogs: sql`coalesce(${posts.stageLogs}, '{}'::jsonb) || ${JSON.stringify({ _error: error })}::jsonb`,
+web/src/mastra/post-state.ts:355:const dropErrorLog = sql`coalesce(${posts.stageLogs}, '{}'::jsonb) - '_error'`
+web/src/mastra/post-state.ts:380:      stageLogs: dropErrorLog,
+web/src/mastra/post-state.ts:403:    .set({ stageLogs: dropErrorLog, updatedAt: new Date() })
+web/src/db/schema.ts:143:    stageLogs: jsonb("stage_logs").$type<Record<string, unknown>>().default({}),
+```
+
+The only key the port ever writes there is `_error`, and the card rendered
+`Object.keys(post.stage_logs).filter(k => !k.startsWith("_"))`, so it could not have drawn a
+row for any post this stack produces. The numbers it used to show are in the run trace from
+item 8.1, cross-checked against `stage_status`, which the card was not.
+
+### Red then green
+
+Against the page as it was at `7a5c765` (`git show HEAD:page.tsx > page.tsx`), with the new
+test file in place:
+
+```
+$ pnpm -C web test --run src/app/posts/PostDetail.test.tsx
+     x offers Run Pipeline on a post that has never run
+     x reports per-stage cost through the run trace
+     x shows the server's message and a working retry when the load fails
+     x falls back to its own wording when the failure carries no message
+     x keeps the post on screen when a refetch fails and offers a retry
+     x shows an analytics error with a retry when analytics fails
+ Test Files  1 failed (1)
+      Tests  6 failed | 12 passed (18)
+```
+
+With the change in place:
+
+```
+$ pnpm -C web test --run src/app/posts/PostDetail.test.tsx
+ Test Files  1 passed (1)
+      Tests  18 passed (18)
+```
+
+Three of those 18 were the standing `PostDetail.test.tsx` failures recorded in `todo.md`, and
+all three were expectation drift this item resolves rather than silences:
+
+| Test | Was | Now |
+| --- | --- | --- |
+| `renders stage tabs` | asserted a tab named "Final"; no such label exists (the label is "Editing"), and after 8.1 `getByText("Research")` also matched the run trace's own table cell | asserts by `getByRole("tab", ...)` with the labels the page actually renders |
+| `shows Run Next and Run All buttons ...` | those two buttons were deleted pre-port in `e9311cc` | asserts the **Run Pipeline** empty state this item adds, on the same never-run fixture |
+| `renders stage logs when present` | asserted a card headed "Execution Logs"; the card was headed "Cost Tracking" and is now removed as dead | asserts the same numbers through the run trace, and that no "Cost Tracking" card remains |
+
+### The four states, live
+
+Dev server on :3000 against the compose `db`/`redis`, signed in through the real sign-in form.
+The empty state needed a post nothing had ever executed against, which post creation cannot
+produce (`POST /api/posts` starts the pipeline), so one was inserted directly:
+
+```
+$ psql -c "insert into posts (...) values ('11111111-1111-4111-8111-111111111111',
+           'never-run-empty-state', ...)"
+INSERT 0 1
+```
+
+**Error.** With `db` stopped, the old page left the post entirely:
+
+```
+$ docker compose stop db
+ Container objective-port-jena-46c1e6-1-db-1  Stopped
+$ chrome-devtools-axi open http://localhost:3000/posts/272e38d1-...
+$ chrome-devtools-axi eval "() => location.pathname"
+result: "\"/\""
+```
+
+The new one stays and says why:
+
+```
+$ chrome-devtools-axi eval "() => location.pathname"
+result: "\"/posts/272e38d1-bed9-4237-a48d-bda64aed9795\""
+$ chrome-devtools-axi snapshot
+    uid=g1876:6_2 StaticText "Could not load this post"
+    uid=g1876:6_3 StaticText "The request failed and the server gave no reason."
+    uid=g1876:6_4 button "Retry"
+```
+
+`GET /api/posts/{id}` answers 500 with an empty body when its database is gone (the same
+finding as item 8.2), so the fallback wording is what a user sees. Retry recovers in place:
+
+```
+$ docker compose start db
+ Container objective-port-jena-46c1e6-1-db-1  Started
+$ chrome-devtools-axi click g1878:6_4        # the Retry button
+$ chrome-devtools-axi eval "() => document.querySelector('h1').textContent"
+result: "\"Content Crew\""
+$ chrome-devtools-axi snapshot | head -30
+    uid=g1880:9_2 heading "How small businesses choose a local SEO agency" level="1"
+    uid=g1880:9_5 button "Rerun Stage"
+    uid=g1880:9_14 StaticText "Run Trace"
+    uid=g1880:9_15 StaticText "72,037"
+```
+
+**Empty.**
+
+```
+$ chrome-devtools-axi open http://localhost:3000/posts/11111111-1111-4111-8111-111111111111
+$ chrome-devtools-axi snapshot
+    uid=g1882:12_2 heading "Choosing a local SEO agency: what to ask first" level="1"
+    uid=g1882:12_4 StaticText "RESEARCH"
+    uid=g1882:12_5 button "Run Pipeline"
+    uid=g1882:12_12 StaticText "Run Trace"
+    uid=g1882:12_13 StaticText "No run yet. Start the pipeline to see per-step status, timing, tokens and cost."
+    uid=g1882:12_14 StaticText "This post has not run yet"
+    uid=g1882:12_15 StaticText "Stage output appears here as the pipeline writes it. Start the run to fill Research, Outline, Write, Edit, Images and Ready."
+    uid=g1882:12_16 button "Run Pipeline"
+```
+
+`Rerun Stage` and `Force Restart` are absent there by design: neither verb means anything
+before a first run.
+
+**Loading.** Captured under a throttled network, counting the skeleton elements on screen at
+the moment of the screenshot:
+
+```
+$ chrome-devtools-axi emulate --network "Fast 3G"
+$ chrome-devtools-axi open http://localhost:3000/posts/272e38d1-... && chrome-devtools-axi screenshot
+$ chrome-devtools-axi eval "() => document.querySelectorAll('[class*=animate-pulse]').length"
+old page: result: "{\"p\":\"/posts/272e38d1-...\",\"n\":3}"
+new page: result: "{\"p\":\"/posts/272e38d1-...\",\"n\":46}"
+```
+
+3 grey bars before, the full layout mirror after, which is the same skeleton `loading.tsx`
+was already rendering for the route wait.
+
+**Success.** The completed 7.6 post, before and after the spacing pass: full-page height
+2160px -> 2029px with no content removed, because the shadcn `Card` default (`gap-6 py-6`)
+was adding a 24px band above and below every separator on top of each card's own `py-3`
+header padding.
+
+### Screenshots
+
+| State | Before | After |
+| --- | --- | --- |
+| Success | `ui/8.3-post-detail-success-before.png` | `ui/8.3-post-detail-success-after.png` |
+| Empty | `ui/8.3-post-detail-empty-before.png` | `ui/8.3-post-detail-empty-after.png` |
+| Error | `ui/8.3-post-detail-error-before.png` (the redirect to `/`) | `ui/8.3-post-detail-error-after.png` |
+| Loading | `ui/8.3-post-detail-loading-before.png` | `ui/8.3-post-detail-loading-after.png` |
+
+All eight are distinct files (`md5` differs pairwise).
+
+### Console
+
+The never-run post is silent:
+
+```
+$ chrome-devtools-axi open http://localhost:3000/posts/11111111-1111-4111-8111-111111111111
+$ chrome-devtools-axi console
+<no console messages found>
+```
+
+The completed post has three errors, all the same pre-existing one:
+
+```
+$ chrome-devtools-axi console --type error
+msgid=70 [error] Failed to load resource: the server responded with a status of 404 (Not Found) [3 times]
+$ chrome-devtools-axi eval "() => [...document.querySelectorAll('img')].filter(i => !i.complete || i.naturalWidth === 0).map(i => i.getAttribute('src'))"
+result: "[\"/media/272e38d1-.../local-seo-service-components.webp\", ...]"
+```
+
+Those are the article's generated images, which live in the compose `media` volume while
+`pnpm -C web dev` serves the repo's own `media/`. That split is the `[investigate]` entry
+`todo.md` recorded on 2026-08-23; it is not this item's code and no new message appeared.
+
+```
+$ npx -y chrome-devtools-axi stop
+status: stopped
+```
+
+### Gates
+
+```
+$ pnpm -C web exec tsc --noEmit
+exit=0
+
+$ pnpm -C web lint
+exit=0
+
+$ pnpm -C web test
+ Test Files  2 failed | 136 passed (138)
+      Tests  7 failed | 4550 passed | 7 skipped (4564)
+
+$ pnpm -C web build
+✓ Compiled successfully in 6.5s
+✓ Generating static pages using 15 workers (42/42) in 278.8ms
+exit=0
+```
+
+The standing baseline was 9 failures. Six are `image-preview.test.tsx`, unchanged. The three
+in `PostDetail.test.tsx` are fixed by this item. The seventh is the known
+`scaffold-check.test.ts` flake `todo.md` records as failing in two runs of three under the
+full suite; it passes on its own immediately afterwards:
+
+```
+$ pnpm -C web test --run src/mastra/workflows/scaffold-check.test.ts
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+```

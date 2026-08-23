@@ -699,14 +699,13 @@
   (exit 0). Item 9.1 has to paste every gate command, so it needs the `exec` form or a
   `typecheck` script in `web/package.json`.
 
-- [confirmed] 2026-08-23 The three failing tests in `web/src/app/posts/PostDetail.test.tsx`
-  (`renders stage tabs`, `shows Run Next and Run All buttons ...`, `renders stage logs when
-  present`) are UI expectation drift, not a runtime defect: each fails with
-  `Unable to find an element with the text: ...` for `Final`, `Run Next` and `Execution Logs`
-  respectively. They plus the 6 in `image-preview.test.tsx` are the whole of the standing
-  `9 failed | 4510 passed` state of `pnpm -C web test`, which had only ever been recorded as
-  an aggregate. Item 9.1 needs both files audited against the current components, the same
-  way the Playwright suite does.
+- [confirmed] 2026-08-23 The 6 failing tests in `web/src/components/__tests__/image-preview.test.tsx`
+  are UI expectation drift, not a runtime defect, and are now the whole of the standing
+  failure state of `pnpm -C web test` (`6 failed | 4550 passed`, plus the intermittent
+  `scaffold-check` entry above). The 3 `PostDetail.test.tsx` failures that used to sit
+  alongside them were resolved by ledger item 8.3 on 2026-08-23. Item 9.1 still needs
+  `image-preview.test.tsx` audited against the current component, the same way the Playwright
+  suite does.
 
 - [confirmed] 2026-08-23 The app has no theme switch: `web/src/app/layout.tsx:28` hardcodes
   `<html lang="en" className="dark">` and no `ThemeProvider` is mounted anywhere
@@ -733,3 +732,16 @@
   Next's default 500 instead. Worth deciding whether the route handlers need a shared catch
   that answers `{"detail": ...}` for unexpected errors too, since Phase 8's error states are
   only as informative as the bodies they get.
+
+- [confirmed] 2026-08-23 `/posts/[id]` names two of the six stages twice: the tab strip in
+  `web/src/app/posts/[id]/page.tsx` labels them "Draft" and "Editing" while the pipeline
+  progress bar and the run trace both say "Write" and "Edit", so one screen shows two names
+  for one step. Not renamed under item 8.3 because `web/e2e/post-editor.test.ts:106` asserts
+  `getByRole("tab", { name: "Draft" })` and the rename would need that suite updated with it.
+
+- [confirmed] 2026-08-23 The `posts.stage_logs` column is write-only dead weight in the ported
+  stack: the only key anything writes is `_error` (`web/src/mastra/post-state.ts`), the
+  execution numbers all go to `execution_logs`, and the last UI that read it (the "Cost
+  Tracking" card) was removed by ledger item 8.3. `GET /api/posts/{id}` still serves it and
+  `PostUpdate` still accepts it, so dropping the column is a schema change to weigh after the
+  port, not during it.

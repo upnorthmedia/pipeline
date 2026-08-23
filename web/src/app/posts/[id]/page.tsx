@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
+  AlertCircle,
   ArrowLeft,
+  Play,
   RefreshCw,
   RotateCcw,
   Pause,
@@ -22,7 +24,6 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { PipelineProgress } from "@/components/pipeline-progress";
 import { StageBadge } from "@/components/stage-badge";
@@ -37,7 +38,9 @@ import { ImagePreview } from "@/components/image-preview";
 import { ExportButton } from "@/components/export-button";
 import { DebugLogPanel, type DebugLog } from "@/components/debug-log-panel";
 import { RunTrace } from "@/components/run-trace";
+import { PostDetailSkeleton } from "./post-detail-skeleton";
 import {
+  apiErrorMessage,
   posts,
   type Post,
   type PipelineStage,
@@ -77,11 +80,12 @@ const STAGE_LABELS: Record<PipelineStage, string> = {
 
 export default function PostDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const postId = params.id as string;
 
   const [post, setPost] = useState<Post | null>(null);
   const [analytics, setAnalytics] = useState<PostAnalytics | null>(null);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("research");
   const [editorContent, setEditorContent] = useState<string>("");
@@ -94,9 +98,17 @@ export default function PostDetailPage() {
   const [liveStart, setLiveStart] = useState<{ stage: PipelineStage; at: string } | null>(null);
   const lastSavedRef = useRef<string>("");
 
+  /**
+   * A failed load used to raise a toast and push the browser back to `/`, so a
+   * 500 or a dropped connection took the operator off the post with nothing to
+   * read and nothing to retry. It now leaves the page where it is and shows the
+   * server's own message: as a full-page state when there is no post to show,
+   * and as a banner over the last good render when a refetch fails mid-run.
+   */
   const fetchPost = useCallback(async () => {
     try {
       const data = await posts.get(postId);
+      setError(null);
       setPost((prev) => {
         if (!prev) return data;
         // Preserve optimistic "running" when API returns stale "pending"
@@ -115,20 +127,26 @@ export default function PostDetailPage() {
         .reverse()
         .find((s) => data.stage_status[s] === "complete");
       if (lastComplete) setActiveTab(lastComplete);
-    } catch {
-      toast.error("Failed to load post");
-      router.push("/");
+    } catch (e) {
+      // A route handler that dies before it can answer sends an empty 500
+      // body, so there is often nothing of the server's own to show.
+      setError(
+        apiErrorMessage(e, "The request failed and the server gave no reason.")
+      );
     } finally {
       setLoading(false);
     }
-  }, [postId, router]);
+  }, [postId]);
 
   const fetchAnalytics = useCallback(async () => {
     try {
       const data = await posts.analytics(postId);
       setAnalytics(data);
-    } catch {
-      // Analytics may not be available yet
+      setAnalyticsError(null);
+    } catch (e) {
+      setAnalyticsError(
+        apiErrorMessage(e, "The request failed and the server gave no reason.")
+      );
     }
   }, [postId]);
 
@@ -263,6 +281,22 @@ export default function PostDetailPage() {
     }
   };
 
+  /**
+   * The action behind the empty state. `POST /run` with no stage starts a full
+   * pipeline that skips whatever is already complete and still parks on the
+   * post's configured review gates, which is what "run this post" means for a
+   * post that has never run; `/run-all` would force every gate to `auto`.
+   */
+  const handleRun = async () => {
+    try {
+      await posts.run(postId);
+      toast.success("Pipeline started");
+      fetchPost();
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Failed to start the pipeline"));
+    }
+  };
+
   const handleRerun = async () => {
     try {
       const result = await posts.rerun(postId);
@@ -303,20 +337,51 @@ export default function PostDetailPage() {
     toast.success("Copied to clipboard");
   };
 
-  if (loading) {
+  const retry = () => {
+    setLoading(true);
+    fetchPost();
+    fetchAnalytics();
+  };
+
+  if (loading) return <PostDetailSkeleton />;
+
+  if (!post) {
     return (
-      <div className="p-6 space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-12 w-full" />
-        <Skeleton className="h-96 w-full" />
+      <div className="mx-auto max-w-6xl space-y-6 p-6">
+        <Link href="/">
+          <Button variant="ghost" size="sm">
+            <ArrowLeft className="h-4 w-4 mr-1.5" />
+            All posts
+          </Button>
+        </Link>
+        <Card className="py-0">
+          <CardContent className="py-16 text-center">
+            <AlertCircle className="mx-auto h-6 w-6 text-destructive" />
+            <p className="mt-3 text-base font-medium">Could not load this post</p>
+            <p className="mx-auto mt-1 max-w-lg text-sm text-muted-foreground">
+              {error ?? "The request failed and the server gave no reason."}
+            </p>
+            <Button variant="outline" size="sm" className="mt-4" onClick={retry}>
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
-  if (!post) return null;
-
   const isRunning = STAGES.some((s) => post.stage_status[s] === "running");
   const isComplete = post.current_stage === "complete";
+  // A post nothing has ever executed against: no stage has moved off
+  // `pending` and no stage column holds output. Posts normally start on
+  // creation, so this is the state of a post whose run never reached the
+  // worker, which is exactly when an operator needs a way to start one.
+  const neverRan =
+    STAGES.every((s) => {
+      const status = post.stage_status[s];
+      return !status || status === "pending";
+    }) && STAGES.every((s) => !post[STAGE_CONTENT_FIELDS[s]]);
 
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
@@ -401,14 +466,23 @@ export default function PostDetailPage() {
               Pause
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={handleRerun}>
-            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-            Rerun Stage
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleRestart}>
-            <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
-            Force Restart
-          </Button>
+          {neverRan ? (
+            <Button size="sm" onClick={handleRun}>
+              <Play className="h-3.5 w-3.5 mr-1.5" />
+              Run Pipeline
+            </Button>
+          ) : (
+            <>
+              <Button variant="outline" size="sm" onClick={handleRerun}>
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                Rerun Stage
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleRestart}>
+                <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                Force Restart
+              </Button>
+            </>
+          )}
           {post.output_format === "wordpress" &&
             isComplete &&
             (!post.wp_publish_status || post.wp_publish_status === "pending") && (
@@ -451,8 +525,26 @@ export default function PostDetailPage() {
         </div>
       </div>
 
+      {/* A refetch that failed over a page that still has a post to show. */}
+      {error && (
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">This post is out of date</p>
+            <p className="mt-0.5 text-sm text-muted-foreground">{error}</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={retry}>
+            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+            Retry
+          </Button>
+        </div>
+      )}
+
       {/* Pipeline Progress */}
-      <Card>
+      <Card className="gap-0 py-0">
         <CardContent className="py-4">
           <div className="flex items-center justify-center">
             <PipelineProgress
@@ -471,139 +563,158 @@ export default function PostDetailPage() {
       />
 
       {/* Stage Content Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <div className="flex items-center justify-between">
-          <TabsList>
-            {STAGES.map((stage) => {
-              const hasContent = !!post[STAGE_CONTENT_FIELDS[stage]];
-              return (
-                <TabsTrigger
-                  key={stage}
-                  value={stage}
-                  className="relative"
-                  disabled={!hasContent}
-                >
-                  {STAGE_LABELS[stage]}
-                </TabsTrigger>
-              );
-            })}
-          </TabsList>
+      {neverRan ? (
+        <Card className="py-0">
+          <CardContent className="py-16 text-center">
+            <p className="text-base font-medium">This post has not run yet</p>
+            <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+              Stage output appears here as the pipeline writes it. Start the run
+              to fill Research, Outline, Write, Edit, Images and Ready.
+            </p>
+            <Button size="sm" className="mt-4" onClick={handleRun}>
+              <Play className="h-3.5 w-3.5 mr-1.5" />
+              Run Pipeline
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <div className="flex items-center justify-between">
+            <TabsList>
+              {STAGES.map((stage) => {
+                const hasContent = !!post[STAGE_CONTENT_FIELDS[stage]];
+                return (
+                  <TabsTrigger
+                    key={stage}
+                    value={stage}
+                    className="relative"
+                    disabled={!hasContent}
+                  >
+                    {STAGE_LABELS[stage]}
+                  </TabsTrigger>
+                );
+              })}
+            </TabsList>
 
-          <div className="flex items-center gap-2">
-            {activeTab &&
-              activeTab !== "images" &&
-              activeTab !== "ready" &&
-              post[STAGE_CONTENT_FIELDS[activeTab as PipelineStage]] && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    copyContent(
-                      String(
-                        post[STAGE_CONTENT_FIELDS[activeTab as PipelineStage]]
+            <div className="flex items-center gap-2">
+              {activeTab &&
+                activeTab !== "images" &&
+                activeTab !== "ready" &&
+                post[STAGE_CONTENT_FIELDS[activeTab as PipelineStage]] && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      copyContent(
+                        String(
+                          post[STAGE_CONTENT_FIELDS[activeTab as PipelineStage]]
+                        )
                       )
-                    )
-                  }
-                  className="text-xs"
-                >
-                  <Copy className="h-3 w-3 mr-1" />
-                  Copy
-                </Button>
-              )}
+                    }
+                    className="text-xs"
+                  >
+                    <Copy className="h-3 w-3 mr-1" />
+                    Copy
+                  </Button>
+                )}
+            </div>
           </div>
-        </div>
 
-        {STAGES.map((stage) => {
-          const field = STAGE_CONTENT_FIELDS[stage];
-          const content = post[field];
+          {STAGES.map((stage) => {
+            const field = STAGE_CONTENT_FIELDS[stage];
+            const content = post[field];
 
-          return (
-            <TabsContent key={stage} value={stage} className="mt-4">
-              {stage === "ready" ? (
-                content ? (
-                  <Card>
+            return (
+              <TabsContent key={stage} value={stage} className="mt-4">
+                {stage === "ready" ? (
+                  content ? (
+                    <Card className="gap-0 py-0">
+                      <CardHeader className="flex flex-row items-center justify-between py-3">
+                        <CardTitle className="text-base">Ready — Live Preview</CardTitle>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => copyContent(content as string)}
+                          className="text-xs"
+                        >
+                          <Copy className="h-3 w-3 mr-1" />
+                          Copy
+                        </Button>
+                      </CardHeader>
+                      <Separator />
+                      <CardContent className="p-0">
+                        <ContentPreview
+                          content={content as string}
+                          height="800px"
+                        />
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <Card className="py-0">
+                      <CardContent className="py-12 text-center">
+                        <p className="text-muted-foreground text-sm">
+                          {post.stage_status[stage] === "running"
+                            ? "Running Ready..."
+                            : "No ready content yet"}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  )
+                ) : stage === "images" ? (
+                  <ImagePreview
+                    manifest={content as Record<string, unknown> | null}
+                  />
+                ) : content ? (
+                  <Card className="gap-0 py-0">
                     <CardHeader className="flex flex-row items-center justify-between py-3">
-                      <CardTitle className="text-base">Ready — Live Preview</CardTitle>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => copyContent(content as string)}
-                        className="text-xs"
-                      >
-                        <Copy className="h-3 w-3 mr-1" />
-                        Copy
-                      </Button>
+                      <CardTitle className="text-base">
+                        {STAGE_LABELS[stage]} Output
+                      </CardTitle>
                     </CardHeader>
                     <Separator />
                     <CardContent className="p-0">
-                      <ContentPreview
-                        content={content as string}
-                        height="800px"
+                      <MarkdownEditor
+                        content={editorContent}
+                        onChange={setEditorContent}
+                        onSave={handleSave}
+                        height="500px"
+                        readOnly={
+                          post.stage_status[stage] === "running"
+                        }
                       />
                     </CardContent>
                   </Card>
                 ) : (
-                  <Card>
+                  <Card className="py-0">
                     <CardContent className="py-12 text-center">
                       <p className="text-muted-foreground text-sm">
                         {post.stage_status[stage] === "running"
-                          ? "Running Ready..."
-                          : "No ready content yet"}
+                          ? `Running ${STAGE_LABELS[stage]}...`
+                          : `No ${STAGE_LABELS[stage].toLowerCase()} content yet`}
                       </p>
                     </CardContent>
                   </Card>
-                )
-              ) : stage === "images" ? (
-                <ImagePreview
-                  manifest={content as Record<string, unknown> | null}
-                />
-              ) : content ? (
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between py-3">
-                    <CardTitle className="text-base">
-                      {STAGE_LABELS[stage]} Output
-                    </CardTitle>
-                  </CardHeader>
-                  <Separator />
-                  <CardContent className="p-0">
-                    <MarkdownEditor
-                      content={editorContent}
-                      onChange={setEditorContent}
-                      onSave={handleSave}
-                      height="500px"
-                      readOnly={
-                        post.stage_status[stage] === "running"
-                      }
-                    />
-                  </CardContent>
-                </Card>
-              ) : (
-                <Card>
-                  <CardContent className="py-12 text-center">
-                    <p className="text-muted-foreground text-sm">
-                      {post.stage_status[stage] === "running"
-                        ? `Running ${STAGE_LABELS[stage]}...`
-                        : `No ${STAGE_LABELS[stage].toLowerCase()} content yet`}
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
-            </TabsContent>
-          );
-        })}
-      </Tabs>
+                )}
+              </TabsContent>
+            );
+          })}
+        </Tabs>
+      )}
 
       {/* Debug Logs */}
       <DebugLogPanel logs={debugLogs} isRunning={isRunning} />
 
-      {/* Analytics */}
-      {analytics && (
-        <Card>
+      {/* Analytics. The endpoint answers zeroes for a post with no content, so
+          nothing here is conditional on the pipeline having run: a card with no
+          numbers in it is the honest empty state, and a failure is the server's
+          own message rather than the silence it used to be. */}
+      {analytics ? (
+        <Card className="gap-0 py-0">
           <CardHeader className="py-3">
             <CardTitle className="text-base">Analytics</CardTitle>
           </CardHeader>
           <Separator />
-          <CardContent className="pt-4 space-y-4">
+          <CardContent className="space-y-4 py-4">
             <AnalyticsBar
               analytics={analytics}
               targetWordCount={post.word_count}
@@ -612,84 +723,29 @@ export default function PostDetailPage() {
             <KeywordDensity density={analytics.keyword_density} />
           </CardContent>
         </Card>
-      )}
-
-      {/* Stage Logs + Cost Tracking */}
-      {post.stage_logs && Object.keys(post.stage_logs).filter(k => !k.startsWith("_")).length > 0 && (
-        <Card>
-          <CardHeader className="py-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Cost Tracking</CardTitle>
-              {(() => {
-                const stageEntries = Object.entries(post.stage_logs).filter(([k]) => !k.startsWith("_"));
-                const totalCost = stageEntries.reduce((sum, [, log]) => {
-                  const l = log as Record<string, unknown>;
-                  return sum + ((l.cost_usd as number) || 0);
-                }, 0);
-                const totalTokens = stageEntries.reduce((sum, [, log]) => {
-                  const l = log as Record<string, unknown>;
-                  return sum + ((l.tokens_in as number) || 0) + ((l.tokens_out as number) || 0);
-                }, 0);
-                const totalTime = stageEntries.reduce((sum, [, log]) => {
-                  const l = log as Record<string, unknown>;
-                  return sum + ((l.duration_s as number) || 0);
-                }, 0);
-                return (
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    <span>{totalTokens.toLocaleString()} tokens</span>
-                    <span>{totalTime.toFixed(1)}s</span>
-                    <span className="font-medium text-foreground">
-                      ${totalCost.toFixed(4)}
-                    </span>
-                  </div>
-                );
-              })()}
-            </div>
-          </CardHeader>
-          <Separator />
-          <CardContent className="pt-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-              {Object.entries(post.stage_logs)
-                .filter(([k]) => !k.startsWith("_"))
-                .map(([stage, log]) => {
-                const l = log as Record<string, unknown>;
-                return (
-                  <div
-                    key={stage}
-                    className="rounded-md border border-border p-3 space-y-1"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium capitalize">
-                        {stage}
-                      </span>
-                      {l.cost_usd != null && (
-                        <span className="text-xs font-medium">
-                          ${(l.cost_usd as number).toFixed(4)}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[10px] font-mono text-muted-foreground">
-                      {l.model as string}
-                    </div>
-                    <div className="grid grid-cols-2 gap-x-4 text-xs text-muted-foreground">
-                      {l.tokens_in != null && (
-                        <span>In: {(l.tokens_in as number).toLocaleString()}</span>
-                      )}
-                      {l.tokens_out != null && (
-                        <span>
-                          Out: {(l.tokens_out as number).toLocaleString()}
-                        </span>
-                      )}
-                      {l.duration_s != null && (
-                        <span>{(l.duration_s as number).toFixed(1)}s</span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
+      ) : (
+        analyticsError && (
+          <Card className="gap-0 py-0">
+            <CardHeader className="py-3">
+              <CardTitle className="text-base">Analytics</CardTitle>
+            </CardHeader>
+            <Separator />
+            <CardContent className="py-6 text-center">
+              <AlertCircle className="mx-auto h-5 w-5 text-destructive" />
+              <p className="mt-2 text-sm font-medium">Analytics unavailable</p>
+              <p className="mt-1 text-sm text-muted-foreground">{analyticsError}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={fetchAnalytics}
+              >
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                Retry
+              </Button>
+            </CardContent>
+          </Card>
+        )
       )}
     </div>
   );

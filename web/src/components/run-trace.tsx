@@ -197,7 +197,7 @@ export function RunTrace({
   const started = trace.stages.some((row) => row.status !== "pending");
 
   return (
-    <Card>
+    <Card className="gap-0 py-0">
       <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 py-3">
         <div className="flex items-center gap-2">
           <Activity className="h-4 w-4 text-muted-foreground" />
