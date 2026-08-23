@@ -745,3 +745,10 @@
   Tracking" card) was removed by ledger item 8.3. `GET /api/posts/{id}` still serves it and
   `PostUpdate` still accepts it, so dropping the column is a schema change to weigh after the
   port, not during it.
+
+- [confirmed] 2026-08-23 `web/e2e/navigation.test.ts:56` asserts a "Pipeline Settings" card on
+  `/posts/new` and no such card exists in `web/src/app/posts/new/page.tsx` (the page's cards
+  are Website Profile, Content, Writing Config, SEO & Research and a conditional WordPress
+  Publishing). Found while working item 8.5; it is one instance of the broadly failing e2e
+  drift item 9.1 has to settle, recorded here so that pass knows the assertion is stale rather
+  than the page being wrong.

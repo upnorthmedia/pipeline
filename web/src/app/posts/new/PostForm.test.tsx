@@ -29,6 +29,8 @@ vi.mock("@/lib/api", async () => {
     },
     profiles: {
       list: vi.fn(),
+      wpCategories: vi.fn(),
+      wpAuthors: vi.fn(),
     },
   };
 });
@@ -44,6 +46,8 @@ const { posts, profiles } = await import("@/lib/api");
 const { toast } = await import("sonner");
 const mockCreate = vi.mocked(posts.create);
 const mockProfilesList = vi.mocked(profiles.list);
+const mockWpCategories = vi.mocked(profiles.wpCategories);
+const mockWpAuthors = vi.mocked(profiles.wpAuthors);
 
 const testProfile = makeProfile({
   id: "prof-1",
@@ -61,7 +65,10 @@ const testProfile = makeProfile({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockProfilesList.mockResolvedValue([testProfile]);
+  // Pending by default: most cases here render and assert synchronously, and a
+  // profile list that resolves afterwards settles state outside act(...) and
+  // fills the run with warnings. Cases that need the list say so.
+  mockProfilesList.mockReturnValue(new Promise(() => {}));
   mockCreate.mockResolvedValue({
     id: "new-post-1",
     slug: "test",
@@ -157,7 +164,24 @@ describe("NewPostPage", () => {
     });
   });
 
-  it("shows error toast on submission failure", async () => {
+  // A toast would be gone in four seconds and the operator is still looking at
+  // a filled-in form, so the reason stays on the page next to the button.
+  it("shows the server's own reason inline on submission failure", async () => {
+    mockCreate.mockRejectedValue(
+      new Error(JSON.stringify({ detail: "Slug already in use" }))
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<NewPostPage />);
+
+    await user.type(screen.getByLabelText(/Topic/), "Test Post");
+    await user.click(screen.getByText("Create Post"));
+
+    expect(await screen.findByText("Slug already in use")).toBeInTheDocument();
+    expect(screen.getByText("Could not create the post")).toBeInTheDocument();
+    expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
+  });
+
+  it("falls back to its own wording when the failure carries no message", async () => {
     mockCreate.mockRejectedValue(new Error("Server error"));
     const user = userEvent.setup();
     renderWithProviders(<NewPostPage />);
@@ -165,9 +189,73 @@ describe("NewPostPage", () => {
     await user.type(screen.getByLabelText(/Topic/), "Test Post");
     await user.click(screen.getByText("Create Post"));
 
-    await waitFor(() => {
-      expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Failed to create post");
+    expect(await screen.findByText("Failed to create post")).toBeInTheDocument();
+  });
+
+  it("clears a previous failure when the form is submitted again", async () => {
+    mockCreate.mockRejectedValueOnce(
+      new Error(JSON.stringify({ detail: "Slug already in use" }))
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<NewPostPage />);
+
+    await user.type(screen.getByLabelText(/Topic/), "Test Post");
+    await user.click(screen.getByText("Create Post"));
+    expect(await screen.findByText("Slug already in use")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Create Post"));
+    await waitFor(() =>
+      expect(screen.queryByText("Slug already in use")).not.toBeInTheDocument()
+    );
+  });
+
+  it("prefills the writing config from the chosen profile", async () => {
+    mockProfilesList.mockResolvedValue([testProfile]);
+    const user = userEvent.setup();
+    renderWithProviders(<NewPostPage />);
+
+    await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+    await user.click(await screen.findByRole("option", { name: "Firearms Blog" }));
+
+    expect(screen.getByLabelText("Niche")).toHaveValue("Firearms");
+    expect(screen.getByLabelText("Target Audience")).toHaveValue("Gun Enthusiasts");
+    expect(screen.getByLabelText("Tone")).toHaveValue("Expert");
+    expect(screen.getByLabelText("Word Count")).toHaveValue(3000);
+  });
+
+  // Categories and authors come from the profile's own WordPress site, so a
+  // wrong password fails here and nowhere else. Silent, it reads as a site
+  // with no categories.
+  it("surfaces a WordPress lookup failure with a retry", async () => {
+    const wpProfile = makeProfile({
+      id: "prof-wp",
+      name: "WP Site",
+      wp_url: "https://wp.example.com",
+      wp_username: "editor",
     });
+    mockProfilesList.mockResolvedValue([wpProfile]);
+    mockWpCategories.mockRejectedValueOnce(
+      new Error(JSON.stringify({ detail: "WordPress rejected the credentials" }))
+    );
+    mockWpAuthors.mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderWithProviders(<NewPostPage />);
+
+    await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+    await user.click(await screen.findByRole("option", { name: "WP Site" }));
+
+    expect(
+      await screen.findByText("WordPress rejected the credentials")
+    ).toBeInTheDocument();
+
+    mockWpCategories.mockResolvedValue([{ id: 3, name: "Optics" } as never]);
+    await user.click(screen.getByRole("button", { name: /Retry/ }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Could not load categories and authors")
+      ).not.toBeInTheDocument()
+    );
   });
 
   it("disables submit button while submitting", async () => {

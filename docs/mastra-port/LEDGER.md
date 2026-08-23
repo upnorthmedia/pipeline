@@ -1480,7 +1480,19 @@ screenshots via `npx -y chrome-devtools-axi` into
   Filters and table became one group under the header's rhythm, and the `Pri` header is
   spelled out.
   Evidence: [`evidence/phase-8.md` #8.4](../mastra-port/evidence/phase-8.md)
-- [ ] 8.5 `/posts/new` and `/posts/batch`: four states.
+- [x] 8.5 `/posts/new` and `/posts/batch`: four states.
+  Both routes loaded profiles with `.catch(() => {})`, so a dead database, an account with no
+  profiles and a successful load rendered the identical control: a select whose only option is
+  "No profile". The before screenshots are byte-identical across all three states on each
+  route, which is the defect rather than a capture bug. The picker is now one shared card with
+  a skeleton, an empty state pointing at `/profiles`, the server's own message with a working
+  Retry, and the select. Both submit paths kept the server's reason inline above the button
+  instead of dropping it into a four-second toast, proven live with a real
+  `404 {"detail": "Profile not found"}`, and `/posts/new` surfaces a failed WordPress category
+  and author lookup instead of showing two empty selects. Three standing accessibility issues
+  on `/posts/new`, one of them contributed by the new card, are fixed and both routes are
+  console-clean.
+  Evidence: [`evidence/phase-8.md` #8.5](../mastra-port/evidence/phase-8.md)
 - [ ] 8.6 `/profiles` and `/profiles/[id]`: four states.
 - [ ] 8.7 `/settings`: four states, plus visual hierarchy and spacing pass.
 - [ ] 8.8 `/monitor`: four states.

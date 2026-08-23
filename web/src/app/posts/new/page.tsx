@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { AlertCircle, ArrowLeft, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +23,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { ProfileSelectCard } from "@/components/profile-select-card";
 import {
+  apiErrorMessage,
   posts,
   profiles,
   type Profile,
@@ -58,9 +60,9 @@ function slugify(text: string): string {
 
 export default function NewPostPage() {
   const router = useRouter();
-  const [profileList, setProfileList] = useState<Profile[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<Profile | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Form state
   const [topic, setTopic] = useState("");
@@ -84,10 +86,7 @@ export default function NewPostPage() {
   const [requiredMentions, setRequiredMentions] = useState("");
   const [wpCategories, setWpCategories] = useState<WPCategory[]>([]);
   const [wpAuthors, setWpAuthors] = useState<WPAuthor[]>([]);
-
-  useEffect(() => {
-    profiles.list().then(setProfileList).catch(() => {});
-  }, []);
+  const [wpError, setWpError] = useState<string | null>(null);
 
   // Auto-slug from topic
   useEffect(() => {
@@ -96,8 +95,30 @@ export default function NewPostPage() {
     }
   }, [topic, slugManual]);
 
-  const handleProfileChange = (profileId: string) => {
-    const profile = profileList.find((p) => p.id === profileId) || null;
+  /**
+   * Category and author lists come from the profile's WordPress site, so a
+   * wrong password or an unreachable host fails here and nowhere else. Left
+   * silent it looks like a site with no categories.
+   */
+  const loadWpDefaults = async (profileId: string) => {
+    setWpError(null);
+    try {
+      const [categories, authors] = await Promise.all([
+        profiles.wpCategories(profileId),
+        profiles.wpAuthors(profileId),
+      ]);
+      setWpCategories(categories);
+      setWpAuthors(authors);
+    } catch (e) {
+      setWpCategories([]);
+      setWpAuthors([]);
+      setWpError(
+        apiErrorMessage(e, "WordPress did not answer with categories or authors.")
+      );
+    }
+  };
+
+  const handleProfileSelect = (profile: Profile | null) => {
     setSelectedProfile(profile);
     if (profile) {
       setNiche(profile.niche || "");
@@ -114,11 +135,11 @@ export default function NewPostPage() {
       setWpCategoryId(profile.wp_default_category_id);
       setWpAuthorId(profile.wp_default_author_id);
       if (profile.wp_url && profile.wp_username) {
-        profiles.wpCategories(profile.id).then(setWpCategories).catch(() => {});
-        profiles.wpAuthors(profile.id).then(setWpAuthors).catch(() => {});
+        loadWpDefaults(profile.id);
       } else {
         setWpCategories([]);
         setWpAuthors([]);
+        setWpError(null);
       }
     }
   };
@@ -131,6 +152,7 @@ export default function NewPostPage() {
     }
 
     setSubmitting(true);
+    setSubmitError(null);
     try {
       const data: PostCreate = {
         slug: slug.trim(),
@@ -160,8 +182,11 @@ export default function NewPostPage() {
       const post = await posts.create(data);
       toast.success("Post created");
       router.push(`/posts/${post.id}`);
-    } catch {
-      toast.error("Failed to create post");
+    } catch (e) {
+      // Inline rather than a toast: the operator stays on a filled-in form
+      // after a rejected slug or a dead database, so the reason has to stay
+      // on screen next to the button that failed.
+      setSubmitError(apiErrorMessage(e, "Failed to create post"));
     } finally {
       setSubmitting(false);
     }
@@ -184,35 +209,11 @@ export default function NewPostPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Profile selector */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Website Profile</CardTitle>
-            <CardDescription>
-              Select a profile to auto-fill default settings
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Select
-              value={selectedProfile?.id || "none"}
-              onValueChange={(v) =>
-                v === "none" ? setSelectedProfile(null) : handleProfileChange(v)
-              }
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="No profile (manual config)" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No profile</SelectItem>
-                {profileList.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </CardContent>
-        </Card>
+        <ProfileSelectCard
+          description="Select a profile to auto-fill default settings"
+          selected={selectedProfile}
+          onSelect={handleProfileSelect}
+        />
 
         {/* Required fields */}
         <Card>
@@ -251,8 +252,8 @@ export default function NewPostPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="intent">Search Intent</Label>
-                <Select value={intent} onValueChange={setIntent}>
-                  <SelectTrigger>
+                <Select name="intent" value={intent} onValueChange={setIntent}>
+                  <SelectTrigger id="intent">
                     <SelectValue placeholder="Select intent" />
                   </SelectTrigger>
                   <SelectContent>
@@ -265,8 +266,12 @@ export default function NewPostPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="articleType">Article Type</Label>
-                <Select value={articleType} onValueChange={setArticleType}>
-                  <SelectTrigger>
+                <Select
+                  name="article_type"
+                  value={articleType}
+                  onValueChange={setArticleType}
+                >
+                  <SelectTrigger id="articleType">
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent>
@@ -332,9 +337,13 @@ export default function NewPostPage() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Output Format</Label>
-                <Select value={outputFormat} onValueChange={setOutputFormat}>
-                  <SelectTrigger>
+                <Label htmlFor="outputFormat">Output Format</Label>
+                <Select
+                  name="output_format"
+                  value={outputFormat}
+                  onValueChange={setOutputFormat}
+                >
+                  <SelectTrigger id="outputFormat">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -437,17 +446,41 @@ export default function NewPostPage() {
                 Override category and author for this post
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              {wpError && (
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                  <div>
+                    <p className="text-sm font-medium">
+                      Could not load categories and authors
+                    </p>
+                    <p className="mt-1 text-sm text-muted-foreground">{wpError}</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      type="button"
+                      className="mt-2"
+                      onClick={() =>
+                        selectedProfile && loadWpDefaults(selectedProfile.id)
+                      }
+                    >
+                      <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                      Retry
+                    </Button>
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Category</Label>
+                  <Label htmlFor="wpCategory">Category</Label>
                   <Select
+                    name="wp_category_id"
                     value={wpCategoryId?.toString() || "none"}
                     onValueChange={(v) =>
                       setWpCategoryId(v === "none" ? null : Number(v))
                     }
                   >
-                    <SelectTrigger>
+                    <SelectTrigger id="wpCategory">
                       <SelectValue placeholder="Profile default" />
                     </SelectTrigger>
                     <SelectContent>
@@ -461,14 +494,15 @@ export default function NewPostPage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Author</Label>
+                  <Label htmlFor="wpAuthor">Author</Label>
                   <Select
+                    name="wp_author_id"
                     value={wpAuthorId?.toString() || "none"}
                     onValueChange={(v) =>
                       setWpAuthorId(v === "none" ? null : Number(v))
                     }
                   >
-                    <SelectTrigger>
+                    <SelectTrigger id="wpAuthor">
                       <SelectValue placeholder="Profile default" />
                     </SelectTrigger>
                     <SelectContent>
@@ -487,6 +521,16 @@ export default function NewPostPage() {
         )}
 
         <Separator />
+
+        {submitError && (
+          <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <div>
+              <p className="text-sm font-medium">Could not create the post</p>
+              <p className="mt-1 text-sm text-muted-foreground">{submitError}</p>
+            </div>
+          </div>
+        )}
 
         <div className="flex justify-end gap-3">
           <Link href="/">

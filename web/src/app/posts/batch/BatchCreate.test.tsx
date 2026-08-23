@@ -51,7 +51,10 @@ const mockBatchCreate = vi.mocked(posts.batchCreate);
 describe("BatchCreatePage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockProfilesList.mockResolvedValue([makeProfile()]);
+    // Pending by default: most cases here render and assert without awaiting
+    // the profile list, and a list that resolves afterwards settles state
+    // outside act(...). Cases that need the list say so.
+    mockProfilesList.mockReturnValue(new Promise(() => {}));
     mockBatchCreate.mockResolvedValue([{ id: "new-1" }] as unknown as Awaited<ReturnType<typeof posts.batchCreate>>);
   });
 
@@ -67,6 +70,7 @@ describe("BatchCreatePage", () => {
   });
 
   it("renders profile selector", async () => {
+    mockProfilesList.mockResolvedValue([makeProfile()]);
     renderWithProviders(<BatchCreatePage />);
     expect(await screen.findByText("No profile")).toBeInTheDocument();
   });
@@ -145,5 +149,68 @@ describe("BatchCreatePage", () => {
 
     const cancelLink = screen.getByRole("link", { name: /Cancel/i });
     expect(cancelLink).toHaveAttribute("href", "/");
+  });
+
+  // A rejected batch leaves up to twenty rows of typed-in work on screen, so
+  // the reason has to outlive a toast.
+  it("shows the server's own reason inline when the batch is rejected", async () => {
+    mockBatchCreate.mockRejectedValue(
+      new Error(JSON.stringify({ detail: "Slug already in use: test-blog-post" }))
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<BatchCreatePage />);
+
+    await user.click(screen.getByText("Manual Entry"));
+    await user.type(screen.getByPlaceholderText("Topic"), "Test Blog Post");
+    await user.click(screen.getByRole("button", { name: /Create 1 Post$/i }));
+
+    expect(
+      await screen.findByText("Slug already in use: test-blog-post")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Could not create the posts")).toBeInTheDocument();
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it("falls back to its own wording when the failure carries no message", async () => {
+    mockBatchCreate.mockRejectedValue(new Error("Server error"));
+    const user = userEvent.setup();
+    renderWithProviders(<BatchCreatePage />);
+
+    await user.click(screen.getByText("Manual Entry"));
+    await user.type(screen.getByPlaceholderText("Topic"), "Test Blog Post");
+    await user.click(screen.getByRole("button", { name: /Create 1 Post$/i }));
+
+    expect(await screen.findByText("Failed to create posts")).toBeInTheDocument();
+  });
+
+  it("applies the chosen profile's defaults to every row", async () => {
+    const profile = makeProfile({
+      id: "prof-batch",
+      name: "Batch Site",
+      niche: "Optics",
+      tone: "Expert",
+      word_count: 3000,
+    });
+    mockProfilesList.mockResolvedValue([profile]);
+    const user = userEvent.setup();
+    renderWithProviders(<BatchCreatePage />);
+
+    await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+    await user.click(await screen.findByRole("option", { name: "Batch Site" }));
+
+    await user.click(screen.getByText("Manual Entry"));
+    await user.type(screen.getByPlaceholderText("Topic"), "Test Blog Post");
+    await user.click(screen.getByRole("button", { name: /Create 1 Post$/i }));
+
+    await waitFor(() =>
+      expect(mockBatchCreate).toHaveBeenCalledWith([
+        expect.objectContaining({
+          profile_id: "prof-batch",
+          niche: "Optics",
+          tone: "Expert",
+          word_count: 3000,
+        }),
+      ])
+    );
   });
 });

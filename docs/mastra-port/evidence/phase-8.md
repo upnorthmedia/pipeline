@@ -712,3 +712,196 @@ records. The three `PostDetail.test.tsx` failures item 8.3 fixed stayed fixed, a
 `scaffold-check.test.ts` passed in this run rather than hitting its recorded flake.
 The build's `BetterAuthError` lines are the standing environmental noise from
 `BETTER_AUTH_SECRET` being absent from the repo `.env`; the build still exits 0.
+
+## 8.5 `/posts/new` and `/posts/batch`: four states
+
+Both routes had exactly one async surface visible on load, `profiles.list()`, and both wrote
+it the same way:
+
+```
+$ git show HEAD~1:web/src/app/posts/new/page.tsx | grep -n "profiles.list"
+89:    profiles.list().then(setProfileList).catch(() => {});
+
+$ git show HEAD~1:web/src/app/posts/batch/page.tsx | grep -n "profiles.list"
+121:    profiles.list().then(setProfileList).catch(() => {});
+```
+
+A swallowed rejection with no loading, empty or error state, so a dead database, an account
+with no profiles and a successful load all rendered the same control: a select whose only
+option is "No profile". The before screenshots prove it at the byte level (below).
+
+Both submit paths threw the server's answer away the same way (`catch { toast.error("Failed
+to create post") }`), which on a form is the worst place to lose it: the toast is gone in
+four seconds and the operator is still looking at a filled-in form with no reason on screen.
+
+### What changed
+
+| Surface | Before | After |
+| --- | --- | --- |
+| Profile list, in flight | nothing | `Skeleton` the height of the select |
+| Profile list, empty account | select with one dead option | "No profiles yet" + what a profile is for + **Create a profile** linking `/profiles` |
+| Profile list, failed | select with one dead option | "Could not load profiles" + the server's own `{"detail"}` via `apiErrorMessage` + **Retry** |
+| Profile list, success | select | unchanged select, now with `aria-label` and `name` |
+| Create submit, failed | 4s toast, generic wording | inline block above the button with the server's own message |
+| WordPress categories/authors, failed (`/posts/new`) | two silently empty selects | "Could not load categories and authors" + message + **Retry** |
+
+The picker is one component, `web/src/components/profile-select-card.tsx`, because both pages
+render the same card with the same four states and only the description differs.
+
+### Tests
+
+```
+$ pnpm exec vitest run src/components/__tests__/profile-select-card.test.tsx \
+    src/app/posts/new/PostForm.test.tsx src/app/posts/batch/BatchCreate.test.tsx
+ ✓ src/components/__tests__/profile-select-card.test.tsx (6 tests) 213ms
+ ✓ src/app/posts/batch/BatchCreate.test.tsx (13 tests) 1008ms
+ ✓ src/app/posts/new/PostForm.test.tsx (16 tests) 1383ms
+
+ Test Files  3 passed (3)
+      Tests  35 passed (35)
+```
+
+New coverage: the four card states plus the retry and the fallback wording; the inline submit
+error on both pages with the server's `{"detail"}`, the fallback, and that a resubmit clears
+the previous failure; the WordPress lookup failure and its retry; and two behaviours the
+refactor touched that had no test at all, profile prefill on `/posts/new` and profile
+defaults reaching every row of a batch.
+
+Mutation check, replacing the card's `setError(...)` with `setList([])`:
+
+```
+ ✓ shows a skeleton while the profiles are in flight 14ms
+ ✓ shows the select once the profiles arrive 61ms
+ ✓ hands the picked profile back to the page 84ms
+ ✓ points at profile creation when the account has none 13ms
+ × shows the server's own message and retries on demand 1003ms
+ × falls back to its own wording when the failure carries no message 1003ms
+      Tests  2 failed | 4 passed (6)
+```
+
+Both `act(...)` warning counts went **down**, because the default profile list in each suite
+is now a pending promise rather than one that resolves after a synchronous assertion:
+
+```
+$ vitest run src/app/posts/new/PostForm.test.tsx | grep -c "not wrapped in act"
+before 5   after 0
+
+$ vitest run src/app/posts/batch/BatchCreate.test.tsx | grep -c "not wrapped in act"
+before 4   after 0
+```
+
+### Live readouts
+
+Dev server on :3000 against the compose `db`/`redis`, signed in through the real sign-in form.
+
+Error state, `docker compose stop db`:
+
+```
+$ chrome-devtools-axi eval "document.body.innerText.match(/Could not load profiles[\s\S]{0,140}/)"
+/posts/new:   "Could not load profiles |  | The request failed and the server gave no reason. |  | Retry | Content | ..."
+/posts/batch: "Could not load profiles |  | The request failed and the server gave no reason. |  | Retry | CSV Upload | ..."
+```
+
+Recovery in place, `docker compose start db` then clicking **Retry** without a reload:
+
+```
+$ chrome-devtools-axi eval "...{errorGone, combobox}"
+{"errorGone":true,"combobox":"No profile"}
+```
+
+Empty state, signed in as a second user who owns no profiles:
+
+```
+/posts/new:   "No profiles yet |  | A profile carries the niche, tone and publishing defaults so you do not retype them for every post. |  | Create a profile"
+/posts/batch: "No profiles yet |  | A profile carries the niche, tone and publishing defaults so you do not retype them for every post. |  | Create a profile"
+```
+
+Loading state, captured under `emulate --network "Slow 3G"` with the skeleton counted at
+screenshot time:
+
+```
+/posts/new:   {"path":"/posts/new","pulse":1}
+/posts/batch: {"path":"/posts/batch","pulse":1}
+```
+
+Inline submit error carrying a real server message. `POST /api/posts` and
+`POST /api/posts/batch` both answer `404 {"detail": "Profile not found"}` when the chosen
+profile is not the caller's, so the profile was selected in the UI, its `user_id` moved to the
+other account, the form submitted, and the `user_id` moved back:
+
+```
+/posts/new:   "Could not create the post |  | Profile not found |  | Cancel | Create Post"
+/posts/batch: "Could not create the posts |  | Profile not found |  | Cancel | Create 1 Post"
+```
+
+### Screenshots
+
+`docs/mastra-port/ui/`, distinct md5 recorded per file:
+
+| File | md5 |
+| --- | --- |
+| `new-success-before.png` | `e8d1c5243a016137daa0343309a5bf02` |
+| `new-error-before.png` | `e8d1c5243a016137daa0343309a5bf02` |
+| `new-empty-before.png` | `e8d1c5243a016137daa0343309a5bf02` |
+| `new-success-after.png` | `e8d1c5243a016137daa0343309a5bf02` |
+| `new-error-after.png` | `6bd8c25a07a3ee2ed1d01aa0de8aa6bb` |
+| `new-empty-after.png` | `fcc3ae6afc6f799c4e1c487bad8abea0` |
+| `new-loading-after.png` | `cee5e15d5e31edbcc59d1fcd5b00cf94` |
+| `new-submit-error-after.png` | `ae0e3e2928ab3e82a55e90310fb2f853` |
+| `batch-success-before.png` | `79c17f18aaf5c1568c9f9d8f88672eeb` |
+| `batch-error-before.png` | `79c17f18aaf5c1568c9f9d8f88672eeb` |
+| `batch-empty-before.png` | `79c17f18aaf5c1568c9f9d8f88672eeb` |
+| `batch-success-after.png` | `79c17f18aaf5c1568c9f9d8f88672eeb` |
+| `batch-error-after.png` | `fdbb92d564944ad20030fddb131b69a1` |
+| `batch-empty-after.png` | `cd4abe0d995b652e6f43839acd502d05` |
+| `batch-loading-after.png` | `cd4b6e45cab918478bfe965bd5418541` |
+| `batch-submit-error-after.png` | `1c3667c66aa35da4c49e32c770c56f89` |
+
+Two of those repeated hashes are the finding, not a capture bug. Per route the **before**
+success, error and empty captures are one identical file, which is the defect stated exactly:
+the old pages could not tell an operator apart from a dead database or an empty account. The
+third repeat, `success-after` equal to `success-before`, is the intended result: the success
+path is visually untouched by the refactor.
+
+### Console
+
+```
+$ chrome-devtools-axi console          # /posts/new, before
+msgid=173 [issue] No label associated with a form field (count: 1)
+msgid=174 [issue] A form field element should have an id or name attribute (count: 4)
+msgid=175 [issue] Incorrect use of <label for=FORM_ELEMENT> (count: 2)
+```
+
+Three standing accessibility issues, one of which the new card contributed to (its Radix
+`Select` renders a hidden native `select` with no `name`, the fourth of the four). Fixed on
+both routes: `name` on every `Select`, `id` on the triggers that a `<Label htmlFor>` pointed
+at (`intent` and `articleType` had dangling `for` attributes, `Output Format` had none at
+all), and `name` plus `aria-label` on the batch page's per-row inputs and the CSV file input.
+
+```
+$ chrome-devtools-axi console          # after
+/posts/new:                    <no console messages found>
+/posts/batch:                  <no console messages found>
+/posts/batch, Manual Entry:    <no console messages found>
+```
+
+### Gates
+
+```
+$ pnpm -C web exec tsc --noEmit
+exit=0
+
+$ pnpm -C web lint
+exit=0
+
+$ pnpm -C web test
+ Test Files  1 failed | 138 passed (139)
+      Tests  6 failed | 4564 passed | 7 skipped (4577)
+
+$ pnpm -C web build
+✓ Compiled successfully in 6.5s
+exit=0
+```
+
+All six failures are `image-preview.test.tsx`, the standing baseline in `todo.md`. The
+build's `BetterAuthError` lines are the standing `BETTER_AUTH_SECRET` noise.
