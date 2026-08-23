@@ -674,3 +674,27 @@
   supply throwaway `BETTER_AUTH_SECRET`/`BETTER_AUTH_URL` placeholders the way it now does for
   `DATABASE_URL_SYNC` and `REDIS_URL`, or whether `src/lib/auth.ts` should not be reachable
   from page-data collection at all.
+
+- [confirmed] 2026-08-23 Generated images are unreachable from the `web` service on Railway.
+  The `/media` volume is mounted on `worker`, which writes them, but Railway documents "Each
+  service can only have a single volume" and its IaC reference says "A volume can be attached
+  to one service", so `web` serving `/media/<post_id>/<file>` reads a different disk and
+  answers 404. No configuration closes this; the fix is object storage (Railway's `bucket()`
+  resource exists in the same DSL), which means changing where the images stage writes and
+  where `web/src/app/media/[...path]/route.ts` reads. Stated in `docs/mastra-port/railway.md`
+  and belongs in the SUMMARY.md gap list for item 9.3.
+
+- [confirmed] 2026-08-23 Nothing runs database migrations on deploy. `deploy.preDeployCommand`
+  is the documented Railway hook, but neither runtime image carries `drizzle-kit` or the
+  `drizzle/` folder, so a fresh Railway environment needs `pnpm -C web db:migrate` and
+  `pnpm -C web auth:migrate` run by hand against the Postgres service's `DATABASE_PUBLIC_URL`.
+  Either ship the migrator in the image and set a preDeploy command, or accept the manual step
+  and keep it documented.
+
+- [investigate] 2026-08-23 The shared dev Redis had exited on its own during ledger item 7.2b
+  (`getaddrinfo ENOTFOUND redis` from inside the compose network while `docker ps` still
+  reported it healthy). Restarting it logged `RDB memory usage when created 4228.13 Mb` for
+  983 keys, which looks like an OOM kill. Mastra's Redis Streams entries are never trimmed, so
+  months of test runs accumulate; the stale backlog is the same one every worker boot drains.
+  Worth deciding on a `MAXLEN` trim or a separate Redis database for tests, which item 9.1
+  already has a related reason to want.

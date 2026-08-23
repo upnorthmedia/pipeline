@@ -1324,7 +1324,7 @@ pages that use it work with the Python API stopped.
     drifted off the lockfile's pnpm major, and `.npmrc`/`pnpm-workspace.yaml` were never
     copied into the image.
     Evidence: [`evidence/phase-7.md` #7.1c](../mastra-port/evidence/phase-7.md)
-- [ ] 7.2 Railway deployment configuration for `web` and `worker` from this repo, with start
+- [x] 7.2 Railway deployment configuration for `web` and `worker` from this repo, with start
   commands, shared Postgres and Redis references, and documented per-service environment
   variables. Both import the same `web/src/mastra/index.ts`.
 
@@ -1350,12 +1350,28 @@ pages that use it work with the Python API stopped.
     healthcheck exits 0 and it reads the baked-in rules; the web image serves `/auth/sign-in`
     200 and every ported handler 401 with no stack trace.
     Evidence: [`evidence/phase-7.md` #7.2a](../mastra-port/evidence/phase-7.md)
-  - [ ] 7.2b The Railway service definitions themselves: config-as-code files for `web` and
+  - [x] 7.2b The Railway service definitions themselves: config-as-code files for `web` and
     `worker`, their start commands, shared Postgres and Redis references, and the per-service
     environment variable tables. Must state the `BETTER_AUTH_SECRET` requirement and the
     shared-`/media` gap (Railway allows one volume per service and does not share volumes
     between services, so the `web` service serving `/media/<post_id>/<file>` cannot see the
     disk the `worker` writes generated images to).
+
+    Landed as `.railway/railway.ts`, not `railway.json`: Railway documents Config as Code as
+    deprecated with a 2026-12-01 hard cutoff and states that new services cannot opt into it,
+    so Infrastructure as Code is the only form available. One file declares `postgres`,
+    `redis`, a `media` volume and both services; the database references compile to
+    `${{postgres.DATABASE_URL}}` and `${{redis.REDIS_URL}}`, and every secret is named with
+    `preserve()`, which the compiler drops from the desired state so no value enters git.
+    Neither the IaC `BuildConfig` nor the deprecated `railway.json` schema can select a build
+    target, so `web/Dockerfile` gained a sixth and last stage, `railway`, carrying both entry
+    points; the services differ only by start command (`node server.js` and
+    `node .mastra/worker/index.mjs`). Verified by evaluating the file with the package's own
+    evaluator and by booting one target-less image both ways against the real Postgres and
+    Redis. Also new: `GET /api/health` (Railway requires a 200 and `/` answers 307), the
+    `NEXT_PUBLIC_APP_URL` build arg, and `docs/mastra-port/railway.md` with the two env
+    tables and the gaps.
+    Evidence: [`evidence/phase-7.md` #7.2b](../mastra-port/evidence/phase-7.md)
 - [ ] 7.3 Document the Mastra Studio workflow: running it locally alongside `next dev` against
   the same Postgres, `server.studioBase` if a custom mount path is used, and an explicit
   statement that Studio is never publicly exposed (auth or private network only).

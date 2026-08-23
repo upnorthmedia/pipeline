@@ -47,6 +47,14 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV DATABASE_URL_SYNC="postgresql://build:build@127.0.0.1:5432/build"
 ENV REDIS_URL="redis://127.0.0.1:6379"
 
+# `NEXT_PUBLIC_*` values are inlined into the client bundle by `next build`, so
+# the dashboard's BetterAuth client takes its base URL from here and not from
+# the runtime environment. Railway passes a service's variables to the build,
+# which is what this `ARG` reads; an empty value leaves the client on its
+# `http://localhost:3000` fallback, so a deployment has to set it.
+ARG NEXT_PUBLIC_APP_URL
+ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+
 RUN pnpm build
 
 # Stage 3: Production runtime
@@ -120,3 +128,32 @@ ENV RULES_DIR=/app/rules
 ENV MEDIA_DIR=/app/media
 
 CMD ["node", ".mastra/worker/index.mjs"]
+
+# Stage 6: the image both Railway services run
+#
+# Railway has no way to select a build target: neither the deprecated
+# `railway.json` schema nor the `.railway/railway.ts` `BuildConfig`
+# (`builder`, `watchPatterns`, `buildCommand`, `buildEnvironment`,
+# `dockerfilePath`, `nixpacks*`, `railpackVersion`) carries one, so a Railway
+# build gets Docker's default, which is the last stage in the file. This stage
+# is therefore last on purpose, and holds both entry points: the `web` service
+# starts `node server.js` and the `worker` service starts
+# `node .mastra/worker/index.mjs`, the same split `docker-compose.yml` gets
+# from its two targets.
+#
+# Both still import the same `web/src/mastra/index.ts`: `web` through the Next
+# standalone server's traced modules, `worker` through the bundle.
+FROM runner AS railway
+
+COPY --from=worker-builder /app/.mastra/worker ./.mastra/worker
+COPY --from=worker-builder /app/src/mastra/textstat/data ./src/mastra/textstat/data
+COPY --from=worker-builder /app/src/mastra/scripts/worker-healthcheck.mjs ./scripts/
+
+# Set here rather than only in the `worker` stage because the Next standalone
+# server has the same problem for a different reason: file tracing does not
+# follow a runtime `path.resolve` into a data directory, so the readability
+# scores in the `edit` stage need the corpus pointed at explicitly in both
+# entry points.
+ENV TEXTSTAT_DATA_DIR=/app/src/mastra/textstat/data
+
+CMD ["node", "server.js"]

@@ -974,3 +974,230 @@ worker on the shared Redis is a correctness hazard for the suite, not just a loa
   7.2b to state, not to paper over.
 - The `BetterAuthError` lines printed during `next build` inside the image are pre-existing
   noise, not fatal, and unrelated to the build context. Logged in `todo.md`.
+
+## 7.2b
+
+The Railway service definitions themselves.
+
+### The form the config had to take
+
+`railway.json` was the plan; it is not usable. Railway's own docs:
+
+> Config as Code (`railway.json` / `railway.toml`) is **deprecated**. Infrastructure as Code
+> (`.railway/railway.ts`) is the replacement.
+>
+> Config as Code is still read from your service repository during deploy for existing
+> (legacy) services [...] New services cannot opt into Config as Code. Existing Config as Code
+> files stop being read on **2026-12-01** (hard cutoff).
+>
+> (docs.railway.com/infrastructure-as-code)
+
+So the deliverable is `.railway/railway.ts`. It is also the better fit: one file describes both
+services, both managed databases and the volume, where Config as Code describes a single
+service and would have needed two files plus a per-service "Railway Config File" path setting
+(itself documented as not following the service's Root Directory).
+
+The DSL is the `railway` npm package, whose `./iac` subpath export is real:
+
+```
+$ curl -sS https://registry.npmjs.org/railway | python3 -c "..."
+latest 3.10.0 desc TypeScript SDK for Railway.
+exports {".": {...}, "./iac": {"import": {"types": "./dist/iac/index.d.ts", "default": "./dist/iac/index.js"}, "require": {...}}}
+bin {"railway-iac-ts": "dist/iac/bin.js"}
+modified 2026-08-13T23:31:46.996Z
+```
+
+Every key used in `.railway/railway.ts` was read off that package's type definitions rather
+than off the docs page (`node_modules/railway/dist/index-F4_q1IqR.d.ts`):
+
+```ts
+interface IntentServiceConfig {
+    source?: SourceConfig | Omit<SourceConfig, "type">;
+    root?: string; rootDirectory?: string;
+    build?: string | BuildConfig;
+    deploy?: DeployConfig;
+    start?: string; startCommand?: string;
+    healthcheck?: string; healthcheckPath?: string; healthcheckTimeout?: number;
+    replicas?: number | Record<string, RegionConfig>;
+    env?: Record<string, string | VariableConfig | VariableValue>;
+    volumeMounts?: Record<string, VolumeMount | null | VolumeNode>;
+    ...
+}
+type BuildConfig = {
+    builder?: "NIXPACKS" | "DOCKERFILE" | "RAILPACK" | "HEROKU" | "PAKETO" | null;
+    watchPatterns?: string[] | null;
+    buildCommand?: string | null;
+    buildEnvironment?: "V2" | "V3" | null;
+    dockerfilePath?: string | null;
+    nixpacksConfigPath?: string | null; nixpacksPlan?: unknown;
+    nixpacksVersion?: string | null; railpackVersion?: string | null;
+};
+```
+
+`BuildConfig` has no build-target key, and neither did the deprecated
+`railway.schema.json` (`build.additionalProperties: false`, properties `builder`,
+`watchPatterns`, `buildCommand`, `dockerfilePath`, `nixpacksConfigPath`, `nixpacksPlan`,
+`nixpacksVersion`, `railpackVersion`). A Railway build therefore gets Docker's default
+target: the last stage in the Dockerfile. That is the constraint the image change below
+answers.
+
+### What landed
+
+- `.railway/railway.ts`: `postgres`, `redis`, a `media` volume, and the `web` and `worker`
+  services, both built from `web/Dockerfile` with `builder: "DOCKERFILE"` and separated only
+  by their start commands.
+- `web/Dockerfile` gains a sixth and now-last stage, `railway`, built `FROM runner` plus the
+  worker bundle, the textstat corpus and the worker healthcheck. `docker-compose.yml` keeps
+  building the narrower `runner` and `worker` targets.
+- `web/Dockerfile`'s builder stage gains `ARG NEXT_PUBLIC_APP_URL` / `ENV`. `next build`
+  inlines `NEXT_PUBLIC_*`, and `src/lib/auth-client.ts` reads `NEXT_PUBLIC_APP_URL`, so
+  without the arg the deployed browser client would keep its `http://localhost:3000`
+  fallback.
+- `web/src/app/api/health/route.ts` plus 3 tests: Railway "will query the endpoint until it
+  receives an HTTP 200 response", and `/` answers 307 to unauthenticated requests.
+- Both compose files' `web` healthcheck now probes `/api/health` instead of `/`.
+- `docs/mastra-port/railway.md`: the per-service environment variable tables, the one-time
+  setup steps the file cannot do, and the known gaps.
+
+### The file compiles to the intended graph
+
+The Railway CLI is not installed here, so `railway config plan` could not be run against a
+live project. The next best thing is the package's own evaluator, which is the same code path
+the CLI drives: `evaluateRailwayFile()` from `railway@3.10.0` on a byte-identical copy
+(`md5 101dd537398a19dfa92403771f3ab769` for both the repo file and the evaluated copy).
+
+```
+$ node eval.mjs /tmp/rwiac/.railway/railway.ts   # evaluateRailwayFile(..., {command: "plan", environment: "production"})
+diagnostics: null
+
+-- web {"deploy": {"startCommand": "node server.js", "healthcheckPath": "/api/health", "healthcheckTimeout": 300, "numReplicas": 1}}
+   vars: {'DATABASE_URL_SYNC': ('reference', None), 'REDIS_URL': ('reference', None),
+          'WP_ENCRYPTION_KEY': ('preserve', None), 'BETTER_AUTH_SECRET': ('preserve', None),
+          'BETTER_AUTH_URL': ('literal', 'https://${{RAILWAY_PUBLIC_DOMAIN}}'),
+          'NEXT_PUBLIC_APP_URL': ('literal', 'https://${{RAILWAY_PUBLIC_DOMAIN}}'),
+          'STRIPE_SECRET_KEY': ('preserve', None), 'STRIPE_WEBHOOK_SECRET': ('preserve', None),
+          'RESEND_API_KEY': ('preserve', None), 'EMAIL_FROM': ('preserve', None)}
+
+-- worker {"deploy": {"startCommand": "node .mastra/worker/index.mjs", "numReplicas": 1}}
+   vars: {'DATABASE_URL_SYNC': ('reference', None), 'REDIS_URL': ('reference', None),
+          'WP_ENCRYPTION_KEY': ('preserve', None)}
+   volumeAttachments: {"media": {"volume": "volume.media", "mountPath": "/app/media"}}
+
+-- volume {"address": "volume.media", "type": "volume", "name": "media", "config": {"sizeMB": 5120}}
+```
+
+The compiled desired state resolves the database references into Railway's own variable
+syntax, and drops every `preserve()` variable rather than writing it, which is what keeps
+secrets out of git without an apply clobbering the dashboard value:
+
+```json
+"worker": {
+  "source": {"repo": "upnorthmedia/pipeline", "branch": "master"},
+  "build": {"builder": "DOCKERFILE", "dockerfilePath": "web/Dockerfile",
+            "watchPatterns": ["web/**", "rules/**", ".railway/**"]},
+  "deploy": {"startCommand": "node .mastra/worker/index.mjs", "numReplicas": 1},
+  "variables": {"DATABASE_URL_SYNC": {"value": "${{postgres.DATABASE_URL}}"},
+                "REDIS_URL": {"value": "${{redis.REDIS_URL}}"}},
+  "volumeMounts": {"media": {"mountPath": "/app/media"}}
+}
+```
+
+Two things the evaluation also settled: `github(...)` defaults `branch` to `"main"`, so
+`master` had to be stated; and Railway's managed Postgres helper resolves to
+`ghcr.io/railwayapp-templates/postgres-ssl:18`, a major ahead of the dev database's 17, which
+still satisfies the `UNIQUE NULLS NOT DISTINCT` requirement from item 6.0 (Postgres 15+).
+
+### The default build target is the combined stage
+
+```
+$ docker build -f web/Dockerfile -t jena-default:iter143 .        # no --target
+$ docker image inspect jena-default:iter143 jena-railway:iter143 --format '{{.Id}} {{json .Config.Cmd}}'
+sha256:93174495e516d92fc4ccc52fbbcf847d88a8e4cef712bd141e1fa48558b4b997 ["node","server.js"]
+sha256:caec65463a631b62782b20dc2015a28c9317dfbfa0f10a2e307d5373eee48a5d ["node","server.js"]
+
+$ docker run --rm jena-default:iter143 sh -c 'ls -d /app/.mastra/worker /app/rules /app/src/mastra/textstat/data && echo ...'
+/app/.mastra/worker
+/app/rules
+/app/src/mastra/textstat/data
+TEXTSTAT_DATA_DIR=/app/src/mastra/textstat/data RULES_DIR=/app/rules MEDIA_DIR=/app/media
+```
+
+A target-less build produces the `railway` stage, and that image carries both payloads.
+
+### Both start commands run out of that one image
+
+Against the real Postgres and Redis on the compose network, with no bind mounts:
+
+```
+$ docker run -d --name jena-rw-web --network objective-port-jena-46c1e6-1_default \
+    -e DATABASE_URL_SYNC=... -e REDIS_URL=redis://redis:6379 -e WP_ENCRYPTION_KEY=<redacted> \
+    -e BETTER_AUTH_SECRET=<redacted> -p 3311:3000 jena-default:iter143 node server.js
+
+$ curl -sS -i http://localhost:3311/api/health | head -3
+HTTP/1.1 200 OK
+vary: rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch
+content-type: application/json
+{"status":"ok"}
+
+$ curl -sS -o /dev/null -w '%{http_code} -> %{redirect_url}\n' http://localhost:3311/
+307 -> http://localhost:3311/auth/sign-in
+
+$ curl -sS -o /dev/null -w '%{http_code}\n' http://localhost:3311/api/posts
+401
+
+$ docker logs jena-rw-web | tail -5
+▲ Next.js 16.1.6
+✓ Starting...
+✓ Ready in 38ms
+(two BetterAuth warnings about the throwaway smoke-test secret's length and entropy)
+```
+
+The 307 on `/` is why the healthcheck path exists: Railway only accepts a 200.
+
+```
+$ docker run -d --name jena-rw-worker --network objective-port-jena-46c1e6-1_default \
+    -e DATABASE_URL_SYNC=... -e REDIS_URL=redis://redis:6379 -e WP_ENCRYPTION_KEY=<redacted> \
+    jena-default:iter143 node .mastra/worker/index.mjs
+
+$ docker logs jena-rw-worker | head -13
+ERROR (content-pipeline): Profile a8d2721b-... not found        <- stale dev-Redis backlog
+... eleven more ...
+[mastra] Workers started
+
+$ docker exec jena-rw-worker node /app/scripts/worker-healthcheck.mjs; echo "exit=$?"
+exit=0
+
+$ docker exec jena-rw-worker sh -c 'ls /app/rules'
+blog-edit.md blog-images.md blog-outline.md blog-ready.md blog-research.md blog-write.md
+```
+
+Same image, same `web/src/mastra/index.ts`, two entry points. The backlog errors are the
+same shared-dev-Redis noise recorded under 7.1c, and are the strongest available proof that
+the bundled worker is subscribed to the topic the app publishes on. Both containers were
+removed afterwards.
+
+An aside worth recording: the dev Redis container had exited on its own before this test
+(`getaddrinfo ENOTFOUND redis` from inside the network while `docker ps` still showed it
+healthy). On restart it logged `RDB memory usage when created 4228.13 Mb` for 983 keys.
+Logged in `todo.md`.
+
+### Gates
+
+```
+$ pnpm -C web tsc --noEmit
+exit=0
+$ pnpm -C web lint
+exit=0
+$ pnpm -C web test
+ Test Files  2 failed | 133 passed (135)
+      Tests  9 failed | 4510 passed | 7 skipped (4526)
+$ pnpm -C web build
+✓ Compiled successfully in 6.7s
+├ ƒ /api/health
+$ docker compose -f docker-compose.yml config -q && docker compose -f docker-compose.prod.yml config -q
+compose dev ok
+compose prod ok
+```
+
+9 failures is the standing baseline for this tree (6 in `image-preview.test.tsx`, 3 in
+`PostDetail.test.tsx`), unchanged, with 4510 passing.
