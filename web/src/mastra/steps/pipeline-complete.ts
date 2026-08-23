@@ -18,6 +18,11 @@
  * It passes `ready`'s stage meta straight through, so adding it to the chain
  * leaves the workflow's declared output unchanged.
  *
+ * It is also where a finished post publishes itself, which is the rest of
+ * `_post_completion_hook` plus the two `enqueue_job` calls the caller made on
+ * what the hook wrote. That decision lives in `../auto-publish.ts`, which
+ * records why the write and the start are two steps rather than one.
+ *
  * It is also where the worker records that it finished a run, which is
  * `_record_job_completed()` at `api/src/worker.py:313`. That call sits after
  * Python's `if is_full_pipeline:` block rather than inside it, so it fires for
@@ -29,6 +34,7 @@
  */
 import { createStep } from "@mastra/core/workflows/evented"
 
+import { applyAutoPublishHook } from "../auto-publish"
 import { appendExecutionLog } from "../execution-log"
 import { publishPipelineEvent } from "../pipeline-events"
 import { markPipelineComplete } from "../post-state"
@@ -47,6 +53,12 @@ export const pipelineCompleteStep = createStep({
     // rerun from the dashboard.
     if (!inputData.stages) {
       await markPipelineComplete(inputData.postId)
+      // The rest of `_post_completion_hook`: mark the post for publishing if
+      // its format and its profile ask for it, then read back what the caller
+      // is to start. Both happen before the log entry and the event, as they
+      // did in Python, so the row a dashboard refetches on `pipeline_complete`
+      // already reads `pending`.
+      const publishTargets = await applyAutoPublishHook(inputData.postId)
       // The row's own record of the same fact, from inside Python's database
       // block and before the publish. `stage` is `""`, as it was there: this
       // entry is about the run, not about any one stage, and `GET /logs`
@@ -65,6 +77,26 @@ export const pipelineCompleteStep = createStep({
       await publishPipelineEvent(mastra.pubsub, inputData.postId, "pipeline_complete", {
         message: "Pipeline finished",
       })
+      // Python's two `enqueue_job` calls, after the event for the same reason
+      // they were after it there: the publish job re-reads the row and the
+      // dashboard is already looking at the finished post by the time the
+      // publish starts moving `wp_publish_status` again.
+      //
+      // The workflows are reached through the injected instance rather than
+      // through `../start-wordpress-publish`, which imports `../index`: this
+      // step is part of the pipeline workflow that module registers, so the
+      // import would close a cycle. `startAsync` publishes `workflow.start` and
+      // returns the run id without waiting, which is what `enqueue_job` did.
+      if (publishTargets.wordpress) {
+        await (await mastra.getWorkflow("wordpressPublish").createRun()).startAsync({
+          inputData: { postId: inputData.postId },
+        })
+      }
+      if (publishTargets.nextjs) {
+        await (await mastra.getWorkflow("nextjsPublish").createRun()).startAsync({
+          inputData: { postId: inputData.postId },
+        })
+      }
     }
     await recordRunCompleted()
     return inputData

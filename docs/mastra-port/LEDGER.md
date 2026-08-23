@@ -1145,7 +1145,7 @@ pages that use it work with the Python API stopped.
 
   Evidence: [`evidence/phase-5.md` #5.10](../mastra-port/evidence/phase-5.md)
 
-- [ ] 5.11 The auto-publish half of `_post_completion_hook` (`api/src/worker.py:439-463`),
+- [x] 5.11 The auto-publish half of `_post_completion_hook` (`api/src/worker.py:439-463`),
   which 4.7b deferred to Phase 5 because it needed the two publish workflows. Both now
   exist (5.3c-iii-b-1-c-iii and 5.3c-iii-b-2-d), so nothing blocks it. A full run that
   ends with `output_format == "wordpress"` and a profile carrying `wp_url`,
@@ -1158,6 +1158,8 @@ pages that use it work with the Python API stopped.
   `status == "pending"`, so a post left `pending` by an earlier failed publish is
   re-enqueued even when the configuration check just declined; and `both` matches
   neither branch, exactly as in `POST /{post_id}/publish`.
+
+  Evidence: [`evidence/phase-5.md` #5.11](../mastra-port/evidence/phase-5.md)
 
 ## Phase 6: Runtime model configuration
 

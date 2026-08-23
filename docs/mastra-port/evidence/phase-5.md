@@ -14550,3 +14550,134 @@ The 9 failures are the recorded baseline: 6 in `image-preview.test.tsx` and 3 in
 `_post_completion_hook`'s auto-publish half (`api/src/worker.py:439-463`) is still
 unported. 4.7b deferred it to Phase 5 because it needed these two workflows; they exist
 now, so it is newly unblocked and recorded as ledger item 5.11.
+
+## 5.11
+
+The auto-publish half of `_post_completion_hook` (`api/src/worker.py:439-463`) plus the two
+`enqueue_job` calls the caller made on what it wrote (`api/src/worker.py:288-311`).
+
+`web/src/mastra/auto-publish.ts` is the hook's decision and the caller's read-back:
+`applyAutoPublishHook(postId)` writes the `pending` markers and returns
+`{wordpress, nextjs}` from a fresh read of the two columns.
+`web/src/mastra/steps/pipeline-complete.ts` calls it from inside its existing
+`if (!inputData.stages)` block, between the `completed_at` stamp and the
+`pipeline_complete` log entry, and starts `wordpressPublish` / `nextjsPublish` after the
+event, which is Python's order exactly.
+
+### Three behaviours Python's shape hides
+
+* **The hook writes, the caller reads.** `should_publish_wp` is the state of the row after
+  the hook, not the answer the configuration check gave. A post left `pending` by a
+  publish that died is therefore started again by the next full run even when the check
+  declined, and the two columns are read without reference to `output_format`, so a
+  `wordpress` post carrying a stale `nextjs_publish_status = "pending"` starts the Next.js
+  publish too. Both are preserved and both are tested.
+* **`both` matches neither branch.** Python compared for equality rather than testing
+  membership, exactly as `POST /{post_id}/publish` does.
+* **`if is_full_pipeline`.** A named-stage rerun never reaches the hook, so rerunning one
+  stage of a finished WordPress post does not re-upload every image to the live site.
+
+### One deliberate divergence
+
+Each marker write is skipped when the column already reads `pending`
+(`is distinct from 'pending'` in the `WHERE`), because SQLAlchemy emitted no `UPDATE` for
+an assignment that did not change the loaded value and so left `updated_at` alone. This is
+the opposite choice from `POST /{post_id}/publish`, which hand-stamps `updated_at` and
+records that as a deviation: there the write is the whole point of the request, here it
+fires at the end of every full run and would bump `updated_at` on posts whose publish
+state did not move.
+
+### The decision table, against real rows
+
+```
+$ pnpm vitest run src/mastra/auto-publish.test.ts
+ ✓ src/mastra/auto-publish.test.ts (16 tests) 67ms
+
+ Test Files  1 passed (1)
+      Tests  16 passed (16)
+   Duration  360ms
+```
+
+Eleven posts across five profiles, one `applyAutoPublishHook` call each, plus a post that
+does not exist. Covers: configured WordPress, missing `wp_app_password`, `wp_url` as an
+empty string (Python truthiness, not a null check), no profile at all, a previous
+`failed`, an already-`pending` column, configured Next.js, a webhook URL with no secret,
+`both` on a profile configured for both, and the two stale-`pending` paths.
+
+### The wiring, against real receivers
+
+```
+$ pnpm vitest run src/mastra/workflows/auto-publish.test.ts
+ ✓ src/mastra/workflows/auto-publish.test.ts (9 tests) 3415ms
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Duration  4.18s
+```
+
+Three real pipeline runs on the evented engine against the dev database and Redis. The
+WordPress site and the Next.js webhook receiver are `http.Server`s on loopback ports, so
+"the publish started" is asserted by a request arriving at a site, not by a spy: the
+WordPress run produces one `POST /wp-json/wp/v2/posts` carrying the article's title and
+the profile's `draft` status and ends `wp_publish_status = "published"` with
+`wp_post_id = 900`; the Next.js run produces one signed `POST /api/jena/publish` at the
+receiver and ends `nextjs_publish_status = "published"`. The third run names `edit` and
+must publish nothing, which is `if is_full_pipeline`.
+
+### Mutations
+
+Eight mutations, four in `auto-publish.ts` and four in the completion step, each applied
+alone and reverted afterwards.
+
+```
+M1 drop the is-distinct-from guard (always UPDATE):            KILLED
+M2 return the check's decision instead of re-reading the row:  KILLED
+M3 `value !== null` instead of Python truthiness:              KILLED
+M4 treat `both` as `wordpress`:                                KILLED
+M5 gate the nextjs column read on output_format == "nextjs":   KILLED
+M6 run the hook for named-stage reruns too:                    KILLED
+M7 drop the wordpressPublish start:                            KILLED
+M8 drop the nextjsPublish start:                               KILLED
+```
+
+### One test defect found and fixed inside this item
+
+The first draft of `workflows/auto-publish.test.ts` reused
+`workflows/sitemap-crawl.test.ts`'s profile ids. Vitest runs files in parallel, so that
+file's cleanup tried to delete a profile this file's posts still referenced and died on
+`posts_profile_id_fkey`, turning a passing suite red from the outside. The ids moved to a
+block nothing else uses and both files pass together.
+
+### Gates
+
+```
+$ pnpm -C web tsc --noEmit ; echo EXIT=$?
+EXIT=0
+
+$ pnpm -C web lint ; echo EXIT=$?
+EXIT=0
+
+$ pnpm -C web test
+ Test Files  3 failed | 123 passed (126)
+      Tests  10 failed | 4388 passed | 7 skipped (4405)
+   Start at  11:05:05
+   Duration  78.73s
+
+$ pnpm -C web build ; echo EXIT=$?
+EXIT=0
+```
+
+9 of the 10 are the recorded baseline: 6 in `image-preview.test.tsx` and 3 in
+`PostDetail.test.tsx`. The tenth is
+`workflows/scaffold-check.test.ts > emits the workflow lifecycle events the trace view
+will read`, the intermittent flake recorded in `todo.md` and in iterations 121-124.
+
+A repeat run of the same working tree also reported 10, with a *different* tenth:
+`pipeline-events.test.ts > carries Python's log payload and nothing else`, which read the
+outline stage's second log event where it expected the first. That one was not previously
+recorded, so it was isolated: four runs of that file alone on this tree failed once, and
+four runs of it with every change of this item stashed away also failed once. It is a
+pre-existing flake in that test, not a regression from this item, and it is now in
+`todo.md`.
+
+No Python was touched, so pytest is unaffected.

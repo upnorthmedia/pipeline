@@ -619,3 +619,13 @@
   5.3c-iii-b-2-e with its own test, because widening it would start two publish runs from
   one request and that is a behaviour change, not a port. `_post_completion_hook`'s
   auto-publish half has the same shape, so a `both` post is not auto-published either.
+- [confirmed] 2026-08-23 `web/src/mastra/pipeline-events.test.ts > a run that executes
+  every stage > carries Python's log payload and nothing else` is flaky: it reads the first
+  `log` event delivered for the `outline` stage and roughly one run in four gets
+  "Calling Claude for outline..." where it expects "Rules loaded, building prompt...".
+  Isolated during ledger item 5.11: four runs of the file alone failed once both with that
+  item's changes present and with them stashed away, so it is not a regression from it.
+  Two events published back to back from one step arrive out of order, which is either the
+  test's `.find()` over a set it assumes is ordered or a real ordering gap in the Redis
+  Streams fan-out; the second reading would matter to the Phase 8 trace view, so this needs
+  a real diagnosis rather than a retry.
