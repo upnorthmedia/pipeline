@@ -593,3 +593,122 @@ $ pnpm -C web test --run src/mastra/workflows/scaffold-check.test.ts
  Test Files  1 passed (1)
       Tests  5 passed (5)
 ```
+
+## 8.4
+
+The posts list at `/`. Its four states landed under 8.2 (same route, same file), so what this
+item covers is the visual hierarchy and spacing pass.
+
+### What landed
+
+| Change | File |
+| --- | --- |
+| The page is capped at `max-w-6xl mx-auto`, the width `/posts/[id]`, `/settings` and `/posts/new` already use; it was the only full-bleed page in the app | `web/src/app/page.tsx` |
+| The selection controls moved into the filter row; as a block of their own they pushed the table down 74px the moment a row was ticked | `web/src/app/page.tsx` |
+| Filters and table are one group (`space-y-3`) under the header's `space-y-6`, so the controls read as belonging to the table rather than as a third peer section | `web/src/app/page.tsx` |
+| The topic no longer truncates at a fixed `max-w-xs` while the column had three times that much space; the slug under it moved from a one-off `text-[11px]` onto the `text-xs` scale | `web/src/app/page.tsx` |
+| The `Pri` column header is spelled `Priority` | `web/src/app/page.tsx` |
+
+### Measured, live, at a 1600x1000 viewport
+
+Before, `/` stretched to the viewport while every page it links to is capped:
+
+```
+$ chrome-devtools-axi resize 1600 1000
+$ chrome-devtools-axi eval '() => ...root/table widths and child offsets...'
+{"vw":1600,"rootW":1376,"tableW":1326,"docH":1000,
+ "kids":[{"cls":"flex items-center justify-between","top":24,"h":56},
+         {"cls":"flex flex-wrap items-center gap-3","top":104,"h":36},
+         {"cls":"rounded-md border border-border","top":164,"h":147}]}
+```
+
+After, the content is 1152px wide and the filters and table are one two-child group:
+
+```
+{"rootW":1152,"tableW":1102,"tableTop":153,
+ "kids":[{"cls":"flex items-center justify-betwee","top":24,"h":56},
+         {"cls":"space-y-3","top":104,"h":196}]}
+```
+
+The selection jump, measured by reading the table's viewport offset either side of a click on
+the first row's checkbox.
+
+Before:
+
+```
+$ chrome-devtools-axi eval '() => { before = table.top; rowCheckbox.click(); }'
+{"before":165,"rows":2}
+$ chrome-devtools-axi eval '() => ({ after: table.top })'
+{"after":239}
+```
+
+74px. After:
+
+```
+{"before":153}
+{"after":153,"selectedText":["1 selected"]}
+```
+
+Zero, and the count still reads `1 selected`, which is what
+`PostsList.test.tsx > shows bulk action bar when items selected` asserts.
+
+The filtered-empty state still renders inside the new grouping, and does not move the table
+either:
+
+```
+$ chrome-devtools-axi eval '() => set search to "zzzz-no-such-post"'
+{"body":"No posts match these filters Widen the search or the status and profile filters. Clear filters","tableTop":153}
+```
+
+### Screenshots
+
+| State | Before | After |
+| --- | --- | --- |
+| Success | `ui/8.4-posts-list-success-before.png` | `ui/8.4-posts-list-success-after.png` |
+| One row selected | `ui/8.4-posts-list-selected-before.png` | `ui/8.4-posts-list-selected-after.png` |
+| Filtered, no match | (captured under 8.2 at the old width) | `ui/8.4-posts-list-filtered-empty-after.png` |
+
+```
+$ md5 docs/mastra-port/ui/8.4-posts-list-*.png
+MD5 (8.4-posts-list-selected-after.png)  = 84ee342d4b64763b9bee38e66c8712d0
+MD5 (8.4-posts-list-selected-before.png) = 6dfc32a0c5d6652f3899559d8f4292fc
+MD5 (8.4-posts-list-success-after.png)   = 3443b9a4905f86f8aba0da586a621851
+MD5 (8.4-posts-list-success-before.png)  = 2e8e89e1310227f98be0756d7f46ce21
+```
+
+### Console
+
+```
+$ chrome-devtools-axi console
+## Console messages
+Showing 1-2 of 2 (Page 1 of 1).
+msgid=27 [log] [Fast Refresh] rebuilding (1 args)
+msgid=28 [log] [Fast Refresh] done in 206ms (1 args)
+```
+
+No errors and no warnings; both messages are the dev server's own hot reload.
+
+### Gates
+
+```
+$ pnpm -C web exec tsc --noEmit
+exit=0
+
+$ pnpm -C web lint
+exit=0
+
+$ pnpm -C web test
+ Test Files  1 failed | 137 passed (138)
+      Tests  6 failed | 4551 passed | 7 skipped (4564)
+
+$ pnpm -C web build
+✓ Compiled successfully in 6.6s
+✓ Generating static pages using 15 workers (42/42) in 285.3ms
+exit=0
+```
+
+All six remaining failures are `image-preview.test.tsx`, the standing baseline `todo.md`
+records. The three `PostDetail.test.tsx` failures item 8.3 fixed stayed fixed, and
+`scaffold-check.test.ts` passed in this run rather than hitting its recorded flake.
+The build's `BetterAuthError` lines are the standing environmental noise from
+`BETTER_AUTH_SECRET` being absent from the repo `.env`; the build still exits 0.

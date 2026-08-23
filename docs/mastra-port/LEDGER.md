@@ -1470,9 +1470,16 @@ screenshots via `npx -y chrome-devtools-axi` into
   the ported pipeline never writes, and put every section card on one spacing rhythm. Three of
   the nine standing vitest failures were this page's drift and are resolved, not silenced.
   Evidence: [`evidence/phase-8.md` #8.3](../mastra-port/evidence/phase-8.md)
-- [ ] 8.4 posts list: four states, plus visual hierarchy and spacing pass.
-  Same route as 8.2 (`web/src/app/page.tsx`), so the four states are already done and checked
-  there. What remains under this item is only the visual hierarchy and spacing pass.
+- [x] 8.4 posts list: four states, plus visual hierarchy and spacing pass.
+  Same route as 8.2 (`web/src/app/page.tsx`), so the four states were already done and checked
+  there; this item is the visual hierarchy and spacing pass. `/` was the only full-bleed page
+  in the app, so its table ran 1326px wide while every page it links to is capped at 1152px,
+  and the topic still truncated at a fixed `max-w-xs` inside all that space. Ticking a row
+  checkbox inserted a bulk-actions bar that pushed the table down 74px, moving the row out
+  from under the cursor; those controls now live in the filter row, measured at zero shift.
+  Filters and table became one group under the header's rhythm, and the `Pri` header is
+  spelled out.
+  Evidence: [`evidence/phase-8.md` #8.4](../mastra-port/evidence/phase-8.md)
 - [ ] 8.5 `/posts/new` and `/posts/batch`: four states.
 - [ ] 8.6 `/profiles` and `/profiles/[id]`: four states.
 - [ ] 8.7 `/settings`: four states, plus visual hierarchy and spacing pass.

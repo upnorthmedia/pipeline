@@ -193,7 +193,7 @@ export default function PostsPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -230,252 +230,255 @@ export default function PostsPage() {
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            name="q"
-            aria-label="Search posts"
-            placeholder="Search posts..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {STATUS_FILTERS.map((f) => (
-              <SelectItem key={f.value} value={f.value}>
-                {f.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={profileFilter} onValueChange={setProfileFilter}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="All profiles" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All profiles</SelectItem>
-            {profileList.map((p) => (
-              <SelectItem key={p.id} value={p.id}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Bulk actions */}
-      {selected.size > 0 && (
-        <div className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-4 py-2">
-          <span className="text-sm font-medium">
-            {selected.size} selected
-          </span>
-          <div className="ml-auto flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowBulkDelete(true)}
-              className="text-destructive hover:text-destructive"
-            >
-              <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-              Delete
-            </Button>
+      {/* Filters and bulk actions, then the table they act on */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[200px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              name="q"
+              aria-label="Search posts"
+              placeholder="Search posts..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9"
+            />
           </div>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_FILTERS.map((f) => (
+                <SelectItem key={f.value} value={f.value}>
+                  {f.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={profileFilter} onValueChange={setProfileFilter}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="All profiles" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All profiles</SelectItem>
+              {profileList.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {/*
+            The selection controls sit in the filter row rather than in a bar of
+            their own: as a block of their own they pushed the table down 74px
+            the moment a row was ticked, moving the row out from under the cursor.
+          */}
+          {selected.size > 0 && (
+            <div className="ml-auto flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">
+                {selected.size} selected
+              </span>
+              <Button
+                variant="outline"
+                onClick={() => setShowBulkDelete(true)}
+                className="text-destructive hover:text-destructive"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete
+              </Button>
+            </div>
+          )}
         </div>
-      )}
 
-      {/* Table */}
-      <div className="rounded-md border border-border">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="w-10">
-                <input
-                  type="checkbox"
-                  name="select-all-posts"
-                  aria-label="Select all posts"
-                  checked={
-                    postList.length > 0 && selected.size === postList.length
-                  }
-                  onChange={toggleAll}
-                  className="h-4 w-4 rounded border-border"
-                />
-              </TableHead>
-              <TableHead>Topic</TableHead>
-              <TableHead className="w-[100px]">Stage</TableHead>
-              <TableHead className="w-[180px]">Progress</TableHead>
-              <TableHead className="w-[60px] text-center">Pri</TableHead>
-              <TableHead className="w-[100px]">Created</TableHead>
-              <TableHead className="w-10" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              Array.from({ length: 5 }).map((_, i) => (
-                <TableRow key={i}>
-                  <TableCell><Skeleton className="h-4 w-4" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-48" /></TableCell>
-                  <TableCell><Skeleton className="h-5 w-16" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-6 mx-auto" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-14" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-4" /></TableCell>
+        {/* Table */}
+        <div className="rounded-md border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-10">
+                  <input
+                    type="checkbox"
+                    name="select-all-posts"
+                    aria-label="Select all posts"
+                    checked={
+                      postList.length > 0 && selected.size === postList.length
+                    }
+                    onChange={toggleAll}
+                    className="h-4 w-4 rounded border-border"
+                  />
+                </TableHead>
+                <TableHead>Topic</TableHead>
+                <TableHead className="w-[100px]">Stage</TableHead>
+                <TableHead className="w-[180px]">Progress</TableHead>
+                <TableHead className="w-[90px] text-center">Priority</TableHead>
+                <TableHead className="w-[100px]">Created</TableHead>
+                <TableHead className="w-10" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell><Skeleton className="h-4 w-4" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-48" /></TableCell>
+                    <TableCell><Skeleton className="h-5 w-16" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-6 mx-auto" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-14" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-4" /></TableCell>
+                  </TableRow>
+                ))
+              ) : error ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={7} className="h-40 text-center">
+                    <AlertCircle className="mx-auto h-5 w-5 text-destructive" />
+                    <p className="mt-2 text-sm font-medium">Could not load posts</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{error}</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => fetchPosts({ skeletons: true })}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                      Retry
+                    </Button>
+                  </TableCell>
                 </TableRow>
-              ))
-            ) : error ? (
-              <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={7} className="h-40 text-center">
-                  <AlertCircle className="mx-auto h-5 w-5 text-destructive" />
-                  <p className="mt-2 text-sm font-medium">Could not load posts</p>
-                  <p className="mt-1 text-sm text-muted-foreground">{error}</p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="mt-3"
-                    onClick={() => fetchPosts({ skeletons: true })}
-                  >
-                    <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                    Retry
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ) : postList.length === 0 ? (
-              <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={7} className="h-40 text-center">
-                  {filtersActive ? (
-                    <>
-                      <p className="text-sm font-medium">
-                        No posts match these filters
-                      </p>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Widen the search or the status and profile filters.
-                      </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="mt-3"
-                        onClick={clearFilters}
-                      >
-                        Clear filters
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-sm font-medium">No posts yet</p>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Every post starts here and runs the six pipeline stages.
-                      </p>
-                      <Link href="/posts/new">
-                        <Button size="sm" className="mt-3">
-                          <Plus className="h-3.5 w-3.5 mr-1.5" />
-                          Create your first post
-                        </Button>
-                      </Link>
-                    </>
-                  )}
-                </TableCell>
-              </TableRow>
-            ) : (
-              postList.map((post) => (
-                <TableRow
-                  key={post.id}
-                  className="cursor-pointer"
-                  onClick={() => router.push(`/posts/${post.id}`)}
-                >
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      name={`select-${post.id}`}
-                      aria-label={`Select ${post.topic}`}
-                      checked={selected.has(post.id)}
-                      onChange={() => toggleSelect(post.id)}
-                      className="h-4 w-4 rounded border-border"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <div>
-                      <p className="font-medium text-sm truncate max-w-xs">
-                        {post.topic}
-                      </p>
-                      <p className="text-[11px] font-mono text-muted-foreground">
-                        {post.slug}
-                      </p>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <StageBadge stage={post.current_stage} />
-                  </TableCell>
-                  <TableCell>
-                    <PipelineProgress
-                      stageStatus={post.stage_status}
-                      currentStage={post.current_stage}
-                      compact
-                    />
-                  </TableCell>
-                  <TableCell className="text-center">
-                    <span className="text-xs font-mono text-muted-foreground">
-                      {post.priority}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-xs text-muted-foreground">
-                      {timeAgo(post.created_at)}
-                    </span>
-                  </TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
+              ) : postList.length === 0 ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={7} className="h-40 text-center">
+                    {filtersActive ? (
+                      <>
+                        <p className="text-sm font-medium">
+                          No posts match these filters
+                        </p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Widen the search or the status and profile filters.
+                        </p>
                         <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          aria-label={`Actions for ${post.topic}`}
+                          variant="outline"
+                          size="sm"
+                          className="mt-3"
+                          onClick={clearFilters}
                         >
-                          <MoreHorizontal className="h-4 w-4" />
+                          Clear filters
                         </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => router.push(`/posts/${post.id}`)}
-                        >
-                          <ExternalLink className="h-3.5 w-3.5 mr-2" />
-                          Open
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => posts.pause(post.id).then(() => fetchPosts())}
-                        >
-                          <Pause className="h-3.5 w-3.5 mr-2" />
-                          Pause
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => handleDuplicate(post.id)}
-                        >
-                          <Copy className="h-3.5 w-3.5 mr-2" />
-                          Duplicate
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onClick={() => setDeleteTarget(post.id)}
-                          className="text-destructive focus:text-destructive"
-                        >
-                          <Trash2 className="h-3.5 w-3.5 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm font-medium">No posts yet</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Every post starts here and runs the six pipeline stages.
+                        </p>
+                        <Link href="/posts/new">
+                          <Button size="sm" className="mt-3">
+                            <Plus className="h-3.5 w-3.5 mr-1.5" />
+                            Create your first post
+                          </Button>
+                        </Link>
+                      </>
+                    )}
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+              ) : (
+                postList.map((post) => (
+                  <TableRow
+                    key={post.id}
+                    className="cursor-pointer"
+                    onClick={() => router.push(`/posts/${post.id}`)}
+                  >
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        name={`select-${post.id}`}
+                        aria-label={`Select ${post.topic}`}
+                        checked={selected.has(post.id)}
+                        onChange={() => toggleSelect(post.id)}
+                        className="h-4 w-4 rounded border-border"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div>
+                        <p className="font-medium text-sm truncate">
+                          {post.topic}
+                        </p>
+                        <p className="text-xs font-mono text-muted-foreground truncate">
+                          {post.slug}
+                        </p>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <StageBadge stage={post.current_stage} />
+                    </TableCell>
+                    <TableCell>
+                      <PipelineProgress
+                        stageStatus={post.stage_status}
+                        currentStage={post.current_stage}
+                        compact
+                      />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <span className="text-xs font-mono text-muted-foreground">
+                        {post.priority}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-xs text-muted-foreground">
+                        {timeAgo(post.created_at)}
+                      </span>
+                    </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label={`Actions for ${post.topic}`}
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => router.push(`/posts/${post.id}`)}
+                          >
+                            <ExternalLink className="h-3.5 w-3.5 mr-2" />
+                            Open
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => posts.pause(post.id).then(() => fetchPosts())}
+                          >
+                            <Pause className="h-3.5 w-3.5 mr-2" />
+                            Pause
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleDuplicate(post.id)}
+                          >
+                            <Copy className="h-3.5 w-3.5 mr-2" />
+                            Duplicate
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => setDeleteTarget(post.id)}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </div>
+
       {/* Single delete confirmation */}
       <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
         <AlertDialogContent>
