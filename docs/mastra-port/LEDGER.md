@@ -11213,7 +11213,137 @@ three pieces are separately verifiable, so they are separate items.
           (`api/src/pipeline/publish.py`): the media-directory sweep, the manifest-driven
           featured image and alt text, the local-to-remote URL rewrite, the create/update
           branch, the `wp_publish_status` transitions and the `publish_start` /
-          `publish_complete` / `publish_error` events.
+          `publish_complete` / `publish_error` events. Split into three: the two pure
+          helpers decide the title and which upload becomes featured and are oracle-testable
+          against the real Python with no network or filesystem at all, the sweep is a
+          filesystem walk plus real HTTP uploads, and the workflow itself is database
+          transitions and events. They share no machinery, and only the first can be pinned
+          byte for byte against Python.
+          - [x] 5.3c-iii-b-1-c-i `_extract_frontmatter` and the `manifest_by_file` /
+            `featured_filename` index.
+
+            Ported to `web/src/mastra/wordpress/publish-metadata.ts` as
+            `extractFrontmatter()` and `indexManifestImages()`. The oracle is
+            `web/src/mastra/wordpress/data/wp-publish-metadata-parity.json`, written by
+            `api/scripts/export_wp_publish_metadata_parity.py`: 43 frontmatter cases
+            through the real `_extract_frontmatter`, and 19 manifest cases through the
+            real indexing loop. That loop is inline in `publish_to_wordpress` rather than
+            a function, so instead of transcribing it (which would make the oracle a copy
+            of a copy) the script pulls the block out with `inspect.getsource`, dedents it
+            and `exec`s it against a stub post. If the block moves, the extraction raises
+            rather than recording stale answers, and the test asserts the recorded source
+            still contains both marker lines.
+
+            **`_extract_frontmatter` is four primitives and all four diverge.**
+
+            * `\s` in `^---\s*\n(.*?)\n---\s*\n(.*)$` is Python's class, which holds
+              `\x1c`-`\x1f` and `\x85` and omits `\ufeff`, where JavaScript's does the
+              reverse. Both directions are observable and both are oracle cases: a file
+              separator after the opening fence parses in Python (`{"title": "Hello"}`) and
+              would not in JavaScript, and a BOM in the same position does not parse in
+              Python (`{}`, body unchanged) and would in JavaScript. `PY_WHITESPACE` from
+              `../textstat` is reused rather than respelled.
+            * `.` under `re.DOTALL` is every character, which is `[\s\S]` here because
+              JavaScript's `.` excludes more than Python's.
+            * `str.strip()` with no argument uses that same Python class, not
+              `String.trim()`'s, so `\x1c` around a key is stripped and a BOM around a key
+              is kept (`{"\ufefftitle\ufeff": "Hello"}`).
+            * `.strip('"').strip("'")` strips a *set* of characters at both ends in a
+              fixed order. `'"Hello"'` loses the single quotes first and keeps the double
+              ones, giving `"Hello"` with the quotes intact; the reverse order gives
+              `Hello` and is caught.
+
+            **The index has one quirk worth naming.** The two maps are written
+            independently, so a featured entry followed by an inline entry with the same
+            filename leaves `featured_filename` pointing at that filename while
+            `manifest_by_file` holds the inline record. Preserved, and asserted directly
+            as well as through the oracle.
+
+            **Both maps are `Map`s, not objects, and the oracle carries them as pair
+            lists.** The keys are model output: `__proto__` is an ordinary dict key in
+            Python, and it does not survive a round trip through a JavaScript object
+            literal. The first version of this test emitted `meta` as a JSON object and
+            failed on the `__proto__` case with `expected { __proto__: 'x', title:
+            'Hello' } to deeply equal { title: 'Hello' }`, which is the import dropping
+            the key rather than a port defect.
+
+            `_find_image_refs` in the same module is **not** ported: nothing in
+            `publish.py` calls it and `grep` finds no other caller outside
+            `api/tests/phase10/test_publish.py`. Porting dead code would be speculative.
+
+            Twenty-two mutations of the port were run against the test file; twenty-one
+            were caught.
+
+            | # | mutation | result |
+            | --- | --- | --- |
+            | 1 | fence whitespace uses JavaScript's class | caught |
+            | 2 | the frontmatter block match is greedy | caught |
+            | 3 | the pattern is not anchored at the start | caught |
+            | 4 | `.` replaces the DOTALL character class | caught |
+            | 5 | the key is trimmed with `String.trim` | caught |
+            | 6 | the value is trimmed with `String.trim` | caught |
+            | 7 | the quote strips run in the other order | caught |
+            | 8 | `stripChars` removes at most one character per end | caught |
+            | 9 | `stripChars` only strips the leading end | caught |
+            | 10 | the line is split on the last colon | caught |
+            | 11 | a line without a colon is not skipped | caught |
+            | 12 | the first entry wins in `byFile` | caught |
+            | 13 | the first featured entry wins | caught |
+            | 14 | only `placement` marks an entry featured | caught |
+            | 15 | only `type` marks an entry featured | caught |
+            | 16 | the filename keeps its leading slash | caught |
+            | 17 | the filename is taken from the front of the url | caught |
+            | 18 | a missing url becomes the string `undefined` | caught |
+            | 19 | the filename is empty when the url has no slash | caught |
+            | 20 | the frontmatter map is a plain object | caught |
+            | 21 | the body is the whole content rather than the second group | caught |
+            | 22 | `images === undefined` replaces `Array.isArray(images)` | SURVIVED |
+
+            Mutation 22 is unobservable rather than untested. The two spellings differ only
+            for an `images` value that is neither undefined nor an array, and Python raises
+            on every one of those: a string iterates to characters whose `.get` is an
+            `AttributeError`, a dict iterates to keys with the same result, a number is not
+            iterable. Two sibling shapes raise for the same reason and are documented in the
+            module header rather than reproduced: a non-empty non-object `image_manifest`,
+            and an entry whose `url` is JSON null (`"/" in None` is a `TypeError`). The
+            images stage only ever writes an object of objects with string urls.
+
+            ```
+            $ cd api && uv run python scripts/export_wp_publish_metadata_parity.py
+            wrote 43 frontmatter cases (36 with a parsed block) and 19 manifest cases (6 with a featured image) to /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web/src/mastra/wordpress/data/wp-publish-metadata-parity.json
+            $ pnpm -C web exec vitest run src/mastra/wordpress/publish-metadata.test.ts
+             Test Files  1 passed (1)
+                  Tests  67 passed (67)
+            ```
+
+            Gates, both stacks. `pnpm test` reported 10 failures on the first run and 9 on
+            the second; 9 is the recorded baseline and the tenth was the known
+            `scaffold-check.test.ts` lifecycle-event flake in `todo.md`, which passes 5 of
+            5 in isolation and touches nothing this item changes.
+
+            ```
+            $ pnpm -C web exec tsc --noEmit
+            (no output, exit 0)
+            $ pnpm -C web lint
+            (no output, exit 0)
+            $ pnpm -C web test
+             Test Files  2 failed | 114 passed (116)
+                  Tests  9 failed | 3576 passed | 7 skipped (3592)
+            $ pnpm -C web build
+            ✓ Compiled successfully
+            $ cd api && uv run pytest -q
+            120 failed, 241 passed, 25 errors in 15.15s
+            $ cd api && uv run ruff check scripts/export_wp_publish_metadata_parity.py
+            All checks passed!
+            $ cd api && uv run ruff format --check scripts/export_wp_publish_metadata_parity.py
+            1 file already formatted
+            ```
+          - [ ] 5.3c-iii-b-1-c-ii The media-directory sweep: the sorted walk, the
+            `mimetypes` image filter, the per-file upload with its manifest alt text, the
+            featured-media resolution and the local-to-remote URL rewrite.
+          - [ ] 5.3c-iii-b-1-c-iii The publish workflow itself: the profile and credential
+            guards, the create/update branch, the `wp_publish_status` transitions and the
+            `publish_start` / `publish_complete` / `publish_error` events with `_fail`.
         - [ ] 5.3c-iii-b-1-d The `output_format == "wordpress"` branch of
           `POST /{post_id}/publish`, starting the workflow above.
   - [x] 5.3d Exports, logs and analytics (split: five endpoints, and `/export/all`

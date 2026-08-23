@@ -1,0 +1,900 @@
+{
+  "manifestBlockSource": "manifest = post.image_manifest or {}\nmanifest_images = manifest.get(\"images\", [])\nmanifest_by_file: dict[str, dict] = {}\nfeatured_filename: str | None = None\nfor img_info in manifest_images:\n    url = img_info.get(\"url\", \"\")\n    fname = url.rsplit(\"/\", 1)[-1] if \"/\" in url else url\n    manifest_by_file[fname] = img_info\n    is_feat = (\n        img_info.get(\"placement\") == \"featured\"\n        or img_info.get(\"type\") == \"featured\"\n    )\n    if is_feat:\n        featured_filename = fname",
+  "frontmatter": [
+    {
+      "name": "empty",
+      "input": "",
+      "meta": [],
+      "body": ""
+    },
+    {
+      "name": "no frontmatter",
+      "input": "# Hello\n\nBody.\n",
+      "meta": [],
+      "body": "# Hello\n\nBody.\n"
+    },
+    {
+      "name": "plain frontmatter",
+      "input": "---\ntitle: Hello\ndescription: A post\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ],
+        [
+          "description",
+          "A post"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "no body after the closing fence",
+      "input": "---\ntitle: Hello\n---\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": ""
+    },
+    {
+      "name": "empty frontmatter block",
+      "input": "---\n\n---\nBody.\n",
+      "meta": [],
+      "body": "Body.\n"
+    },
+    {
+      "name": "fence not at the start of the string",
+      "input": "\n---\ntitle: Hello\n---\nBody.\n",
+      "meta": [],
+      "body": "\n---\ntitle: Hello\n---\nBody.\n"
+    },
+    {
+      "name": "leading space before the opening fence",
+      "input": " ---\ntitle: Hello\n---\nBody.\n",
+      "meta": [],
+      "body": " ---\ntitle: Hello\n---\nBody.\n"
+    },
+    {
+      "name": "four dashes on the opening fence",
+      "input": "----\ntitle: Hello\n---\nBody.\n",
+      "meta": [],
+      "body": "----\ntitle: Hello\n---\nBody.\n"
+    },
+    {
+      "name": "spaces after the opening fence",
+      "input": "---   \ntitle: Hello\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "spaces after the closing fence",
+      "input": "---\ntitle: Hello\n---   \nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "crlf line endings",
+      "input": "---\r\ntitle: Hello\r\n---\r\nBody.\r\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\r\n"
+    },
+    {
+      "name": "blank line after the opening fence",
+      "input": "---\n\ntitle: Hello\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "a second fence pair later in the body",
+      "input": "---\ntitle: Hello\n---\nBody.\n\n---\ntitle: Other\n---\nMore.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n\n---\ntitle: Other\n---\nMore.\n"
+    },
+    {
+      "name": "horizontal rule in the body",
+      "input": "---\ntitle: Hello\n---\nBody.\n\n---\n\nMore.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n\n---\n\nMore.\n"
+    },
+    {
+      "name": "line without a colon is skipped",
+      "input": "---\ntitle: Hello\njust text\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "duplicate key, last wins",
+      "input": "---\ntitle: One\ntitle: Two\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Two"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "empty value",
+      "input": "---\ntitle:\ndescription: d\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          ""
+        ],
+        [
+          "description",
+          "d"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "value with an inner colon",
+      "input": "---\ntitle: Hello: World\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello: World"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "key with surrounding spaces",
+      "input": "---\n  title  : Hello\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "double-quoted value",
+      "input": "---\ntitle: \"Hello\"\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "single-quoted value",
+      "input": "---\ntitle: 'Hello'\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "double quotes outside single",
+      "input": "---\ntitle: \"'Hello'\"\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "single quotes outside double",
+      "input": "---\ntitle: '\"Hello\"'\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "\"Hello\""
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "tripled double quotes",
+      "input": "---\ntitle: \"\"\"Hello\"\"\"\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "unbalanced trailing quote",
+      "input": "---\ntitle: Hello\"\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "quote in the middle of the value",
+      "input": "---\ntitle: He\"llo\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "He\"llo"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "value is only quotes",
+      "input": "---\ntitle: \"'\"\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          ""
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "tab-padded value",
+      "input": "---\ntitle:\tHello\t\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "key named __proto__",
+      "input": "---\n__proto__: x\ntitle: Hello\n---\nBody.\n",
+      "meta": [
+        [
+          "__proto__",
+          "x"
+        ],
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "key named constructor",
+      "input": "---\nconstructor: x\ntitle: Hello\n---\nBody.\n",
+      "meta": [
+        [
+          "constructor",
+          "x"
+        ],
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "file separator after the opening fence",
+      "input": "---\u001c\ntitle: Hello\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "byte order mark after the opening fence",
+      "input": "---﻿\ntitle: Hello\n---\nBody.\n",
+      "meta": [],
+      "body": "---﻿\ntitle: Hello\n---\nBody.\n"
+    },
+    {
+      "name": "next line character after the closing fence",
+      "input": "---\ntitle: Hello\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "line separator after the closing fence",
+      "input": "---\ntitle: Hello\n--- \nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "file separator around a key",
+      "input": "---\n\u001ctitle\u001c: Hello\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "byte order mark around a key",
+      "input": "---\n﻿title﻿: Hello\n---\nBody.\n",
+      "meta": [
+        [
+          "﻿title﻿",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "file separator around a value",
+      "input": "---\ntitle: \u001cHello\u001c\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "byte order mark around a value",
+      "input": "---\ntitle: ﻿Hello﻿\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "﻿Hello﻿"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "no-break space around a value",
+      "input": "---\ntitle:  Hello \n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "line separator inside a value",
+      "input": "---\ntitle: Hello World\n---\nBody.\n",
+      "meta": [
+        [
+          "title",
+          "Hello World"
+        ]
+      ],
+      "body": "Body.\n"
+    },
+    {
+      "name": "body keeps its trailing newline",
+      "input": "---\ntitle: Hello\n---\nBody.\n\n\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body.\n\n\n"
+    },
+    {
+      "name": "body with no trailing newline",
+      "input": "---\ntitle: Hello\n---\nBody.",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "Body."
+    },
+    {
+      "name": "media url in the body",
+      "input": "---\ntitle: Hello\n---\n![a](/media/POST/a.webp)\n",
+      "meta": [
+        [
+          "title",
+          "Hello"
+        ]
+      ],
+      "body": "![a](/media/POST/a.webp)\n"
+    }
+  ],
+  "manifests": [
+    {
+      "name": "null manifest",
+      "input": null,
+      "byFile": [],
+      "featuredFilename": null
+    },
+    {
+      "name": "empty manifest",
+      "input": {},
+      "byFile": [],
+      "featuredFilename": null
+    },
+    {
+      "name": "manifest without an images key",
+      "input": {
+        "count": 0
+      },
+      "byFile": [],
+      "featuredFilename": null
+    },
+    {
+      "name": "empty images list",
+      "input": {
+        "images": []
+      },
+      "byFile": [],
+      "featuredFilename": null
+    },
+    {
+      "name": "one inline image",
+      "input": {
+        "images": [
+          {
+            "url": "/media/p1/body-1.webp",
+            "alt_text": "A chart"
+          }
+        ]
+      },
+      "byFile": [
+        [
+          "body-1.webp",
+          {
+            "url": "/media/p1/body-1.webp",
+            "alt_text": "A chart"
+          }
+        ]
+      ],
+      "featuredFilename": null
+    },
+    {
+      "name": "featured by placement",
+      "input": {
+        "images": [
+          {
+            "url": "/media/p1/featured-010225-47.webp",
+            "placement": "featured"
+          },
+          {
+            "url": "/media/p1/body-1.webp",
+            "placement": "inline"
+          }
+        ]
+      },
+      "byFile": [
+        [
+          "featured-010225-47.webp",
+          {
+            "url": "/media/p1/featured-010225-47.webp",
+            "placement": "featured"
+          }
+        ],
+        [
+          "body-1.webp",
+          {
+            "url": "/media/p1/body-1.webp",
+            "placement": "inline"
+          }
+        ]
+      ],
+      "featuredFilename": "featured-010225-47.webp"
+    },
+    {
+      "name": "featured by type",
+      "input": {
+        "images": [
+          {
+            "url": "/media/p1/body-1.webp",
+            "placement": "inline"
+          },
+          {
+            "url": "/media/p1/hero.webp",
+            "type": "featured"
+          }
+        ]
+      },
+      "byFile": [
+        [
+          "body-1.webp",
+          {
+            "url": "/media/p1/body-1.webp",
+            "placement": "inline"
+          }
+        ],
+        [
+          "hero.webp",
+          {
+            "url": "/media/p1/hero.webp",
+            "type": "featured"
+          }
+        ]
+      ],
+      "featuredFilename": "hero.webp"
+    },
+    {
+      "name": "two featured entries, last wins",
+      "input": {
+        "images": [
+          {
+            "url": "/media/p1/a.webp",
+            "placement": "featured"
+          },
+          {
+            "url": "/media/p1/b.webp",
+            "type": "featured"
+          }
+        ]
+      },
+      "byFile": [
+        [
+          "a.webp",
+          {
+            "url": "/media/p1/a.webp",
+            "placement": "featured"
+          }
+        ],
+        [
+          "b.webp",
+          {
+            "url": "/media/p1/b.webp",
+            "type": "featured"
+          }
+        ]
+      ],
+      "featuredFilename": "b.webp"
+    },
+    {
+      "name": "featured flag with the wrong case",
+      "input": {
+        "images": [
+          {
+            "url": "/media/p1/a.webp",
+            "placement": "Featured"
+          }
+        ]
+      },
+      "byFile": [
+        [
+          "a.webp",
+          {
+            "url": "/media/p1/a.webp",
+            "placement": "Featured"
+          }
+        ]
+      ],
+      "featuredFilename": null
+    },
+    {
+      "name": "entry with no url",
+      "input": {
+        "images": [
+          {
+            "generated": false,
+            "error": "no prompt",
+            "index": 0
+          }
+        ]
+      },
+      "byFile": [
+        [
+          "",
+          {
+            "generated": false,
+            "error": "no prompt",
+            "index": 0
+          }
+        ]
+      ],
+      "featuredFilename": null
+    },
+    {
+      "name": "url with no slash",
+      "input": {
+        "images": [
+          {
+            "url": "bare.webp",
+            "alt_text": "Bare"
+          }
+        ]
+      },
+      "byFile": [
+        [
+          "bare.webp",
+          {
+            "url": "bare.webp",
+            "alt_text": "Bare"
+          }
+        ]
+      ],
+      "featuredFilename": null
+    },
+    {
+      "name": "url ending in a slash",
+      "input": {
+        "images": [
+          {
+            "url": "/media/p1/",
+            "alt_text": "Trailing"
+          }
+        ]
+      },
+      "byFile": [
+        [
+          "",
+          {
+            "url": "/media/p1/",
+            "alt_text": "Trailing"
+          }
+        ]
+      ],
+      "featuredFilename": null
+    },
+    {
+      "name": "two entries with the same filename, last wins",
+      "input": {
+        "images": [
+          {
+            "url": "/media/p1/a.webp",
+            "alt_text": "First"
+          },
+          {
+            "url": "/media/p2/a.webp",
+            "alt_text": "Second"
+          }
+        ]
+      },
+      "byFile": [
+        [
+          "a.webp",
+          {
+            "url": "/media/p2/a.webp",
+            "alt_text": "Second"
+          }
+        ]
+      ],
+      "featuredFilename": null
+    },
+    {
+      "name": "featured entry overwritten by a later entry with the same filename",
+      "input": {
+        "images": [
+          {
+            "url": "/media/p1/a.webp",
+            "placement": "featured"
+          },
+          {
+            "url": "/media/p2/a.webp",
+            "placement": "inline"
+          }
+        ]
+      },
+      "byFile": [
+        [
+          "a.webp",
+          {
+            "url": "/media/p2/a.webp",
+            "placement": "inline"
+          }
+        ]
+      ],
+      "featuredFilename": "a.webp"
+    },
+    {
+      "name": "explicit null alt text",
+      "input": {
+        "images": [
+          {
+            "url": "/media/p1/a.webp",
+            "alt_text": null
+          }
+        ]
+      },
+      "byFile": [
+        [
+          "a.webp",
+          {
+            "url": "/media/p1/a.webp",
+            "alt_text": null
+          }
+        ]
+      ],
+      "featuredFilename": null
+    },
+    {
+      "name": "filename that is a javascript prototype key",
+      "input": {
+        "images": [
+          {
+            "url": "/media/p1/__proto__",
+            "placement": "featured"
+          }
+        ]
+      },
+      "byFile": [
+        [
+          "__proto__",
+          {
+            "url": "/media/p1/__proto__",
+            "placement": "featured"
+          }
+        ]
+      ],
+      "featuredFilename": "__proto__"
+    },
+    {
+      "name": "absolute remote url",
+      "input": {
+        "images": [
+          {
+            "url": "https://cdn.example.com/x/y.webp",
+            "alt_text": "Remote"
+          }
+        ]
+      },
+      "byFile": [
+        [
+          "y.webp",
+          {
+            "url": "https://cdn.example.com/x/y.webp",
+            "alt_text": "Remote"
+          }
+        ]
+      ],
+      "featuredFilename": null
+    },
+    {
+      "name": "windows-style separators are not path separators here",
+      "input": {
+        "images": [
+          {
+            "url": "media\\p1\\a.webp",
+            "alt_text": "Backslash"
+          }
+        ]
+      },
+      "byFile": [
+        [
+          "media\\p1\\a.webp",
+          {
+            "url": "media\\p1\\a.webp",
+            "alt_text": "Backslash"
+          }
+        ]
+      ],
+      "featuredFilename": null
+    },
+    {
+      "name": "full manifest as the images stage writes it",
+      "input": {
+        "images": [
+          {
+            "prompt": "A wide hero shot",
+            "placement": "featured",
+            "alt_text": "Hero",
+            "filename": "featured.png",
+            "generated": true,
+            "size_bytes": 182344,
+            "url": "/media/p1/featured-010225-47.webp",
+            "index": 0
+          },
+          {
+            "prompt": "A diagram",
+            "placement": "inline",
+            "alt_text": "Diagram",
+            "filename": "image-1.png",
+            "generated": true,
+            "size_bytes": 91002,
+            "url": "/media/p1/image-1.webp",
+            "index": 1
+          },
+          {
+            "prompt": "",
+            "placement": "inline",
+            "generated": false,
+            "error": "no prompt",
+            "index": 2
+          }
+        ],
+        "count": 3
+      },
+      "byFile": [
+        [
+          "featured-010225-47.webp",
+          {
+            "prompt": "A wide hero shot",
+            "placement": "featured",
+            "alt_text": "Hero",
+            "filename": "featured.png",
+            "generated": true,
+            "size_bytes": 182344,
+            "url": "/media/p1/featured-010225-47.webp",
+            "index": 0
+          }
+        ],
+        [
+          "image-1.webp",
+          {
+            "prompt": "A diagram",
+            "placement": "inline",
+            "alt_text": "Diagram",
+            "filename": "image-1.png",
+            "generated": true,
+            "size_bytes": 91002,
+            "url": "/media/p1/image-1.webp",
+            "index": 1
+          }
+        ],
+        [
+          "",
+          {
+            "prompt": "",
+            "placement": "inline",
+            "generated": false,
+            "error": "no prompt",
+            "index": 2
+          }
+        ]
+      ],
+      "featuredFilename": "featured-010225-47.webp"
+    }
+  ]
+}
