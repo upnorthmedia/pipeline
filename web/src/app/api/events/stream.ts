@@ -27,6 +27,14 @@
  * - **Teardown on abort.** Each subscription owns a Redis connection and a
  *   private consumer group, and `unsubscribe()` is what quits the one and
  *   destroys the other. Without it a browser refresh leaks both.
+ * - **Deliveries are considered one at a time.** `RedisStreamsPubSub` invokes a
+ *   subscriber with `sub.cb(event, ack, nack)` and does not await the promise
+ *   it returns, so two events whose `matches` calls take different amounts of
+ *   time would race and reach the browser out of publication order. That is
+ *   invisible while `matches` is synchronous, which is all the per-post
+ *   endpoint needs, and becomes real as soon as one has to ask the database
+ *   (ledger 5.5d-ii). Chaining every delivery onto the previous one restores
+ *   the ordering `PUBLISH` gave for free.
  */
 import type { Event } from "@mastra/core/events"
 
@@ -67,7 +75,7 @@ function eventName(payload: PipelineEventPayload): string {
  */
 export async function pipelineEventStream(
   request: Request,
-  matches: (payload: PipelineEventPayload) => boolean,
+  matches: (payload: PipelineEventPayload) => boolean | Promise<boolean>,
 ): Promise<Response> {
   const encoder = new TextEncoder()
   let ping: ReturnType<typeof setInterval> | undefined
@@ -102,10 +110,23 @@ export async function pipelineEventStream(
         }
       }
 
+      // Publication order, preserved across an asynchronous `matches`. The
+      // link is added synchronously, inside the same turn the transport called
+      // the listener in, so the chain is built in delivery order; a `matches`
+      // that rejects is swallowed here rather than left to stall every event
+      // behind it, and the event it concerns is not sent, which is the
+      // fail-closed answer for a predicate that decides who may see what.
+      let tail: Promise<void> = Promise.resolve()
+
       listener = async (event, ack) => {
+        const payload = payloadOf(event)
+        const delivery = tail.then(async () => {
+          if (payload !== null && (await matches(payload)))
+            send(encodeSseEvent(eventName(payload), payload))
+        })
+        tail = delivery.catch(() => {})
         try {
-          const payload = payloadOf(event)
-          if (payload !== null && matches(payload)) send(encodeSseEvent(eventName(payload), payload))
+          await tail
         } finally {
           await ack?.()
         }

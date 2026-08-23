@@ -14269,7 +14269,7 @@ three pieces are separately verifiable, so they are separate items.
           $ cd api && uv run ruff format --check .
           9 files would be reformatted, 131 files already formatted
           ```
-  - [ ] 5.5d `GET /api/events/{post_id}` and `GET /api/events`, as Next.js route handlers
+  - [x] 5.5d `GET /api/events/{post_id}` and `GET /api/events`, as Next.js route handlers
     serving `text/event-stream` in `use-sse.ts`'s named-event shape, subscribed to the
     topic rather than to an in-process stream.
 
@@ -14477,8 +14477,207 @@ three pieces are separately verifiable, so they are separate items.
       $ cd api && uv run ruff format --check .
       9 files would be reformatted, 131 files already formatted
       ```
-    - [ ] 5.5d-ii `GET /api/events`, and how the global feed is scoped to the caller's
+    - [x] 5.5d-ii `GET /api/events`, and how the global feed is scoped to the caller's
       own posts.
+
+      `web/src/app/api/events/route.ts` ports `global_events()`, with the scoping
+      decision in `web/src/app/api/events/scope.ts` and one change to the shared
+      `stream.ts` that the scoping forces.
+
+      **The design question this item was split out for: what does "the caller's own
+      posts" mean for a feed that has no post id?** The per-post endpoint resolves
+      ownership once, before the stream opens, because it has exactly one row to check.
+      This one has none. Three shapes were considered and two rejected:
+
+      - *A snapshot of owned post ids taken at connect time.* One query per connection,
+        no per-event cost, and wrong for the endpoint's main consumer:
+        `global-notifications.tsx` and the monitor's overview tab open this feed on
+        mount and the posts they are waiting to hear about are frequently created
+        afterwards. A snapshot silently never delivers those. Rejected.
+      - *An ownership query per delivered event.* Correct and always fresh, and it puts
+        a database round trip on the hot path of a feed that carries tens of events per
+        run per post, for an answer that changes approximately never. Rejected.
+      - *Adopted: resolve per post id, lazily, memoised for the life of the
+        connection.* One query per distinct post a connection hears about, not one per
+        event, and a post created after the connection opened resolves on its first
+        event like any other. Concurrent events for the same unseen post share one
+        in-flight query because the promise is cached rather than its result.
+
+      **Deviation 1, and the reason this endpoint needed a decision at all: it is
+      authenticated and scoped, and the Python one was neither.** `global_events()`
+      took no parameters and no session dependency, subscribed every caller to
+      `pipeline:global`, and forwarded the channel verbatim, so one tenant's dashboard
+      received every other tenant's stage messages, model names and error text. This is
+      the same deviation recorded under 5.5d-i for the per-post endpoint, applied to the
+      endpoint where it actually leaks everything rather than one guessed id.
+
+      **Deviation 2, the cost of memoising: a negative answer is remembered too.** A
+      post whose profile is reassigned to the caller mid-connection stays invisible
+      until the browser reconnects. Re-querying only the negatives would make an
+      unowned run more expensive than an owned one, which is the wrong way round, and
+      `useSSE()` reconnects on any transport error and on every page load. The
+      behaviour is asserted rather than left implicit, including the reconnect that
+      picks the reassignment up.
+
+      **`stream.ts` change: deliveries are now considered one at a time.** Reading the
+      installed transport rather than assuming, `RedisStreamsPubSub` invokes a
+      subscriber and does not await what it returns:
+
+      ```
+      $ sed -n '556,563p' web/node_modules/@mastra/redis-streams/dist/index.js
+              try {
+                      const result = sub.cb(event, ack, nack);
+                      if (result && typeof result.catch === "function") result.catch(async () => {
+                              await nack();
+                      });
+              } catch {
+                      await nack();
+              }
+      ```
+
+      So two events whose `matches` calls take different amounts of time race, and the
+      cached one overtakes the one waiting on Postgres. That is invisible while
+      `matches` is synchronous, which is all 5.5d-i needed, and becomes a real
+      reordering the moment a predicate asks the database. Every delivery is now chained
+      onto the previous one, the link added synchronously inside the turn the transport
+      called the listener in, so the chain is built in delivery order. A `matches` that
+      rejects is swallowed on the chain rather than left to stall every event behind it,
+      and the event it concerns is not sent: fail closed is the right answer for a
+      predicate deciding who may see what. The scope memo drops itself on a rejected
+      lookup so a transient database error is retried on the next event rather than
+      cached as a decision.
+
+      The three cases the per-post endpoint answers with a 404 are the three this one
+      silently drops, because it shares `ownedByCaller()` from 5.3c-ii: a post that does
+      not exist, a post owned by someone else, and a post whose `profile_id` is null.
+
+      The twelve new tests join the sixteen from 5.5d-i in
+      `web/src/app/api/events/events.test.ts`, against the real database, real
+      BetterAuth sessions and the real Redis Streams topic, with every asserted event
+      published by a separate `RedisStreamsPubSub` client:
+
+      ```
+      $ pnpm -C web vitest run src/app/api/events/events.test.ts --reporter=verbose
+       v GET /api/events > rejects an unauthenticated request 251ms
+       v GET /api/events > opens with the same four response headers as the per-post stream 1271ms
+       v GET /api/events > delivers events for every post the caller owns, not just one 1330ms
+       v GET /api/events > drops another user's events, which global_events() broadcast to everyone 1323ms
+       v GET /api/events > drops an event for a post that no longer exists 1332ms
+       v GET /api/events > drops an event for a post whose profile_id is null, as the inner join did 1336ms
+       v GET /api/events > delivers events for a post created after the connection opened 1340ms
+       v GET /api/events > preserves publication order across posts whose ownership is not yet resolved 1329ms
+       v GET /api/events > remembers an ownership answer instead of re-querying per event 1333ms
+       v GET /api/events > remembers a negative answer too, so a mid-connection reassignment needs a reconnect 2436ms
+       v GET /api/events > acknowledges deliveries it drops, so an unowned run leaks no pending entries 1317ms
+       v GET /api/events > scopes two concurrent callers to their own posts on the same topic 2352ms
+       Test Files  1 passed (1)
+            Tests  28 passed (28)
+         Start at  22:21:56
+         Duration  35.30s (transform 167ms, setup 85ms, import 821ms, tests 34.33s, environment 0ms)
+      ```
+
+      Two of those need saying out loud, because they assert a property through its
+      consequence rather than by counting queries, which would have meant mocking the
+      database:
+
+      - "remembers an ownership answer instead of re-querying per event" deletes the
+        post row after its first event has been delivered and asserts the second event
+        still arrives. A lookup per event would start dropping the feed there.
+      - "preserves publication order" publishes two rounds across three owned posts, so
+        each post's first event pays for a lookup and its second reads the memo. Without
+        the delivery chain the three cached events overtake the three uncached ones.
+
+      Negative controls, each reverted after measuring:
+
+      ```
+      # 1. drop the scoping: pipelineEventStream(request, () => true), which is what
+      #    Python did
+      Tests  5 failed | 23 passed (28)
+        x drops another user's events, which global_events() broadcast to everyone
+        x drops an event for a post that no longer exists
+        x drops an event for a post whose profile_id is null, as the inner join did
+        x remembers a negative answer too, so a mid-connection reassignment needs a reconnect
+        x scopes two concurrent callers to their own posts on the same topic
+
+      # 2. drop the delivery chain in stream.ts: await matches() inline as 5.5d-i did
+      Tests  1 failed | 27 passed (28)
+        x preserves publication order across posts whose ownership is not yet resolved
+
+      # 3. drop the memo read in scope.ts, so every event queries
+      Tests  2 failed | 26 passed (28)
+        x remembers an ownership answer instead of re-querying per event
+        x remembers a negative answer too, so a mid-connection reassignment needs a reconnect
+
+      # 4. resolve ownership with eq(posts.id, id) instead of ownedByCaller(id, userId)
+      Tests  4 failed | 24 passed (28)
+        x drops another user's events, which global_events() broadcast to everyone
+        x drops an event for a post whose profile_id is null, as the inner join did
+        x remembers a negative answer too, so a mid-connection reassignment needs a reconnect
+        x scopes two concurrent callers to their own posts on the same topic
+
+      # 5. serve an unauthenticated caller the unfiltered feed instead of a 401
+      Tests  1 failed | 27 passed (28)
+        x rejects an unauthenticated request
+
+      # 6. ack only the deliveries that produced a frame
+      Tests  2 failed | 26 passed (28)
+        x acknowledges every delivery, so a long-lived reader accumulates no pending entries
+        x acknowledges deliveries it drops, so an unowned run leaks no pending entries
+      ```
+
+      Control 6 also re-proves the 5.5d-i ack test, which is the point: a global feed
+      drops far more deliveries than a per-post one, so an unacked drop accumulates a
+      pending entry per event published installation-wide.
+
+      Frontend gates:
+
+      ```
+      $ pnpm -C web tsc --noEmit
+      TSC EXIT=0
+      (no output)
+
+      $ pnpm -C web lint
+      LINT EXIT=0
+      (no output)
+
+      $ pnpm -C web test
+       Test Files  2 failed | 92 passed (94)
+            Tests  9 failed | 1690 passed | 7 skipped (1706)
+      ```
+
+      Nine failed is the recorded baseline: six in
+      `src/components/__tests__/image-preview.test.tsx` and three in
+      `src/app/posts/PostDetail.test.tsx`. 5.5d-i measured ten because the
+      `scaffold-check` flake `todo.md` records fired in that run; it passed in this one.
+      Passing count 1677 -> 1690.
+
+      ```
+      $ pnpm -C web build
+      BUILD EXIT=0
+      v Compiled successfully in 4.3s
+      v Generating static pages using 15 workers (36/36) in 306.4ms
+      |- f /api/events
+      |- f /api/events/[post_id]
+      ```
+
+      Python gates, unchanged from the recorded baseline:
+
+      ```
+      $ set -a && . ./.env && set +a && cd api && uv run pytest -q
+      120 failed, 241 passed, 25 errors in 15.06s
+
+      $ cd api && uv run ruff check .
+      Found 32 errors.
+      [*] 17 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).
+
+      $ cd api && uv run ruff format --check .
+      9 files would be reformatted, 131 files already formatted
+      ```
+
+      Worth recording for the next iteration that runs pytest: without sourcing the repo
+      `.env` first, every database test fails with
+      `asyncpg.exceptions.InvalidPasswordError` and the run reports 177 errors instead
+      of the baseline 25. That is the environment, not a regression.
   - [ ] 5.5e Resumable replay: a browser that reconnects mid-run recovers the events it
     missed. Test disconnects and reconnects mid-run and asserts no gap in the sequence.
 - [ ] 5.6 `rules`

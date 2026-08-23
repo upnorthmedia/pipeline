@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
- * `GET /api/events/{post_id}`, the SSE stream the dashboard's `useSSE()` hook
- * opens for one post.
+ * The two SSE streams the dashboard's `useSSE()` hook opens: `/api/events/{post_id}`
+ * for one post, and `/api/events` for the queue-wide feed.
  *
  * The tests run against the real database, real BetterAuth sessions and the
  * real Redis Streams topic. Every event they assert on is published by a
@@ -19,7 +19,7 @@
 import { randomUUID } from "node:crypto"
 
 import { RedisStreamsPubSub } from "@mastra/redis-streams"
-import { like } from "drizzle-orm"
+import { eq, like } from "drizzle-orm"
 import { createClient } from "redis"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
@@ -28,6 +28,7 @@ import { TOPIC_PIPELINE_EVENTS, publishPipelineEvent } from "@/mastra/pipeline-e
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { GET as postEvents } from "./[post_id]/route"
+import { GET as globalEvents } from "./route"
 import { SSE_SEPARATOR } from "./sse"
 
 const PREFIX = "events-sse-test-"
@@ -79,11 +80,16 @@ async function insertPost(
   return row
 }
 
-/** The handler, called the way Next.js calls it. */
+/** The per-post handler, called the way Next.js calls it. */
 function events(postId: string, init: { cookie?: string; signal?: AbortSignal } = {}) {
   return postEvents(apiRequest(`${URL_BASE}/${postId}`, init), {
     params: Promise.resolve({ post_id: postId }),
   })
+}
+
+/** The global handler, which takes no path parameter at all. */
+function feed(init: { cookie?: string; signal?: AbortSignal } = {}) {
+  return globalEvents(apiRequest(URL_BASE, init))
 }
 
 interface Connection {
@@ -107,8 +113,19 @@ async function connect(
   postId: string,
   cookie: string | undefined = user.cookie,
 ): Promise<Connection> {
+  return drain((signal) => events(postId, { cookie, signal }))
+}
+
+/** The same, for the global feed, which selects on the session and nothing else. */
+async function connectFeed(cookie: string | undefined = user.cookie): Promise<Connection> {
+  return drain((signal) => feed({ cookie, signal }))
+}
+
+async function drain(
+  openStream: (signal: AbortSignal) => Promise<Response>,
+): Promise<Connection> {
   const abort = new AbortController()
-  const response = await events(postId, { cookie, signal: abort.signal })
+  const response = await openStream(abort.signal)
   let text = ""
   const reader = response.body!.getReader()
   const decoder = new TextDecoder()
@@ -426,6 +443,198 @@ describe("GET /api/events/{post_id}", () => {
       if (found && found.pending === 0) break
       if (Date.now() > deadline) throw new Error(`group ${group} still has ${found?.pending} pending`)
       await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+  })
+})
+
+describe("GET /api/events", () => {
+  it("rejects an unauthenticated request", async () => {
+    const response = await feed()
+    expect(response.status).toBe(401)
+    await expect(response.json()).resolves.toEqual({ detail: "Not authenticated" })
+  })
+
+  it("opens with the same four response headers as the per-post stream", async () => {
+    const connection = await connectFeed()
+    expect(connection.response.status).toBe(200)
+    expect(connection.response.headers.get("content-type")).toBe("text/event-stream; charset=utf-8")
+    expect(connection.response.headers.get("cache-control")).toBe("no-store")
+    expect(connection.response.headers.get("connection")).toBe("keep-alive")
+    expect(connection.response.headers.get("x-accel-buffering")).toBe("no")
+  })
+
+  it("delivers events for every post the caller owns, not just one", async () => {
+    const first = await insertPost(user.userId)
+    const second = await insertPost(user.userId)
+    const connection = await connectFeed()
+
+    await publishPipelineEvent(publisher, first.id, "stage_start", { stage: "research" })
+    await publishPipelineEvent(publisher, second.id, "stage_complete", { stage: "outline" })
+
+    const frames = await waitForFrames(connection, 2)
+    expect(frames.map((frame) => parseFrame(frame).data.post_id)).toEqual([first.id, second.id])
+  })
+
+  it("drops another user's events, which global_events() broadcast to everyone", async () => {
+    const theirs = await insertPost(other.userId)
+    const mine = await insertPost(user.userId)
+    const connection = await connectFeed()
+
+    await publishPipelineEvent(publisher, theirs.id, "stage_start", { stage: "research" })
+    await publishPipelineEvent(publisher, mine.id, "stage_start", { stage: "research" })
+
+    const frames = await waitForFrames(connection, 1)
+    expect(frames).toHaveLength(1)
+    expect(parseFrame(frames[0]).data.post_id).toBe(mine.id)
+  })
+
+  it("drops an event for a post that no longer exists", async () => {
+    const mine = await insertPost(user.userId)
+    const connection = await connectFeed()
+
+    await publishPipelineEvent(publisher, MISSING_ID, "stage_start", { stage: "research" })
+    await publishPipelineEvent(publisher, mine.id, "stage_start", { stage: "research" })
+
+    const frames = await waitForFrames(connection, 1)
+    expect(frames).toHaveLength(1)
+    expect(parseFrame(frames[0]).data.post_id).toBe(mine.id)
+  })
+
+  it("drops an event for a post whose profile_id is null, as the inner join did", async () => {
+    const [orphan] = await db
+      .insert(posts)
+      .values({ slug: `${PREFIX}${randomUUID()}`, topic: "Orphan", profileId: null })
+      .returning()
+    const mine = await insertPost(user.userId)
+    const connection = await connectFeed()
+
+    await publishPipelineEvent(publisher, orphan.id, "stage_start", { stage: "research" })
+    await publishPipelineEvent(publisher, mine.id, "stage_start", { stage: "research" })
+
+    const frames = await waitForFrames(connection, 1)
+    expect(frames).toHaveLength(1)
+    expect(parseFrame(frames[0]).data.post_id).toBe(mine.id)
+  })
+
+  it("delivers events for a post created after the connection opened", async () => {
+    const connection = await connectFeed()
+
+    // The property a connect-time snapshot of owned ids would lose: the
+    // dashboard opens this feed on mount and the post it is waiting to hear
+    // about is created afterwards.
+    const later = await insertPost(user.userId)
+    await publishPipelineEvent(publisher, later.id, "stage_start", { stage: "research" })
+
+    const [frame] = await waitForFrames(connection, 1)
+    expect(parseFrame(frame).data.post_id).toBe(later.id)
+  })
+
+  it("preserves publication order across posts whose ownership is not yet resolved", async () => {
+    const owned = [
+      await insertPost(user.userId),
+      await insertPost(user.userId),
+      await insertPost(user.userId),
+    ]
+    const connection = await connectFeed()
+
+    // The first event for each post pays for a database lookup and the second
+    // reads the memo, so without the delivery chain in `pipelineEventStream()`
+    // the three cached events would overtake the three uncached ones.
+    const published: string[] = []
+    for (const round of [0, 1]) {
+      for (const post of owned) {
+        const seq = `${round}-${post.id}`
+        published.push(seq)
+        await publishPipelineEvent(publisher, post.id, "log", { seq })
+      }
+    }
+
+    const frames = await waitForFrames(connection, published.length)
+    expect(frames.map((frame) => parseFrame(frame).data.seq)).toEqual(published)
+  })
+
+  it("remembers an ownership answer instead of re-querying per event", async () => {
+    const mine = await insertPost(user.userId)
+    const connection = await connectFeed()
+
+    await publishPipelineEvent(publisher, mine.id, "stage_start", { stage: "research" })
+    await waitForFrames(connection, 1)
+
+    // Deleting the row is the observable difference between a memo and a
+    // lookup per event: a per-event lookup would now start dropping the feed.
+    await db.delete(posts).where(eq(posts.id, mine.id))
+    await publishPipelineEvent(publisher, mine.id, "stage_complete", { stage: "research" })
+
+    const frames = await waitForFrames(connection, 2)
+    expect(parseFrame(frames[1]).event).toBe("stage_complete")
+  })
+
+  it("remembers a negative answer too, so a mid-connection reassignment needs a reconnect", async () => {
+    const theirs = await insertPost(other.userId)
+    const mine = await insertPost(user.userId)
+    const connection = await connectFeed()
+
+    await publishPipelineEvent(publisher, theirs.id, "stage_start", { stage: "research" })
+    await publishPipelineEvent(publisher, mine.id, "stage_start", { stage: "research" })
+    await waitForFrames(connection, 1)
+
+    // The documented staleness cost of caching the negative answer.
+    await db
+      .update(websiteProfiles)
+      .set({ userId: user.userId })
+      .where(eq(websiteProfiles.id, theirs.profileId!))
+    await publishPipelineEvent(publisher, theirs.id, "stage_complete", { stage: "research" })
+    await publishPipelineEvent(publisher, mine.id, "stage_complete", { stage: "research" })
+
+    const frames = await waitForFrames(connection, 2)
+    expect(frames).toHaveLength(2)
+    expect(frames.map((frame) => parseFrame(frame).data.post_id)).toEqual([mine.id, mine.id])
+
+    // A reconnect is what picks the reassignment up.
+    const reconnected = await connectFeed()
+    await publishPipelineEvent(publisher, theirs.id, "pipeline_complete", {})
+    const [frame] = await waitForFrames(reconnected, 1)
+    expect(parseFrame(frame).data.post_id).toBe(theirs.id)
+  })
+
+  it("acknowledges deliveries it drops, so an unowned run leaks no pending entries", async () => {
+    const theirs = await insertPost(other.userId)
+    const mine = await insertPost(user.userId)
+    const before = await groupNames()
+    const connection = await connectFeed()
+    const during = await waitForGroups((names) => names.length === before.length + 1)
+    const group = during.filter((name) => !before.includes(name))[0]
+
+    await publishPipelineEvent(publisher, theirs.id, "stage_start", { stage: "research" })
+    await publishPipelineEvent(publisher, mine.id, "stage_start", { stage: "research" })
+    await waitForFrames(connection, 1)
+
+    const deadline = Date.now() + 10_000
+    for (;;) {
+      const groups = (await raw.xInfoGroups(STREAM_KEY)) as { name: string; pending: number }[]
+      const found = groups.find((entry) => entry.name === group)
+      if (found && found.pending === 0) break
+      if (Date.now() > deadline) throw new Error(`group ${group} still has ${found?.pending} pending`)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+  })
+
+  it("scopes two concurrent callers to their own posts on the same topic", async () => {
+    const mine = await insertPost(user.userId)
+    const theirs = await insertPost(other.userId)
+    const ours = await connectFeed()
+    const yours = await connectFeed(other.cookie)
+
+    await publishPipelineEvent(publisher, mine.id, "stage_start", { stage: "research" })
+    await publishPipelineEvent(publisher, theirs.id, "stage_start", { stage: "research" })
+
+    for (const [connection, expected] of [
+      [ours, mine.id],
+      [yours, theirs.id],
+    ] as const) {
+      const frames = await waitForFrames(connection, 1)
+      expect(frames).toHaveLength(1)
+      expect(parseFrame(frames[0]).data.post_id).toBe(expected)
     }
   })
 })
