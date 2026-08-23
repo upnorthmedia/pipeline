@@ -17719,8 +17719,170 @@ three pieces are separately verifiable, so they are separate items.
     $ cd api && uv run ruff format --check .
     9 files would be reformatted, 133 files already formatted
     ```
-- [ ] 5.10 `nextjs` (HMAC signing from `hmac_signing.py` and the webhook contract with
+- [x] 5.10 `nextjs` (HMAC signing from `hmac_signing.py` and the webhook contract with
   `packages/create-mdx-blog` preserved exactly)
+
+  Ported to `web/src/app/api/profiles/[id]/nextjs/test/route.ts`, over
+  `web/src/lib/hmac-signing.ts` (`sign_payload`) and
+  `web/src/app/api/profiles/[id]/nextjs/detail.ts` (the error grammar). The router is one
+  endpoint, `POST /api/profiles/{profile_id}/nextjs/test`, and reuses the
+  `web/src/app/api/profiles/params.ts` helpers for the 422 and the user-scoped 404 that
+  the profiles and wordpress handlers already share. `profiles.nextjsTest()` in
+  `web/src/lib/api.ts` already declared `{connected, error?}` and needed no change, and
+  its only caller, `web/src/app/profiles/[id]/page.tsx:366`, reads exactly those two
+  fields.
+
+  **The bytes on the wire are the contract, not just the JSON.**
+  `packages/create-mdx-blog/src/adapters/delivery/webhook.ts` recomputes
+  `createHmac("sha256", secret).update(rawBody)` over the raw body before parsing it, so
+  the payload is assembled to match Python's `json.dumps` separators (`", "` and `": "`)
+  and `datetime.now(UTC).isoformat()` (microseconds, `+00:00` rather than `Z`, and no
+  fractional part at all when the microsecond is zero) rather than left to
+  `JSON.stringify` and `toISOString`. Both of those are load-bearing: swapping the
+  payload builder for `JSON.stringify` fails 20 tests, and swapping the timestamp for
+  `toISOString()` fails 20.
+
+  **Two `httpx` defaults had to be asked for explicitly**, because `fetch` defaults the
+  other way. `httpx` does not follow redirects, so a 302 is reported as
+  `Webhook returned 302: ...` rather than followed to a 200: `redirect: "manual"`.
+  `httpx.AsyncClient(timeout=10.0)` becomes `AbortSignal.timeout(10_000)`; the timeout is
+  set but not covered by a test, because the value is hardcoded and a real test would
+  cost ten seconds of wall clock.
+
+  **`verify_signature` is deliberately not ported.** `grep -rn` over `api/src` finds no
+  caller: verification is the receiver's half of the contract and `create-mdx-blog`
+  already implements it. Its four tests in `api/tests/phase_nextjs/test_hmac_signing.py`
+  reduce to the signing half here, and the last test in `nextjs.test.ts` checks the two
+  halves against each other by recomputing the digest with the receiver's own
+  `createHmac(...).update(body).digest("hex")` rather than with `signPayload`.
+
+  **The oracle is a live-server capture of the real endpoint coroutine.**
+  `api/scripts/export_nextjs_router_parity.py` drives `test_nextjs_connection` itself,
+  with a stubbed session standing in for the `_get_user_profile` lookup and a local HTTP
+  server standing in for the Next.js blog, and records per scenario the profile row, the
+  request the stand-in saw (body, content type and `X-Jena-Signature` included) and the
+  value returned or the exception raised. `api/tests/phase_nextjs/` covers
+  `sign_payload`/`verify_signature` but has no coverage of the router at all, so all 29
+  router scenarios are new on both sides. The Fernet key in the oracle is a throwaway
+  generated for the file (32 bytes of 0x0b); no real credential is involved.
+
+  **Two documented divergences**, both asserted explicitly in the test rather than
+  papered over:
+
+  * `connection-refused`: Python reports `str(exc)` for an `httpx.RequestError`, which is
+    `All connection attempts failed`. Node's `fetch` says `fetch failed`. The test asserts
+    `connected === false` with a non-empty message and pins Python's wording alongside it.
+  * `502-error-key-is-an-integral-float`: `{"error": 1.0}` renders `1.0` in Python and `1`
+    here, because JSON has one number type and `JSON.parse` erases the int/float split
+    `str()` reads. Every other number, including one with a fractional part, matches.
+
+  Everything else matches byte for byte, including the six shapes `str()` renders
+  differently from `JSON.stringify` (`None`, `True`, `False`, and the `repr` quoting of
+  nested lists, dicts and strings, which switches to double quotes for a string that
+  contains an apostrophe and no double quote).
+
+  ```
+  $ cd api && uv run python scripts/export_nextjs_router_parity.py     # .env sourced
+  stand-in Next.js blog on http://127.0.0.1:63653
+    success-200-json: 1 request(s), returned {"connected": true}
+    success-200-empty-body: 1 request(s), returned {"connected": true}
+    success-200-not-json: 1 request(s), returned {"connected": true}
+    created-201-is-a-failure: 1 request(s), returned {"connected": false, "error": "Webhook returned 201: {\"ok\": true}"}
+    no-content-204-is-a-failure: 1 request(s), returned {"connected": false, "error": "Webhook returned 204: "}
+    redirect-302-is-not-followed: 1 request(s), returned {"connected": false, "error": "Webhook returned 302: moved"}
+    401-json-error-key: 1 request(s), returned {"connected": false, "error": "Webhook returned 401: Invalid signature"}
+    500-json-without-error-key: 1 request(s), returned {"connected": false, "error": "Webhook returned 500: {\"message\": \"boom\", \"code\": 17}"}
+    404-long-html-truncated-to-200-chars: 1 request(s), returned {"connected": false, "error": "Webhook returned 404: <html><body>vercel: this deployment i...
+    400-json-array-body: 1 request(s), returned {"connected": false, "error": "Webhook returned 400: [{\"error\": \"not reached\"}]"}
+    400-json-null-body: 1 request(s), returned {"connected": false, "error": "Webhook returned 400: null"}
+    400-json-string-body: 1 request(s), returned {"connected": false, "error": "Webhook returned 400: \"just a string\""}
+    502-error-key-is-null: 1 request(s), returned {"connected": false, "error": "Webhook returned 502: None"}
+    502-error-key-is-true: 1 request(s), returned {"connected": false, "error": "Webhook returned 502: True"}
+    502-error-key-is-an-int: 1 request(s), returned {"connected": false, "error": "Webhook returned 502: 42"}
+    502-error-key-is-an-integral-float: 1 request(s), returned {"connected": false, "error": "Webhook returned 502: 1.0"}
+    502-error-key-is-a-list: 1 request(s), returned {"connected": false, "error": "Webhook returned 502: ['a', 1, None]"}
+    502-error-key-is-a-list-of-quoted-strings: 1 request(s), returned {"connected": false, "error": "Webhook returned 502: [\"it's\", 'say \"hi\"', ...
+    502-error-key-is-an-object: 1 request(s), returned {"connected": false, "error": "Webhook returned 502: {'why': 'nested'}"}
+    503-empty-body: 1 request(s), returned {"connected": false, "error": "Webhook returned 503: "}
+    connection-refused: 0 request(s), returned {"connected": false, "error": "All connection attempts failed"}
+    profile-not-found: 0 request(s), HTTPException 404: Profile not found
+    profile-owned-by-another-user: 0 request(s), HTTPException 404: Profile not found
+    no-webhook-url: 0 request(s), returned {"connected": false, "error": "Webhook URL or secret not configured"}
+    empty-webhook-url: 0 request(s), returned {"connected": false, "error": "Webhook URL or secret not configured"}
+    no-webhook-secret: 0 request(s), returned {"connected": false, "error": "Webhook URL or secret not configured"}
+    empty-webhook-secret: 0 request(s), returned {"connected": false, "error": "Webhook URL or secret not configured"}
+    undecryptable-webhook-secret: 0 request(s), returned {"connected": false, "error": "Failed to decrypt webhook secret"}
+    unset-encryption-key: 0 request(s), returned {"connected": false, "error": "Failed to decrypt webhook secret"}
+  wrote 29 scenarios to .../web/src/app/api/profiles/data/nextjs-router-parity.json
+
+  $ pnpm -C web vitest run "src/app/api/profiles/[id]/nextjs/nextjs.test.ts"
+   v src/app/api/profiles/[id]/nextjs/nextjs.test.ts (63 tests) 224ms
+   Test Files  1 passed (1)
+        Tests  63 passed (63)
+  ```
+
+  Fourteen negative controls, each reverted after measuring. `Tests N failed` is the
+  count out of 63:
+
+  | Mutation | Result |
+  | --- | --- |
+  | `redirect: "manual"` becomes `"follow"` | 2 failed |
+  | `response.status === 200` becomes `< 300` | 2 failed |
+  | payload built with `JSON.stringify` | 20 failed |
+  | timestamp built with `toISOString()` | 20 failed |
+  | `pythonStr(record.error)` becomes `String(record.error)` | 5 failed |
+  | `text.slice(0, 200)` becomes `slice(0, 300)` | 1 failed |
+  | `repr` always single-quotes | 1 failed |
+  | `pythonStr` sends strings through `repr` too | 1 failed |
+  | `eq(websiteProfiles.userId, user.id)` dropped from the `where` | 3 failed |
+  | `!profile.url \|\| !profile.secret` becomes `== null` | 2 failed |
+  | `signPayload(payload, secret)` becomes `signPayload("", secret)` | 21 failed |
+  | decrypt failure reuses the not-configured message | 2 failed |
+  | `Content-Type: application/json` header dropped | 20 failed |
+  | `if (!user) return unauthorized()` disabled | 1 failed |
+
+  **One control had no teeth, and the code it covered was removed rather than kept.**
+  Deleting the `Array.isArray(parsed)` guard from `webhookDetail` failed nothing, because
+  a JSON array can never carry an `error` key, so `"error" in record` sends it to the same
+  truncated-text fallback the guard did. The guard was dead code and is gone; the comment
+  in `detail.ts` records why only `null` still needs its own branch.
+
+  `web/src/lib/api.ts` still points at the Python origin, so there is no per-router UI
+  check here either; it flips to same-origin once Phase 5 finishes, as recorded under
+  5.1b. Phase 5's one remaining item is 5.3c-iii-b, the two publish paths.
+
+  Gates, both stacks:
+
+  ```
+  $ pnpm -C web tsc --noEmit
+  TSC EXIT=0
+
+  $ pnpm -C web lint
+  LINT EXIT=0
+
+  $ pnpm -C web test
+   Test Files  3 failed | 101 passed (104)
+        Tests  10 failed | 2248 passed | 7 skipped (2265)
+  (the Phase 0 baseline of 9: 6 in image-preview.test.tsx and 3 in PostDetail.test.tsx,
+  plus the known scaffold-check.test.ts flake already logged in todo.md. That file
+  passes 5/5 in isolation:
+    $ pnpm -C web vitest run src/mastra/workflows/scaffold-check.test.ts
+     Test Files  1 passed (1))
+
+  $ pnpm -C web build
+  BUILD EXIT=0
+  v Compiled successfully in 4.2s
+  |- f /api/profiles/[id]/nextjs/test
+
+  $ cd api && uv run pytest -q          # with the repo .env sourced
+  120 failed, 241 passed, 25 errors in 15.06s
+
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 134 files already formatted
+  ```
 
 `auth` is out of scope; BetterAuth already owns it.
 
