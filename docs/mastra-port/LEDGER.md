@@ -1198,6 +1198,24 @@ pages that use it work with the Python API stopped.
 - [ ] 6.2 Extend the `api_settings`-backed settings pattern so each stage has a configurable
   model and, where supported, a reasoning/effort setting, persisted per user, validated on write
   against the allowlist from 6.1, falling back to the verified hardcoded defaults when unset.
+  Split because the storage half (which row wins, what is a legal value) and the consumption
+  half (an agent building its request from that row) fail in different ways and are provable
+  separately.
+
+- [x] 6.2a The settings-backed layer: `mastra/stage-models.ts` holds the per-stage allowlist
+  (only ids with a live provider response behind them in #6.1), the verified defaults, and
+  `resolveStageModels()`, which merges defaults, then the global `user_id IS NULL` row, then the
+  user's row, field by field so an effort override keeps the operator's model. `PATCH
+  /api/settings` validates the `stage_models` key against the allowlist before writing anything,
+  which is the only key it does not store verbatim. Effort is offered only where the provider
+  documents one, so Anthropic stages only; `images` selects the Gemini generation model and its
+  Claude manifest call keeps the shared defaults. 44 tests, 11 mutations killed.
+
+  Evidence: [`evidence/phase-6.md` #6.2a](../mastra-port/evidence/phase-6.md)
+
+- [ ] 6.2b The six stage agents build their request from `resolveStageModels()` for the user who
+  owns the post, replacing the `*_MODEL_ID` constants and the fixed `CLAUDE_DEFAULT_EFFORT`, so a
+  stored override reaches the provider.
 - [ ] 6.3 Settings UI: table of six stages with model and effort selectors, current effective
   value plus default-or-override indicator, save and revert-to-default per stage, real provider
   errors surfaced rather than silent fallback.

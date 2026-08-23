@@ -468,3 +468,125 @@ Found 32 errors.
 $ cd api && uv run ruff format --check .
 9 files would be reformatted, 153 files already formatted
 ```
+
+## 6.2a
+
+The storage half of per-stage model configuration: what a legal value is, which row wins, and
+where a bad value is stopped. No agent reads it yet; that is 6.2b.
+
+### What the shape is, and the three decisions inside it
+
+`web/src/mastra/stage-models.ts`. One `settings` row per user under the key `stage_models`,
+holding only overrides:
+
+```json
+{"write": {"model": "claude-fable-5", "effort": "max"}, "images": {"model": "gemini-3-pro-image"}}
+```
+
+**The allowlist is the pasted evidence from #6.1 and nothing else.** Six ids are accepted:
+`sonar-pro` for `research`, `claude-opus-5` / `claude-fable-5` / `claude-opus-4-6` for the four
+Anthropic stages, and `gemini-3-pro-image` / `gemini-3.1-flash-image-preview` for `images`. Each
+returned HTTP 200 from a real billed call in #6.1, sending the request shape its stage sends,
+including `claude-opus-4-6` under the adaptive-thinking body that replaced `budget_tokens`.
+`sonar` and `sonar-deep-research` are documented tiers with no live call behind them here, so
+they are not offered. A test pins the whole map, so an id cannot be added without the test being
+edited, which is where the "and paste the call" reminder lives.
+
+**Effort exists only where the provider documents one.** `CLAUDE_EFFORTS` is read off the
+provider options schema bundled with the installed `@mastra/core`
+(`dist/_types/@ai-sdk_anthropic-v6/dist/index.d.ts`: `low | medium | high | xhigh | max`), and
+`STAGE_EFFORT_ALLOWLIST` is derived from the stage's provider rather than written out, so a
+stage cannot end up offering an effort its provider ignores. `research` and `images` therefore
+reject `effort` with a 422 instead of storing a value nothing sends.
+
+**`images` selects the Gemini generation model.** The stage also makes one Claude call to write
+the image prompts (`IMAGES_MODEL_ID`); that call is not separately configurable and keeps the
+shared Claude defaults. Recorded here rather than left implicit, because "the images stage's
+model" is ambiguous and this port picked the generation half, which is the one the manifest
+names and the one the stage is judged on.
+
+### Resolution order
+
+Defaults, then the global row (`user_id IS NULL`), then the user's row, **field by field**. A
+user who overrides only `write`'s effort keeps whatever model the global row chose. Both rows
+come back in one query. `resolveStageModels()` also reports where each field came from
+(`default` / `global` / `user`), which is what 6.3's override badge reads.
+
+A stored value that no longer validates (a hand-edited row, an id retired from the allowlist) is
+ignored rather than raised: the stage still has a verified default, and stranding a pipeline run
+on a stale settings row is the worse outcome. Covered by a test.
+
+### Where a bad value is stopped
+
+`PATCH /api/settings` stores every key's value verbatim, as Python did. `stage_models` is the
+one exception: it is parsed against the allowlist for the whole body before any row is written,
+so a rejected batch leaves nothing half-applied. The error names the stage and the accepted
+values, because a rejected id is otherwise indistinguishable from a typo.
+
+One consequence worth stating: `settings.update()` in `web/src/lib/api.ts` types its body as
+`Record<string, {value: ...}>`, and that wrapper is stored verbatim for other keys. It is not a
+stage map, so it is rejected here (`Unknown stage 'value'`) and 6.3 has to send the map itself.
+A test pins that.
+
+### Tests
+
+44 tests against the real database: 26 in `web/src/mastra/stage-models.test.ts`, 18 in
+`web/src/app/api/settings/route.test.ts` (12 pre-existing plus 6 new). The suite captures the
+global `stage_models` row before it writes to it and restores it afterwards, following the
+iteration-132 lesson about test helpers destroying live settings rows.
+
+```
+$ cd web && set -a && . ../.env && set +a && pnpm vitest run \
+    src/mastra/stage-models.test.ts src/app/api/settings/route.test.ts
+ ✓ src/app/api/settings/route.test.ts (18 tests) 81ms
+ ✓ src/mastra/stage-models.test.ts (26 tests) 56ms
+
+ Test Files  2 passed (2)
+      Tests  44 passed (44)
+```
+
+### Mutations
+
+Eleven mutations, all killed, each with a control run either side.
+
+| # | Mutation | Result |
+| --- | --- | --- |
+| M0 | control, unmutated | 44 passed |
+| M1 | resolution layers applied user-then-global | 2 failed |
+| M2 | global row dropped from the query's predicate | 2 failed |
+| M3 | an unparseable stored value trusted instead of ignored | 6 failed |
+| M4 | the "provider has no such setting" guard removed | 2 failed |
+| M5 | an explicit `null` stored instead of dropped | 1 failed |
+| M6 | the unknown-stage check removed | 2 failed |
+| M7 | allowlist membership not checked, only the type | 6 failed |
+| M8 | `modelSource` hardcoded to `user` | 3 failed |
+| M9 | the route's validation loop removed | 4 failed |
+| M10 | the validated key never actually written | 1 failed |
+| M11 | control, after restore | 44 passed |
+
+The harness earned its control runs. The first attempt used `set -e` and died inside M1 without
+restoring, so the next attempt backed up an already-mutated file and every subsequent result was
+against the wrong baseline. The tell was M0 failing, exactly the failure mode iteration 128
+recorded: a mutation harness with no control reports nonsense confidently.
+
+### Gates
+
+```
+$ cd web && pnpm tsc --noEmit
+(exit 0, no output)
+
+$ cd web && pnpm lint
+(exit 0, no output)
+
+$ cd web && set -a && . ../.env && set +a && pnpm test --run
+ Test Files  2 failed | 125 passed (127)
+      Tests  9 failed | 4423 passed | 7 skipped (4439)
+
+$ cd web && pnpm build
+✓ Compiled successfully in 3.6s
+✓ Generating static pages using 15 workers (41/41) in 304.1ms
+```
+
+The 9 failures are exactly the Phase 0 baseline: 6 in `image-preview.test.tsx` and 3 in
+`PostDetail.test.tsx`. A second full run added the known `scaffold-check.test.ts` flake and
+nothing else. No Python file was touched, so the pytest gate is unchanged.

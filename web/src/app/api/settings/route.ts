@@ -18,11 +18,16 @@
  * on `settings_pkey`. Before that revision the second user to write a key got
  * a unique violation, which is what made per-user stage configuration
  * impossible.
+ *
+ * One key is not stored verbatim: `stage_models` is validated against the
+ * allowlist in `mastra/stage-models.ts` before any row is written, per ledger
+ * item 6.2.
  */
 import { and, asc, eq } from "drizzle-orm"
 
 import { getDb, settings } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { parseStageModelSettings, STAGE_MODELS_SETTING_KEY } from "@/mastra/stage-models"
 
 /** The wire shape of one row, matching `SettingRead`. */
 interface SettingResponse {
@@ -73,8 +78,21 @@ export async function PATCH(request: Request): Promise<Response> {
     return Response.json({ detail: "Body must be an object of key to value" }, { status: 422 })
   }
 
+  const entries = Object.entries(updates as Record<string, unknown>)
+
+  // Item 6.2's write validation. Every other key is stored verbatim, as
+  // Python stored it, but `stage_models` chooses which model a paid provider
+  // call runs on, so an id nobody has proven resolves must not reach a
+  // pipeline run. Checked for the whole body before anything is written, so a
+  // rejected batch leaves no half-applied rows behind.
+  for (const [key, value] of entries) {
+    if (key !== STAGE_MODELS_SETTING_KEY) continue
+    const parsed = parseStageModelSettings(value)
+    if (!parsed.ok) return Response.json({ detail: parsed.detail }, { status: 422 })
+  }
+
   const db = getDb()
-  for (const [key, value] of Object.entries(updates as Record<string, unknown>)) {
+  for (const [key, value] of entries) {
     const existing = await db
       .select({ key: settings.key })
       .from(settings)
