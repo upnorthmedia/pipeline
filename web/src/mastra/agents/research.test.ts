@@ -26,9 +26,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { closeDb, getDb, settings } from "../../db"
 import { encryptWithKey } from "../../lib/crypto"
 import { API_KEYS_SETTING_KEY } from "../api-keys"
+import { STAGE_MODEL_ALLOWLIST, STAGE_MODEL_DEFAULTS } from "../stage-models"
 import { mastra, pubsub } from "../index"
 import {
-  RESEARCH_MODEL_ID,
   RESEARCH_PROVIDER,
   RESEARCH_SYSTEM_MESSAGE,
   researchAgent,
@@ -110,9 +110,7 @@ describe("research agent registration", () => {
         fs.readFileSync(path.join(GOLDEN_DIR, slug, "research.json"), "utf8"),
       ) as { provider_calls: { provider: string; request: { model: string } }[] }
       expect(fixture.provider_calls[0].provider).toBe(RESEARCH_PROVIDER)
-      expect(`${fixture.provider_calls[0].provider}/${fixture.provider_calls[0].request.model}`).toBe(
-        RESEARCH_MODEL_ID,
-      )
+      expect(fixture.provider_calls[0].request.model).toBe(STAGE_MODEL_DEFAULTS.research.model)
     }
   })
 })
@@ -146,4 +144,16 @@ describe.skipIf(!LIVE_KEY)("research agent live smoke test", () => {
     expect(result.text.trim().length).toBeGreaterThan(0)
     expect(result.usage?.outputTokens).toBeGreaterThan(0)
   }, 120_000)
+})
+
+describe("research agent model configuration", () => {
+  it("has one verified model, which is why nothing here asserts an override", () => {
+    // Item 6.2b resolves this agent's model through the request context like
+    // every Claude stage, but Perplexity has exactly one id with a live call
+    // behind it, so no stored override can change what reaches the wire and a
+    // mutation that drops the context is undetectable from outside. This is
+    // the tripwire: verify a second Perplexity id into the allowlist and this
+    // fails, which is where the missing override test belongs.
+    expect(STAGE_MODEL_ALLOWLIST.research).toEqual([STAGE_MODEL_DEFAULTS.research.model])
+  })
 })

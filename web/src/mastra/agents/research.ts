@@ -10,6 +10,7 @@
 import { Agent } from "@mastra/core/agent"
 
 import { requireApiKey } from "../api-keys"
+import { resolveStageModel, stageRequestContextUserId } from "../stage-models"
 
 /**
  * The system message Python sends as `system=` on every research call. It is
@@ -25,7 +26,9 @@ export const RESEARCH_SYSTEM_MESSAGE =
   "Produce the complete research directly."
 
 /**
- * Mastra's model-router id for the incumbent research model.
+ * Mastra's model-router prefix for this stage's provider. The model id itself
+ * is resolved per call from the owning user's `stage_models` setting (item
+ * 6.2b), falling back to item 6.1's verified `sonar-pro`.
  *
  * `sonar-pro` is carried over unchanged from `PerplexityClient.chat()`'s
  * default, and ledger item 6.1 kept it. Of the four Sonar models Perplexity
@@ -38,24 +41,29 @@ export const RESEARCH_SYSTEM_MESSAGE =
  * The router resolves `perplexity/*` from `@mastra/core`'s bundled provider
  * registry, so no `@ai-sdk/perplexity` dependency is needed.
  */
-export const RESEARCH_MODEL_ID = "perplexity/sonar-pro" as const
+export const RESEARCH_ROUTER_PREFIX = "perplexity/"
 
 /** The provider id `research` draws its credential from. */
 export const RESEARCH_PROVIDER = "perplexity" as const
 
 /**
- * The credential is resolved per call rather than captured at module load, so
- * rotating the key on the settings page takes effect without restarting the
- * worker, and so importing this module never touches the database (Studio and
- * `next build` both import it).
+ * The model and the credential are both resolved per call rather than captured
+ * at module load, so a settings change (the stored model, or a rotated key)
+ * takes effect without restarting the worker, and so importing this module
+ * never touches the database (Studio and `next build` both import it).
  */
 export const researchAgent = new Agent({
   id: "research",
   name: "research",
   description: "Produces the SEO research document for a post using live web search.",
   instructions: RESEARCH_SYSTEM_MESSAGE,
-  model: async () => ({
-    id: RESEARCH_MODEL_ID,
-    apiKey: await requireApiKey(RESEARCH_PROVIDER),
-  }),
+  model: async ({ requestContext }) => {
+    const { model } = await resolveStageModel(
+      "research",
+      stageRequestContextUserId(requestContext),
+    )
+    // See `claudeStageModel` for why the id needs an annotated binding.
+    const id: `${string}/${string}` = `${RESEARCH_ROUTER_PREFIX}${model}`
+    return { id, apiKey: await requireApiKey(RESEARCH_PROVIDER) }
+  },
 })

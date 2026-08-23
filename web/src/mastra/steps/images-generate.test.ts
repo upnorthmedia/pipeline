@@ -39,17 +39,18 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import sharp from "sharp"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 
-import { closeDb, getDb, posts } from "../../db"
+import { closeDb, getDb, posts, settings, websiteProfiles } from "../../db"
 import { TOPIC_PIPELINE_EVENTS } from "../pipeline-events"
 import geminiCorpus from "../images/data/gemini-parity.json"
 import corpus from "../images/data/image-generation-parity.json"
 import { GEMINI_API_BASE, GEMINI_IMAGE_MODEL_ID } from "../images/gemini"
 import { CONTENT_MAX_WIDTH, FEATURED_MAX_WIDTH } from "../images/generate-one"
 import { loadPipelineState } from "../post-state"
+import { STAGE_MODELS_SETTING_KEY } from "../stage-models"
 import { loadRules } from "../prompts"
 import { imagesAssembleStep } from "./images-assemble"
 import { imagesGenerateStep } from "./images-generate"
@@ -524,5 +525,66 @@ describe("an image whose provider call fails", () => {
       message: `Image 7 failed: ${String(failed.spec.error)}`,
       data: { index: 7, error: String(failed.spec.error) },
     })
+  })
+})
+
+/**
+ * Item 6.2b: the generation model comes from the `images` entry in the owning
+ * user's `stage_models` row, not from `GEMINI_IMAGE_MODEL_ID`.
+ *
+ * The assertion is on the request URL because that is where the model id lands
+ * for this provider: `generateContent` is a per-model endpoint, so an override
+ * that failed to reach the client would still send to the default model's path
+ * and be invisible in the body.
+ */
+describe("imagesGenerateStep model configuration", () => {
+  const PROFILE_ID = "00000000-0000-4000-8000-0000004c7d01"
+  const OWNER_ID = "images-generate-owner-6-2b"
+  const OVERRIDE = "gemini-3.1-flash-image-preview"
+  /**
+   * This suite installs its own transport rather than reading `requests`:
+   * earlier suites in the file replace the shared `fetch` mock with failing
+   * ones to exercise the retry paths and leave them installed, so a suite that
+   * runs after them and expects a 200 has to say so.
+   */
+  const urls: string[] = []
+
+  beforeAll(async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      urls.push(String(input))
+      return new Response(recordedSuccess(), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    })
+    await db.insert(websiteProfiles).values({
+      id: PROFILE_ID,
+      name: "Images owner",
+      websiteUrl: "https://images-owner.example.test",
+      userId: OWNER_ID,
+    })
+    await db.update(posts).set({ profileId: PROFILE_ID }).where(eq(posts.id, POST_ID))
+    await db.insert(settings).values({
+      key: STAGE_MODELS_SETTING_KEY,
+      userId: OWNER_ID,
+      value: { images: { model: OVERRIDE } },
+    })
+  })
+
+  afterAll(async () => {
+    await db
+      .delete(settings)
+      .where(and(eq(settings.key, STAGE_MODELS_SETTING_KEY), eq(settings.userId, OWNER_ID)))
+    await db.update(posts).set({ profileId: null }).where(eq(posts.id, POST_ID))
+    await db.delete(websiteProfiles).where(eq(websiteProfiles.id, PROFILE_ID))
+  })
+
+  it("posts to the model stored for the post's owner", async () => {
+    expect(OVERRIDE).not.toBe(GEMINI_IMAGE_MODEL_ID)
+
+    const generated = await generate(contentSpec, 0)
+
+    expect(generated.outcome).toMatchObject({ kind: "generated" })
+    expect(urls).toEqual([`${GEMINI_API_BASE}/models/${OVERRIDE}:generateContent`])
   })
 })

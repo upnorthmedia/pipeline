@@ -23,10 +23,12 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
+import type { RequestContext } from "@mastra/core/request-context"
 import { eq, inArray } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { closeDb, getDb, posts } from "../../db"
+import { closeDb, getDb, posts, websiteProfiles } from "../../db"
+import { stageRequestContextUserId } from "../stage-models"
 import { stageStepOutputSchema } from "./stage-io"
 import { outlineStep } from "./outline"
 
@@ -93,6 +95,7 @@ type Replay = ReturnType<typeof replayOf>
 /** Records the prompts the step sends and replies with the queued response. */
 function replayMastra(reply: Replay) {
   const prompts: string[] = []
+  const agentOptions: ({ requestContext?: RequestContext } | undefined)[] = []
   const announced: unknown[] = []
   const mastra = {
     /**
@@ -107,14 +110,15 @@ function replayMastra(reply: Replay) {
       },
     },
     getAgent: () => ({
-      generate: async (prompt: string) => {
+      generate: async (prompt: string, options?: { requestContext?: RequestContext }) => {
         prompts.push(prompt)
+        agentOptions.push(options)
         return reply
       },
     }),
     getLogger: () => undefined,
   }
-  return { mastra, prompts, announced }
+  return { mastra, prompts, agentOptions, announced }
 }
 
 type ExecuteParams = Parameters<typeof outlineStep.execute>[0]
@@ -161,8 +165,17 @@ async function insertFixturePosts() {
   }
 }
 
+/**
+ * A profile owned by a known user, so the step's settings-user lookup (item
+ * 6.2b) has an owner to find. The id is this file's namespace so it cannot
+ * collide with another stage's parity file.
+ */
+const OWNED_PROFILE_ID = "a2000000-0000-4000-8000-00000000e01e"
+const OWNER_USER_ID = "outline-step-owner-a2"
+
 async function cleanup() {
   await db.delete(posts).where(inArray(posts.id, fixtureIds))
+  await db.delete(websiteProfiles).where(eq(websiteProfiles.id, OWNED_PROFILE_ID))
 }
 
 beforeAll(cleanup)
@@ -297,5 +310,42 @@ describe("outline step announcement", () => {
         duration_s: expect.any(Number),
       },
     ])
+  })
+})
+
+/**
+ * Item 6.2b: the step tells the agent whose `stage_models` overrides apply.
+ *
+ * `posts` has no `user_id`, so the answer comes from the post's profile. The
+ * two cases that matter are an owned profile (the run uses that user's stored
+ * model) and no profile at all (the run falls back to the global row), and
+ * both are exercised against real rows rather than a stubbed lookup, because
+ * the join is the part that can be wrong.
+ */
+describe("outline step settings user", () => {
+  it("hands the agent a request context carrying the profile's owner", async () => {
+    await db.insert(websiteProfiles).values({
+      id: OWNED_PROFILE_ID,
+      name: "Owned profile",
+      websiteUrl: "https://owner.example.test",
+      userId: OWNER_USER_ID,
+    })
+    await db
+      .update(posts)
+      .set({ profileId: OWNED_PROFILE_ID })
+      .where(eq(posts.id, fixtureIds[0]))
+
+    const { agentOptions } = await runStep(fixtureIds[0], replayOf(fixtures[0]))
+
+    expect(agentOptions).toHaveLength(1)
+    const requestContext = agentOptions[0]?.requestContext
+    expect(requestContext).toBeDefined()
+    expect(stageRequestContextUserId(requestContext!)).toBe(OWNER_USER_ID)
+  })
+
+  it("carries a null user for a post with no profile, so the global row applies", async () => {
+    const { agentOptions } = await runStep(fixtureIds[0], replayOf(fixtures[0]))
+
+    expect(stageRequestContextUserId(agentOptions[0]!.requestContext!)).toBeNull()
   })
 })

@@ -72,6 +72,9 @@ describe("mastra entry point", () => {
       // (ledger 5.4d-i) and takes the topic's `Event` type. Type-only, but the
       // scan is textual, so it belongs on the list either way.
       "@mastra/core/events",
+      // Item 6.2b: the agents' dynamic `model` resolvers read the settings
+      // user off the request context.
+      "@mastra/core/request-context",
       "@mastra/core/workflows/evented",
       "@mastra/loggers",
       "@mastra/pg",

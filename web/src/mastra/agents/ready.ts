@@ -12,8 +12,7 @@
  */
 import { Agent } from "@mastra/core/agent"
 
-import { requireApiKey } from "../api-keys"
-import { CLAUDE_PROVIDER, claudeStageOptions } from "./claude"
+import { claudeStageDefaultOptions, claudeStageModel } from "./claude"
 
 /**
  * The `system=` string Python sends on every ready call, byte-identical to what
@@ -35,25 +34,15 @@ export const READY_SYSTEM_MESSAGE =
  */
 export const READY_MAX_TOKENS = 16_000
 
-/**
- * The strongest Anthropic model this account can reach at the incumbent's
- * per-token price, adopted in ledger item 6.1 over `claude-opus-4-6`. Its
- * request shape differs: see `claudeStageOptions` for the thinking parameter
- * that came with it.
- */
-export const READY_MODEL_ID = "anthropic/claude-opus-5" as const
-
 export const readyAgent = new Agent({
   id: "ready",
   name: "ready",
   description: "Assembles the final publishable article with generated images inline.",
   instructions: READY_SYSTEM_MESSAGE,
-  // Resolved per call, so rotating the key on the settings page takes effect
-  // without restarting the worker and importing this module never touches the
-  // database.
-  model: async () => ({
-    id: READY_MODEL_ID,
-    apiKey: await requireApiKey(CLAUDE_PROVIDER),
-  }),
-  defaultOptions: claudeStageOptions(READY_MAX_TOKENS),
+  // Both are resolved per call: the model and effort from the owning user's
+  // `stage_models` setting (item 6.2b), the credential so that rotating the key
+  // on the settings page takes effect without restarting the worker. Neither
+  // touches the database at import time.
+  model: claudeStageModel("ready"),
+  defaultOptions: claudeStageDefaultOptions("ready", READY_MAX_TOKENS),
 })

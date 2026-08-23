@@ -1195,12 +1195,13 @@ pages that use it work with the Python API stopped.
   live image test guessed PNG; `gemini-3-pro-image` returns JPEG) that had never executed.
 
   Evidence: [`evidence/phase-6.md` #6.1](../mastra-port/evidence/phase-6.md)
-- [ ] 6.2 Extend the `api_settings`-backed settings pattern so each stage has a configurable
+- [x] 6.2 Extend the `api_settings`-backed settings pattern so each stage has a configurable
   model and, where supported, a reasoning/effort setting, persisted per user, validated on write
   against the allowlist from 6.1, falling back to the verified hardcoded defaults when unset.
   Split because the storage half (which row wins, what is a legal value) and the consumption
   half (an agent building its request from that row) fail in different ways and are provable
-  separately.
+  separately. Closed by 6.2a and 6.2b below; the settings page for it is 6.3 and the
+  UI-to-provider assertion is 6.4.
 
 - [x] 6.2a The settings-backed layer: `mastra/stage-models.ts` holds the per-stage allowlist
   (only ids with a live provider response behind them in #6.1), the verified defaults, and
@@ -1213,9 +1214,16 @@ pages that use it work with the Python API stopped.
 
   Evidence: [`evidence/phase-6.md` #6.2a](../mastra-port/evidence/phase-6.md)
 
-- [ ] 6.2b The six stage agents build their request from `resolveStageModels()` for the user who
+- [x] 6.2b The six stage agents build their request from `resolveStageModels()` for the user who
   owns the post, replacing the `*_MODEL_ID` constants and the fixed `CLAUDE_DEFAULT_EFFORT`, so a
-  stored override reaches the provider.
+  stored override reaches the provider. The user travels on Mastra's `requestContext`, which is
+  the only argument a dynamic `model` / `defaultOptions` resolver gets, and comes from
+  `posts.profile_id -> website_profiles.user_id` because `posts` has no owner column. Two
+  constants stayed on purpose: the `images` manifest call, which this setting does not name, and
+  `generateImage`'s own fallback default. 112 tests, 10 of 11 mutations killed, the survivor
+  equivalent under a one-entry allowlist with a tripwire test on it.
+
+  Evidence: [`evidence/phase-6.md` #6.2b](../mastra-port/evidence/phase-6.md)
 - [ ] 6.3 Settings UI: table of six stages with model and effort selectors, current effective
   value plus default-or-override indicator, save and revert-to-default per stage, real provider
   errors surfaced rather than silent fallback.

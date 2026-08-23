@@ -25,6 +25,7 @@ import {
   reviewGate,
   shouldRunStage,
   skippedStageOutput,
+  stageAgentOptions,
   stageStepInputSchema,
   stageStepOutputSchema,
 } from "./stage-io"
@@ -57,7 +58,8 @@ export const outlineStep = createStep({
 
       await publishStageLog(mastra, postId, "outline", "Calling Claude for outline...")
       const startedAt = Date.now()
-      const result = await mastra.getAgent("outline").generate(prompt)
+      const agentOptions = await stageAgentOptions(postId)
+      const result = await mastra.getAgent("outline").generate(prompt, agentOptions)
       const durationMs = Date.now() - startedAt
 
       const tokensOut = result.usage?.outputTokens ?? 0

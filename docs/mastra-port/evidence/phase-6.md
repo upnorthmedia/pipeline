@@ -590,3 +590,156 @@ $ cd web && pnpm build
 The 9 failures are exactly the Phase 0 baseline: 6 in `image-preview.test.tsx` and 3 in
 `PostDetail.test.tsx`. A second full run added the known `scaffold-check.test.ts` flake and
 nothing else. No Python file was touched, so the pytest gate is unchanged.
+
+---
+
+## 6.2b The six stage agents build their request from the resolver
+
+The consumption half of 6.2. Before this item every agent named its model in a module
+constant, so item 6.2a's `settings` row was a stored preference nothing read. After it, the
+model and (on Anthropic) the effort on the wire come from that row, resolved for the user who
+owns the post.
+
+### How the user reaches the agent
+
+Mastra resolves an agent's dynamic `model` and `defaultOptions` with `{ requestContext, mastra }`
+and nothing else (`node_modules/@mastra/core/dist/types/dynamic-argument.d.ts`), and
+`generate(prompt, options)` merges `getDefaultOptions({ requestContext: options?.requestContext })`
+(`dist/agent-DSxJoGjY.js:36863`). So the request context is the only channel a step has for
+telling an agent whose overrides apply, which is what iteration 134 predicted.
+
+Three pieces, in `mastra/stage-models.ts`:
+
+- `settingsUserIdForPost(postId)`: `posts` has no `user_id`, so ownership comes through
+  `posts.profile_id -> website_profiles.user_id` (Alembic 010). A post with no profile, a
+  profile with no owner, and an id that matches no post all resolve to `null`, which resolves
+  to the global row then the verified defaults.
+- `stageRequestContext(userId)` / `stageRequestContextUserId(ctx)`: the `settingsUserId` key,
+  written and read in one place so the two cannot disagree. An agent called with no context
+  (Studio, `getModel()`, a live smoke test) reads `null`.
+- `steps/stage-io.ts` `stageAgentOptions(postId)`: what a step hands `generate()`. The lookup
+  is a query per provider call rather than a value carried in the step's input, deliberately:
+  the workflow snapshot would otherwise pin the setting as it stood when the run started, and
+  a stage resumed after a crash or rerun by name days later should use the setting stored now.
+
+`agents/claude.ts` gained `claudeStageModel(stage)` and `claudeStageDefaultOptions(stage, maxTokens)`,
+both taking a `ClaudeStage` (`outline | write | edit | ready`) rather than a `Stage`. That
+narrowing is not cosmetic: the first pass of this item wired `images` through them, which put
+`anthropic/gemini-3-pro-image` on the wire and failed three tests. The type makes the same
+mistake a compile error.
+
+so `outline`, `write`, `edit` and `ready` are one line each. `claudeStageOptions(maxTokens, effort)`
+took the effort as a parameter; `CLAUDE_DEFAULT_EFFORT` is now only the fallback inside
+`STAGE_MODEL_DEFAULTS`, not a value any call site reads. `research` resolves the same way with
+the `perplexity/` prefix. `images` resolves the Gemini generation model in
+`steps/images-generate.ts` and passes it to `generateOneImage` -> `generateImage`.
+
+### Two constants that stayed, and why
+
+- `IMAGES_MODEL_ID` (`agents/images.ts`): the `images` entry in `stage_models` names the
+  Gemini generation model, so the Claude call that writes the manifest has no setting to read.
+  Pointing it at another stage's row would be invented behaviour. The gap was already recorded
+  under 6.2a and is now stated in the module.
+- `GEMINI_IMAGE_MODEL_ID` (`images/gemini.ts`): `generateImage`'s own default for a caller
+  with no settings row to read, which keeps that low-level client usable without a database.
+  `stage-models.test.ts` asserts it equals `STAGE_MODEL_DEFAULTS.images.model`.
+
+`no-next-imports.test.ts` gained `@mastra/core/request-context`: the entry point's package
+graph really did grow by one, and the test failed with a clean one-package diff before the
+list was updated.
+
+### The router's id type
+
+`MastraModelConfig.id` is `` `${string}/${string}` ``, which a template literal built from a
+`string` model id does not satisfy on its own (TS2322). Both resolvers apply the prefix through
+an annotated binding rather than a cast, so the router's constraint is still checked.
+
+### Tests
+
+```
+$ cd web && npx vitest run src/mastra/stage-models.test.ts src/mastra/agents \
+    src/mastra/steps/outline.test.ts src/mastra/steps/images-generate.test.ts \
+    src/mastra/no-next-imports.test.ts
+ ✓ src/mastra/no-next-imports.test.ts (3 tests) 12ms
+ ✓ src/mastra/steps/outline.test.ts (8 tests) 106ms
+ ✓ src/mastra/steps/images-generate.test.ts (18 tests) 265ms
+ ✓ src/mastra/stage-models.test.ts (31 tests) 94ms
+ ✓ src/mastra/agents/research.test.ts (7 tests | 1 skipped) 36ms
+ ✓ src/mastra/agents/images.test.ts (12 tests | 1 skipped) 120ms
+ ✓ src/mastra/agents/edit.test.ts (10 tests | 1 skipped) 195ms
+ ✓ src/mastra/agents/ready.test.ts (9 tests | 1 skipped) 265ms
+ ✓ src/mastra/agents/write.test.ts (8 tests | 1 skipped) 328ms
+ ✓ src/mastra/agents/outline.test.ts (12 tests | 1 skipped) 297ms
+
+ Test Files  10 passed (10)
+      Tests  112 passed | 6 skipped (118)
+```
+
+New coverage, all against the real database and the real serialized provider request:
+
+- `agents/outline.test.ts`: four wire tests. A stored `{model, effort}` for the user puts
+  `claude-opus-4-6` and `output_config.effort: "max"` on the outbound Anthropic request while
+  `max_tokens` stays the golden fixture's; an effort-only override keeps the stage's model;
+  another stage's override changes nothing; a run with no settings user sends the verified
+  defaults. `claude-opus-4-6` is the pre-6.1 incumbent, so the override is a real allowlisted
+  id rather than one invented for the test.
+- `steps/outline.test.ts`: the step hands the agent a context carrying the owner of the post's
+  profile, and a null user for a post with no profile.
+- `steps/images-generate.test.ts`: the generation request goes to
+  `/models/gemini-3.1-flash-image-preview:generateContent` when that is what the owner stored.
+  The assertion is on the URL because `generateContent` is a per-model endpoint, so an override
+  that never reached the client would be invisible in the body.
+- `stage-models.test.ts`: `settingsUserIdForPost` over four real row shapes, and
+  `resolveStageModelForPost` proving an owned post merges global then user while an unowned
+  post sees only the global row.
+
+### Mutations
+
+Eleven mutations, ten killed.
+
+| Mutation | Result |
+| --- | --- |
+| `stageRequestContextUserId` always returns null | KILLED |
+| `settingsUserIdForPost` joins on `posts.id` instead of `posts.profile_id` | KILLED |
+| `settingsUserIdForPost` always returns null | KILLED |
+| `stageRequestContext` builds an empty context | KILLED |
+| `claudeStageModel` resolves for `null` instead of the context's user | KILLED |
+| `claudeStageDefaultOptions` resolves for `null` instead of the context's user | KILLED |
+| `claudeStageDefaultOptions` drops the resolved effort | KILLED |
+| the research agent resolves for `null` instead of the context's user | SURVIVED |
+| `stageAgentOptions` passes a null user | KILLED |
+| `images-generate` never resolves a model | KILLED |
+| the images manifest call's model id changes | KILLED |
+
+The survivor is equivalent under the current allowlist: `STAGE_MODEL_ALLOWLIST.research` has
+exactly one entry (`sonar-pro`, the only Perplexity id with a live call behind it), so no
+stored override can change what reaches the wire and the context is unobservable from outside.
+`agents/research.test.ts` carries the tripwire: it asserts the allowlist is exactly that one
+id, so verifying a second Perplexity model fails that test and forces the missing override
+test to be written with it.
+
+A control run either side of the sweep was clean. Note for future sweeps: detecting a kill by
+grepping the last line containing `Tests ` is wrong, because vitest's `Failed Tests 1` banner
+matches it and carries a capital `Failed`; the first pass reported all eleven as SURVIVED
+before switching to the exit code.
+
+### Gates
+
+```
+$ cd web && pnpm tsc --noEmit
+(exit 0, no output)
+
+$ cd web && pnpm lint
+(exit 0, no output)
+
+$ cd web && pnpm test
+ Test Files  3 failed | 124 passed (127)
+      Tests  10 failed | 4435 passed | 7 skipped (4452)
+
+$ cd web && pnpm build
+✓ Compiled successfully in 4.4s
+```
+
+Nine of the ten failures are the recorded baseline (6 in `image-preview.test.tsx`, 3 in
+`PostDetail.test.tsx`); the tenth is the known `scaffold-check.test.ts` flake, which passed on
+a repeat run of the same tree. No Python file was touched, so the pytest gate is unchanged.

@@ -43,6 +43,13 @@ export const IMAGES_MAX_TOKENS = 8_000
  * per-token price, adopted in ledger item 6.1 over `claude-opus-4-6`. Its
  * request shape differs: see `claudeStageOptions` for the thinking parameter
  * that came with it.
+ *
+ * This is the one Claude call item 6.2b left as a constant. The `images` entry
+ * in `stage_models` names the Gemini generation model, the one the manifest
+ * records and the one the stage is judged on, so there is no second setting
+ * for the model that writes the prompts. The gap is recorded in the ledger
+ * under 6.2a rather than papered over by pointing this call at another stage's
+ * setting.
  */
 export const IMAGES_MODEL_ID = "anthropic/claude-opus-5" as const
 
@@ -51,9 +58,10 @@ export const imagesAgent = new Agent({
   name: "images",
   description: "Writes the JSON image manifest that drives per-image generation.",
   instructions: IMAGES_SYSTEM_MESSAGE,
-  // Resolved per call, so rotating the key on the settings page takes effect
-  // without restarting the worker and importing this module never touches the
-  // database.
+  // The credential is resolved per call, so rotating the key on the settings
+  // page takes effect without restarting the worker and importing this module
+  // never touches the database. The model is not: this is the one Claude call
+  // `stage_models` does not configure, for the reason in `IMAGES_MODEL_ID`.
   model: async () => ({
     id: IMAGES_MODEL_ID,
     apiKey: await requireApiKey(CLAUDE_PROVIDER),

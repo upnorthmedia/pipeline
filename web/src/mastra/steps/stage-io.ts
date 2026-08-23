@@ -30,6 +30,7 @@ import {
   markStageForReview,
   markStageRunning,
 } from "../post-state"
+import { settingsUserIdForPost, stageRequestContext } from "../stage-models"
 import { MAX_ATTEMPTS, STAGES, STATUS_COMPLETE } from "../state"
 import type { Stage } from "../state"
 
@@ -490,4 +491,18 @@ export function skippedStageOutput(input: StageStepInput, stage: Stage): StageSt
     durationS: 0,
     skipped: true,
   }
+}
+
+/**
+ * The options a stage passes `agent.generate()`, carrying the settings user so
+ * the agent's dynamic `model` and `defaultOptions` resolve that user's
+ * `stage_models` overrides (item 6.2b).
+ *
+ * The lookup is a query per provider call rather than a value threaded through
+ * the step input, because the run's snapshot would otherwise pin the setting
+ * as it stood when the run started: a stage resumed after a crash, or rerun by
+ * name days later, should use the setting that is stored now.
+ */
+export async function stageAgentOptions(postId: string) {
+  return { requestContext: stageRequestContext(await settingsUserIdForPost(postId)) }
 }

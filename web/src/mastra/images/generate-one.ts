@@ -112,6 +112,8 @@ export interface GenerateOneImageOptions {
   /** The already-created `<media_dir>/<post_id>` directory. */
   mediaDir: string
   apiKey: string
+  /** The generation model, resolved from the stage's setting by the caller. */
+  model?: string
 }
 
 /**
@@ -164,7 +166,7 @@ function errorText(error: unknown): string {
 export async function generateOneImage(
   options: GenerateOneImageOptions,
 ): Promise<GeneratedImage> {
-  const { spec, index, postId, mediaDir, apiKey } = options
+  const { spec, index, postId, mediaDir, apiKey, model } = options
 
   const prompt = spec.prompt
   // Python's `if not image_prompt`, so a missing key, an empty string and a
@@ -188,7 +190,7 @@ export async function generateOneImage(
 
   let usage: ImageUsage | null = null
   try {
-    const response = await generateImage({ prompt, apiKey, aspectRatio, imageSize })
+    const response = await generateImage({ prompt, apiKey, model, aspectRatio, imageSize })
     usage = {
       tokensIn: response.tokensIn,
       tokensOut: response.tokensOut,

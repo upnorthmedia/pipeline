@@ -27,12 +27,17 @@ import fs from "node:fs"
 import path from "node:path"
 
 import { Agent } from "@mastra/core/agent"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, settings } from "../../db"
 import { encryptWithKey } from "../../lib/crypto"
 import { API_KEYS_SETTING_KEY } from "../api-keys"
+import {
+  STAGE_MODEL_DEFAULTS,
+  STAGE_MODELS_SETTING_KEY,
+  stageRequestContext,
+} from "../stage-models"
 import { mastra, pubsub } from "../index"
 import {
   CLAUDE_DEFAULT_EFFORT,
@@ -42,12 +47,12 @@ import {
 } from "./claude"
 import {
   OUTLINE_MAX_TOKENS,
-  OUTLINE_MODEL_ID,
   OUTLINE_SYSTEM_MESSAGE,
   outlineAgent,
 } from "./outline"
 
 import { lockApiKeysRow, unlockApiKeysRow } from "@/test/api-keys-row"
+import { createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 const GOLDEN_DIR = path.resolve(process.cwd(), "..", "docs", "mastra-port", "golden")
 const GOLDEN_SLUGS = ["how-to-choose-a-crm-for-a-small-team", "best-time-tracking-tools-for-agencies"]
@@ -132,7 +137,7 @@ describe("outline agent registration", () => {
   })
 
   it("carries the model item 6.1 verified, on the provider the fixtures used", () => {
-    expect(OUTLINE_MODEL_ID).toBe("anthropic/claude-opus-5")
+    expect(STAGE_MODEL_DEFAULTS.outline.model).toBe("claude-opus-5")
     for (const slug of GOLDEN_SLUGS) {
       const call = loadFixture(slug).provider_calls[0]
       expect(call.provider).toBe(CLAUDE_PROVIDER)
@@ -140,7 +145,7 @@ describe("outline agent registration", () => {
       // Item 6.1 moved every Claude stage off `claude-opus-4-6`, so the
       // fixtures pin the prompt and the token budget from here on, not the
       // model id.
-      expect(`${call.provider}/${call.request.model}`).not.toBe(OUTLINE_MODEL_ID)
+      expect(call.request.model).not.toBe(STAGE_MODEL_DEFAULTS.outline.model)
     }
   })
 })
@@ -267,4 +272,95 @@ describe.skipIf(!LIVE_KEY)("outline agent live smoke test", () => {
     expect(result.text.trim().length).toBeGreaterThan(0)
     expect(result.usage?.outputTokens).toBeGreaterThan(0)
   }, 300_000)
+})
+
+/**
+ * Item 6.2b: the model and the effort on the wire come from the settings row
+ * of the user carried on the request context, not from a constant.
+ *
+ * The assertions are on the serialized HTTP request for the same reason the
+ * parity test above is: the resolver returning the right string proves nothing
+ * about what the provider is asked to run. `claude-opus-4-6` is the incumbent
+ * this stage ran before item 6.1, so the override is a real verified id off
+ * the allowlist rather than a value invented for the test.
+ */
+describe("outline agent per-user model configuration", () => {
+  const SESSION_PREFIX = "outline-agent-6-2b-"
+  let user: TestSession
+  let restoreFetch: (() => void) | undefined
+
+  async function setOverride(value: unknown) {
+    await getDb()
+      .delete(settings)
+      .where(and(eq(settings.key, STAGE_MODELS_SETTING_KEY), eq(settings.userId, user.userId)))
+    if (value !== null) {
+      await getDb()
+        .insert(settings)
+        .values({ key: STAGE_MODELS_SETTING_KEY, userId: user.userId, value: value as object })
+    }
+  }
+
+  /** One captured request for `prompt`, sent as `userId`'s run would send it. */
+  async function capturedRequest(userId: string | null) {
+    await writeAnthropicKey("sk-ant-not-a-real-key")
+    const capture = captureAnthropicRequests()
+    restoreFetch = capture.restore
+    await outlineAgent.generate("Reply with the single word OK.", {
+      requestContext: stageRequestContext(userId),
+    })
+    expect(capture.captured).toHaveLength(1)
+    return capture.captured[0].body
+  }
+
+  beforeAll(async () => {
+    user = await createTestSession(SESSION_PREFIX)
+  }, 30_000)
+
+  afterEach(async () => {
+    restoreFetch?.()
+    restoreFetch = undefined
+    await setOverride(null)
+  })
+
+  afterAll(async () => {
+    await deleteTestSessions(SESSION_PREFIX)
+  })
+
+  it("sends the model and effort stored for that user", async () => {
+    await setOverride({ outline: { model: "claude-opus-4-6", effort: "max" } })
+
+    const body = await capturedRequest(user.userId)
+
+    expect(body.model).toBe("claude-opus-4-6")
+    expect(body.model).not.toBe(STAGE_MODEL_DEFAULTS.outline.model)
+    expect(body.output_config).toEqual({ effort: "max" })
+    // The override moves the model and the reasoning depth, never the token
+    // budget the golden fixtures pinned.
+    expect(body.max_tokens).toBe(claudeEffectiveMaxTokens(OUTLINE_MAX_TOKENS))
+  })
+
+  it("keeps the stage's model when only its effort is overridden", async () => {
+    await setOverride({ outline: { effort: "low" } })
+
+    const body = await capturedRequest(user.userId)
+
+    expect(body.model).toBe(STAGE_MODEL_DEFAULTS.outline.model)
+    expect(body.output_config).toEqual({ effort: "low" })
+  })
+
+  it("ignores another stage's override", async () => {
+    await setOverride({ write: { model: "claude-opus-4-6", effort: "low" } })
+
+    const body = await capturedRequest(user.userId)
+
+    expect(body.model).toBe(STAGE_MODEL_DEFAULTS.outline.model)
+    expect(body.output_config).toEqual({ effort: CLAUDE_DEFAULT_EFFORT })
+  })
+
+  it("sends the verified defaults for a run with no settings user", async () => {
+    const body = await capturedRequest(null)
+
+    expect(body.model).toBe(STAGE_MODEL_DEFAULTS.outline.model)
+    expect(body.output_config).toEqual({ effort: CLAUDE_DEFAULT_EFFORT })
+  })
 })

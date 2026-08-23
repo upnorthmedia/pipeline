@@ -30,9 +30,10 @@
  * global row chose, which is the fallback behaviour Phase 6.0 required of
  * every settings key.
  */
+import { RequestContext } from "@mastra/core/request-context"
 import { and, eq, isNull, or } from "drizzle-orm"
 
-import { getDb, settings } from "../db"
+import { getDb, posts, settings, websiteProfiles } from "../db"
 import type { Provider } from "./api-keys"
 import { STAGE_PROVIDER_MAP, STAGES, type Stage } from "./state"
 
@@ -114,10 +115,12 @@ export interface StageModelConfig {
  * The values a stage runs at when nothing is stored: item 6.1's verified
  * choices.
  *
- * The six agent modules still carry their own `*_MODEL_ID` constants, because
- * item 6.2b is what moves them onto this resolver. Until then
- * `stage-models.test.ts` asserts the two agree, so the settings page cannot
- * offer a default the pipeline does not actually run.
+ * Item 6.2b moved every stage onto this resolver, so these are the values the
+ * pipeline actually runs when nothing is stored. Two constants outlive that
+ * move and `stage-models.test.ts` asserts both agree with the table here:
+ * `GEMINI_IMAGE_MODEL_ID`, which stays `generate_image`'s own default so the
+ * low-level client keeps working without a database, and `IMAGES_MODEL_ID`,
+ * the manifest call this setting deliberately does not configure.
  */
 export const STAGE_MODEL_DEFAULTS: Record<Stage, StageModelConfig> = {
   research: { model: "sonar-pro", effort: null },
@@ -285,4 +288,58 @@ export async function resolveStageModel(
 ): Promise<StageModelConfig> {
   const { model, effort } = (await resolveStageModels(userId))[stage]
   return { model, effort }
+}
+
+/**
+ * The `requestContext` key carrying the settings user into an agent's dynamic
+ * `model` and `defaultOptions` resolvers.
+ *
+ * Mastra resolves both with `{ requestContext }` and nothing else, so this is
+ * the only channel a step has for telling an agent whose overrides apply. The
+ * value is the user id or `null` for an unowned post, which is exactly
+ * `resolveStageModel`'s parameter.
+ */
+export const STAGE_USER_CONTEXT_KEY = "settingsUserId"
+
+/** The context a step hands `agent.generate()` so its overrides are read. */
+export function stageRequestContext(userId: string | null): RequestContext {
+  return new RequestContext([[STAGE_USER_CONTEXT_KEY, userId]])
+}
+
+/**
+ * The settings user carried by a request context, or `null`.
+ *
+ * `null` is also what an agent called without a context resolves to (Studio, a
+ * live smoke test, `getModel()`), and that resolves to the global row then the
+ * defaults, which is the right answer for a call that belongs to no user.
+ */
+export function stageRequestContextUserId(requestContext: RequestContext): string | null {
+  const value = requestContext.getRaw(STAGE_USER_CONTEXT_KEY)
+  return typeof value === "string" ? value : null
+}
+
+/**
+ * The user whose settings apply to a pipeline run, for a post id.
+ *
+ * `posts` has no `user_id`: Alembic 010 put multi-tenancy on
+ * `website_profiles`, and every route handler scopes a post by joining through
+ * its profile. A post with no profile, or a profile with no owner, has no
+ * settings user and runs on the global row.
+ */
+export async function settingsUserIdForPost(postId: string): Promise<string | null> {
+  const rows = await getDb()
+    .select({ userId: websiteProfiles.userId })
+    .from(posts)
+    .leftJoin(websiteProfiles, eq(posts.profileId, websiteProfiles.id))
+    .where(eq(posts.id, postId))
+    .limit(1)
+  return rows[0]?.userId ?? null
+}
+
+/** One stage's effective configuration for the user who owns a post. */
+export async function resolveStageModelForPost(
+  stage: Stage,
+  postId: string,
+): Promise<StageModelConfig> {
+  return resolveStageModel(stage, await settingsUserIdForPost(postId))
 }

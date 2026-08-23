@@ -19,6 +19,7 @@ import { z } from "zod"
 
 import { requireApiKey } from "../api-keys"
 import { generateOneImage } from "../images/generate-one"
+import { resolveStageModelForPost } from "../stage-models"
 import type { ImageOutcome, ImageSpec } from "../images/generate-one"
 import { imageSpecSchema } from "./images-manifest"
 import { publishStageLog, recordStageRetry } from "./stage-io"
@@ -149,12 +150,18 @@ export const imagesGenerateStep = createStep({
   execute: async ({ inputData, mastra, retryCount }) => {
     try {
       const apiKey = await requireApiKey("gemini")
+      // The `images` entry in `stage_models` names the generation model (item
+      // 6.2b), resolved for the user who owns the post. The manifest call in
+      // `images-manifest` is the stage's other provider call and is not
+      // configurable; see `agents/images.ts`.
+      const { model } = await resolveStageModelForPost("images", inputData.postId)
       const { spec, usage, outcome } = await generateOneImage({
         spec: inputData.spec as ImageSpec,
         index: inputData.index,
         postId: inputData.postId,
         mediaDir: inputData.mediaDir,
         apiKey,
+        model,
       })
       // Python publishes from inside `_generate_one`, one statement before the
       // entry is returned. Here it is one statement after, because the publish

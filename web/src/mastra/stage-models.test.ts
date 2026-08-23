@@ -12,22 +12,22 @@
  * before the suite writes to it and restored afterwards, following the lesson
  * from iteration 132 where a failed restore destroyed live credentials.
  */
-import { and, eq, isNull } from "drizzle-orm"
+import { RequestContext } from "@mastra/core/request-context"
+import { and, eq, inArray, isNull } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
-import { closeDb, getDb, settings } from "@/db"
+import { closeDb, getDb, posts, settings, websiteProfiles } from "@/db"
 import { createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
-import { EDIT_MODEL_ID } from "./agents/edit"
 import { IMAGES_MODEL_ID } from "./agents/images"
 import { CLAUDE_DEFAULT_EFFORT } from "./agents/claude"
-import { OUTLINE_MODEL_ID } from "./agents/outline"
-import { READY_MODEL_ID } from "./agents/ready"
-import { RESEARCH_MODEL_ID } from "./agents/research"
-import { WRITE_MODEL_ID } from "./agents/write"
 import { GEMINI_IMAGE_MODEL_ID } from "./images/gemini"
 import {
   CLAUDE_EFFORTS,
+  resolveStageModelForPost,
+  settingsUserIdForPost,
+  stageRequestContext,
+  stageRequestContextUserId,
   parseStageModelSettings,
   resolveStageModel,
   resolveStageModels,
@@ -111,18 +111,13 @@ afterAll(async () => {
 })
 
 describe("the allowlist and the defaults", () => {
-  it("defaults are exactly the ids the stage agents run today", () => {
-    // The agents still own their own constants until item 6.2b; this binds the
-    // two so the settings page cannot advertise a default the pipeline
-    // contradicts. `*_MODEL_ID` carries Mastra's router prefix, the setting
-    // carries the bare provider id.
-    expect(`anthropic/${STAGE_MODEL_DEFAULTS.outline.model}`).toBe(OUTLINE_MODEL_ID)
-    expect(`anthropic/${STAGE_MODEL_DEFAULTS.write.model}`).toBe(WRITE_MODEL_ID)
-    expect(`anthropic/${STAGE_MODEL_DEFAULTS.edit.model}`).toBe(EDIT_MODEL_ID)
-    expect(`anthropic/${STAGE_MODEL_DEFAULTS.ready.model}`).toBe(READY_MODEL_ID)
-    expect(`perplexity/${STAGE_MODEL_DEFAULTS.research.model}`).toBe(RESEARCH_MODEL_ID)
+  it("defaults agree with the two model constants item 6.2b left standing", () => {
+    // Every stage agent now resolves its model through this table, so there is
+    // no per-agent constant left to cross-check except these two, and both are
+    // deliberate: `GEMINI_IMAGE_MODEL_ID` is `generate_image`'s own fallback
+    // for a caller that has no settings row to read, and `IMAGES_MODEL_ID` is
+    // the manifest call this setting does not configure.
     expect(STAGE_MODEL_DEFAULTS.images.model).toBe(GEMINI_IMAGE_MODEL_ID)
-    // The images stage's Claude half is not what this setting selects.
     expect(IMAGES_MODEL_ID).toBe("anthropic/claude-opus-5")
   })
 
@@ -355,5 +350,81 @@ describe("resolveStageModels", () => {
       model: "sonar-pro",
       effort: null,
     })
+  })
+})
+
+/**
+ * Item 6.2b's other half: finding the user whose settings a run follows.
+ *
+ * `posts` has no `user_id` column, so ownership has to come through
+ * `website_profiles.user_id` (Alembic 010). Real rows, because the join is
+ * exactly the thing a mocked lookup would get right by construction.
+ */
+describe("the settings user for a post", () => {
+  const OWNED_PROFILE = "b7000000-0000-4000-8000-0000000000a1"
+  const ORPHAN_PROFILE = "b7000000-0000-4000-8000-0000000000a2"
+  const OWNED_POST = "b7000000-0000-4000-8000-0000000000b1"
+  const ORPHAN_POST = "b7000000-0000-4000-8000-0000000000b2"
+  const PROFILELESS_POST = "b7000000-0000-4000-8000-0000000000b3"
+  const ABSENT_POST = "b7000000-0000-4000-8000-0000000000b9"
+
+  beforeAll(async () => {
+    await db.insert(websiteProfiles).values([
+      {
+        id: OWNED_PROFILE,
+        name: "Owned",
+        websiteUrl: "https://owned.example.test",
+        userId: user.userId,
+      },
+      { id: ORPHAN_PROFILE, name: "Orphan", websiteUrl: "https://orphan.example.test" },
+    ])
+    await db.insert(posts).values([
+      { id: OWNED_POST, profileId: OWNED_PROFILE, slug: "owned", topic: "Owned" },
+      { id: ORPHAN_POST, profileId: ORPHAN_PROFILE, slug: "orphan", topic: "Orphan" },
+      { id: PROFILELESS_POST, slug: "profileless", topic: "Profileless" },
+    ])
+  })
+
+  afterAll(async () => {
+    await db.delete(posts).where(inArray(posts.id, [OWNED_POST, ORPHAN_POST, PROFILELESS_POST]))
+    await db
+      .delete(websiteProfiles)
+      .where(inArray(websiteProfiles.id, [OWNED_PROFILE, ORPHAN_PROFILE]))
+  })
+
+  it("is the owner of the post's profile", async () => {
+    expect(await settingsUserIdForPost(OWNED_POST)).toBe(user.userId)
+  })
+
+  it("is null for a profile with no owner, a post with no profile, and no post", async () => {
+    expect(await settingsUserIdForPost(ORPHAN_POST)).toBeNull()
+    expect(await settingsUserIdForPost(PROFILELESS_POST)).toBeNull()
+    expect(await settingsUserIdForPost(ABSENT_POST)).toBeNull()
+  })
+
+  it("resolves a post's stage model through that owner's row", async () => {
+    await setGlobal({ write: { model: "claude-opus-4-6" } })
+    await setUser(user.userId, { write: { effort: "low" } })
+
+    expect(await resolveStageModelForPost("write", OWNED_POST)).toEqual({
+      model: "claude-opus-4-6",
+      effort: "low",
+    })
+    // An unowned post sees the global row and none of the user's overrides.
+    expect(await resolveStageModelForPost("write", PROFILELESS_POST)).toEqual({
+      model: "claude-opus-4-6",
+      effort: CLAUDE_DEFAULT_EFFORT,
+    })
+  })
+})
+
+describe("the request context an agent reads its user from", () => {
+  it("round-trips a user id and a null", () => {
+    expect(stageRequestContextUserId(stageRequestContext(user.userId))).toBe(user.userId)
+    expect(stageRequestContextUserId(stageRequestContext(null))).toBeNull()
+  })
+
+  it("reads null from a context that carries no settings user", () => {
+    expect(stageRequestContextUserId(new RequestContext())).toBeNull()
   })
 })

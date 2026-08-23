@@ -24,6 +24,7 @@ import {
   reviewGate,
   shouldRunStage,
   skippedStageOutput,
+  stageAgentOptions,
   stageStepInputSchema,
   stageStepOutputSchema,
 } from "./stage-io"
@@ -61,7 +62,8 @@ export const writeStep = createStep({
         "Calling Claude for draft (up to 16k tokens)...",
       )
       const startedAt = Date.now()
-      const result = await mastra.getAgent("write").generate(prompt)
+      const agentOptions = await stageAgentOptions(postId)
+      const result = await mastra.getAgent("write").generate(prompt, agentOptions)
       const durationMs = Date.now() - startedAt
 
       const tokensOut = result.usage?.outputTokens ?? 0

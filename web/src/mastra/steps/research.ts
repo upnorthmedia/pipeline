@@ -31,6 +31,7 @@ import {
   reviewGate,
   shouldRunStage,
   skippedStageOutput,
+  stageAgentOptions,
   stageStepInputSchema,
   stageStepOutputSchema,
 } from "./stage-io"
@@ -121,6 +122,7 @@ export const researchStep = createStep({
       await publishStageLog(mastra, postId, "research", "Rules loaded, building prompt...")
       const prompt = buildStagePrompt("research", rules, state)
       const agent = mastra.getAgent("research")
+      const agentOptions = await stageAgentOptions(postId)
 
       let text = ""
       let model = ""
@@ -143,7 +145,10 @@ export const researchStep = createStep({
         )
 
         const startedAt = Date.now()
-        const result = await agent.generate(attempt === 1 ? prompt : reinforcedPrompt(prompt))
+        const result = await agent.generate(
+          attempt === 1 ? prompt : reinforcedPrompt(prompt),
+          agentOptions,
+        )
         durationMs += Date.now() - startedAt
 
         text = result.text

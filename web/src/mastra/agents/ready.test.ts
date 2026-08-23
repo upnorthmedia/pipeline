@@ -28,6 +28,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 import { closeDb, getDb, settings } from "../../db"
 import { encryptWithKey } from "../../lib/crypto"
 import { API_KEYS_SETTING_KEY } from "../api-keys"
+import { STAGE_MODEL_DEFAULTS } from "../stage-models"
 import { mastra, pubsub } from "../index"
 import {
   CLAUDE_MIN_TEXT_TOKENS,
@@ -36,7 +37,7 @@ import {
   CLAUDE_THINKING_BUDGET_TOKENS,
   claudeEffectiveMaxTokens,
 } from "./claude"
-import { READY_MAX_TOKENS, READY_MODEL_ID, READY_SYSTEM_MESSAGE, readyAgent } from "./ready"
+import { READY_MAX_TOKENS, READY_SYSTEM_MESSAGE, readyAgent } from "./ready"
 
 import { lockApiKeysRow, unlockApiKeysRow } from "@/test/api-keys-row"
 
@@ -134,7 +135,7 @@ describe("ready agent registration", () => {
   })
 
   it("carries the model item 6.1 verified, on the provider the fixtures used", () => {
-    expect(READY_MODEL_ID).toBe("anthropic/claude-opus-5")
+    expect(STAGE_MODEL_DEFAULTS.ready.model).toBe("claude-opus-5")
     for (const slug of GOLDEN_SLUGS) {
       const call = loadFixture(slug).provider_calls[0]
       expect(call.provider).toBe(CLAUDE_PROVIDER)
@@ -142,7 +143,7 @@ describe("ready agent registration", () => {
       // Item 6.1 moved every Claude stage off `claude-opus-4-6`, so the
       // fixtures pin the prompt and the token budget from here on, not the
       // model id.
-      expect(`${call.provider}/${call.request.model}`).not.toBe(READY_MODEL_ID)
+      expect(call.request.model).not.toBe(STAGE_MODEL_DEFAULTS.ready.model)
     }
   })
 })
