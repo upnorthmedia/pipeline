@@ -23,7 +23,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Cpu, Loader2, RotateCcw, Save } from "lucide-react";
+import { AlertCircle, Cpu, Loader2, RefreshCw, RotateCcw, Save } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -102,7 +102,7 @@ export function StageModelsCard() {
         setDraft({});
       })
       .catch((error) =>
-        setLoadError(apiErrorMessage(error, "Failed to load stage models"))
+        setLoadError(apiErrorMessage(error, "The request failed and the server gave no reason."))
       )
       .finally(() => setLoading(false));
   }, []);
@@ -190,9 +190,22 @@ export function StageModelsCard() {
             ))}
           </div>
         ) : loadError ? (
-          <div className="space-y-3">
-            <p className="text-sm text-destructive">{loadError}</p>
-            <Button variant="outline" size="sm" onClick={load}>
+          // Same shape as the two cards either side of it on the settings
+          // page: what failed, the server's own reason, then the retry.
+          <div className="py-8 text-center">
+            <AlertCircle className="mx-auto h-5 w-5 text-destructive" />
+            <p className="mt-2 text-sm font-medium">Could not load stage models</p>
+            <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+              {loadError}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              onClick={load}
+              aria-label="Retry stage models"
+            >
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
               Retry
             </Button>
           </div>

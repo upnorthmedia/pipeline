@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Save,
   Settings,
@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   XCircle,
   AlertCircle,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import {
+  apiErrorMessage,
   apiKeys,
   rules,
   type ApiKeyStatus,
@@ -79,6 +81,8 @@ export default function SettingsPage() {
   const [keyErrors, setKeyErrors] = useState<Record<string, string>>({});
   const [savingKeys, setSavingKeys] = useState(false);
   const [loadingKeys, setLoadingKeys] = useState(true);
+  const [keysError, setKeysError] = useState("");
+  const [saveKeysError, setSaveKeysError] = useState("");
 
   // Rule files state
   const [ruleFiles, setRuleFiles] = useState<RuleFile[]>([]);
@@ -87,37 +91,70 @@ export default function SettingsPage() {
   const [loadingRule, setLoadingRule] = useState(false);
   const [savingRule, setSavingRule] = useState(false);
   const [loadingRuleList, setLoadingRuleList] = useState(true);
+  const [ruleListError, setRuleListError] = useState("");
+  const [ruleError, setRuleError] = useState("");
+  const [saveRuleError, setSaveRuleError] = useState("");
 
-  // Load API key statuses on mount
-  useEffect(() => {
+  const loadKeys = useCallback(() => {
+    setLoadingKeys(true);
+    setKeysError("");
     apiKeys
       .get()
       .then(setKeyStatuses)
-      .catch(() => toast.error("Failed to load API key status"))
+      .catch((error) => {
+        // Clearing the statuses matters: a stale map would keep the badges on
+        // screen next to inputs the error state has already replaced.
+        setKeyStatuses({});
+        setKeysError(
+          apiErrorMessage(error, "The request failed and the server gave no reason.")
+        );
+      })
       .finally(() => setLoadingKeys(false));
   }, []);
 
-  // Load rule file list on mount
-  useEffect(() => {
+  useEffect(loadKeys, [loadKeys]);
+
+  const loadRuleList = useCallback(() => {
+    setLoadingRuleList(true);
+    setRuleListError("");
     rules
       .list()
       .then(setRuleFiles)
-      .catch(() => toast.error("Failed to load rule files"))
+      .catch((error) => {
+        setRuleFiles([]);
+        setRuleListError(
+          apiErrorMessage(error, "the server gave no reason.")
+        );
+      })
       .finally(() => setLoadingRuleList(false));
   }, []);
 
-  // Load rule content when active rule changes
-  useEffect(() => {
+  useEffect(loadRuleList, [loadRuleList]);
+
+  /**
+   * A failed read leaves the editor empty, and an empty editor over a rule
+   * file is a way to lose one: `rules/*.md` is the product's prompt IP and
+   * `PUT /api/rules/{name}` writes whatever it is given. So a failure gets its
+   * own state and the save button goes with it, rather than a toast over a
+   * blank textarea that reads exactly like a file nobody has written yet.
+   */
+  const loadRule = useCallback((name: string) => {
     setLoadingRule(true);
+    setRuleError("");
+    setSaveRuleError("");
     rules
-      .get(activeRule)
+      .get(name)
       .then((rc) => setRuleContent(rc.content))
-      .catch(() => {
+      .catch((error) => {
         setRuleContent("");
-        toast.error(`Failed to load ${activeRule}`);
+        setRuleError(
+          apiErrorMessage(error, "The request failed and the server gave no reason.")
+        );
       })
       .finally(() => setLoadingRule(false));
-  }, [activeRule]);
+  }, []);
+
+  useEffect(() => loadRule(activeRule), [activeRule, loadRule]);
 
   const validateFormat = (provider: ProviderKey, value: string) => {
     if (!value) {
@@ -145,12 +182,16 @@ export default function SettingsPage() {
 
     // Show: fetch decrypted key from backend
     setRevealingKey((prev) => ({ ...prev, [provider]: true }));
+    setKeyErrors((prev) => ({ ...prev, [provider]: "" }));
     try {
       const { key } = await apiKeys.reveal(provider);
       setRevealedKeys((prev) => ({ ...prev, [provider]: key }));
       setKeyVisible((prev) => ({ ...prev, [provider]: true }));
-    } catch {
-      toast.error(`Failed to reveal ${provider} key`);
+    } catch (error) {
+      setKeyErrors((prev) => ({
+        ...prev,
+        [provider]: apiErrorMessage(error, "The key could not be revealed."),
+      }));
     } finally {
       setRevealingKey((prev) => ({ ...prev, [provider]: false }));
     }
@@ -158,6 +199,7 @@ export default function SettingsPage() {
 
   const handleSaveKeys = async () => {
     setSavingKeys(true);
+    setSaveKeysError("");
     try {
       const payload: Record<string, string> = {};
       for (const p of PROVIDERS) {
@@ -178,10 +220,12 @@ export default function SettingsPage() {
       if (allValid) {
         toast.success("API keys saved and validated");
       } else {
-        toast.error("Some keys failed validation — check status badges");
+        setSaveKeysError("Some keys failed validation, see the status badges");
       }
-    } catch {
-      toast.error("Failed to save API keys");
+    } catch (error) {
+      // The operator is still looking at the keys they pasted, so the reason
+      // belongs next to them rather than in a toast that expires.
+      setSaveKeysError(apiErrorMessage(error, "The keys could not be saved."));
     } finally {
       setSavingKeys(false);
     }
@@ -189,11 +233,18 @@ export default function SettingsPage() {
 
   const handleSaveRule = async () => {
     setSavingRule(true);
+    setSaveRuleError("");
     try {
       await rules.update(activeRule, ruleContent);
+      // The file exists now whether or not it did a moment ago.
+      setRuleFiles((prev) =>
+        prev.map((f) => (f.name === activeRule ? { ...f, exists: true } : f))
+      );
       toast.success(`Rule file "${activeRule}" saved`);
-    } catch {
-      toast.error(`Failed to save ${activeRule}`);
+    } catch (error) {
+      setSaveRuleError(
+        apiErrorMessage(error, `${activeRule} could not be saved.`)
+      );
     } finally {
       setSavingRule(false);
     }
@@ -201,6 +252,12 @@ export default function SettingsPage() {
 
   const hasKeyChanges = PROVIDERS.some((p) => keyValues[p.key].length > 0);
   const hasFormatErrors = Object.values(keyErrors).some((e) => e);
+  const configuredCount = PROVIDERS.filter(
+    (p) => keyStatuses[p.key]?.configured
+  ).length;
+  const activeRuleFile = ruleFiles.find((f) => f.name === activeRule);
+  const activeRuleFilename = activeRuleFile?.filename ?? `${activeRule}.md`;
+  const activeRuleIsNew = activeRuleFile ? !activeRuleFile.exists : false;
 
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-6">
@@ -238,8 +295,36 @@ export default function SettingsPage() {
                 </div>
               ))}
             </div>
+          ) : keysError ? (
+            <div className="py-8 text-center">
+              <AlertCircle className="mx-auto h-5 w-5 text-destructive" />
+              <p className="mt-2 text-sm font-medium">
+                Could not load API key status
+              </p>
+              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+                {keysError}
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={loadKeys}
+                aria-label="Retry API keys"
+              >
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                Retry
+              </Button>
+            </div>
           ) : (
             <>
+              {configuredCount === 0 && (
+                <p className="rounded-md border border-dashed px-3 py-2.5 text-sm text-muted-foreground">
+                  No provider keys are configured yet. A run needs Perplexity
+                  for research, Anthropic for outline, write, edit and ready,
+                  and Gemini for images. Paste a key below and save it.
+                </p>
+              )}
+
               {PROVIDERS.map((provider) => {
                 const status = keyStatuses[provider.key];
                 return (
@@ -255,6 +340,8 @@ export default function SettingsPage() {
                     <div className="flex gap-2">
                       <Input
                         id={`key-${provider.key}`}
+                        name={`key-${provider.key}`}
+                        autoComplete="off"
                         type={
                           keyVisible[provider.key] && !keyValues[provider.key]
                             ? "text"
@@ -329,7 +416,12 @@ export default function SettingsPage() {
               })}
 
               <Separator />
-              <div className="flex justify-end">
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                {saveKeysError && (
+                  <p className="mr-auto text-sm text-destructive">
+                    {saveKeysError}
+                  </p>
+                )}
                 <Button
                   onClick={handleSaveKeys}
                   disabled={savingKeys || !hasKeyChanges || hasFormatErrors}
@@ -373,6 +465,24 @@ export default function SettingsPage() {
             </div>
           ) : (
             <>
+              {ruleListError && (
+                // The six names are a constant, so the editor still works; only
+                // the "does not exist yet" marker is missing. Say that rather
+                // than blocking the card.
+                <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  Could not check which rule files exist: {ruleListError}
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-xs"
+                    onClick={loadRuleList}
+                    aria-label="Retry rule file list"
+                  >
+                    Retry
+                  </Button>
+                </p>
+              )}
+
               <div className="flex flex-wrap gap-2">
                 {RULE_NAMES.map((name) => {
                   const file = ruleFiles.find((r) => r.name === name);
@@ -394,22 +504,76 @@ export default function SettingsPage() {
                 })}
               </div>
 
-              {loadingRule ? (
-                <Skeleton className="h-[400px] w-full" />
-              ) : (
-                <Textarea
-                  value={ruleContent}
-                  onChange={(e) => setRuleContent(e.target.value)}
-                  className="font-mono text-sm min-h-[400px] resize-y"
-                  placeholder={`Enter content for ${activeRule}...`}
-                />
-              )}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  {/* Only a label while there is a textarea to point at: the
+                      loading and error branches replace it, and a `for` with
+                      no target is a dangling label Chrome reports. */}
+                  {loadingRule || ruleError ? (
+                    <span className="font-mono text-xs font-medium">
+                      {activeRuleFilename}
+                    </span>
+                  ) : (
+                    <Label htmlFor="rule-content" className="font-mono text-xs">
+                      {activeRuleFilename}
+                    </Label>
+                  )}
+                  {activeRuleIsNew && !loadingRule && !ruleError && (
+                    <span className="text-xs text-muted-foreground">
+                      {activeRuleFilename} does not exist yet. The stage runs
+                      without rules until you save one.
+                    </span>
+                  )}
+                </div>
+
+                {loadingRule ? (
+                  <Skeleton className="h-[400px] w-full" />
+                ) : ruleError ? (
+                  <div className="rounded-md border border-dashed py-12 text-center">
+                    <AlertCircle className="mx-auto h-5 w-5 text-destructive" />
+                    <p className="mt-2 text-sm font-medium">
+                      Could not load {activeRule}
+                    </p>
+                    <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+                      {ruleError}
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => loadRule(activeRule)}
+                      aria-label={`Retry ${activeRule}`}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                      Retry
+                    </Button>
+                  </div>
+                ) : (
+                  <Textarea
+                    id="rule-content"
+                    name="rule-content"
+                    value={ruleContent}
+                    onChange={(e) => setRuleContent(e.target.value)}
+                    // `field-sizing: content` on the shared Textarea grows this
+                    // one to the whole file, which put the save button 5471px
+                    // down the page for blog-research. The cap keeps the card,
+                    // and the button under it, on one screen.
+                    className="font-mono text-sm min-h-[400px] max-h-[60vh] overflow-auto resize-y"
+                    placeholder={`Enter content for ${activeRule}...`}
+                  />
+                )}
+              </div>
 
               <Separator />
-              <div className="flex justify-end">
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                {saveRuleError && (
+                  <p className="mr-auto text-sm text-destructive">
+                    {saveRuleError}
+                  </p>
+                )}
                 <Button
                   onClick={handleSaveRule}
-                  disabled={savingRule || loadingRule}
+                  disabled={savingRule || loadingRule || !!ruleError}
                 >
                   {savingRule ? (
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />

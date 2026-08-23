@@ -1506,7 +1506,18 @@ screenshots via `npx -y chrome-devtools-axi` into
   expiring in a toast. Eleven accessibility findings on `/profiles/[id]`, seven of them Radix's
   hidden native selects, are cleared and both routes are console-clean.
   Evidence: [`evidence/phase-8.md` #8.6](../mastra-port/evidence/phase-8.md)
-- [ ] 8.7 `/settings`: four states, plus visual hierarchy and spacing pass.
+- [x] 8.7 `/settings`: four states, plus visual hierarchy and spacing pass.
+  Two of the page's three cards had no error state: a stopped database rendered the API keys
+  card exactly like an account that has never pasted a key, and the rule editor exactly like a
+  file nobody has written, with `Save blog-research` still enabled over an empty textarea that
+  `PUT /api/rules/{name}` would have written straight into `rules/`. All three cards now name
+  what failed, carry the server's own reason and retry in place, both save paths keep the
+  server's wording inline instead of a four-second toast, and the two missing empty states are
+  filled. The rule editor was growing to the whole file through the shared Textarea's
+  `field-sizing: content`, putting its save button 5471px down a 5556px page; capped at 60vh
+  that is 2754px on a 2839px page. Two accessibility findings cleared and the page is
+  console-clean in all three states.
+  Evidence: [`evidence/phase-8.md` #8.7](../mastra-port/evidence/phase-8.md)
 - [ ] 8.8 `/monitor`: four states.
 - [ ] 8.9 Keyboard and a11y pass across the touched screens: focus-visible on all interactive
   elements, labelled form controls, no keyboard traps, dialogs return focus on close.

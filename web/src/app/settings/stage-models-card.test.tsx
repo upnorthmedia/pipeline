@@ -103,7 +103,8 @@ describe("StageModelsCard loading and error states", () => {
     await screen.findByText("Not authenticated");
 
     mockGet.mockResolvedValueOnce(payload());
-    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    // The settings page carries three retries now, so this one names itself.
+    await userEvent.click(screen.getByRole("button", { name: "Retry stage models" }));
 
     await waitFor(() => expect(screen.getByLabelText("write model")).toBeInTheDocument());
   });

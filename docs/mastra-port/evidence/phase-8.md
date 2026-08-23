@@ -1169,3 +1169,304 @@ exit=0
 ```
 
 All six failures are `image-preview.test.tsx`, the standing baseline in `todo.md`.
+
+## 8.7 `/settings`: four states, plus visual hierarchy and spacing pass
+
+Dev server on :3000 against the compose `db`/`redis`, signed in as the owner of the global
+`api_keys` settings row. The `settings` table holds one row (`api_keys`, `user_id` NULL) with
+all three providers configured, so every account resolves the same success state.
+
+### What was wrong
+
+`/settings` renders three cards. Only one of them, the Stage Models card added in 6.3, had an
+error state. The other two turned every failure into a four-second toast and then rendered
+something that reads as a normal, successful page.
+
+With `docker compose stop db` every request from the page fails, and the old page said so
+nowhere on screen:
+
+```
+$ docker compose stop db
+ Container objective-port-jena-46c1e6-1-db-1 Stopped
+$ chrome-devtools-axi open http://localhost:3000/settings
+$ chrome-devtools-axi eval "() => { const t=document.querySelector('textarea');
+    const b=[...document.querySelectorAll('button')].find(x=>x.textContent.includes('Save blog-research'));
+    return JSON.stringify({badges:[...document.querySelectorAll('[data-slot=badge]')].map(x=>x.textContent),
+                           ruleText:t.value, ruleSaveDisabled:b.disabled}) }"
+result: "{\"badges\":[],\"ruleText\":\"\",\"ruleSaveDisabled\":false}"
+```
+
+Read that against the same page with the database up and no keys configured: three inputs
+placeheld `Enter <provider> API key`, no badges, reveal buttons disabled. Identical. A dead
+database and an account that has never pasted a key rendered the same card.
+
+The rule editor is worse than indistinguishable. `rules.get()` failing set the editor to `""`
+and left `Save blog-research` **enabled**, and `PUT /api/rules/{name}` writes whatever it is
+given. One failed read plus one click truncates a file in `rules/`, which `CLAUDE.md` names as
+the product's prompt IP. `ruleSaveDisabled: false` above is that path, measured. It was not
+driven to completion live, because doing so would have truncated a real rule file; it is
+pinned by a unit test instead (`does not offer to save an empty editor over a rule file that
+failed to load`).
+
+The server's own reason was discarded on every write path too: `catch { toast.error("Failed to
+save API keys") }` and `` catch { toast.error(`Failed to save ${activeRule}`) } ``.
+
+### The four states, live
+
+**Loading.** Unchanged and already correct: 34 skeleton elements under a Slow 3G throttle,
+before and after.
+
+```
+$ chrome-devtools-axi emulate --network "Slow 3G"
+$ chrome-devtools-axi open http://localhost:3000/settings
+$ chrome-devtools-axi eval "() => document.querySelectorAll('[data-slot=skeleton]').length"
+result: "34"
+```
+
+`8.7-settings-loading-before.png` and `-after.png` are byte-identical (md5
+`f571d120db7b3710c20f46ddb6bb87fa` both) and that is the honest result: nothing on this path
+changed. `loading.tsx`, the route-transition mirror, did change: it had two bordered cards
+while the page has three, so it stopped short of the Stage Models table. That is pinned by
+`mirrors all three cards the page renders`, which fails when the new block is deleted.
+
+**Error.** With `db` stopped, all three cards now name what failed, carry the server's own
+reason, and offer a retry:
+
+```
+$ chrome-devtools-axi eval "() => JSON.stringify([...document.querySelectorAll('p')]
+    .map(p=>p.textContent).filter(t=>t.includes('Could not')))"
+result: "[\"Could not load API key status\",
+          \"Could not load stage models\",
+          \"Could not check which rule files exist: the server gave no reason.\",
+          \"Could not load blog-research\"]"
+```
+
+`GET /api/settings/api-keys` returns a bare `500` with an empty body when the database is
+down, so `apiErrorMessage` falls through to the app's shared wording, `The request failed and
+the server gave no reason.`, the same fallback `/`, `/profiles` and the profile picker use.
+
+The save button goes with the error:
+
+```
+$ chrome-devtools-axi eval "() => [...document.querySelectorAll('button')]
+    .find(x=>x.textContent.includes('Save blog-research')).disabled"
+result: "true"
+```
+
+**Retry.** With `db` restarted, clicking all three retries recovers in place, no reload:
+
+```
+$ docker compose start db
+$ chrome-devtools-axi eval "() => { const b=[...document.querySelectorAll('button')]
+    .filter(x=>/Retry/.test(x.getAttribute('aria-label')||'')); b.forEach(x=>x.click());
+    return b.map(x=>x.getAttribute('aria-label')).join(', ') }"
+result: "Retry API keys, Retry stage models, Retry blog-research"
+
+$ chrome-devtools-axi eval "() => JSON.stringify({
+    badges:[...document.querySelectorAll('[data-slot=badge]')].map(b=>b.textContent).slice(0,3),
+    ruleChars: document.querySelector('textarea').value.length,
+    saveDisabled: [...document.querySelectorAll('button')]
+      .find(x=>x.textContent.includes('Save blog-research')).disabled,
+    stillFailing: document.body.innerText.includes('Could not load') })"
+result: "{\"badges\":[\"Configured\",\"Configured\",\"Configured\"],\"ruleChars\":5312,
+          \"saveDisabled\":false,\"stillFailing\":false}"
+```
+
+**Empty.** The API keys card had no empty state: three "Not configured" badges over three
+blank inputs, and nothing saying what a run needs. Driven by patching `window.fetch` to answer
+`GET /api/settings/api-keys` with all three unconfigured, then navigating client-side so the
+patch survives:
+
+```
+$ chrome-devtools-axi eval "() => JSON.stringify({
+    badges:[...document.querySelectorAll('[data-slot=badge]')].map(b=>b.textContent).slice(0,3),
+    emptyLine: [...document.querySelectorAll('p')].map(p=>p.textContent)
+                 .find(t=>t.includes('No provider keys')) })"
+result: "{\"badges\":[\"Not configured\",\"Not configured\",\"Not configured\"],
+          \"emptyLine\":\"No provider keys are configured yet. A run needs Perplexity for
+          research, Anthropic for outline, write, edit and ready, and Gemini for images.
+          Paste a key below and save it.\"}"
+```
+
+The rule editor has its own empty case: a file that does not exist yet. All six exist in this
+repo, so it was driven by patching `GET /api/rules` to report `blog-images` absent and its
+content empty. The tab already said `(new)`; the editor said nothing.
+
+```
+$ chrome-devtools-axi eval "() => JSON.stringify({
+    note: [...document.querySelectorAll('span')].map(s=>s.textContent)
+            .find(t=>t.includes('does not exist yet')),
+    textareaChars: document.querySelector('textarea').value.length })"
+result: "{\"note\":\"blog-images.md does not exist yet. The stage runs without rules until
+          you save one.\",\"textareaChars\":0}"
+```
+
+"The stage runs without rules" is `loadRules()` in `web/src/mastra/prompts.ts`, which returns
+`""` for a missing file rather than throwing.
+
+**Success.** Three Configured badges, six stage rows, the rule editor with 5312 characters of
+`blog-research.md`.
+
+### Failed writes keep the server's wording
+
+Both save paths driven live against patched responses, on one page:
+
+```
+$ chrome-devtools-axi eval "() => JSON.stringify([...document.querySelectorAll('p')]
+    .map(p=>p.textContent).filter(t=>t.includes('read only')||t.includes('invalid key')))"
+result: "[\"anthropic: invalid key format\",\"rules directory is read only\"]"
+```
+
+Both sit inline next to the control that was clicked and stay there. Previously both were
+replaced by a fixed string in a toast that expires after four seconds.
+
+### Visual hierarchy and spacing
+
+The shared shadcn `Textarea` carries `field-sizing: content`, and the rule editor had no
+maximum height, so it grew to the whole file:
+
+| | before | after |
+| --- | --- | --- |
+| `document.documentElement.scrollHeight` | 5556px | 2839px |
+| textarea height | 3958px | 1217px (60vh) |
+| `Save blog-research` top offset | 5471px | 2754px |
+
+Measured at a 2029px viewport, which is generous; on a laptop the button was roughly six
+screens below the editor it saves. `max-h-[60vh] overflow-auto` caps it, `resize-y` still lets
+a user grow it, and the button now sits directly under the editor.
+
+```
+$ chrome-devtools-axi eval "() => { const t=document.querySelector('textarea');
+    const save=[...document.querySelectorAll('button')].find(x=>x.textContent.includes('Save blog-research'));
+    return JSON.stringify({docHeight: document.documentElement.scrollHeight,
+      textareaHeight: Math.round(t.getBoundingClientRect().height),
+      saveTop: Math.round(save.getBoundingClientRect().top + scrollY), viewport: innerHeight}) }"
+result: "{\"docHeight\":2839,\"textareaHeight\":1217,\"saveTop\":2754,\"viewport\":2029}"
+```
+
+The other two hierarchy changes: the editor gained a `blog-research.md` label above it, so the
+filename being edited is stated rather than implied by a tab, and the Stage Models card's
+error state was rebuilt to the same icon / heading / reason / retry shape as the two cards
+either side of it, replacing a bare line of red text with a plain button.
+
+### Accessibility
+
+One standing Chrome issue on the page, and one introduced and removed during the work.
+
+```
+$ chrome-devtools-axi console            # before
+msgid=100 [issue] A form field element should have an id or name attribute (count: 1)
+$ chrome-devtools-axi eval "() => [...document.querySelectorAll('input,select,textarea')]
+    .filter(e=>!e.id && !e.name).map(e=>e.tagName)"
+result: "[\"TEXTAREA\"]"
+```
+
+The rule editor had neither `id` nor `name` nor a label, only a placeholder. It now has all
+three. The first fix introduced a second finding: the filename `<Label htmlFor="rule-content">`
+sat outside the loading and error branches, so during those the `for` pointed at nothing.
+
+```
+msgid=250 [issue] Incorrect use of <label for=FORM_ELEMENT> (count: 1)
+```
+
+It is a plain `<span>` in those two branches now. All three states re-checked:
+
+```
+$ chrome-devtools-axi console --type issue     # success
+<no console messages found>
+$ chrome-devtools-axi console --type issue     # Slow 3G, loading
+<no console messages found>
+$ chrome-devtools-axi console --type issue     # db stopped, error
+<no console messages found>
+```
+
+DOM cross-check on the settled page: no form field without `id` or `name`, no label whose
+`for` has no target, no button without an accessible name.
+
+```
+result: "{\"bad\":[],\"dangling\":[],\"unnamedButtons\":1}"
+```
+
+The one unnamed button is the Next.js dev overlay, not application markup.
+
+### Tests
+
+14 new cases in `SettingsPage.test.tsx` (13 red first, plus the `loading.tsx` mirror), taking
+the file from 13 to 27. Two existing cases changed, both deliberately:
+
+| case | why it changed |
+| --- | --- |
+| `shows validation failure toast` -> `keeps a validation failure inline` | the reason a save was rejected now stays next to the keys that were pasted; the old string also carried an em dash, which the repo forbids |
+| `surfaces the server's own message on a failed load, with a retry` (stage models) | `getByRole("button", {name: "Retry"})` is ambiguous now that the page carries three retries, so each names itself |
+
+Red run, before the implementation:
+
+```
+$ npx vitest run src/app/settings/SettingsPage.test.tsx
+ Test Files  1 failed (1)
+      Tests  13 failed | 13 passed (26)
+```
+
+Green:
+
+```
+$ npx vitest run src/app/settings/
+ Test Files  3 passed (3)
+      Tests  42 passed (42)
+```
+
+Three mutations, each killed:
+
+| mutation | result |
+| --- | --- |
+| `loadRule`'s catch stops calling `setRuleError` (the old behaviour) | 3 failed \| 23 passed |
+| `Save {rule}` drops `!!ruleError` from `disabled` | 1 failed \| 25 passed |
+| `loading.tsx` loses the Stage Models block | 1 failed \| 26 passed |
+
+### Screenshots
+
+`docs/mastra-port/ui/`, full page, dark (the app forces `class="dark"` on `<html>`):
+
+| file | md5 |
+| --- | --- |
+| `8.7-settings-loading-before.png` | `f571d120db7b3710c20f46ddb6bb87fa` |
+| `8.7-settings-loading-after.png` | `f571d120db7b3710c20f46ddb6bb87fa` (identical, unchanged path) |
+| `8.7-settings-empty-before.png` | `11cc290f6f442353d9d03f7641477224` |
+| `8.7-settings-empty-after.png` | `ff6609b8c3a68d7286eebc81755f8000` |
+| `8.7-settings-error-before.png` | `64bd3dd930fb6e89446e1044ddb67435` |
+| `8.7-settings-error-after.png` | `6fac2c007a26461aa92c52223bf67df2` |
+| `8.7-settings-success-before.png` | `493c61fa4c0afe3508a90407ff163c31` |
+| `8.7-settings-success-after.png` | `fab983b6ebbebb9b044168b96283fe81` |
+| `8.7-settings-rule-new-after.png` | `105484105d113888e43c78303e093bae` |
+| `8.7-settings-save-error-after.png` | `df7bb8ea25b315dfc60dcb99672e4a4e` |
+
+### Gates
+
+```
+$ pnpm -C web exec tsc --noEmit
+exit 0
+
+$ pnpm -C web lint
+exit 0
+
+$ pnpm -C web test
+ Test Files  1 failed | 138 passed (139)
+      Tests  6 failed | 4587 passed | 7 skipped (4600)
+exit 1
+```
+
+The 6 are the standing `image-preview.test.tsx` baseline, unchanged by this item and tracked
+by 9.1. The Phase 0 baseline was 9 in 2 files; item 8.3 resolved the 3 in `PostDetail.test.tsx`.
+
+```
+$ pnpm -C web build
+exit 0
+```
+
+### Not covered
+
+- The rule-file truncation path was proven only up to the enabled button, not driven to a real
+  `PUT` with an empty body, because that would have destroyed a file in `rules/`.
+- `loading.tsx` is asserted by unit test, not screenshot: the settings route has no server-side
+  await, so a full page load never renders it and a client transition to it is too brief to
+  capture reliably.
