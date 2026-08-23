@@ -262,7 +262,11 @@ export class WordPressClient {
     status?: string
     categories?: number[] | null
     author?: number | null
-    featuredMedia?: number | null
+    // `unknown` for the same reason `uploadMedia`'s `altText` is: the publish
+    // hook forwards `media["id"]` straight out of an upload response, so a
+    // WordPress that answered with a string id sends a string here. The
+    // truthiness gate below is the only thing that inspects it.
+    featuredMedia?: unknown
     excerpt?: string
   }): Promise<unknown> {
     const payload: Record<string, unknown> = {

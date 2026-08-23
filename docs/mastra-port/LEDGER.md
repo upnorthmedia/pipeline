@@ -11209,7 +11209,7 @@ three pieces are separately verifiable, so they are separate items.
               $ cd api && uv run ruff format --check scripts/export_wp_html_inline_link_parity.py
               1 file already formatted
               ```
-        - [ ] 5.3c-iii-b-1-c The Mastra WordPress publish workflow
+        - [x] 5.3c-iii-b-1-c The Mastra WordPress publish workflow
           (`api/src/pipeline/publish.py`): the media-directory sweep, the manifest-driven
           featured image and alt text, the local-to-remote URL rewrite, the create/update
           branch, the `wp_publish_status` transitions and the `publish_start` /
@@ -11218,7 +11218,9 @@ three pieces are separately verifiable, so they are separate items.
           against the real Python with no network or filesystem at all, the sweep is a
           filesystem walk plus real HTTP uploads, and the workflow itself is database
           transitions and events. They share no machinery, and only the first can be pinned
-          byte for byte against Python.
+          byte for byte against Python. Closed by 5.3c-iii-b-1-c-iii: all three
+          sub-items are checked with their own evidence, and the whole hook is registered
+          on the Mastra instance as the `wordpressPublish` workflow.
           - [x] 5.3c-iii-b-1-c-i `_extract_frontmatter` and the `manifest_by_file` /
             `featured_filename` index.
 
@@ -11338,12 +11340,14 @@ three pieces are separately verifiable, so they are separate items.
             $ cd api && uv run ruff format --check scripts/export_wp_publish_metadata_parity.py
             1 file already formatted
             ```
-          - [ ] 5.3c-iii-b-1-c-ii The media-directory sweep. Split into three: the
+          - [x] 5.3c-iii-b-1-c-ii The media-directory sweep. Split into three: the
             `mimetypes` filter is a pure function over a filename and is the only part of
             the sweep that can be pinned against Python with no filesystem and no network,
             the walk is a filesystem enumeration whose ordering rule is the thing worth
             testing, and the upload loop is HTTP plus the featured-media and URL-rewrite
-            bookkeeping.
+            bookkeeping. Closed by 5.3c-iii-b-1-c-ii-3: all three sub-items are checked
+            with their own evidence, and the whole sweep is reachable through
+            `sweepMediaDirectory()` in `web/src/mastra/wordpress/media-upload.ts`.
             - [x] 5.3c-iii-b-1-c-ii-1 `mimetypes.guess_type`, the image filter.
 
               Ported to `web/src/mastra/wordpress/mimetypes.ts` as
@@ -11871,9 +11875,142 @@ three pieces are separately verifiable, so they are separate items.
               120 failed, 241 passed, 25 errors in 15.01s
               # the Phase 0 baseline exactly, unchanged by this item
               ```
-          - [ ] 5.3c-iii-b-1-c-iii The publish workflow itself: the profile and credential
+          - [x] 5.3c-iii-b-1-c-iii The publish workflow itself: the profile and credential
             guards, the create/update branch, the `wp_publish_status` transitions and the
             `publish_start` / `publish_complete` / `publish_error` events with `_fail`.
+
+            Ported to `web/src/mastra/steps/wordpress-publish.ts`
+            (`wordpressPublishStep`) and `web/src/mastra/workflows/wordpress-publish.ts`
+            (`wordpressPublishWorkflow`, one `.then(step).commit()`), registered on the
+            Mastra instance as `wordpressPublish`. The four pieces the hook composes were
+            already ported under -c-i, -b and -c-ii; what this item adds is the part with
+            no pure oracle, so it is verified by a run rather than by a corpus: a Node
+            `http.Server` on a loopback port stands in for WordPress and records every
+            request it receives, the images are real files under a real `MEDIA_DIR`, the
+            row is a real row in the dev database, and the password is a real Fernet token
+            produced by `web/src/lib/crypto.ts`.
+
+            **There is no oracle for this item and that is deliberate.**
+            `publish_to_wordpress` is a database transaction, a Redis publish and an HTTP
+            conversation; every observable it has is a side effect. Recording it from
+            Python would mean standing up a fake WordPress for the Python side too, and
+            the recording would then only prove that two fakes agree. The Python source is
+            read line by line in the module header instead, and the twenty mutations below
+            are what stands in for the corpus.
+
+            **Four behaviours a naive translation loses**, each with a test:
+
+            * **A publish failure is not a step failure.** Python caught everything, marked
+              the post `failed` and returned normally, so ARQ never retried a publish. The
+              step returns its failure in `output.error` rather than throwing, because a
+              thrown step is redelivered by `RedisStreamsPubSub` and every image would be
+              uploaded to the site a second time.
+            * **A missing post is not an error either.** Python logged and returned, having
+              touched no column and published no event. `status: "missing"`.
+            * **The `try` covers the success commit.** An exception raised after the row is
+              already `published`, which is every failure in `append_execution_log` and in
+              the event publish, still reaches `_fail`, which rewrites `wp_publish_status`
+              to `failed` and leaves `wp_post_id` and `wp_post_url` in place. A post that
+              exists on WordPress and reads as failed here is Python's behaviour and is
+              preserved.
+            * **`body` is computed and never used.** `_extract_frontmatter` is called for
+              its metadata only; the HTML is rendered from the whole `content`, frontmatter
+              included, because `markdown_to_wp_html` strips its own. Pinned by asserting
+              the created post's content carries no `description:` line.
+
+            **One divergence, outcome-equivalent but not message-equivalent.**
+            `post.wp_post_id = wp_post.get("id")` assigns into an `integer` column and
+            `post.wp_post_url = wp_post.get("link", "")` into a `text` one. A WordPress
+            that answered `{"id": "7"}` made asyncpg raise, which Python caught and turned
+            into a `failed` publish. `pg` sends parameters as text and Postgres would
+            coerce `'7'` happily, so `integerColumn()` / `textColumn()` make the check
+            here instead. The outcome matches; the recorded message does not, because
+            Python's was asyncpg's.
+
+            **Two smaller notes.** `pythonGet` was lifted out of `media-upload.ts` (it was
+            `mediaGet`) because `wp_post.get("id")` is the same subscript against the same
+            kind of decoded response, `AttributeError` message included.
+            `WordPressClient.createPost`'s `featuredMedia` parameter widened from
+            `number | null` to `unknown` for the same reason `altText` did in -c-ii-3: the
+            value comes straight out of an upload response and Python forwards whatever
+            was there.
+
+            **Mutation testing: twenty mutations, nineteen killed, one equivalent.**
+
+            | # | Mutation | Result |
+            | --- | --- | --- |
+            | 1 | `final_md_content` wins over `ready_content` | killed |
+            | 2 | title always `posts.topic` | killed |
+            | 3 | title always frontmatter, empty when absent | killed |
+            | 4 | excerpt always `""` | killed |
+            | 5 | status always `publish` | killed |
+            | 6 | `categories` `[]` instead of `null` when unset | **survived, equivalent** |
+            | 7 | update sends `null` categories instead of `[]` | killed |
+            | 8 | always create, never update | killed |
+            | 9 | no local-to-remote rewrite | killed |
+            | 10 | no `publish_start` event | killed |
+            | 11 | row never moves to `publishing` | killed |
+            | 12 | failure log message loses its prefix | killed |
+            | 13 | `publish_error` payload loses `message` | killed |
+            | 14 | credential guard checks only `wp_url` | killed |
+            | 15 | a missing post fails instead of returning quietly | killed |
+            | 16 | featured media never sent on create | killed |
+            | 17 | alt-text default is `posts.topic`, not the title | killed |
+            | 18 | `uploaded` count always zero | killed |
+            | 19 | `publish_complete` payload keys renamed | killed |
+            | 20 | decrypt failure reported as the credentials message | killed |
+
+            Mutation 6 is genuinely unobservable. `create_post` filters with
+            `if categories:`, which is false for both `None` and `[]`, and the update
+            branch spells `categories or []`, which is `[]` for both. No WordPress request
+            can tell the two apart.
+
+            Three of the twenty needed the tests strengthened before they died, and all
+            three were real coverage gaps rather than equivalences:
+
+            * 11 is a status that only exists while the hook is talking to WordPress, so
+              the assertion had to be made from inside the fake site's request handler:
+              the first `POST /media` reads the row back and records
+              `wp_publish_status`. Nothing outside the run can see `publishing`.
+            * 14 needed `wp_username` and `wp_app_password` knocked out one at a time on a
+              profile that has a `wp_url`; the original fixture had a profile with none of
+              the three, which an only-`wp_url` guard still rejects.
+            * 5, 16 and the `final_md_content` fallback needed a row that takes the other
+              side of every `or` in the hook: no `ready_content`, no frontmatter, no
+              manifest and a profile with a null `wp_default_status`.
+
+            ```
+            $ pnpm -C web exec vitest run src/mastra/steps/wordpress-publish.test.ts
+             Test Files  1 passed (1)
+                  Tests  28 passed (28)
+
+            $ pnpm -C web exec vitest run src/mastra/index.test.ts
+             Test Files  1 passed (1)
+                  Tests  8 passed (8)
+            # includes the new "registers the WordPress publish hook as a one-step
+            # workflow" case, which asserts the serialized step graph is a single
+            # `wordpress-publish` step.
+
+            $ pnpm -C web tsc --noEmit
+            (no output, exit 0)
+
+            $ pnpm -C web lint
+            (no output, exit 0)
+
+            $ pnpm -C web test
+             Test Files  2 failed | 118 passed (120)
+                  Tests  9 failed | 3930 passed | 7 skipped (3946)
+            # the 9 are the Phase 0 baseline: 6 in image-preview.test.tsx and 3 in
+            # PostDetail.test.tsx. The scaffold-check file-count flake recorded under
+            # 5.3c-iii-b-1-c-ii-2 did not fire on this run.
+
+            $ pnpm -C web build
+            ✓ Compiled successfully
+
+            $ cd api && set -a && . ../.env && set +a && uv run pytest -q
+            120 failed, 241 passed, 25 errors in 15.15s
+            # the Phase 0 baseline exactly, unchanged by this item
+            ```
         - [ ] 5.3c-iii-b-1-d The `output_format == "wordpress"` branch of
           `POST /{post_id}/publish`, starting the workflow above.
   - [x] 5.3d Exports, logs and analytics (split: five endpoints, and `/export/all`

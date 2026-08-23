@@ -72,12 +72,16 @@ function pythonTypeName(value: unknown): string {
 }
 
 /**
- * `media.get(key, fallback)`. The publish hook never checks that the client
- * returned a JSON object, so a WordPress that answers with a list or a bare
- * `null` raises `AttributeError` out of the loop and into the hook's `_fail`.
- * The message is Python's so that the recorded failure reads the same.
+ * `value.get(key, fallback)` over a decoded JSON response. Neither the upload
+ * loop nor the create/update branch checks that the client returned a JSON
+ * object, so a WordPress that answers with a list or a bare `null` raises
+ * `AttributeError` out of the hook and into its `_fail`. The message is
+ * Python's so that the recorded failure reads the same.
+ *
+ * Exported because `wp_post.get("id")` in `../steps/wordpress-publish.ts` is
+ * the same subscript against the same kind of value.
  */
-function mediaGet(media: unknown, key: string, fallback: unknown = null): unknown {
+export function pythonGet(media: unknown, key: string, fallback: unknown = null): unknown {
   if (media === null || typeof media !== "object" || Array.isArray(media)) {
     throw new TypeError(`'${pythonTypeName(media)}' object has no attribute 'get'`)
   }
@@ -132,12 +136,12 @@ export async function uploadMediaFiles(
     const bytes = new Uint8Array(await readFile(file.path))
     const media = await client.uploadMedia(bytes, file.name, mime, alt)
 
-    imageMap.set(`/media/${postId}/${file.name}`, mediaGet(media, "source_url", ""))
+    imageMap.set(`/media/${postId}/${file.name}`, pythonGet(media, "source_url", ""))
 
     if (manifest.featuredFilename && file.name === manifest.featuredFilename) {
-      featuredMediaId = mediaGet(media, "id")
+      featuredMediaId = pythonGet(media, "id")
     } else if (featuredMediaId === null && !manifest.featuredFilename) {
-      featuredMediaId = mediaGet(media, "id")
+      featuredMediaId = pythonGet(media, "id")
     }
   }
 

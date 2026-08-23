@@ -22,6 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { closeDb, getPool, toNodePostgresUrl } from "../db"
 import { logger, mastra, pubsub, storage } from "./index"
 import { RECRAWL_CHECK_CRON, recrawlCheckWorkflow } from "./workflows/recrawl-check"
+import { wordpressPublishWorkflow } from "./workflows/wordpress-publish"
 import { sitemapCrawlWorkflow } from "./workflows/sitemap-crawl"
 
 /** An independent connection, so the assertions do not read through the pool under test. */
@@ -104,6 +105,25 @@ describe("mastra instance", () => {
     }[]
     expect(graph.map((entry) => entry.type)).toEqual(["step"])
     expect(graph[0].step?.id).toBe("recrawl-check")
+  })
+
+  /**
+   * The WordPress publish hook's registration (item 5.3c-iii-b-1-c-iii), here
+   * for the same reason as the two above: importing this module rebinds the
+   * workflow to this instance, so the run in
+   * `steps/wordpress-publish.test.ts` calls the step directly instead.
+   */
+  it("registers the WordPress publish hook as a one-step workflow", () => {
+    expect(mastra.getWorkflow("wordpressPublish")).toBe(wordpressPublishWorkflow)
+    expect(Object.keys(mastra.listWorkflows())).toContain("wordpressPublish")
+    expect(wordpressPublishWorkflow.id).toBe("wordpress-publish")
+
+    const graph = wordpressPublishWorkflow.serializedStepGraph as {
+      type: string
+      step?: { id?: string }
+    }[]
+    expect(graph.map((entry) => entry.type)).toEqual(["step"])
+    expect(graph[0].step?.id).toBe("wordpress-publish")
   })
 })
 

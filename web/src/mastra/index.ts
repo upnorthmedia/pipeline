@@ -34,6 +34,7 @@ import { pipelineWorkflow } from "./workflows/pipeline"
 import { recrawlCheckWorkflow } from "./workflows/recrawl-check"
 import { scaffoldCheckWorkflow } from "./workflows/scaffold-check"
 import { sitemapCrawlWorkflow } from "./workflows/sitemap-crawl"
+import { wordpressPublishWorkflow } from "./workflows/wordpress-publish"
 
 function redisUrl(): string {
   const url = process.env.REDIS_URL
@@ -147,6 +148,7 @@ export const mastra = new Mastra({
     scaffoldCheck: scaffoldCheckWorkflow,
     sitemapCrawl: sitemapCrawlWorkflow,
     recrawlCheck: recrawlCheckWorkflow,
+    wordpressPublish: wordpressPublishWorkflow,
   },
   events: workerEvents,
   agents: {
