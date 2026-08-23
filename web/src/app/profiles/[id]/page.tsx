@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -13,6 +13,7 @@ import {
   Loader2,
   ExternalLink,
   Globe,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +46,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   profiles,
+  apiErrorMessage,
   type Profile,
   type InternalLink,
   type StageMode,
@@ -54,6 +56,7 @@ import {
   STAGES,
 } from "@/lib/api";
 import { toast } from "sonner";
+import { ProfileDetailSkeleton } from "./profile-detail-skeleton";
 
 const OUTPUT_FORMATS = [
   { value: "markdown", label: "Markdown" },
@@ -74,11 +77,12 @@ const CRAWL_STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" |
 
 export default function ProfileDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const profileId = params.id as string;
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const crawlPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -128,7 +132,8 @@ export default function ProfileDetailPage() {
 
   // Links state
   const [links, setLinks] = useState<InternalLink[]>([]);
-  const [linksLoading, setLinksLoading] = useState(false);
+  const [linksLoading, setLinksLoading] = useState(true);
+  const [linksError, setLinksError] = useState<string | null>(null);
   const [linksPage, setLinksPage] = useState(1);
   const [linksHasMore, setLinksHasMore] = useState(false);
   const [linksSearch, setLinksSearch] = useState("");
@@ -175,13 +180,17 @@ export default function ProfileDetailPage() {
     try {
       const data = await profiles.get(profileId);
       setProfile(data);
+      setError(null);
       return data;
-    } catch {
-      toast.error("Failed to load profile");
-      router.push("/profiles");
+    } catch (e) {
+      // The URL identifies the profile, so a failed load stays here with the
+      // reason rather than bouncing back to the list and losing it.
+      setError(
+        apiErrorMessage(e, "The request failed and the server gave no reason.")
+      );
       return null;
     }
-  }, [profileId, router]);
+  }, [profileId]);
 
   const fetchLinks = useCallback(
     async (page: number, search: string, append = false) => {
@@ -198,8 +207,11 @@ export default function ProfileDetailPage() {
           setLinks(data.items);
         }
         setLinksHasMore(page < data.pages);
-      } catch {
-        toast.error("Failed to load links");
+        setLinksError(null);
+      } catch (e) {
+        setLinksError(
+          apiErrorMessage(e, "The request failed and the server gave no reason.")
+        );
       } finally {
         setLinksLoading(false);
       }
@@ -256,6 +268,7 @@ export default function ProfileDetailPage() {
     }
 
     setSaving(true);
+    setSaveError(null);
     try {
       const data = {
         name: name.trim(),
@@ -295,8 +308,10 @@ export default function ProfileDetailPage() {
       const updated = await profiles.update(profileId, data);
       setProfile(updated);
       toast.success("Profile saved");
-    } catch {
-      toast.error("Failed to save profile");
+    } catch (e) {
+      // The form stays as the operator left it, so the reason belongs next to
+      // the button they just pressed rather than in a toast that expires.
+      setSaveError(apiErrorMessage(e, "The profile could not be saved."));
     } finally {
       setSaving(false);
     }
@@ -427,22 +442,68 @@ export default function ProfileDetailPage() {
     fetchLinks(nextPage, linksSearch, true);
   };
 
-  if (loading) {
+  if (loading) return <ProfileDetailSkeleton />;
+
+  if (!profile) {
     return (
-      <div className="p-6 space-y-6 max-w-3xl mx-auto">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-12 w-full" />
-        <Skeleton className="h-96 w-full" />
+      <div className="p-6 max-w-3xl mx-auto space-y-6">
+        <div>
+          <Link href="/profiles">
+            <Button variant="ghost" size="sm" className="-ml-2">
+              <ArrowLeft className="h-4 w-4 mr-1.5" />
+              Profiles
+            </Button>
+          </Link>
+        </div>
+        <div className="flex flex-col items-center justify-center rounded-md border border-border py-16 text-center">
+          <AlertCircle className="h-6 w-6 text-destructive" />
+          <p className="mt-3 text-sm font-medium">Could not load this profile</p>
+          <p className="mt-1 max-w-md text-sm text-muted-foreground">
+            {error ?? "The request failed and the server gave no reason."}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-4"
+            onClick={() => {
+              setLoading(true);
+              (async () => {
+                const data = await fetchProfile();
+                if (data) populateForm(data);
+                setLoading(false);
+              })();
+            }}
+          >
+            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+            Retry
+          </Button>
+        </div>
       </div>
     );
   }
-
-  if (!profile) return null;
 
   const isCrawling = profile.crawl_status === "crawling";
 
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-6">
+      {/* A refetch that failed while a good render is on screen: the page keeps
+          showing the last known profile and says so rather than replacing it. */}
+      {error && (
+        <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3">
+          <AlertCircle className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">
+              This profile could not be refreshed
+            </p>
+            <p className="mt-0.5 text-sm text-muted-foreground">{error}</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={fetchProfile}>
+            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+            Retry
+          </Button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start gap-3">
         <Link href="/profiles">
@@ -482,6 +543,9 @@ export default function ProfileDetailPage() {
                 </Label>
                 <Input
                   id="name"
+                  /* The profile's name, not the operator's: browser autofill
+                     recognises `name` and would offer a person's name here. */
+                  autoComplete="off"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
@@ -554,9 +618,13 @@ export default function ProfileDetailPage() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Output Format</Label>
-                <Select value={outputFormat} onValueChange={setOutputFormat}>
-                  <SelectTrigger>
+                <Label htmlFor="outputFormat">Output Format</Label>
+                <Select
+                  name="output_format"
+                  value={outputFormat}
+                  onValueChange={setOutputFormat}
+                >
+                  <SelectTrigger id="outputFormat">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -659,12 +727,16 @@ export default function ProfileDetailPage() {
                 >
                   <span className="text-sm font-medium capitalize">{stage}</span>
                   <Select
+                    name={`stage_${stage}`}
                     value={stageSettings[stage]}
                     onValueChange={(v: StageMode) =>
                       setStageSettings((prev) => ({ ...prev, [stage]: v }))
                     }
                   >
-                    <SelectTrigger className="w-[140px] h-8">
+                    <SelectTrigger
+                      className="w-[140px] h-8"
+                      aria-label={`${stage} stage mode`}
+                    >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -751,14 +823,15 @@ export default function ProfileDetailPage() {
                 <>
                   <div className="grid grid-cols-3 gap-4">
                     <div className="space-y-2">
-                      <Label>Default Category</Label>
+                      <Label htmlFor="wpDefaultCategory">Default Category</Label>
                       <Select
+                        name="wp_default_category_id"
                         value={wpDefaultCategoryId?.toString() || "none"}
                         onValueChange={(v) =>
                           setWpDefaultCategoryId(v === "none" ? null : Number(v))
                         }
                       >
-                        <SelectTrigger>
+                        <SelectTrigger id="wpDefaultCategory">
                           <SelectValue placeholder="Select category" />
                         </SelectTrigger>
                         <SelectContent>
@@ -772,14 +845,15 @@ export default function ProfileDetailPage() {
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Default Author</Label>
+                      <Label htmlFor="wpDefaultAuthor">Default Author</Label>
                       <Select
+                        name="wp_default_author_id"
                         value={wpDefaultAuthorId?.toString() || "none"}
                         onValueChange={(v) =>
                           setWpDefaultAuthorId(v === "none" ? null : Number(v))
                         }
                       >
-                        <SelectTrigger>
+                        <SelectTrigger id="wpDefaultAuthor">
                           <SelectValue placeholder="Select author" />
                         </SelectTrigger>
                         <SelectContent>
@@ -793,9 +867,13 @@ export default function ProfileDetailPage() {
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Default Status</Label>
-                      <Select value={wpDefaultStatus} onValueChange={setWpDefaultStatus}>
-                        <SelectTrigger>
+                      <Label htmlFor="wpDefaultStatus">Default Status</Label>
+                      <Select
+                        name="wp_default_status"
+                        value={wpDefaultStatus}
+                        onValueChange={setWpDefaultStatus}
+                      >
+                        <SelectTrigger id="wpDefaultStatus">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -885,6 +963,16 @@ export default function ProfileDetailPage() {
           </Card>
         )}
 
+        {saveError && (
+          <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3">
+            <AlertCircle className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Could not save this profile</p>
+              <p className="mt-0.5 text-sm text-muted-foreground">{saveError}</p>
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-end">
           <Button type="submit" disabled={saving}>
             {saving ? (
@@ -929,9 +1017,13 @@ export default function ProfileDetailPage() {
             )}
           </div>
           <div className="space-y-2">
-            <Label>Re-crawl Schedule</Label>
-            <Select value={recrawlInterval} onValueChange={setRecrawlInterval}>
-              <SelectTrigger className="w-[200px]">
+            <Label htmlFor="recrawlInterval">Re-crawl Schedule</Label>
+            <Select
+              name="recrawl_interval"
+              value={recrawlInterval}
+              onValueChange={setRecrawlInterval}
+            >
+              <SelectTrigger id="recrawlInterval" className="w-[200px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1029,6 +1121,8 @@ export default function ProfileDetailPage() {
           <div className="relative">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
+              name="link-search"
+              aria-label="Search internal links"
               placeholder="Search links by URL or title..."
               value={linksSearch}
               onChange={(e) => {
@@ -1052,13 +1146,65 @@ export default function ProfileDetailPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {links.length === 0 && !linksLoading ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={5}
-                      className="text-center text-muted-foreground py-8"
-                    >
-                      {linksSearch ? "No links match your search" : "No internal links yet"}
+                {linksLoading && links.length === 0 ? (
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <TableRow key={i}>
+                      <TableCell><Skeleton className="h-4 w-48" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-16" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-4" /></TableCell>
+                    </TableRow>
+                  ))
+                ) : linksError ? (
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={5} className="h-32 text-center">
+                      <AlertCircle className="mx-auto h-5 w-5 text-destructive" />
+                      <p className="mt-2 text-sm font-medium">
+                        Could not load internal links
+                      </p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {linksError}
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-3"
+                        onClick={() => fetchLinks(1, linksSearch)}
+                      >
+                        <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                        Retry links
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ) : links.length === 0 ? (
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={5} className="h-32 text-center">
+                      {linksSearch ? (
+                        <>
+                          <p className="text-sm font-medium">
+                            No links match your search
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="mt-3"
+                            onClick={() => setLinksSearch("")}
+                          >
+                            Clear search
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm font-medium">
+                            No internal links yet
+                          </p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Crawl the sitemap or add a link by hand to give the
+                            pipeline something to link to.
+                          </p>
+                        </>
+                      )}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -1113,7 +1259,7 @@ export default function ProfileDetailPage() {
           </div>
 
           {/* Load More / Loading */}
-          {linksLoading && (
+          {linksLoading && links.length > 0 && (
             <div className="flex justify-center py-4">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>

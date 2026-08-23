@@ -1493,7 +1493,19 @@ screenshots via `npx -y chrome-devtools-axi` into
   on `/posts/new`, one of them contributed by the new card, are fixed and both routes are
   console-clean.
   Evidence: [`evidence/phase-8.md` #8.5](../mastra-port/evidence/phase-8.md)
-- [ ] 8.6 `/profiles` and `/profiles/[id]`: four states.
+- [x] 8.6 `/profiles` and `/profiles/[id]`: four states.
+  Both routes read a failed request as an absence: the list caught every failure with a toast
+  and rendered "No profiles yet", and the detail page pushed the browser back to `/profiles`,
+  discarding both the URL that identifies the profile and the server's reason. Its links table
+  had no error state at all, so a failed first page also read as "No internal links yet". Both
+  now hold the server's own message with a working Retry, proven live with a stopped database
+  and with a real `{"detail": "Profile not found"}`. The detail route's client loading state
+  went from three grey bars to the same full-layout skeleton `loading.tsx` already had, now one
+  shared component, and its links table gets skeleton rows instead of an empty body under a
+  detached spinner. Rejected creates and saves stay inline next to the fields rather than
+  expiring in a toast. Eleven accessibility findings on `/profiles/[id]`, seven of them Radix's
+  hidden native selects, are cleared and both routes are console-clean.
+  Evidence: [`evidence/phase-8.md` #8.6](../mastra-port/evidence/phase-8.md)
 - [ ] 8.7 `/settings`: four states, plus visual hierarchy and spacing pass.
 - [ ] 8.8 `/monitor`: four states.
 - [ ] 8.9 Keyboard and a11y pass across the touched screens: focus-visible on all interactive

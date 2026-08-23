@@ -11,6 +11,7 @@ import {
   ExternalLink,
   Loader2,
   Search,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,11 +37,17 @@ import {
   DialogTitle,
   DialogTrigger,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { profiles, type Profile, type ProfileCreate } from "@/lib/api";
+import {
+  profiles,
+  apiErrorMessage,
+  type Profile,
+  type ProfileCreate,
+} from "@/lib/api";
 import { toast } from "sonner";
 
 function timeAgo(dateStr: string): string {
@@ -82,18 +89,26 @@ export default function ProfilesPage() {
   const router = useRouter();
   const [profileList, setProfileList] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [formName, setFormName] = useState("");
   const [formUrl, setFormUrl] = useState("");
 
   const fetchProfiles = useCallback(async () => {
+    setLoading(true);
     try {
       const data = await profiles.list();
       setProfileList(data);
-    } catch {
-      toast.error("Failed to load profiles");
+      setError(null);
+    } catch (e) {
+      // A route handler that dies before it can answer sends an empty 500
+      // body, so there is often nothing of the server's own to show.
+      setError(
+        apiErrorMessage(e, "The request failed and the server gave no reason.")
+      );
     } finally {
       setLoading(false);
     }
@@ -117,6 +132,7 @@ export default function ProfilesPage() {
       return;
     }
     setCreating(true);
+    setCreateError(null);
     try {
       const data: ProfileCreate = {
         name: formName.trim(),
@@ -128,8 +144,10 @@ export default function ProfilesPage() {
       setFormName("");
       setFormUrl("");
       router.push(`/profiles/${created.id}`);
-    } catch {
-      toast.error("Failed to create profile");
+    } catch (e) {
+      // The dialog stays open with the fields still filled in: a four-second
+      // toast is the wrong place for the reason a submit was rejected.
+      setCreateError(apiErrorMessage(e, "The profile could not be created."));
     } finally {
       setCreating(false);
     }
@@ -164,11 +182,20 @@ export default function ProfilesPage() {
             Website Profiles
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {profileList.length} total profiles
+            {loading
+              ? "Loading profiles..."
+              : error
+                ? "Profile list unavailable"
+                : `${profileList.length} total profile${profileList.length === 1 ? "" : "s"}`}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" onClick={fetchProfiles}>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Refresh profiles"
+            onClick={fetchProfiles}
+          >
             <RefreshCw className="h-4 w-4" />
           </Button>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -181,6 +208,10 @@ export default function ProfilesPage() {
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Create Profile</DialogTitle>
+                <DialogDescription>
+                  Name the site and give its URL. Everything else is editable
+                  once the profile exists.
+                </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <div className="space-y-2">
@@ -201,6 +232,19 @@ export default function ProfilesPage() {
                     onChange={(e) => setFormUrl(e.target.value)}
                   />
                 </div>
+                {createError && (
+                  <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3">
+                    <AlertCircle className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">
+                        Could not create the profile
+                      </p>
+                      <p className="mt-0.5 text-sm text-muted-foreground">
+                        {createError}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
               <DialogFooter>
                 <Button
@@ -227,6 +271,8 @@ export default function ProfilesPage() {
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
+            name="profile-search"
+            aria-label="Search profiles"
             placeholder="Search profiles..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -268,21 +314,63 @@ export default function ProfilesPage() {
                   </TableCell>
                 </TableRow>
               ))
-            ) : filtered.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} className="h-32 text-center">
-                  <Globe className="h-8 w-8 mx-auto text-muted-foreground/50" />
-                  <p className="text-muted-foreground mt-2">
-                    {search ? "No profiles match your search" : "No profiles yet"}
+            ) : error ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={5} className="h-40 text-center">
+                  <AlertCircle className="mx-auto h-5 w-5 text-destructive" />
+                  <p className="mt-2 text-sm font-medium">
+                    Could not load profiles
                   </p>
-                  {!search && (
-                    <Button
-                      variant="link"
-                      className="mt-2"
-                      onClick={() => setDialogOpen(true)}
-                    >
-                      Create your first profile
-                    </Button>
+                  <p className="mt-1 text-sm text-muted-foreground">{error}</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={fetchProfiles}
+                  >
+                    <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                    Retry
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ) : filtered.length === 0 ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={5} className="h-40 text-center">
+                  <Globe className="h-8 w-8 mx-auto text-muted-foreground/50" />
+                  {search ? (
+                    <>
+                      <p className="mt-2 text-sm font-medium">
+                        No profiles match your search
+                      </p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Search matches the profile name and its website URL.
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-3"
+                        onClick={() => setSearch("")}
+                      >
+                        Clear search
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="mt-2 text-sm font-medium">No profiles yet</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        A profile holds the site, voice and links every post is
+                        written against.
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-3"
+                        onClick={() => setDialogOpen(true)}
+                      >
+                        <Plus className="h-3.5 w-3.5 mr-1.5" />
+                        Create your first profile
+                      </Button>
+                    </>
                   )}
                 </TableCell>
               </TableRow>

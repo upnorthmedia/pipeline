@@ -905,3 +905,267 @@ exit=0
 
 All six failures are `image-preview.test.tsx`, the standing baseline in `todo.md`. The
 build's `BetterAuthError` lines are the standing `BETTER_AUTH_SECRET` noise.
+
+## 8.6 `/profiles` and `/profiles/[id]`: four states
+
+Both routes treated a failed request as an absence. `/profiles` caught every list failure with
+`toast.error("Failed to load profiles")` and then rendered its empty state, so a dead database
+told the operator they had no profiles and offered to create their first one. `/profiles/[id]`
+was worse: a failed `profiles.get()` pushed the browser back to `/profiles`, throwing away both
+the URL that identifies the profile and the server's reason for refusing it. Its links table
+had no error state at all, so a failed first page of links also read as "No internal links yet".
+
+### The tests, red before the change
+
+```
+$ cd web && npx vitest run src/app/profiles/ProfilesList.test.tsx
+ ×  shows the server's own message and a working retry when the list fails
+ ×  falls back to its own wording when the failure carries no message
+ ×  clears the search from the no-match empty state
+ ×  keeps a rejected create inline in the dialog
+ Test Files  1 failed (1)
+      Tests  4 failed | 12 passed (16)
+
+$ cd web && npx vitest run src/app/profiles/ProfileDetail.test.tsx
+ ×  shows the server's own message and a working retry when the load fails
+ ×  falls back to its own wording when the load failure carries no message
+ ×  shows a links error with a retry instead of an empty links table
+ ×  renders skeleton rows while the first page of links is in flight
+ ×  keeps a rejected save inline above the button
+ Test Files  1 failed (1)
+      Tests  5 failed | 13 passed (18)
+```
+
+Green after:
+
+```
+$ cd web && npx vitest run src/app/profiles
+ ✓ src/app/profiles/ProfilesList.test.tsx  (16 tests) 755ms
+ ✓ src/app/profiles/ProfileDetail.test.tsx (18 tests) 983ms
+ Test Files  2 passed (2)
+      Tests  34 passed (34)
+```
+
+`ProfileDetail.test.tsx`'s `redirects on fetch error` case is gone, replaced by the two
+load-failure cases above. That is an intended behaviour change, not drift: the redirect it
+pinned is the defect this item fixes.
+
+### The four states, driven live
+
+Dev server on `:3000`, the compose `db` and `redis`. Two accounts: one owning the profile
+`714bf8bd` ("Compose Stack Check", 393 internal links) and one owning none.
+
+**`/profiles`, before.** Signed in as the account with no profiles, then with the database
+stopped:
+
+```
+# before, empty account
+"Website Profiles\n\n0 total profiles\n ... No profiles yet\n\nCreate your first profile"
+
+# before, database stopped, Refresh clicked
+"Website Profiles\n\n0 total profiles\n ... No profiles yet\n\nCreate your first profile\nFailed to load profiles"
+```
+
+The two states differ only by a four-second toast: the table said "No profiles yet" either way.
+
+**`/profiles`, after.** Same two drives:
+
+```
+# after, empty account
+"Website Profiles\n\n0 total profiles\n ... No profiles yet\n\nA profile holds the site,
+ voice and links every post is written against.\n\nCreate your first profile"
+
+# after, database stopped, Refresh clicked
+"Website Profiles\n\nProfile list unavailable\n ... Could not load profiles\n\nThe request
+ failed and the server gave no reason.\n\nRetry"
+```
+
+The wording of the failure is the client's fallback because a route handler whose database is
+gone answers 500 with an empty body (recorded in `todo.md` during 8.2). Retry recovers:
+
+```
+# database stopped
+document.body.innerText.includes("Could not load profiles")   -> true
+# `docker compose start db`, then Retry clicked
+{ recovered: true, text: "Website Profiles\n\n0 total profiles ..." }
+```
+
+**Loading.** Under `chrome-devtools-axi emulate --network "Slow 3G"`, `open` then `screenshot`
+then read the DOM:
+
+```
+{ skeletons: 25, header: "Website Profiles\n\nLoading profiles...\n\nNew Pro" }
+```
+
+**Create dialog.** With the database stopped, filling the dialog and pressing Create:
+
+```
+# before
+document.body.innerText.includes("Failed to create profile")   -> true   (toast only)
+
+# after
+"Create Profile\n\nName the site and give its URL. Everything else is editable once the
+ profile exists.\n\nName\nWebsite URL\n\nCould not create the profile\n\nThe profile could
+ not be created.\n\nCancel\nCreate\nClose"
+```
+
+The dialog keeps the operator's two fields and the reason together. The `DialogDescription`
+in that readout is a second fix: the dialog had none, which Radix reports on every open as
+`Warning: Missing 'Description' or 'aria-describedby={undefined}' for {DialogContent}` and
+which showed up in this suite's own test output.
+
+**`/profiles/[id]`, load failure.** Opening a profile id that this account does not own:
+
+```
+# before
+{ path: "/profiles", text: "Content Crew ... Website Profiles\n\n1 total profiles ..." }
+
+# after
+{ path: "/profiles/00000000-0000-0000-0000-000000000000",
+  text: "Could not load this profile\n\nProfile not found\n\nRetry" }
+```
+
+`GET /api/profiles/<id>` answers `{"detail": "Profile not found"}` for an unowned id, so this
+is the server's own wording. Retry, proven by moving the real profile's `user_id` to the other
+account, opening it, moving it back and pressing Retry:
+
+```
+"Could not load this profile\n\nProfile not found\n\nRetry"
+-> Retry
+{ path: "/profiles/714bf8bd-...", err: false }
+{ name: "Compose Stack Check", links: 20 }
+```
+
+**`/profiles/[id]`, links failure on first load.** Driven by patching `window.fetch` to fail
+`/links` and then navigating client-side from `/profiles` (a client navigation keeps the patch,
+a fresh `open` does not):
+
+```
+# before
+{ path: "/profiles/714bf8bd-...", emptyState: true, errState: false, msg: false, rows: 1 }
+
+# after
+{ path: "/profiles/714bf8bd-...", emptyState: false, errState: true, msg: true, rows: 1 }
+```
+
+`Retry links` recovers once the patch is lifted:
+
+```
+{ err: false, rows: 20 }
+```
+
+A links *refetch* that fails (typing in the links search while the profile has been moved to
+another account) keeps the last good rows rather than blanking them, before and after:
+
+```
+{ emptyState: false, toast: true, rows: 20 }
+```
+
+**`/profiles/[id]`, links loading.** With `/links` left pending:
+
+```
+{ combo: 25, inRow: 25 }     # 5 skeleton rows x 5 cells inside <tbody>
+```
+
+Before, that same window rendered an empty `<tbody>` with a detached spinner underneath.
+
+**`/profiles/[id]`, page loading.** Under Slow 3G, `open` then `screenshot` then count:
+
+```
+# before                       # after
+{ skeletons: 3 }               { skeletons: 25 }
+```
+
+The route already had a full-layout `loading.tsx`; the client fetch rendered three grey bars
+instead. `profile-detail-skeleton.tsx` is now the single definition both use.
+
+**`/profiles/[id]`, save failure.** With the profile moved to the other account, pressing
+Save Profile:
+
+```
+"Could not save this profile\n\nProfile not found\n\nSave Profile\nCrawl Sitemap ..."
+```
+
+### Accessibility
+
+`/profiles` was already clean. `/profiles/[id]` reported three issues:
+
+```
+$ chrome-devtools-axi console --type issue      # /profiles/[id], before
+[issue] No label associated with a form field (count: 2)
+[issue] An element doesn't have an autocomplete attribute (count: 1)
+[issue] A form field element should have an id or name attribute (count: 8)
+```
+
+The eight unnamed fields were seven Radix `Select`s (Radix renders a hidden native `select`
+for form compatibility whether or not it is given a `name`) and the links search input. The two
+unassociated labels were `Output Format` and `Re-crawl Schedule`, both `<Label>` with no
+`htmlFor` next to a Radix trigger with no `id`. The autocomplete issue was the profile `Name`
+input, which browser autofill recognises by id and would offer a person's name for.
+
+```
+$ chrome-devtools-axi console --type issue      # /profiles/[id], after
+<no console messages found>
+
+$ chrome-devtools-axi console --type error      # both routes, after
+<no console messages found>
+```
+
+DOM cross-check on the after build:
+
+```
+{ unnamed: [], badLabels: [] }
+```
+
+### Screenshots
+
+Twenty files under `docs/mastra-port/ui/`, prefixed `8.6-`:
+
+| File | md5 |
+| --- | --- |
+| `8.6-list-success-before.png` | `004059d95176d655673c5c9876fe0564` |
+| `8.6-list-success-after.png` | `6fcbf9d726f9bddca1c6f6b2b067774a` |
+| `8.6-list-empty-before.png` | `5debac38484e8c3b2dc919ef6e9e37c6` |
+| `8.6-list-empty-after.png` | `94af9796d9a0ddf56fb01dd3ddeced60` |
+| `8.6-list-error-before.png` | `f7ae7a674495bd007b77b28faa3ad6c1` |
+| `8.6-list-error-after.png` | `4bd58656bcd5e227be942edd5dd94701` |
+| `8.6-list-loading-after.png` | `65a8962d7be9ed7b4db654bc5ed5ff1c` |
+| `8.6-list-create-error-before.png` | `d9650e99b9205456655cd28318d13d4a` |
+| `8.6-list-create-error-after.png` | `952c99e65d82f12618cce820c5cfe6d0` |
+| `8.6-detail-success-before.png` | `5aeb908fbb50307ee596246e3a0aad62` |
+| `8.6-detail-success-after.png` | `5aeb908fbb50307ee596246e3a0aad62` |
+| `8.6-detail-loading-before.png` | `1151ce8ba80d71d90937a8ebfce48f29` |
+| `8.6-detail-loading-after.png` | `91b38b7a6f73fb8183d41145c316313c` |
+| `8.6-detail-load-error-before.png` | `54b98592d66f8f454a07d77629074fc7` |
+| `8.6-detail-load-error-after.png` | `47edae11a8b7042d86f46e7d0a8fa27d` |
+| `8.6-detail-links-firstload-error-before.png` | `60538476b9dc565731250a5f3f530c6d` |
+| `8.6-detail-links-firstload-error-after.png` | `c0939b5feb690e82fd14c943a0a66a9e` |
+| `8.6-detail-links-error-before.png` | `b7529dccbcafea622b1aa39deffd4ae5` |
+| `8.6-detail-links-loading-after.png` | `30bfbfad098f35ed3f1e6e6c8514e961` |
+| `8.6-detail-save-error-after.png` | `27eb20638d6a3f6673ef10a70f1b57c3` |
+
+`8.6-detail-success-before.png` and `8.6-detail-success-after.png` are byte-identical, and that
+is the intended result: nothing on this item touched the success render of `/profiles/[id]`
+beyond `id`, `name` and `autoComplete` attributes. `8.6-list-success-{before,after}.png` differ
+only because the count line now reads "1 total profile" rather than "1 total profiles".
+
+### Gates
+
+```
+$ pnpm -C web exec tsc --noEmit
+exit=0
+
+$ pnpm -C web lint
+exit=0
+
+$ pnpm -C web test
+ Test Files  1 failed | 138 passed (139)
+      Tests  6 failed | 4572 passed | 7 skipped (4585)
+
+$ pnpm -C web build
+✓ Compiled successfully in 6.5s
+✓ Generating static pages using 15 workers (42/42) in 282.2ms
+exit=0
+```
+
+All six failures are `image-preview.test.tsx`, the standing baseline in `todo.md`.

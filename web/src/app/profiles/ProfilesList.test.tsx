@@ -171,4 +171,68 @@ describe("ProfilesPage", () => {
     await user.click(screen.getByRole("button", { name: "Create" }));
     expect(toast.error).toHaveBeenCalledWith("Name and website URL are required");
   });
+  it("shows the server's own message and a working retry when the list fails", async () => {
+    const user = userEvent.setup();
+    mockList.mockRejectedValueOnce(
+      new Error(JSON.stringify({ detail: "Profiles unavailable" }))
+    );
+    renderWithProviders(<ProfilesPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Could not load profiles")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Profiles unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("No profiles yet")).not.toBeInTheDocument();
+    expect(screen.getByText("Profile list unavailable")).toBeInTheDocument();
+
+    mockList.mockResolvedValue(testProfiles);
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(screen.getByText("Test Site")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Could not load profiles")).not.toBeInTheDocument();
+  });
+
+  it("falls back to its own wording when the failure carries no message", async () => {
+    mockList.mockRejectedValueOnce(new Error(""));
+    renderWithProviders(<ProfilesPage />);
+    await waitFor(() => {
+      expect(
+        screen.getByText("The request failed and the server gave no reason.")
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("clears the search from the no-match empty state", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ProfilesPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Test Site")).toBeInTheDocument();
+    });
+    await user.type(screen.getByPlaceholderText("Search profiles..."), "nonexistent-xyz");
+    expect(screen.getByText("No profiles match your search")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(screen.getByText("Test Site")).toBeInTheDocument();
+  });
+
+  it("keeps a rejected create inline in the dialog", async () => {
+    const user = userEvent.setup();
+    vi.mocked(profiles.create).mockRejectedValueOnce(
+      new Error(JSON.stringify({ detail: "A profile with that URL already exists" }))
+    );
+    renderWithProviders(<ProfilesPage />);
+    await waitFor(() => {
+      expect(screen.getByText("New Profile")).toBeInTheDocument();
+    });
+    await user.click(screen.getByText("New Profile"));
+    await user.type(screen.getByLabelText("Name"), "My Site");
+    await user.type(screen.getByLabelText("Website URL"), "https://example.com");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => {
+      expect(
+        screen.getByText("A profile with that URL already exists")
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText("Create Profile")).toBeInTheDocument();
+    expect(mockPush).not.toHaveBeenCalled();
+  });
 });

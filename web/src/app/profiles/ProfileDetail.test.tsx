@@ -224,11 +224,91 @@ describe("ProfileDetailPage", () => {
     });
   });
 
-  it("redirects on fetch error", async () => {
-    mockGet.mockRejectedValue(new Error("Not found"));
+  it("shows the server's own message and a working retry when the load fails", async () => {
+    const user = userEvent.setup();
+    mockGet.mockRejectedValueOnce(
+      new Error(JSON.stringify({ detail: "Profile not found" }))
+    );
     renderWithProviders(<ProfileDetailPage />);
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith("/profiles");
+      expect(screen.getByText("Could not load this profile")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Profile not found")).toBeInTheDocument();
+    // The URL is where the profile is: a failed load must not throw it away.
+    expect(mockPush).not.toHaveBeenCalled();
+
+    mockGet.mockResolvedValue(makeProfile({ name: "Test Profile" }));
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(screen.getByText("Test Profile")).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText("Could not load this profile")
+    ).not.toBeInTheDocument();
+  });
+
+  it("falls back to its own wording when the load failure carries no message", async () => {
+    mockGet.mockRejectedValueOnce(new Error(""));
+    renderWithProviders(<ProfileDetailPage />);
+    await waitFor(() => {
+      expect(
+        screen.getByText("The request failed and the server gave no reason.")
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("shows a links error with a retry instead of an empty links table", async () => {
+    const user = userEvent.setup();
+    mockLinks.mockRejectedValueOnce(
+      new Error(JSON.stringify({ detail: "Links unavailable" }))
+    );
+    renderWithProviders(<ProfileDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Could not load internal links")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Links unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("No internal links yet")).not.toBeInTheDocument();
+
+    mockLinks.mockResolvedValue({
+      items: testLinks,
+      total: testLinks.length,
+      page: 1,
+      per_page: 20,
+      pages: 1,
+    });
+    await user.click(screen.getByRole("button", { name: "Retry links" }));
+    await waitFor(() => {
+      expect(screen.getByText("https://example.com/page-1")).toBeInTheDocument();
+    });
+  });
+
+  it("renders skeleton rows while the first page of links is in flight", async () => {
+    mockLinks.mockReturnValue(new Promise(() => {}));
+    const { container } = renderWithProviders(<ProfileDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Internal Links")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("No internal links yet")).not.toBeInTheDocument();
+    const rows = container.querySelectorAll(
+      "tbody tr [class*='animate-pulse']"
+    );
+    expect(rows.length).toBeGreaterThan(0);
+  });
+
+  it("keeps a rejected save inline above the button", async () => {
+    const user = userEvent.setup();
+    mockUpdate.mockRejectedValueOnce(
+      new Error(JSON.stringify({ detail: "website_url must be absolute" }))
+    );
+    renderWithProviders(<ProfileDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Test Site")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /Save Profile/i }));
+    await waitFor(() => {
+      expect(
+        screen.getByText("website_url must be absolute")
+      ).toBeInTheDocument();
     });
   });
 });

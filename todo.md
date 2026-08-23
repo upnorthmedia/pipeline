@@ -752,3 +752,11 @@
   Publishing). Found while working item 8.5; it is one instance of the broadly failing e2e
   drift item 9.1 has to settle, recorded here so that pass knows the assertion is stale rather
   than the page being wrong.
+
+- [confirmed] 2026-08-23 `POST /api/profiles` accepts any string as `website_url`: creating a
+  profile with the literal value `not a url` succeeded during item 8.6's live checks. This is
+  a faithful port (`web/src/app/api/profiles/validation.ts` uses `z.string()` where Pydantic
+  used `str`), so it is a product gap rather than a port defect, but the sitemap crawl and the
+  internal-link resolver both assume the field parses as a URL. Tightening it changes an API
+  contract the dashboard and `packages/create-mdx-blog` both sit on, so it is a decision to
+  take deliberately after the port rather than inside it.
