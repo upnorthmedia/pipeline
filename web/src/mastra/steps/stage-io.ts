@@ -29,7 +29,7 @@ import {
   markStageForReview,
   markStageRunning,
 } from "../post-state"
-import { STAGES, STATUS_COMPLETE } from "../state"
+import { MAX_ATTEMPTS, STAGES, STATUS_COMPLETE } from "../state"
 import type { Stage } from "../state"
 
 /**
@@ -309,6 +309,68 @@ export async function announceStageComplete(
     stage: output.stage,
     model: output.model,
     duration_s: durationS,
+  })
+}
+
+/**
+ * Python's `str(e)` on the exception that reached the runner's `except` block.
+ *
+ * A thrown `Error` reports its message and anything else is stringified, which
+ * is the same pair of shapes `failure-recorder.ts` reads back off the engine's
+ * serialised `prevResult.error`. Both records of one failure therefore carry
+ * the same text.
+ */
+function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return String(error)
+}
+
+/**
+ * The `warning` / `retry` entry from Python's exception branch
+ * (`api/src/worker.py:334`), written when a stage throws and the engine still
+ * has attempts left for it.
+ *
+ * It lives here rather than beside its sibling `error` / `stage_error` entry in
+ * `failure-recorder.ts` because the two are written from different places by
+ * construction. The evented processor only routes a failed step to
+ * `workflow.step.end`, and so to `workflow.fail`, once
+ * `retryCount >= retryConfig.attempts`
+ * (`workflow-event-processor-Dp87-e6z.js:3434`); while attempts remain it
+ * republishes `workflow.step.run` and nothing terminal is ever published. A
+ * listener on `workflows-finish` therefore cannot see a retry, and the only
+ * vantage point that can is inside the step, where `retryCount` and the thrown
+ * error are both in hand.
+ *
+ * `retryCount + 1` is Python's `job_try`: the engine counts retries after the
+ * first execution, so the first failure arrives with `retryCount === 0` and is
+ * attempt 1. The gate is Python's own `job_try < MAX_ATTEMPTS`, which holds
+ * exactly when the workflow's `attempts` (`MAX_ATTEMPTS - 1`) leaves a retry to
+ * come, so the entry is written when and only when one actually follows.
+ *
+ * The stage names the step that threw. Python sent `""` for a full run, since
+ * its runner only knew the whole job had failed; the same deviation, and the
+ * same reason for it, is recorded on the `stage_error` entry in
+ * `failure-recorder.ts`.
+ *
+ * No SSE event goes with it: Python published `stage_error` once per attempt
+ * from the same block, and that publish is already ported in the failure
+ * recorder. Publishing a second one here would raise a toast per attempt for a
+ * run that has not failed yet.
+ */
+export async function recordStageRetry(
+  stage: Stage,
+  postId: string,
+  retryCount: number,
+  error: unknown,
+): Promise<void> {
+  const attempt = retryCount + 1
+  if (attempt >= MAX_ATTEMPTS) return
+  await appendExecutionLog(postId, {
+    stage,
+    level: "warning",
+    event: "retry",
+    message: `Pipeline attempt ${attempt} failed, retrying...`,
+    data: { attempt, max_attempts: MAX_ATTEMPTS, error: errorText(error) },
   })
 }
 

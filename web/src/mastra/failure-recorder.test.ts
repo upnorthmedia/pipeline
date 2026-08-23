@@ -447,9 +447,41 @@ describe("a pipeline run that fails", () => {
       "stage_complete/research",
       "stage_start/outline",
       "stage_complete/outline",
-      ...Array(MAX_ATTEMPTS).fill("stage_start/write"),
+      // Every attempt but the last is followed by the `retry` entry saying
+      // another one is coming; the last is followed by the `stage_error` entry
+      // saying none is.
+      ...Array(MAX_ATTEMPTS - 1).fill(["stage_start/write", "retry/write"]).flat(),
+      "stage_start/write",
       "stage_error/write",
     ])
+  })
+
+  it("writes Python's retry entry for every attempt that had another one left", () => {
+    const entries = executionLogsOf(failedRow).filter((entry) => entry.event === "retry")
+    // One per failed attempt except the last: Python's `job_try < MAX_ATTEMPTS`.
+    expect(entries).toHaveLength(MAX_ATTEMPTS - 1)
+    expect(entries).toEqual(
+      Array.from({ length: MAX_ATTEMPTS - 1 }, (_, index) => ({
+        ts: expect.any(String),
+        stage: "write",
+        level: "warning",
+        event: "retry",
+        message: `Pipeline attempt ${index + 1} failed, retrying...`,
+        data: { attempt: index + 1, max_attempts: MAX_ATTEMPTS, error: BOOM },
+      })),
+    )
+  })
+
+  it("timestamps the retry entries in the offset form the analytics query sorts on", () => {
+    const entries = executionLogsOf(failedRow).filter((entry) => entry.event === "retry")
+    for (const entry of entries) expect(String(entry.ts)).toMatch(/\+00:00$/)
+  })
+
+  it("writes no retry entry against a stage that never threw", () => {
+    const stages = executionLogsOf(failedRow)
+      .filter((entry) => entry.event === "retry")
+      .map((entry) => entry.stage)
+    expect(new Set(stages)).toEqual(new Set(["write"]))
   })
 
   it("writes no pipeline_complete entry for a run that died", () => {

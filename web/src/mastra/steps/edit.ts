@@ -33,6 +33,7 @@ import {
   gateResumeSchema,
   gateSuspendSchema,
   markRerunComplete,
+  recordStageRetry,
   reviewGate,
   shouldRunStage,
   skippedStageOutput,
@@ -215,67 +216,76 @@ export const editStep = createStep({
   outputSchema: stageStepOutputSchema,
   resumeSchema: gateResumeSchema,
   suspendSchema: gateSuspendSchema,
-  execute: async ({ inputData, mastra, resumeData, suspend }) => {
-    const { postId } = inputData
-    const state = await loadPipelineState(postId)
-    if (!shouldRunStage("edit", inputData, state.stageStatus)) {
-      return skippedStageOutput(inputData, "edit")
-    }
-
-    // The gate sits immediately after the skip check and before anything the
-    // stage spends, which is where Python put it: a paused stage bills nothing.
-    const gate = await reviewGate("edit", inputData, state.stageSettings, resumeData)
-    if (gate) return suspend(gate)
-    await announceStageStart(mastra, "edit", inputData)
-    const rulesPrompt = buildStagePrompt("edit", loadRules("edit"), state)
-    const analyticsSection = buildAnalyticsSection(state)
-    const prompt = analyticsSection
-      ? rulesPrompt + ANALYTICS_SEPARATOR + analyticsSection
-      : rulesPrompt
-
-    const startedAt = Date.now()
-    const result = await mastra.getAgent("edit").generate(prompt)
-    const durationMs = Date.now() - startedAt
-
-    const logger = mastra.getLogger()
-    for (const warning of editOutputWarnings(state, result.text)) {
-      logger?.warn(warning.message, { postId, stage: "edit" })
-    }
-
-    let validation: ValidationResult
+  execute: async ({ inputData, mastra, resumeData, suspend, retryCount }) => {
     try {
-      validation = await validateLinks(result.text)
+      const { postId } = inputData
+      const state = await loadPipelineState(postId)
+      if (!shouldRunStage("edit", inputData, state.stageStatus)) {
+        return skippedStageOutput(inputData, "edit")
+      }
+
+      // The gate sits immediately after the skip check and before anything the
+      // stage spends, which is where Python put it: a paused stage bills nothing.
+      const gate = await reviewGate("edit", inputData, state.stageSettings, resumeData)
+      if (gate) return suspend(gate)
+      await announceStageStart(mastra, "edit", inputData)
+      const rulesPrompt = buildStagePrompt("edit", loadRules("edit"), state)
+      const analyticsSection = buildAnalyticsSection(state)
+      const prompt = analyticsSection
+        ? rulesPrompt + ANALYTICS_SEPARATOR + analyticsSection
+        : rulesPrompt
+
+      const startedAt = Date.now()
+      const result = await mastra.getAgent("edit").generate(prompt)
+      const durationMs = Date.now() - startedAt
+
+      const logger = mastra.getLogger()
+      for (const warning of editOutputWarnings(state, result.text)) {
+        logger?.warn(warning.message, { postId, stage: "edit" })
+      }
+
+      let validation: ValidationResult
+      try {
+        validation = await validateLinks(result.text)
+      } catch (error) {
+        // Never blocks the pipeline: an unreachable network leaves the model's own
+        // links in place rather than throwing away a paid-for edit.
+        logger?.error("link validation failed, skipping", { postId, error })
+        validation = { content: result.text, removed: [] }
+      }
+
+      if (validation.removed.length > 0) {
+        logger?.warn(
+          `Stripped ${validation.removed.length} dead link(s): ` +
+            validation.removed.map((link) => link.url).join(", "),
+          { postId, stage: "edit" },
+        )
+      }
+
+      await saveStageOutput(postId, "edit", validation.content, { edit: STATUS_COMPLETE })
+      await markRerunComplete(inputData)
+
+      const output = {
+        postId,
+        stages: inputData.stages,
+        stage: "edit" as const,
+        skipped: false,
+        // The provider's own reported model id, not the one requested, so a
+        // silent server-side alias shows up in the run trace.
+        model: result.response?.modelId ?? "",
+        tokensIn: result.usage?.inputTokens ?? 0,
+        tokensOut: result.usage?.outputTokens ?? 0,
+        durationS: durationMs / 1000,
+      }
+      await announceStageComplete(mastra, output)
+      return output
     } catch (error) {
-      // Never blocks the pipeline: an unreachable network leaves the model's own
-      // links in place rather than throwing away a paid-for edit.
-      logger?.error("link validation failed, skipping", { postId, error })
-      validation = { content: result.text, removed: [] }
+      // Python's `warning` / `retry` entry, from the `except` block that
+      // wrapped the whole stage loop. Only this side of the throw can see the
+      // attempt number, so the record is written here and the error is rethrown
+      // unchanged for the engine to retry or fail on.
+      await recordStageRetry("edit", inputData.postId, retryCount, error)
+      throw error
     }
-
-    if (validation.removed.length > 0) {
-      logger?.warn(
-        `Stripped ${validation.removed.length} dead link(s): ` +
-          validation.removed.map((link) => link.url).join(", "),
-        { postId, stage: "edit" },
-      )
-    }
-
-    await saveStageOutput(postId, "edit", validation.content, { edit: STATUS_COMPLETE })
-    await markRerunComplete(inputData)
-
-    const output = {
-      postId,
-      stages: inputData.stages,
-      stage: "edit" as const,
-      skipped: false,
-      // The provider's own reported model id, not the one requested, so a
-      // silent server-side alias shows up in the run trace.
-      model: result.response?.modelId ?? "",
-      tokensIn: result.usage?.inputTokens ?? 0,
-      tokensOut: result.usage?.outputTokens ?? 0,
-      durationS: durationMs / 1000,
-    }
-    await announceStageComplete(mastra, output)
-    return output
   },
 })

@@ -12614,6 +12614,207 @@ three pieces are separately verifiable, so they are separate items.
         - [ ] 5.5c-iii-b-2 The `warning` / `retry` entry itself, written from inside the
           step where `retryCount` and the thrown error are both in hand, since the
           `workflows-finish` listener only ever sees a run whose attempts are spent.
+
+          Split, because the six stages are not one shape here. Five of them are a
+          single step in `pipelineWorkflow`'s own chain, so the parent's
+          `retryConfig.attempts` is what retries them and the `retryCount` their
+          `execute` receives is the attempt number Python called `job_try`. `images`
+          is a nested workflow (`workflows/images.ts`), and a nested run is a fresh
+          `Run` carrying its own `retryConfig`, which `createWorkflow` defaults to
+          `{attempts: 0, delay: 0}` (`agent-DSxJoGjY.js:4951`). Its three sub-steps
+          therefore see a `retryCount` that is not the parent's, and the attempt
+          number Python recorded is not in hand anywhere inside them. That is a
+          different problem with a different answer, so it gets its own item.
+
+          - [x] 5.5c-iii-b-2-a The entry for the five single-step stages: `research`,
+            `outline`, `write`, `edit`, `ready`.
+
+            `recordStageRetry()` in `web/src/mastra/steps/stage-io.ts` ports Python's
+            `if job_try < MAX_ATTEMPTS:` branch (`api/src/worker.py:333`) verbatim:
+            level `warning`, event `retry`, message
+            `Pipeline attempt {n} failed, retrying...`, and the three data keys
+            `attempt`, `max_attempts`, `error`. Each of the five steps now wraps its
+            `execute` body in `try` / `catch`, calls it, and rethrows the error
+            unchanged.
+
+            Three decisions, argued rather than assumed:
+
+            1. **Inside the step, not beside its sibling entry.** The `error` /
+               `stage_error` entry from the same Python block is written by
+               `failure-recorder.ts` off the `workflows-finish` topic. That listener
+               cannot see a retry by construction: the evented processor routes a
+               failed step to `workflow.step.end` (and so to `workflow.fail`) only
+               when `retryCount >= (getEntryRetries(leaf) ?? workflow.retryConfig.attempts ?? 0)`,
+               and otherwise republishes `workflow.step.run` with `retryCount + 1`
+               (`workflow-event-processor-Dp87-e6z.js:3434`). Nothing terminal is
+               published while attempts remain, so the only vantage point that sees
+               one is the step that threw.
+
+            2. **`retryCount + 1` is `job_try`, and `attempt >= MAX_ATTEMPTS` is the
+               gate.** The engine counts retries after the first execution, so the
+               first failure arrives with `retryCount === 0`. Python's own condition
+               was `job_try < MAX_ATTEMPTS`, which is `attempt < MAX_ATTEMPTS` here,
+               and it holds exactly when the workflow's `attempts`
+               (`MAX_ATTEMPTS - 1`, item 5.5c-iii-b-1) leaves a retry to come. So the
+               entry that promises another attempt is written when and only when one
+               follows.
+
+            3. **No SSE event beside it.** Python published `stage_error` once per
+               attempt from this block; that publish is already ported in the failure
+               recorder, once per run. Adding a second publish here would raise a
+               dashboard toast per attempt for a run that has not failed yet, which
+               is a user-visible change rather than a port.
+
+            One deviation from Python, the same one 5.5c-iii-a records for the
+            `stage_error` entry: the stage names the step that threw, where Python
+            sent `""` for a full run because its runner only knew the whole job had
+            failed.
+
+            Not covered, and deliberately: a step whose *input* fails schema
+            validation throws inside `StepExecutor.execute` before `step.execute` is
+            called (`workflow-event-processor-Dp87-e6z.js:1122`), so no `catch` in the
+            step body can see it and no retry entry is written for it. Python had no
+            equivalent failure mode, since it passed a dict.
+
+            The two entries a failing `write` stage stores, read back off the row:
+
+            ```json
+            [
+              {
+                "ts": "2026-08-23T00:43:16.735+00:00",
+                "data": {
+                  "error": "provider exploded mid-draft",
+                  "attempt": 1,
+                  "max_attempts": 3
+                },
+                "event": "retry",
+                "level": "warning",
+                "stage": "write",
+                "message": "Pipeline attempt 1 failed, retrying..."
+              },
+              {
+                "ts": "2026-08-23T00:43:16.736+00:00",
+                "data": {
+                  "error": "provider exploded mid-draft",
+                  "attempt": 2,
+                  "max_attempts": 3
+                },
+                "event": "retry",
+                "level": "warning",
+                "stage": "write",
+                "message": "Pipeline attempt 2 failed, retrying..."
+              }
+            ]
+            ```
+
+            The third attempt writes nothing, which is Python's `else` branch and the
+            reason the run's trail ends `stage_start/write` then `stage_error/write`.
+
+            Before the implementation, with the assertions written first:
+
+            ```
+            $ npx vitest run src/mastra/failure-recorder.test.ts
+            Tests  3 failed | 32 passed (35)
+
+            AssertionError: expected [] to have a length of 2 but got +0
+              src/mastra/failure-recorder.test.ts:462:21
+            AssertionError: expected Set{} to deeply equal Set{ 'write' }
+              src/mastra/failure-recorder.test.ts:484:29
+            # plus the whole-trail assertion, which the retry entries interleave into.
+            ```
+
+            Six boundary tests against the real database, driving `recordStageRetry`
+            directly, because a real run only ever fails on its last attempt and so
+            can never reach the branch that writes nothing:
+
+            ```
+            $ npx vitest run src/mastra/steps/stage-retry.test.ts --reporter=verbose
+             ✓ recordStageRetry > writes Python's entry for the first failure, with retryCount read as job_try 20ms
+             ✓ recordStageRetry > writes nothing on the attempt that spends the last one, Python's else branch 2ms
+             ✓ recordStageRetry > writes an entry for every attempt before the last one 3ms
+             ✓ recordStageRetry > records a thrown non-Error the way Python's str(e) would 2ms
+             ✓ recordStageRetry > names the stage that threw, which is what the log reader groups on 2ms
+             ✓ recordStageRetry > timestamps the entry in the offset form the analytics query sorts on 4ms
+
+             Test Files  1 passed (1)
+                  Tests  6 passed (6)
+            ```
+
+            Three assertions on the file's existing real failing run (real evented
+            engine, real Redis Streams, real database, `write` throwing), plus the
+            whole-trail assertion the entries now interleave into:
+
+            ```
+            $ npx vitest run src/mastra/failure-recorder.test.ts --reporter=verbose
+             ✓ a pipeline run that fails > closes the log with the failure, after the stages that did complete 0ms
+             ✓ a pipeline run that fails > writes Python's retry entry for every attempt that had another one left 0ms
+             ✓ a pipeline run that fails > timestamps the retry entries in the offset form the analytics query sorts on 0ms
+             ✓ a pipeline run that fails > writes no retry entry against a stage that never threw 0ms
+
+             Test Files  1 passed (1)
+                  Tests  35 passed (35)
+            ```
+
+            Negative controls, each reverted after measuring, run over both files
+            (41 tests, all passing at baseline):
+
+            | Control | Result |
+            | --- | --- |
+            | `if (attempt >= MAX_ATTEMPTS) return` deleted | 4 failed, 37 passed |
+            | `const attempt = retryCount` instead of `retryCount + 1` | 5 failed, 36 passed |
+            | gate loosened to `attempt > MAX_ATTEMPTS` | 4 failed, 37 passed |
+            | the `recordStageRetry` call deleted from `write.ts` only | 3 failed, 38 passed |
+
+            The third control is the one worth keeping: an off-by-one in the gate
+            leaves the entry looking right on every attempt except the last, where it
+            silently claims a retry that never comes. It fails the boundary test and
+            the run's exact-count and whole-trail assertions.
+
+            Gates:
+
+            ```
+            $ npx tsc --noEmit
+            TSC EXIT=0
+
+            $ npx eslint
+            LINT EXIT=0
+
+            $ npx vitest run
+             Test Files  3 failed | 86 passed (89)
+                  Tests  10 failed | 1595 passed | 7 skipped (1612)
+            # 9 is the standing baseline: 6 in image-preview.test.tsx and 3 in
+            # PostDetail.test.tsx, both pre-existing. The tenth is the known
+            # scaffold-check.test.ts flake logged in todo.md; it passed alone:
+            $ npx vitest run src/mastra/workflows/scaffold-check.test.ts
+             Test Files  1 passed (1)
+                  Tests  5 passed (5)
+
+            $ npx next build
+            BUILD EXIT=0
+            ✓ Compiled successfully in 3.4s
+            ✓ Generating static pages using 15 workers (35/35) in 295.6ms
+
+            $ cd api && uv run pytest -q
+            120 failed, 241 passed, 25 errors in 13.24s
+            # Better than the Phase 0 baseline of 125 failed / 235 passed / 25 errors,
+            # and untouched by this item: no Python file changed.
+
+            $ cd api && uv run ruff check .
+            Found 32 errors.
+
+            $ cd api && uv run ruff format --check .
+            9 files would be reformatted, 131 files already formatted
+            ```
+
+          - [ ] 5.5c-iii-b-2-b The entry for the `images` stage. Blocked on deciding
+            where the attempt number comes from: `imagesWorkflow` is a nested run with
+            its own defaulted `retryConfig`, so `images-manifest`, `images-generate`
+            and `images-assemble` each see a `retryCount` that is not the parent's.
+            Settle first, by measurement rather than by reading, whether the parent
+            retries the nested workflow entry at all under
+            `pipelineWorkflow.retryConfig`, and whether a nested run's steps restart
+            at `retryCount === 0` on each parent attempt. Both answers change what the
+            entry can honestly say.
     - [ ] 5.5c-iv `publishStageLog()` and the `log` event: the 28 call sites inside the
       six stage nodes, and the module-level `set_event_context` /
       `clear_event_context` they read, which has no equivalent in a step that already

@@ -20,11 +20,11 @@
  * It also carries the run-level records Python wrote from the same `except`
  * block: the `stage_error` event on the bus and the `error` / `stage_error`
  * entry in `execution_logs`. The `warning` / `retry` entry beside it is not
- * here, and ledger item 5.5c-iii-b-2 holds why: the evented engine only
- * publishes `workflow.fail` once `retryConfig.attempts` is exhausted, so a run
- * that reaches this listener has no attempts left by construction. The entry
- * for the attempts that remained has to be written from inside the step, where
- * `retryCount` and the thrown error are both in hand.
+ * here: the evented engine only publishes `workflow.fail` once
+ * `retryConfig.attempts` is exhausted, so a run that reaches this listener has
+ * no attempts left by construction. The entry for the attempts that remained is
+ * written from inside the step, where `retryCount` and the thrown error are
+ * both in hand, by `recordStageRetry()` in `steps/stage-io.ts`.
  *
  * The hook is a listener on the `workflows-finish` topic, registered through
  * `events` on the Mastra instance. That keeps it inside a Mastra primitive and

@@ -304,3 +304,14 @@
   reading the retry branch for item 5.5c-iii-b-1. If real, the user-visible effect is a
   second approval prompt rather than a lost run, and the fix is probably to treat a
   `stage_status` of `running` for this stage as approval.
+- [investigate] 2026-08-22 The `images` stage may not retry at all, where Python's job
+  retry re-ran it like any other stage. `imagesWorkflow` is a nested workflow, and
+  `createWorkflow` defaults `retryConfig` to `{attempts: 0, delay: 0}`
+  (`agent-DSxJoGjY.js:4951`), so its three sub-steps have no retries of their own.
+  Whether the parent retries the nested entry under `pipelineWorkflow.retryConfig` was
+  not measured: the nested workflow is dispatched as `entry.step.execute(...)` like any
+  step (`workflow-event-processor-Dp87-e6z.js:1196`), which suggests the parent's retry
+  branch does apply to it, but the sub-steps would then restart at `retryCount === 0` on
+  each parent attempt. Found writing the retry log entry for item 5.5c-iii-b-2-a, which
+  is why that item covers only the five single-step stages; 5.5c-iii-b-2-b is blocked on
+  this measurement.

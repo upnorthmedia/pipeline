@@ -25,6 +25,7 @@ import {
   gateResumeSchema,
   gateSuspendSchema,
   markRerunComplete,
+  recordStageRetry,
   reviewGate,
   shouldRunStage,
   skippedStageOutput,
@@ -85,71 +86,80 @@ export const researchStep = createStep({
   outputSchema: stageStepOutputSchema,
   resumeSchema: gateResumeSchema,
   suspendSchema: gateSuspendSchema,
-  execute: async ({ inputData, mastra, resumeData, suspend }) => {
-    const { postId } = inputData
-    const state = await loadPipelineState(postId)
-    if (!shouldRunStage("research", inputData, state.stageStatus)) {
-      return skippedStageOutput(inputData, "research")
-    }
+  execute: async ({ inputData, mastra, resumeData, suspend, retryCount }) => {
+    try {
+      const { postId } = inputData
+      const state = await loadPipelineState(postId)
+      if (!shouldRunStage("research", inputData, state.stageStatus)) {
+        return skippedStageOutput(inputData, "research")
+      }
 
-    // The gate sits immediately after the skip check and before anything the
-    // stage spends, which is where Python put it: a paused stage bills nothing.
-    const gate = await reviewGate("research", inputData, state.stageSettings, resumeData)
-    if (gate) return suspend(gate)
-    await announceStageStart(mastra, "research", inputData)
-    const prompt = buildStagePrompt("research", loadRules("research"), state)
-    const agent = mastra.getAgent("research")
+      // The gate sits immediately after the skip check and before anything the
+      // stage spends, which is where Python put it: a paused stage bills nothing.
+      const gate = await reviewGate("research", inputData, state.stageSettings, resumeData)
+      if (gate) return suspend(gate)
+      await announceStageStart(mastra, "research", inputData)
+      const prompt = buildStagePrompt("research", loadRules("research"), state)
+      const agent = mastra.getAgent("research")
 
-    let text = ""
-    let model = ""
-    let tokensIn = 0
-    let tokensOut = 0
-    let durationMs = 0
+      let text = ""
+      let model = ""
+      let tokensIn = 0
+      let tokensOut = 0
+      let durationMs = 0
 
-    for (let attempt = 1; attempt <= MAX_RESEARCH_ATTEMPTS; attempt += 1) {
-      const startedAt = Date.now()
-      const result = await agent.generate(attempt === 1 ? prompt : reinforcedPrompt(prompt))
-      durationMs += Date.now() - startedAt
+      for (let attempt = 1; attempt <= MAX_RESEARCH_ATTEMPTS; attempt += 1) {
+        const startedAt = Date.now()
+        const result = await agent.generate(attempt === 1 ? prompt : reinforcedPrompt(prompt))
+        durationMs += Date.now() - startedAt
 
-      text = result.text
-      model = result.response?.modelId ?? model
-      // Python sums usage across every attempt, so a run that retried is billed
-      // and reported for all of its calls rather than only the surviving one.
-      tokensIn += result.usage?.inputTokens ?? 0
-      tokensOut += result.usage?.outputTokens ?? 0
+        text = result.text
+        model = result.response?.modelId ?? model
+        // Python sums usage across every attempt, so a run that retried is billed
+        // and reported for all of its calls rather than only the surviving one.
+        tokensIn += result.usage?.inputTokens ?? 0
+        tokensOut += result.usage?.outputTokens ?? 0
 
-      if (isValidResearch(text)) break
+        if (isValidResearch(text)) break
 
-      mastra.getLogger()?.warn("research attempt returned a meta-response, retrying", {
+        mastra.getLogger()?.warn("research attempt returned a meta-response, retrying", {
+          postId,
+          attempt,
+          maxAttempts: MAX_RESEARCH_ATTEMPTS,
+        })
+      }
+
+      if (!isValidResearch(text)) {
+        // Python keeps the last response rather than failing the run: degraded
+        // research still lets a human read the post detail page and rerun the
+        // stage, where a hard failure would leave the column empty.
+        mastra.getLogger()?.error("all research attempts returned meta-responses, using the last", {
+          postId,
+        })
+      }
+
+      await saveStageOutput(postId, "research", text, { research: STATUS_COMPLETE })
+      await markRerunComplete(inputData)
+
+      const output = {
         postId,
-        attempt,
-        maxAttempts: MAX_RESEARCH_ATTEMPTS,
-      })
+        stages: inputData.stages,
+        stage: "research" as const,
+        skipped: false,
+        model,
+        tokensIn,
+        tokensOut,
+        durationS: durationMs / 1000,
+      }
+      await announceStageComplete(mastra, output)
+      return output
+    } catch (error) {
+      // Python's `warning` / `retry` entry, from the `except` block that
+      // wrapped the whole stage loop. Only this side of the throw can see the
+      // attempt number, so the record is written here and the error is rethrown
+      // unchanged for the engine to retry or fail on.
+      await recordStageRetry("research", inputData.postId, retryCount, error)
+      throw error
     }
-
-    if (!isValidResearch(text)) {
-      // Python keeps the last response rather than failing the run: degraded
-      // research still lets a human read the post detail page and rerun the
-      // stage, where a hard failure would leave the column empty.
-      mastra.getLogger()?.error("all research attempts returned meta-responses, using the last", {
-        postId,
-      })
-    }
-
-    await saveStageOutput(postId, "research", text, { research: STATUS_COMPLETE })
-    await markRerunComplete(inputData)
-
-    const output = {
-      postId,
-      stages: inputData.stages,
-      stage: "research" as const,
-      skipped: false,
-      model,
-      tokensIn,
-      tokensOut,
-      durationS: durationMs / 1000,
-    }
-    await announceStageComplete(mastra, output)
-    return output
   },
 })

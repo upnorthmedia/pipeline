@@ -27,6 +27,7 @@ import {
   gateResumeSchema,
   gateSuspendSchema,
   markRerunComplete,
+  recordStageRetry,
   reviewGate,
   shouldRunStage,
   skippedStageOutput,
@@ -122,40 +123,49 @@ export const readyStep = createStep({
   outputSchema: stageStepOutputSchema,
   resumeSchema: gateResumeSchema,
   suspendSchema: gateSuspendSchema,
-  execute: async ({ inputData, mastra, resumeData, suspend }) => {
-    const { postId } = inputData
-    const state = await loadPipelineState(postId)
-    if (!shouldRunStage("ready", inputData, state.stageStatus)) {
-      return skippedStageOutput(inputData, "ready")
+  execute: async ({ inputData, mastra, resumeData, suspend, retryCount }) => {
+    try {
+      const { postId } = inputData
+      const state = await loadPipelineState(postId)
+      if (!shouldRunStage("ready", inputData, state.stageStatus)) {
+        return skippedStageOutput(inputData, "ready")
+      }
+
+      // The gate sits immediately after the skip check and before anything the
+      // stage spends, which is where Python put it: a paused stage bills nothing.
+      const gate = await reviewGate("ready", inputData, state.stageSettings, resumeData)
+      if (gate) return suspend(gate)
+      await announceStageStart(mastra, "ready", inputData)
+      const prompt = buildReadyPrompt(loadRules("ready"), state)
+
+      const startedAt = Date.now()
+      const result = await mastra.getAgent("ready").generate(prompt)
+      const durationMs = Date.now() - startedAt
+
+      await saveStageOutput(postId, "ready", result.text, { ready: STATUS_COMPLETE })
+      await markRerunComplete(inputData)
+
+      const output = {
+        postId,
+        stages: inputData.stages,
+        stage: "ready" as const,
+        skipped: false,
+        // The provider's own reported model id, not the one requested, so a
+        // silent server-side alias shows up in the run trace.
+        model: result.response?.modelId ?? "",
+        tokensIn: result.usage?.inputTokens ?? 0,
+        tokensOut: result.usage?.outputTokens ?? 0,
+        durationS: durationMs / 1000,
+      }
+      await announceStageComplete(mastra, output)
+      return output
+    } catch (error) {
+      // Python's `warning` / `retry` entry, from the `except` block that
+      // wrapped the whole stage loop. Only this side of the throw can see the
+      // attempt number, so the record is written here and the error is rethrown
+      // unchanged for the engine to retry or fail on.
+      await recordStageRetry("ready", inputData.postId, retryCount, error)
+      throw error
     }
-
-    // The gate sits immediately after the skip check and before anything the
-    // stage spends, which is where Python put it: a paused stage bills nothing.
-    const gate = await reviewGate("ready", inputData, state.stageSettings, resumeData)
-    if (gate) return suspend(gate)
-    await announceStageStart(mastra, "ready", inputData)
-    const prompt = buildReadyPrompt(loadRules("ready"), state)
-
-    const startedAt = Date.now()
-    const result = await mastra.getAgent("ready").generate(prompt)
-    const durationMs = Date.now() - startedAt
-
-    await saveStageOutput(postId, "ready", result.text, { ready: STATUS_COMPLETE })
-    await markRerunComplete(inputData)
-
-    const output = {
-      postId,
-      stages: inputData.stages,
-      stage: "ready" as const,
-      skipped: false,
-      // The provider's own reported model id, not the one requested, so a
-      // silent server-side alias shows up in the run trace.
-      model: result.response?.modelId ?? "",
-      tokensIn: result.usage?.inputTokens ?? 0,
-      tokensOut: result.usage?.outputTokens ?? 0,
-      durationS: durationMs / 1000,
-    }
-    await announceStageComplete(mastra, output)
-    return output
   },
 })
