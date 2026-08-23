@@ -32,7 +32,8 @@ services:
   # in-flight pipeline alone.
   web:
     build:
-      context: ./web
+      context: .
+      dockerfile: web/Dockerfile
       target: deps
     command: pnpm dev
     ports:
@@ -66,7 +67,8 @@ services:
   # service, reached through the bundle `mastra worker build` produces.
   worker:
     build:
-      context: ./web
+      context: .
+      dockerfile: web/Dockerfile
       target: deps
     command: sh -c "pnpm run worker:build && pnpm run worker"
     env_file: .env

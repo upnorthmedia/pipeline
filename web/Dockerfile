@@ -1,3 +1,8 @@
+# Build context is the repo root, not `web/`, so that `rules/` can be copied
+# into the runtime images. Build with:
+#   docker build -f web/Dockerfile --target runner .
+# `docker-compose.yml` and the Railway service definitions both point here.
+
 # Stage 1: Install dependencies
 FROM node:22-alpine AS deps
 
@@ -12,12 +17,12 @@ RUN corepack enable
 # `.npmrc` and `pnpm-workspace.yaml` carry the hoist patterns and the
 # ignored-build-scripts list; without them the container install resolves
 # differently from the local one.
-COPY package.json pnpm-lock.yaml* .npmrc pnpm-workspace.yaml ./
+COPY web/package.json web/pnpm-lock.yaml* web/.npmrc web/pnpm-workspace.yaml ./
 
 RUN pnpm install --frozen-lockfile
 
 # Copy config files needed for dev server
-COPY next.config.ts tsconfig.json postcss.config.mjs eslint.config.mjs components.json ./
+COPY web/next.config.ts web/tsconfig.json web/postcss.config.mjs web/eslint.config.mjs web/components.json ./
 
 # Stage 2: Build
 FROM node:22-alpine AS builder
@@ -27,9 +32,20 @@ WORKDIR /app
 RUN corepack enable
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY web/ ./
 
 ENV NEXT_TELEMETRY_DISABLED=1
+
+# `next build` collects page data by importing every route module, and
+# `src/mastra/index.ts` builds its Postgres store and its Redis pub/sub at
+# module scope, so the build needs both URLs to be parseable even though it
+# never opens either connection. Outside a container `next.config.ts` supplies
+# them by reading the repo-root `.env`, which is why this only ever failed in an
+# image. Neither placeholder reaches the runtime: Next inlines only
+# `NEXT_PUBLIC_*` values, and a builder-stage `ENV` does not carry into the
+# runner stage.
+ENV DATABASE_URL_SYNC="postgresql://build:build@127.0.0.1:5432/build"
+ENV REDIS_URL="redis://127.0.0.1:6379"
 
 RUN pnpm build
 
@@ -47,6 +63,16 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+
+# The stage prompts and the rules editor read these off disk. Baked in rather
+# than mounted so a deployment without bind mounts still has them; a compose
+# bind mount on the same path still wins.
+COPY rules ./rules
+ENV RULES_DIR=/app/rules
+
+# Generated images. A volume is mounted here in every deployment; the default
+# is pinned so an unmounted container writes inside /app instead of /.
+ENV MEDIA_DIR=/app/media
 
 EXPOSE 3000
 
@@ -66,7 +92,7 @@ WORKDIR /app
 RUN corepack enable
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY web/ ./
 
 RUN pnpm run worker:build
 
@@ -76,7 +102,8 @@ RUN pnpm run worker:build
 # dependencies. Anything the pipeline reads off disk therefore has to be copied
 # in and pointed at explicitly: `mastra worker build` has no asset-copy option
 # (its BundlerConfig is externals / sourcemap / minify / transpilePackages /
-# dynamicPackages), and every default path in the app resolves from the cwd.
+# dynamicPackages), and every default path in the app resolves from the cwd,
+# which for the bundle is its own output directory.
 FROM node:22-alpine AS worker
 
 WORKDIR /app
@@ -86,9 +113,10 @@ ENV NODE_ENV=production
 COPY --from=worker-builder /app/.mastra/worker ./.mastra/worker
 COPY --from=worker-builder /app/src/mastra/textstat/data ./src/mastra/textstat/data
 COPY --from=worker-builder /app/src/mastra/scripts/worker-healthcheck.mjs ./scripts/
+COPY rules ./rules
 
-# `rules` and `media` are mounts, so the compose and Railway definitions own
-# those two; the textstat corpus ships in the image and is pinned here.
 ENV TEXTSTAT_DATA_DIR=/app/src/mastra/textstat/data
+ENV RULES_DIR=/app/rules
+ENV MEDIA_DIR=/app/media
 
 CMD ["node", ".mastra/worker/index.mjs"]

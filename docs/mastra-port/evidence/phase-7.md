@@ -696,3 +696,281 @@ logged in `todo.md`.
   datastores, joins the orchestration group and reports itself healthy.
 - The dev `worker` service builds the bundle on start (`pnpm run worker:build && pnpm run worker`),
   which is why its healthcheck has a 90 s `start_period`. It has not been timed under compose.
+
+## 7.2a
+
+Make both runtime images self-contained: build them from the repo root so `rules/` ships
+inside them, and fix the three defects that stopped `web` from building or running at all.
+
+### Why the build context had to move
+
+`rules/` lives at the repo root and both services read it: the six stage prompts come from
+`rules/blog-<stage>.md` through `src/mastra/prompts.ts`, and `/api/rules/[name]` reads and
+writes the same files. Until now both compose files supplied it as a bind mount
+(`./rules:/app/rules`), so nothing in either image carried it.
+
+Railway has no bind mounts. A volume there is empty persistent storage, so a `worker`
+deployed with the old image would come up with no `rules` directory, and the failure mode is
+not a crash: `renderStagePrompt()` treats a missing rule file as an empty section, so every
+stage would run with its rule text silently stripped out of the prompt.
+
+The Dockerfile therefore builds from the repo root (`docker build -f web/Dockerfile .`), and
+both runtime stages `COPY rules ./rules` and pin `ENV RULES_DIR=/app/rules`. The compose bind
+mounts are kept: a mount on the same path still wins, which is what makes editing a rule file
+on the host show up in a running dev container.
+
+`web/.dockerignore` moved to the repo root, because Docker only reads the `.dockerignore` at
+the context root. The old file's `*.md` rule was context-relative and would now have excluded
+`rules/*.md`; at the repo root `*.md` matches only top-level files, and the rules directory is
+explicitly not excluded.
+
+### Three defects this uncovered, all pre-existing
+
+**1. `next build` cannot run without `DATABASE_URL_SYNC` and `REDIS_URL`.** The `runner`
+target had never built. Confirmed against the previous Dockerfile, unchanged, at HEAD:
+
+```
+$ git show HEAD:web/Dockerfile > /tmp/Dockerfile.head
+$ docker build -f /tmp/Dockerfile.head --target runner -t jena-web:head ./web
+...
+ > [builder 6/6] RUN pnpm build:
+22.10   type: 'Error'
+22.10 }
+22.17  ELIFECYCLE  Command failed with exit code 1.
+ERROR: failed to build: failed to solve: process "/bin/sh -c pnpm build" did not complete successfully: exit code: 1
+```
+
+The cause is `next build`'s page-data collection, which imports every route module.
+`src/mastra/index.ts` constructs its `PostgresStore` (`getPool()`) and its `RedisStreamsPubSub`
+at module scope, and both throw when their URL is unset:
+
+```
+Error: DATABASE_URL_SYNC (or DATABASE_URL) must be set to reach the database
+> Build error occurred
+Error: Failed to collect page data for /api/events/[post_id]
+```
+
+and after supplying the first:
+
+```
+Error: REDIS_URL must be set to reach the Mastra event bus
+> Build error occurred
+Error: Failed to collect page data for /api/events/[post_id]
+```
+
+Outside a container this never surfaced, because `next.config.ts` reads the repo-root `.env`
+at `path.resolve(__dirname, "../.env")` and there is no such file in the image. The builder
+stage now sets both to unreachable placeholders. They do not reach the runtime: only
+`NEXT_PUBLIC_*` values are inlined by Next, and a builder-stage `ENV` does not carry into the
+`runner` stage. Verified on the built image:
+
+```
+$ docker run --rm --entrypoint sh jena-web:7.2a -c '
+    if grep -rl "build:build@127.0.0.1\|redis://127.0.0.1:6379" /app 2>/dev/null; then echo LEAK; else echo "no placeholder anywhere under /app"; fi
+    echo "DATABASE_URL_SYNC=[${DATABASE_URL_SYNC:-<unset>}] REDIS_URL=[${REDIS_URL:-<unset>}] RULES_DIR=[$RULES_DIR] MEDIA_DIR=[$MEDIA_DIR]"'
+no placeholder anywhere under /app
+DATABASE_URL_SYNC=[<unset>] REDIS_URL=[<unset>] RULES_DIR=[/app/rules] MEDIA_DIR=[/app/media]
+```
+
+The first scan of that kind did find one file, `/app/Dockerfile`: with the context at the repo
+root, `COPY web/ ./` brought the Dockerfile into the builder and Next's standalone output
+copied it forward. `web/Dockerfile` is now excluded from the context (`-f` reads it off the
+filesystem, not out of the context), which restores what the old `web/.dockerignore` did.
+
+**2. `sharp` could not load in the `runner` image.** Every API route 500'd:
+
+```
+$ curl -s -o /dev/null -w '%{http_code}' http://localhost:3199/api/profiles
+500
+⨯ Error: Failed to load external module sharp-f7d5c822b461302c: Error: Could not load the "sharp" module using the linuxmusl-arm64 runtime
+ERR_DLOPEN_FAILED: Error loading shared library libvips-cpp.so.8.18.3: No such file or directory (needed by /app/node_modules/.pnpm/@img+sharp-linuxmusl-arm64@0.35.3/node_modules/@img/sharp-linuxmusl-arm64/lib/sharp-linuxmusl-arm64-0.35.3.node)
+```
+
+The libvips package was in the image but its shared object was not: file tracing follows
+`import`/`require`, so it copied the `.node` binding and the libvips package's `index.js`,
+and stopped there. The `.so` is reached by `dlopen` from a sibling package, which tracing
+cannot see.
+
+```
+$ docker run --rm --entrypoint sh jena-web:7.2a -c 'ls -la /app/node_modules/.pnpm/@img+sharp-libvips-linuxmusl-arm64@1.3.2/node_modules/@img/sharp-libvips-linuxmusl-arm64/lib'
+total 12
+-rw-r--r--    1 root     root            28 Aug 23 19:16 index.js
+```
+
+`next.config.ts` gains `outputFileTracingIncludes` (a top-level `NextConfig` key in the
+installed Next 16.1.6: `node_modules/next/dist/server/config-shared.d.ts:1085`,
+`outputFileTracingIncludes?: Record<string, string[]>`) with a glob that matches only what the
+install actually produced, so it is inert on a platform whose libvips lives elsewhere. After:
+
+```
+$ docker run --rm --entrypoint sh jena-web:7.2a -c 'find /app/node_modules/.pnpm -name "libvips*.so*" -exec ls -la {} \;'
+-rw-r--r--    1 root     root      16816688 /app/node_modules/.pnpm/@img+sharp-libvips-linux-arm64@1.2.4/node_modules/@img/sharp-libvips-linux-arm64/lib/libvips-cpp.so.8.17.3
+-rw-r--r--    1 root     root      17800568 /app/node_modules/.pnpm/@img+sharp-libvips-linux-arm64@1.3.2/node_modules/@img/sharp-libvips-linux-arm64/lib/libvips-cpp.so.8.18.3
+-rw-r--r--    1 root     root      18188576 /app/node_modules/.pnpm/@img+sharp-libvips-linuxmusl-arm64@1.3.2/node_modules/@img/sharp-libvips-linuxmusl-arm64/lib/libvips-cpp.so.8.18.3
+-rw-r--r--    1 root     root      17049872 /app/node_modules/.pnpm/@img+sharp-libvips-linuxmusl-arm64@1.2.4/node_modules/@img/sharp-libvips-linuxmusl-arm64/lib/libvips-cpp.so.8.17.3
+```
+
+That is about 70 MB across two libc flavours and two sharp majors in the store. The glob is
+deliberately not narrowed to `linuxmusl`: pinning it to the current Alpine base would make a
+later base-image change fail the same way, silently, at the first image operation.
+
+sharp then runs for real in both images:
+
+```
+$ docker exec jena-web-7.2a sh -c 'node -e "..." "$(ls -d /app/node_modules/.pnpm/sharp@* | tail -1)/node_modules/sharp"'
+using /app/node_modules/.pnpm/sharp@0.35.3_@types+node@20.19.34/node_modules/sharp
+sharp ok, png bytes: 95
+
+$ docker exec jena-worker-7.2a node -e '... require("/app/.mastra/worker/node_modules/sharp") ...'
+worker sharp ok, png bytes: 95
+```
+
+**3. BetterAuth refuses to boot in production without `BETTER_AUTH_SECRET`.** With
+`NODE_ENV=production` and no secret it is a thrown `BetterAuthError`, not the warning it is in
+dev, and it surfaced as an `unhandledRejection` on the first request:
+
+```
+[Error [BetterAuthError]: You are using the default secret. Please set `BETTER_AUTH_SECRET` in your environment variables or pass `secret` in your auth config.]
+⨯ unhandledRejection:  [Error [BetterAuthError]: ...]
+```
+
+The repo `.env` has no `BETTER_AUTH_SECRET` at all (`POSTGRES_HOST_PORT`, `REDIS_HOST_PORT`,
+`DATABASE_URL`, `DATABASE_URL_SYNC`, `TEST_DATABASE_URL`, `REDIS_URL`, `WORKER_MAX_JOBS`,
+`GEMINI_API_KEY`, `BETTER_AUTH_URL`, `WP_ENCRYPTION_KEY`). No code change: this is a required
+deployment variable, and item 7.2b's env table and item 7.4's `.env` documentation own it.
+
+### Both images built and booted with no bind mounts at all
+
+```
+$ docker build -f web/Dockerfile --target worker -t jena-worker:7.2a .
+#17 [worker 6/6] COPY rules ./rules
+#17 DONE 0.0s
+naming to docker.io/library/jena-worker:7.2a done
+docker build ...  23.684 total
+
+$ docker build -f web/Dockerfile --target runner -t jena-web:7.2a .
+#17 [runner 7/7] COPY rules ./rules
+#17 DONE 0.0s
+naming to docker.io/library/jena-web:7.2a done
+```
+
+Rules byte-identical to the host, in the worker image:
+
+```
+$ docker run --rm --entrypoint sh jena-worker:7.2a -c 'md5sum /app/rules/*.md'
+7e898b3d46fcb4fac00715a111d72c99  /app/rules/blog-edit.md
+3e27a8a1f760d437d2cc95467616f6af  /app/rules/blog-images.md
+9f32ce6f1712846aae8e1b789b7873c2  /app/rules/blog-outline.md
+032961997b648b54e2896887d4e16192  /app/rules/blog-ready.md
+6254d0640eba3f0fbf526237522c15c4  /app/rules/blog-research.md
+339a6488043f51e88965b86dc59f579d  /app/rules/blog-write.md
+$ md5 rules/*.md
+MD5 (rules/blog-edit.md) = 7e898b3d46fcb4fac00715a111d72c99
+MD5 (rules/blog-images.md) = 3e27a8a1f760d437d2cc95467616f6af
+MD5 (rules/blog-outline.md) = 9f32ce6f1712846aae8e1b789b7873c2
+MD5 (rules/blog-ready.md) = 032961997b648b54e2896887d4e16192
+MD5 (rules/blog-research.md) = 6254d0640eba3f0fbf526237522c15c4
+MD5 (rules/blog-write.md) = 339a6488043f51e88965b86dc59f579d
+```
+
+`worker`, run with `docker run` on the compose network and **no `-v` at all**, so nothing is
+mounted over `/app/rules`:
+
+```
+$ docker run -d --name jena-worker-7.2a --network objective-port-jena-46c1e6-1_default \
+    -e DATABASE_URL_SYNC=postgresql://pipeline:pipeline@db:5432/content_pipeline \
+    -e REDIS_URL=redis://redis:6379 jena-worker:7.2a
+$ docker logs jena-worker-7.2a | grep -i "workers started"
+[mastra] Workers started
+$ docker exec jena-worker-7.2a node /app/scripts/worker-healthcheck.mjs; echo "healthcheck exit=$?"
+healthcheck exit=0
+$ docker exec jena-worker-7.2a sh -c 'grep -c " /app/rules " /proc/self/mountinfo; head -c 60 "$RULES_DIR/blog-research.md"'
+0
+# Blog Research Agent
+
+You are a blog content strategist and
+```
+
+`web`, same treatment, with a throwaway generated `BETTER_AUTH_SECRET`:
+
+```
+$ docker run -d --name jena-web-7.2a --network objective-port-jena-46c1e6-1_default -p 3199:3000 \
+    -e DATABASE_URL_SYNC=... -e REDIS_URL=redis://redis:6379 \
+    -e BETTER_AUTH_URL=http://localhost:3199 -e BETTER_AUTH_SECRET="$(openssl rand -hex 32)" jena-web:7.2a
+✓ Starting...
+✓ Ready in 38ms
+/                                -> 307
+/auth/sign-in                    -> 200
+/api/profiles                    -> 401
+/api/posts                       -> 401
+/api/settings                    -> 401
+/api/rules/blog-research         -> 401
+```
+
+`307` on `/` is the unauthenticated redirect and `401` is the ported handlers'
+`{"detail":"Not authenticated"}`, both reached without a stack trace in the log. The rules
+route resolving to `401` rather than a 500 is what proves `RULES_DIR` is present and readable.
+
+Both compose files validate against the new context:
+
+```
+$ docker compose -f docker-compose.yml config -q && echo "dev compose OK"
+dev compose OK
+$ docker compose -f docker-compose.prod.yml config -q && echo "prod compose OK"
+prod compose OK
+```
+
+### No automated test
+
+This item changes build inputs only: a Dockerfile, a `.dockerignore`, two compose build blocks
+and one `next.config.ts` key. The only assertion worth making about them is that the images
+build and run, which is what is pasted above; a vitest file that shelled out to `docker build`
+would add minutes to every gate run to re-assert exactly that. No mutation sweep for the same
+reason: there is no test to kill a mutant with.
+
+### Gates
+
+```
+$ pnpm -C web exec tsc --noEmit ; echo "tsc exit=$?"
+tsc exit=0
+
+$ pnpm -C web lint ; echo "lint exit=$?"
+lint exit=0
+
+$ pnpm -C web build ; echo "build exit=$?"
+build exit=0
+
+$ pnpm -C web test
+ Test Files  2 failed | 132 passed (134)
+      Tests  9 failed | 4507 passed | 7 skipped (4523)
+```
+
+The 9 are the recorded baseline: 6 in `image-preview.test.tsx` and 3 in `PostDetail.test.tsx`.
+
+An earlier run of the same suite reported **11** failures, adding one in
+`src/app/api/posts/create.test.ts` and one in `src/mastra/workflows/scaffold-check.test.ts`.
+Cause: the `jena-worker-7.2a` container was still running and subscribed to the same Redis
+orchestration consumer group as the tests, so it consumed events the in-process test workers
+were waiting for. With the container stopped, both files pass:
+
+```
+$ docker rm -f jena-worker-7.2a jena-web-7.2a
+$ pnpm -C web test src/app/api/posts/create.test.ts src/mastra/workflows/scaffold-check.test.ts
+ Test Files  2 passed (2)
+      Tests  30 passed (30)
+```
+
+That also explains the intermittent `scaffold-check.test.ts` `beforeAll` timeout logged under
+7.1c as load contention. A consumer group has exactly one delivery per message, so any second
+worker on the shared Redis is a correctness hazard for the suite, not just a load one.
+
+### What this item did not do
+
+- No Railway configuration files yet. That is 7.2b, which now has three inputs from here: the
+  build context is the repo root and the Dockerfile path is `web/Dockerfile`; `BETTER_AUTH_SECRET`
+  is required per service; and Railway volumes cannot be shared between services
+  (railway.com/docs: "Each service can only have a single volume"), so `web` serving `/media`
+  and `worker` writing generated images cannot see the same disk there. That is a real gap for
+  7.2b to state, not to paper over.
+- The `BetterAuthError` lines printed during `next build` inside the image are pre-existing
+  noise, not fatal, and unrelated to the build context. Logged in `todo.md`.

@@ -1327,6 +1327,35 @@ pages that use it work with the Python API stopped.
 - [ ] 7.2 Railway deployment configuration for `web` and `worker` from this repo, with start
   commands, shared Postgres and Redis references, and documented per-service environment
   variables. Both import the same `web/src/mastra/index.ts`.
+
+  Split, because the images could not be deployed anywhere before they were fixed. `rules/`
+  lives at the repo root and was only ever a bind mount, and Railway has no bind mounts, so a
+  `worker` built from the old context would have run every stage with its rule file silently
+  stripped out of the prompt. Fixing that meant moving the build context, which is when it
+  emerged that the `runner` target had never built at all.
+  - [x] 7.2a Both runtime images are self-contained: built from the repo root so `rules/`
+    ships inside them, and buildable at all.
+
+    Build context moved from `web/` to the repo root (`docker build -f web/Dockerfile .`),
+    `.dockerignore` moved with it, both runtime stages `COPY rules ./rules` and pin
+    `RULES_DIR`/`MEDIA_DIR`, and both compose files point at the new context. Three
+    pre-existing defects had to be fixed for the `web` image to build and serve: `next build`
+    threw on the module-scope `PostgresStore` and `RedisStreamsPubSub` in `src/mastra/index.ts`
+    with no `DATABASE_URL_SYNC`/`REDIS_URL` (builder-stage placeholders, proven absent from the
+    runtime image), file tracing shipped sharp's binding without libvips so every API route
+    500'd on `ERR_DLOPEN_FAILED` (`outputFileTracingIncludes` in `next.config.ts`), and
+    BetterAuth throws rather than warns without `BETTER_AUTH_SECRET` in production (a
+    deployment variable, owned by 7.2b and 7.4). Both images then booted against the real
+    Postgres and Redis with no bind mounts: the worker logs `[mastra] Workers started`, its
+    healthcheck exits 0 and it reads the baked-in rules; the web image serves `/auth/sign-in`
+    200 and every ported handler 401 with no stack trace.
+    Evidence: [`evidence/phase-7.md` #7.2a](../mastra-port/evidence/phase-7.md)
+  - [ ] 7.2b The Railway service definitions themselves: config-as-code files for `web` and
+    `worker`, their start commands, shared Postgres and Redis references, and the per-service
+    environment variable tables. Must state the `BETTER_AUTH_SECRET` requirement and the
+    shared-`/media` gap (Railway allows one volume per service and does not share volumes
+    between services, so the `web` service serving `/media/<post_id>/<file>` cannot see the
+    disk the `worker` writes generated images to).
 - [ ] 7.3 Document the Mastra Studio workflow: running it locally alongside `next dev` against
   the same Postgres, `server.studioBase` if a custom mount path is used, and an explicit
   statement that Studio is never publicly exposed (auth or private network only).

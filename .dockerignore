@@ -1,0 +1,47 @@
+# The build context is the repo root, not `web/`, because `rules/` lives here
+# and both runtime images have to carry it: Railway has no bind mounts, so a
+# `rules` directory that is not in the image is a silently empty prompt.
+# Docker reads the `.dockerignore` at the context root, so this file is the
+# only one that applies.
+
+.git/
+.gitignore
+.dockerignore
+.gnhf/
+
+# Documentation and the port ledger. Large, and never read at runtime.
+docs/
+*.md
+web/*.md
+
+# Runtime state. `media/` is a volume in every deployment.
+media/
+
+# Published separately, not part of either service.
+packages/
+
+# The Dockerfile is read by `-f`, not out of the context, and Next's standalone
+# output copies stray project-root files into the image.
+web/Dockerfile
+
+# Dependencies (reinstalled in the image) and build output.
+node_modules/
+web/node_modules/
+web/.next/
+web/out/
+web/.mastra/
+web/tsconfig.tsbuildinfo
+
+# Tests
+web/src/__tests__/
+web/src/test/
+web/e2e/
+web/playwright-report/
+web/test-results/
+
+# IDE
+.vscode/
+.idea/
+
+# Misc
+*.log

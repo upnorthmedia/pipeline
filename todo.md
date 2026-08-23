@@ -653,3 +653,24 @@
   connections and Redis with every other suite vitest is running in parallel. Item 9.1 needs
   a green run, so either the hook needs a longer timeout or the suites that start workers
   need to stop sharing a connection budget.
+
+- [confirmed] 2026-08-23 A worker process running outside the test suite breaks the suite.
+  While a `jena-worker` container was up against the shared dev Redis, a full
+  `pnpm -C web test` reported 11 failures instead of the baseline 9, adding
+  `src/app/api/posts/create.test.ts` and `src/mastra/workflows/scaffold-check.test.ts`; both
+  passed immediately once the container was stopped. Mastra's orchestration topic is a Redis
+  Streams consumer group, so each event goes to exactly one consumer, and a stray worker eats
+  events the in-process test workers are waiting for. This is very likely the real cause of
+  the intermittent `scaffold-check` `beforeAll` timeout logged above, rather than load. Two
+  things follow: nobody should run `docker compose up worker` while testing, and item 9.1
+  should decide whether the suite deserves its own Redis database index or topic prefix so it
+  cannot be poached.
+
+- [investigate] 2026-08-23 `next build` inside the web image prints seven
+  `[Error [BetterAuthError]: You are using the default secret...]` lines plus a matching
+  BetterAuth base-URL warning per route during page-data collection. Non-fatal (the build
+  exits 0) and pre-existing, but it is error-shaped output in a green build, which is exactly
+  the noise the gate rules forbid introducing. Worth deciding whether the build stage should
+  supply throwaway `BETTER_AUTH_SECRET`/`BETTER_AUTH_URL` placeholders the way it now does for
+  `DATABASE_URL_SYNC` and `REDIS_URL`, or whether `src/lib/auth.ts` should not be reachable
+  from page-data collection at all.

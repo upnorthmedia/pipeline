@@ -31,6 +31,17 @@ loadRepoRootEnv();
 const nextConfig: NextConfig = {
   output: "standalone",
   serverExternalPackages: ["better-auth", "pg"],
+  /**
+   * File tracing follows `require`/`import`, so it copies sharp's `.node`
+   * binding but not the libvips shared object that binding dlopens out of a
+   * sibling package. The standalone image then fails at the first image
+   * operation with `ERR_DLOPEN_FAILED: libvips-cpp.so`. The glob matches only
+   * what the install actually produced, so it is a no-op on a platform whose
+   * libvips lives elsewhere.
+   */
+  outputFileTracingIncludes: {
+    "/**": ["./node_modules/.pnpm/@img+sharp-libvips-*/node_modules/@img/*/lib/*"],
+  },
 };
 
 export default nextConfig;
