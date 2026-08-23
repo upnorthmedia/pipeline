@@ -13837,6 +13837,250 @@ three pieces are separately verifiable, so they are separate items.
         ```
       - [ ] 5.5c-iv-d `images`' seven call sites, spread across the nested workflow's
         three sub-steps, including the per-image lines inside the `.foreach()` fan-out.
+
+        Split, because the seven do not sit in one step and the two halves have
+        different problems. Five of them are inside `images_node` before the fan-out and
+        are a straight transcription like `outline`'s; the remaining two are inside
+        `_generate_one`, publish under event names that are not `log`
+        (`image_generated` / `image_failed`), and have to decide which of
+        `generateOneImage`'s three outcomes they belong to from outside a function that
+        never throws:
+
+        ```
+        $ grep -n "await publish_stage_log(" api/src/pipeline/stages/images.py
+        55:        await publish_stage_log("Rules loaded, building prompt...", stage="images")
+        59:        await publish_stage_log("Calling Claude for image manifest...", stage="images")
+        74:        await publish_stage_log(
+        85:            await publish_stage_log(
+        111:        await publish_stage_log(
+        180:                    await publish_stage_log(
+        195:                    await publish_stage_log(
+        ```
+
+        ```
+        $ awk 'NR>=125 && NR<=207' api/src/pipeline/stages/images.py | grep -c "publish_stage_log"
+        2
+        ```
+
+        - [x] 5.5c-iv-d-1 The five call sites in `images_node` before the fan-out, all of
+          which land in `web/src/mastra/steps/images-manifest.ts`.
+
+          Four are info lines on the happy path and the fifth, the parse-failure warning,
+          takes the place of the fourth. Rendered by Python itself:
+
+          ```
+          $ cd api && uv run python -c "
+          tokens_out=3037
+          num_images=5
+          error_msg='Failed to parse manifest'
+          print(repr('Rules loaded, building prompt...'))
+          print(repr('Calling Claude for image manifest...'))
+          print(repr(f'Manifest received ({tokens_out} tokens)'))
+          print(repr(f'Manifest parse failed: {error_msg}'))
+          print(repr(f'Generating {num_images} images via Gemini...'))
+          "
+          'Rules loaded, building prompt...'
+          'Calling Claude for image manifest...'
+          'Manifest received (3037 tokens)'
+          'Manifest parse failed: Failed to parse manifest'
+          'Generating 5 images via Gemini...'
+          ```
+
+          **Decision 1: the "Generating N images" line stays in the manifest step, not in
+          the workflow's `.map()`.** Python computes `num_images = len(manifest.get("images",
+          []))` at `images.py:110` and publishes one statement later, *before* it creates
+          the media directory and constructs `GeminiClient`. Those last two are the port's
+          `.map()` (`workflows/images.ts:85`), so the two candidate homes are the end of
+          `images-manifest` and the top of the `.map()`. The manifest step wins on three
+          counts: the line is about the manifest the step just parsed rather than about
+          the fan-out, the count is derived from the same `images` array the step already
+          returns so the line and the output cannot disagree, and `.map()`'s callback is
+          not handed `mastra`, so publishing from there would need a transport imported
+          rather than passed. Relative order against everything observable is unchanged,
+          because nothing between the two positions publishes or writes.
+
+          **Decision 2: the parse-failure notice moves off the logger and onto the event
+          bus.** It was `mastra.getLogger()?.warn(...)` from item 3.5f-i. Python never
+          logged it; it published it, at `level="warning"` with two `data` keys. This is
+          the same correction item 5.5c-iv-c made to `edit`'s four quality warnings, and
+          it has the same consequence: a browser watching a run now hears that the
+          manifest could not be parsed, where before only the server log did.
+
+          **Decision 3: `data.error` carries the raw JSON value, the message carries
+          `String()` of it.** Python's `data={"error": error_msg, ...}` stores the value
+          `manifest["error"]` unchanged while the f-string applies `str()` to it. Both are
+          reproduced literally. `String()` is not `str()` for a truthy container
+          (`{'a': 1}` against `[object Object]`), and that divergence is reachable because
+          `pythonTruthy` deliberately admits a non-empty dict or list here. It is recorded
+          in `todo.md` rather than fixed: a faithful `str()` for arbitrary JSON is its own
+          port, and the value the column and the payload carry is correct either way.
+
+          **Decision 4: `Manifest received` is published before the parse, not after.**
+          That is Python's position (`images.py:74`, ahead of `_parse_manifest` at 80), and
+          it is load bearing rather than incidental: a manifest that turns out to be prose
+          has still been paid for, so the line that reports what it cost has to go out
+          before the line that reports it was unusable. Negative control NC5 below moves it
+          after the parse and fails.
+
+          One consequence of item 5.5c-iv-a's deletion of Python's module-level event
+          context applies with extra force here: the fan-out's per-image lines
+          (5.5c-iv-d-2) are still unported, so a run currently reports four lines for
+          `images` and no per-image progress at all. That is the item split, not a gap in
+          this one.
+
+          Before the implementation, with the tests written and the five call sites absent
+          (this is negative control NC1, which doubles as the pre-implementation state):
+
+          ```
+          $ git checkout HEAD -- web/src/mastra/steps/images-manifest.ts
+          $ cd web && npx vitest run src/mastra/steps/images-manifest.test.ts \
+              src/mastra/pipeline-events.test.ts src/mastra/workflows/images.test.ts \
+              src/mastra/workflows/images-retry.test.ts \
+              src/mastra/steps/images-retry-entry.test.ts
+          Test Files  5 failed (5)
+               Tests  11 failed | 81 passed (92)
+          ```
+
+          After, the same five files:
+
+          ```
+          $ cd web && npx vitest run src/mastra/steps/images-manifest.test.ts \
+              src/mastra/pipeline-events.test.ts src/mastra/workflows/images.test.ts \
+              src/mastra/workflows/images-retry.test.ts \
+              src/mastra/steps/images-retry-entry.test.ts
+          Test Files  5 passed (5)
+               Tests  92 passed (92)
+          ```
+
+          The real published events and the real stored entries for the first golden
+          fixture, dumped from a throwaway probe against the live database and then
+          removed (`expect({...}).toEqual({})`, the technique item 5.5c-iv-a recorded):
+
+          ```
+          + "announced": [
+          +   { "event": "stage_start", "message": "Starting images...",
+          +     "post_id": "00000000-0000-4000-8000-000000000f11", "stage": "images" },
+          +   { "event": "log", "level": "info",
+          +     "message": "Rules loaded, building prompt...",
+          +     "post_id": "00000000-0000-4000-8000-000000000f11", "stage": "images",
+          +     "timestamp": "2026-08-22T00:52:57.065+00:00" },
+          +   { "event": "log", "level": "info",
+          +     "message": "Calling Claude for image manifest...",
+          +     "post_id": "00000000-0000-4000-8000-000000000f11", "stage": "images",
+          +     "timestamp": "2026-08-22T00:52:57.065+00:00" },
+          +   { "event": "log", "level": "info",
+          +     "message": "Manifest received (3037 tokens)",
+          +     "post_id": "00000000-0000-4000-8000-000000000f11", "stage": "images",
+          +     "timestamp": "2026-08-22T00:52:57.065+00:00" },
+          +   { "event": "log", "level": "info",
+          +     "message": "Generating 5 images via Gemini...",
+          +     "post_id": "00000000-0000-4000-8000-000000000f11", "stage": "images",
+          +     "timestamp": "2026-08-22T00:52:57.065+00:00" },
+          + ],
+          + "stored": [
+          +   { "event": "stage_start", "level": "info", "message": "Starting images...",
+          +     "stage": "images", "ts": "2026-08-22T00:52:57.065+00:00" },
+          +   { "event": "log", "level": "info",
+          +     "message": "Rules loaded, building prompt...",
+          +     "stage": "images", "ts": "2026-08-22T00:52:57.065+00:00" },
+          +   { "event": "log", "level": "info",
+          +     "message": "Calling Claude for image manifest...",
+          +     "stage": "images", "ts": "2026-08-22T00:52:57.065+00:00" },
+          +   { "event": "log", "level": "info",
+          +     "message": "Manifest received (3037 tokens)",
+          +     "stage": "images", "ts": "2026-08-22T00:52:57.065+00:00" },
+          +   { "event": "log", "level": "info",
+          +     "message": "Generating 5 images via Gemini...",
+          +     "stage": "images", "ts": "2026-08-22T00:52:57.065+00:00" },
+          + ]
+          ```
+
+          The clock is the fixture's frozen `captured_at`, which is why all five stamps
+          agree; the offset form is Python's `isoformat()`, per item 5.5c-i.
+
+          Negative controls, each run against the same five files (baseline
+          `5 passed / 92 passed`):
+
+          | Control | Result |
+          | --- | --- |
+          | NC1: all five call sites removed (implementation at HEAD) | 5 files failed, 11 tests failed |
+          | NC2: `Manifest received` reports `inputTokens` instead of `outputTokens` | 3 files failed, 7 tests failed |
+          | NC3: `Generating N images` published before the parse-failure branch | 2 files failed, 2 tests failed |
+          | NC4: parse-failure notice left on `getLogger().warn` | 2 files failed, 2 tests failed |
+          | NC5: `Manifest received` published after the parse instead of before | 2 files failed, 2 tests failed |
+          | NC6: only the `Generating N images` line removed | 2 files failed, 7 tests failed |
+
+          NC3, NC4 and NC5 each fail only two tests, and that is the point of having all
+          three: the parse-failure branch is reached by exactly two assertions (the
+          fixture-driven one in `images-manifest.test.ts` and the real nested run in
+          `workflows/images.test.ts`), so three different ways of getting that branch
+          wrong are individually pinned rather than jointly.
+
+          Tests added, all against the real Alembic-owned database:
+
+          - `web/src/mastra/steps/images-manifest.test.ts`, five new: the four lines in
+            order on both the event bus and the row, the two interpolations pinned against
+            the *second* fixture so neither is asserted twice from one set of numbers, the
+            interleaving with `stage_start`, Python's five payload keys with no `data` key,
+            and a skipped stage writing nothing at all.
+          - The same file's parse-failure test rewritten from a logger assertion to a
+            published-event assertion, including the three lines that precede the warning.
+          - `web/src/mastra/workflows/images.test.ts`'s real unparseable-manifest run now
+            asserts the whole stored `log` trail and that the logger saw nothing.
+          - `web/src/mastra/pipeline-events.test.ts`: `LOG_LINES_PER_STAGE.images` 0 to 4,
+            `messagesFor("images")`, and the per-stage delivery count.
+          - `web/src/mastra/workflows/images-retry.test.ts` and
+            `web/src/mastra/steps/images-retry-entry.test.ts`: the failing-attempt trails
+            gain the two lines an attempt reaches before the agent throws.
+
+          Frontend gates:
+
+          ```
+          $ npx tsc --noEmit
+          TSC EXIT=0
+
+          $ npx eslint .
+          LINT EXIT=0
+
+          $ npx vitest run
+          Test Files  2 failed | 91 passed (93)
+               Tests  9 failed | 1647 passed | 7 skipped (1663)
+          # The 9 are the Phase 0 baseline (3 in PostDetail.test.tsx, 6 in
+          # image-preview.test.tsx). HEAD measured immediately before, by reverting all
+          # six changed files: 9 failed | 1642 passed | 7 skipped (1658), so this item is
+          # exactly +5 tests and no new failures.
+
+          $ npx next build
+          BUILD EXIT=0
+          v Compiled successfully in 4.0s
+          ```
+
+          Python gates, unchanged because nothing under `api/` was touched:
+
+          ```
+          $ cd api && uv run pytest -q
+          120 failed, 241 passed, 25 errors in 15.13s
+
+          $ cd api && uv run ruff check .
+          Found 32 errors.
+
+          $ cd api && uv run ruff format --check .
+          9 files would be reformatted, 131 files already formatted
+          ```
+
+        - [ ] 5.5c-iv-d-2 The two call sites inside `_generate_one`, which publish under
+          the event names `image_generated` and `image_failed` rather than `log`, each with
+          a `data` payload, from inside the `.foreach()` fan-out.
+
+          The design question this half has and the first half did not:
+          `generateOneImage` never throws and returns the same `{spec, usage}` shape for
+          all three of Python's outcomes (generated, provider/optimizer failure, and the
+          no-prompt short circuit that publishes nothing). Deciding which of the two lines
+          to publish by inspecting the returned spec is an inference that a provider error
+          whose message happened to be `"no prompt"` would defeat. The likely shape is a
+          publish callback or an explicit outcome discriminant on the return; pick one,
+          argue the other down, and check `use-sse.ts` and `debug-log-panel.tsx` for what
+          they already do with the two event names before choosing the payload.
   - [ ] 5.5d `GET /api/events/{post_id}` and `GET /api/events`, as Next.js route handlers
     serving `text/event-stream` in `use-sse.ts`'s named-event shape, subscribed to the
     topic rather than to an in-process stream.

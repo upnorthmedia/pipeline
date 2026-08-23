@@ -314,6 +314,7 @@ const LOG_LINES_PER_STAGE: Partial<Record<(typeof STAGES)[number], number>> = {
   outline: 3,
   write: 3,
   edit: 5,
+  images: 4,
   ready: 3,
 }
 
@@ -429,7 +430,10 @@ describe("a run that executes every stage", () => {
       // The stubbed edit output is four words long with no keyword in it, so it
       // trips the Flesch branch and the SEO branch and not the em-dash one.
       edit: 5,
-      images: 0,
+      // Four: the manifest step's own lines (item 5.5c-iv-d-1). The stubbed
+      // manifest declares no images, so the fan-out runs zero times and the
+      // two per-image lines (5.5c-iv-d-2) are not due on this run.
+      images: 4,
       ready: 3,
     })
   })
@@ -616,12 +620,13 @@ describe("what a run writes to execution_logs", () => {
       ...STAGES.flatMap((stage) => [
         ["stage_start", stage],
         // The stage's own progress lines, item 5.5c-iv, sitting between the two
-        // announcements the runner made around the node. Five stages have them
-        // so far: four write three lines each (`research` reaches only three of
-        // its five here because the stub validates on the first attempt) and
-        // `edit` writes five, its three plus the two quality warnings the
-        // stubbed output earns. `images` is the last sub-item, and this list is
-        // what will say so when it lands.
+        // announcements the runner made around the node. Four stages write
+        // three lines each (`research` reaches only three of its five here
+        // because the stub validates on the first attempt), `edit` writes five,
+        // its three plus the two quality warnings the stubbed output earns, and
+        // `images` writes four, the manifest step's own (item 5.5c-iv-d-1).
+        // The per-image lines inside the fan-out are 5.5c-iv-d-2 and this run
+        // generates no images, so none of them is due here yet.
         ...Array.from({ length: LOG_LINES_PER_STAGE[stage] ?? 0 }, () => ["log", stage]),
         ["stage_complete", stage],
       ]),
@@ -728,6 +733,14 @@ describe("what a run writes to execution_logs", () => {
       ),
       expect.stringMatching(/^SEO checks still failing after edit: /),
     ])
+    expect(messagesFor("images")).toEqual([
+      "Rules loaded, building prompt...",
+      "Calling Claude for image manifest...",
+      expect.stringMatching(/^Manifest received \(20 tokens\)$/),
+      // The stubbed manifest declares no images, so the fan-out is empty and
+      // the count Python interpolated is 0.
+      "Generating 0 images via Gemini...",
+    ])
     expect(messagesFor("ready")).toEqual([
       "Rules loaded, building prompt...",
       "Calling Claude for final assembly...",
@@ -738,8 +751,9 @@ describe("what a run writes to execution_logs", () => {
   it("stores a progress line with no data key, as Python's `if data:` did", async () => {
     const entries = await logsFor(FULL_POST_ID)
     const lines = entries.filter((item) => item.event === "log")
-    // None of the 21 call sites in the five non-`images` stages passes `data`,
-    // so no stored line carries the key, whatever its level.
+    // None of the 25 call sites ported so far passes `data`: the only three
+    // that do are `images`' parse-failure warning and the two per-image lines,
+    // and this run reaches none of them.
     for (const entry of lines) {
       expect(Object.keys(entry).sort()).toEqual(["event", "level", "message", "stage", "ts"])
     }

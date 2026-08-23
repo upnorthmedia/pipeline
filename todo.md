@@ -352,3 +352,13 @@
   that convention. The two product strings are wire and prompt contracts, so any rewrite
   has to keep the bytes identical; a byte-comparison test against the Python source would
   make that safe. Left alone under item 5.5c-iv-c to keep the diff scoped.
+- [confirmed] 2026-08-23 `web/src/mastra/steps/images-manifest.ts` renders the manifest's
+  `error` value into its parse-failure message with `String(...)` where Python's f-string
+  applies `str(...)`. The two agree on every scalar but not on a container:
+  `str({'a': 1})` is `{'a': 1}` and `String({a: 1})` is `[object Object]`. The branch is
+  reachable, because `pythonTruthy` deliberately treats a non-empty dict or list as a
+  truthy `error`, so a model that writes `"error": {"reason": "..."}` produces a
+  divergent SSE message and execution_logs entry. The stored `data.error` is unaffected:
+  it carries the raw JSON value in both stacks. A fix means porting Python's `str()` for
+  arbitrary JSON (container `repr`, `True`/`False`/`None`, single-quoted strings), which
+  is its own item; left alone under ledger item 5.5c-iv-d-1 to keep that diff scoped.

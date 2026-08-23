@@ -198,12 +198,17 @@ describe("the images stage under the pipeline's retry policy", () => {
     // The whole trail, in order. The sub-step's `retryCount` against
     // `imagesWorkflow`'s own policy is a single ascending sequence, so the
     // entries read exactly like a single-step stage's do.
+    //
+    // Two progress lines per attempt (item 5.5c-iv-d-1): the agent throws, so
+    // the attempt reaches "Rules loaded" and "Calling Claude" and stops before
+    // the line that reports what the manifest cost.
+    const attempt = ["info/stage_start", "info/log", "info/log"]
     expect((await readLogs()).map((entry) => `${entry.level}/${entry.event}`)).toEqual([
-      "info/stage_start",
+      ...attempt,
       "warning/retry",
-      "info/stage_start",
+      ...attempt,
       "warning/retry",
-      "info/stage_start",
+      ...attempt,
     ])
   })
 })

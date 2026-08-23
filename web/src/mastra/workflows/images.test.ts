@@ -286,15 +286,35 @@ describe("the images workflow, executed by the evented engine", () => {
       error: "Failed to parse manifest",
     })
     expect((row.stageStatus as Record<string, string>).images).toBe("failed")
-    expect(warnings).toEqual([
-      {
-        message: "Manifest parse failed: Failed to parse manifest",
-        meta: {
-          postId: UNPARSEABLE_POST_ID,
-          stage: "images",
-          rawSnippet: "I am not able to produce an image manifest for this article.",
+    // Item 5.5c-iv-d-1 moved the parse failure off the logger and onto the
+    // event bus, which is where Python published it. The row's own trail is
+    // asserted rather than the topic because the entry is written by the
+    // process that publishes, so it cannot race the assertion.
+    expect(warnings).toEqual([])
+    const line = (message: string, extra: Record<string, unknown> = {}) => ({
+      ts: expect.any(String),
+      stage: "images",
+      level: "info",
+      event: "log",
+      message,
+      ...extra,
+    })
+    const entries = (row.executionLogs ?? []) as Record<string, unknown>[]
+    expect(entries.filter((entry) => entry.event === "log")).toEqual([
+      line("Rules loaded, building prompt..."),
+      line("Calling Claude for image manifest..."),
+      // The stub reports 3 output tokens, and Python published what the
+      // manifest cost before it discovered the manifest was unusable.
+      line("Manifest received (3 tokens)"),
+      line("Manifest parse failed: Failed to parse manifest", {
+        level: "warning",
+        data: {
+          error: "Failed to parse manifest",
+          raw_snippet: "I am not able to produce an image manifest for this article.",
         },
-      },
+      }),
     ])
+    // The "Generating N images" line is on the far side of the short-circuit,
+    // so a failed parse never claims images are being generated.
   }, 60_000)
 })

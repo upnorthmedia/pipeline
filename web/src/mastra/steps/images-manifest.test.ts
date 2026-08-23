@@ -101,6 +101,26 @@ const fixtureIds = fixtures.map(
   (f) => String(f.post_spec.id).slice(0, -3) + ID_NAMESPACE + String(f.post_spec.id).slice(-1),
 )
 
+/**
+ * Python's four info-level progress lines for `fixtures[0]`, in the order
+ * `images_node` wrote them (item 5.5c-iv-d-1).
+ *
+ * Derived from the fixture rather than written out, so a message that stopped
+ * reporting the manifest's own numbers fails here instead of agreeing with a
+ * hardcoded copy of them.
+ */
+const INFO_LINES = [
+  "Rules loaded, building prompt...",
+  "Calling Claude for image manifest...",
+  `Manifest received (${fixtures[0].stage_output._stage_meta.tokens_out} tokens)`,
+  `Generating ${fixtures[0].stage_output.image_manifest.images.length} images via Gemini...`,
+]
+
+/** The `log` events out of everything the step published. */
+function logLines(announced: Record<string, unknown>[]): Record<string, unknown>[] {
+  return announced.filter((event) => event.event === "log")
+}
+
 function replayOf(fixture: Fixture) {
   const call = fixture.provider_calls[0]
   return {
@@ -120,7 +140,8 @@ type Warning = { message: string; meta: unknown }
 function replayMastra(reply: Replay) {
   const prompts: string[] = []
   const warnings: Warning[] = []
-  const announced: unknown[] = []
+  const debugs: Warning[] = []
+  const announced: Record<string, unknown>[] = []
   const mastra = {
     /**
      * The step announces itself on the event bus before it calls its provider
@@ -129,7 +150,7 @@ function replayMastra(reply: Replay) {
      * Streams topic and asserts the payload it carries.
      */
     pubsub: {
-      publish: async (_topic: string, event: { data: unknown }) => {
+      publish: async (_topic: string, event: { data: Record<string, unknown> }) => {
         announced.push(event.data)
       },
     },
@@ -141,9 +162,14 @@ function replayMastra(reply: Replay) {
     }),
     getLogger: () => ({
       warn: (message: string, meta: unknown) => warnings.push({ message, meta }),
+      // `publishStageLog` reaches for `debug` when its execution-log append
+      // fails. It does not fail here, so this only exists to keep a real
+      // failure visible as a test failure rather than as `debug is not a
+      // function` from inside the swallowing catch.
+      debug: (message: string, meta: unknown) => debugs.push({ message, meta }),
     }),
   }
-  return { mastra, prompts, announced, warnings }
+  return { mastra, prompts, announced, warnings, debugs }
 }
 
 type ExecuteParams = Parameters<typeof imagesManifestStep.execute>[0]
@@ -297,6 +323,7 @@ describe("images manifest step output", () => {
   it("writes only the running marker, leaving every content column to the assembling step", async () => {
     const fixture = fixtures[0]
     vi.setSystemTime(new Date(fixture.captured_at))
+    const stamp = new Date(fixture.captured_at).toISOString().replace("Z", "+00:00")
     const [before] = await db.select().from(posts).where(inArray(posts.id, [fixtureIds[0]]))
 
     await runStep(fixtureIds[0], replayOf(fixture))
@@ -318,12 +345,21 @@ describe("images manifest step output", () => {
       executionLogs: [
         ...(before.executionLogs ?? []),
         {
-          ts: new Date(fixture.captured_at).toISOString().replace("Z", "+00:00"),
+          ts: stamp,
           stage: "images",
           level: "info",
           event: "stage_start",
           message: "Starting images...",
         },
+        // Item 5.5c-iv-d-1: the four progress lines Python's `images_node`
+        // wrote about itself, stored beside the announcement the runner made.
+        ...INFO_LINES.map((message) => ({
+          ts: stamp,
+          stage: "images",
+          level: "info",
+          event: "log",
+          message,
+        })),
       ],
     })
   })
@@ -366,11 +402,31 @@ describe("images manifest step parse-failure branch", () => {
     vi.setSystemTime(new Date(fixture.captured_at))
     const long = `${"x".repeat(600)} not json`
 
-    const { warnings } = await runStep(fixtureIds[0], { ...replayOf(fixture), text: long })
+    const { announced, warnings } = await runStep(fixtureIds[0], {
+      ...replayOf(fixture),
+      text: long,
+    })
 
-    expect(warnings).toHaveLength(1)
-    expect(warnings[0].message).toBe("Manifest parse failed: Failed to parse manifest")
-    expect(warnings[0].meta).toMatchObject({ rawSnippet: "x".repeat(500) })
+    // Item 5.5c-iv-d-1 moves this off the logger and onto the event bus, which
+    // is where Python published it. A browser watching the run now hears that
+    // the manifest could not be parsed; before, only the server log did.
+    expect(warnings).toEqual([])
+    // The three lines ahead of it still went out: Python publishes "received"
+    // before it parses, so a failed parse is announced after the tokens it
+    // cost have been.
+    expect(logLines(announced).map((line) => line.message)).toEqual([
+      ...INFO_LINES.slice(0, 3),
+      "Manifest parse failed: Failed to parse manifest",
+    ])
+    expect(logLines(announced).at(-1)).toEqual({
+      event: "log",
+      post_id: fixtureIds[0],
+      stage: "images",
+      level: "warning",
+      message: "Manifest parse failed: Failed to parse manifest",
+      timestamp: expect.any(String),
+      data: { error: "Failed to parse manifest", raw_snippet: "x".repeat(500) },
+    })
   })
 
   it("short-circuits on an error key the model itself wrote", async () => {
@@ -483,7 +539,9 @@ describe("images step announcement", () => {
   it("announces the stage on the event bus, in Python's payload shape", async () => {
     const { announced } = await runStep(fixtureIds[0], replayOf(fixtures[0]))
 
-    expect(announced).toEqual([
+    // Filtered to the announcement: the node's own progress lines (item
+    // 5.5c-iv-d-1) share this transport, and the suite below owns them.
+    expect(announced.filter((event) => event.event !== "log")).toEqual([
       {
         event: "stage_start",
         post_id: fixtureIds[0],
@@ -491,5 +549,111 @@ describe("images step announcement", () => {
         message: "Starting images...",
       },
     ])
+  })
+})
+
+/**
+ * Item 5.5c-iv-d-1: the five `publish_stage_log()` call sites `images_node`
+ * makes before the fan-out.
+ *
+ * Four of them are info lines on the happy path and the fifth is the
+ * parse-failure warning, which takes the place of the fourth. The fifth call
+ * site in Python's file is the "Generating N images" line, and it lands here
+ * rather than in the workflow's `.map()` because Python computed `num_images`
+ * from the manifest it had just parsed, one statement before it touched the
+ * media directory or the Gemini client.
+ */
+describe("images manifest step progress lines", () => {
+  /** Everything the step stored on the row, in order. */
+  async function storedLines(postId: string): Promise<Record<string, unknown>[]> {
+    const [row] = await db.select().from(posts).where(inArray(posts.id, [postId]))
+    return ((row.executionLogs ?? []) as Record<string, unknown>[]).filter(
+      (entry) => entry.event === "log",
+    )
+  }
+
+  it("writes Python's four lines, in the positions the node wrote them", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { announced } = await runStep(fixtureIds[0], replayOf(fixture))
+
+    expect(logLines(announced).map((line) => line.message)).toEqual(INFO_LINES)
+    expect((await storedLines(fixtureIds[0])).map((entry) => entry.message)).toEqual(INFO_LINES)
+  })
+
+  it("counts the manifest's own entries in the Gemini line", async () => {
+    const fixture = fixtures[1]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { announced } = await runStep(fixtureIds[1], replayOf(fixture))
+
+    // The second fixture's manifest has a different number of entries and a
+    // different token count, so both interpolations are pinned rather than
+    // one fixture's numbers being asserted twice.
+    expect(logLines(announced).map((line) => line.message)).toEqual([
+      "Rules loaded, building prompt...",
+      "Calling Claude for image manifest...",
+      `Manifest received (${fixture.stage_output._stage_meta.tokens_out} tokens)`,
+      `Generating ${fixture.stage_output.image_manifest.images.length} images via Gemini...`,
+    ])
+  })
+
+  it("interleaves them with the stage announcement the runner made", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { announced } = await runStep(fixtureIds[0], replayOf(fixture))
+
+    // `stage_start` first, then the node's own lines. The stage's
+    // `stage_complete` belongs to `images-assemble`, on the far side of the
+    // fan-out, so it is not on this step's transport at all.
+    expect(announced.map((event) => `${event.event}:${event.message}`)).toEqual([
+      "stage_start:Starting images...",
+      ...INFO_LINES.map((message) => `log:${message}`),
+    ])
+  })
+
+  it("carries Python's five payload keys and no data key", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { announced } = await runStep(fixtureIds[0], replayOf(fixture))
+
+    for (const line of logLines(announced)) {
+      // `**({"data": data} if data else {})`: none of the four passes `data`.
+      expect(Object.keys(line).sort()).toEqual([
+        "event",
+        "level",
+        "message",
+        "post_id",
+        "stage",
+        "timestamp",
+      ])
+      expect(line.level).toBe("info")
+    }
+    for (const entry of await storedLines(fixtureIds[0])) {
+      expect(Object.keys(entry).sort()).toEqual(["event", "level", "message", "stage", "ts"])
+    }
+  })
+
+  it("writes nothing at all for a stage the run skipped", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+    await db
+      .update(posts)
+      .set({ stageStatus: { images: "complete" } })
+      .where(inArray(posts.id, [fixtureIds[0]]))
+
+    const harness = replayMastra(replayOf(fixture))
+    await imagesManifestStep.execute({
+      inputData: { postId: fixtureIds[0] },
+      mastra: harness.mastra,
+    } as unknown as ExecuteParams)
+
+    // Python's `continue` jumped the whole node, so a skipped stage neither
+    // announces itself nor reports on its internals.
+    expect(harness.announced).toEqual([])
+    expect(await storedLines(fixtureIds[0])).toEqual([])
   })
 })

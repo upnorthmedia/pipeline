@@ -196,6 +196,10 @@ describe("images-manifest, which is the sub-step a real failing run reaches", ()
     await expect(runManifest(0)).rejects.toThrow(BOOM)
     expect((await readLogs()).map((entry) => `${entry.level}/${entry.event}`)).toEqual([
       "info/stage_start",
+      // The two progress lines the attempt reaches before the agent throws
+      // (item 5.5c-iv-d-1).
+      "info/log",
+      "info/log",
       "warning/retry",
     ])
   })

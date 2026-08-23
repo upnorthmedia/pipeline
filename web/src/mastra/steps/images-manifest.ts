@@ -38,6 +38,7 @@ import {
   announceStageStart,
   gateResumeSchema,
   gateSuspendSchema,
+  publishStageLog,
   recordStageRetry,
   reviewGate,
   shouldRunStage,
@@ -198,9 +199,21 @@ export const imagesManifestStep = createStep({
       const gate = await reviewGate("images", inputData, state.stageSettings, resumeData)
       if (gate) return suspend(gate)
       await announceStageStart(mastra, "images", inputData)
-      const prompt = buildStagePrompt("images", loadRules("images"), state)
+      const rules = loadRules("images")
+      // Python's first two progress lines, in the positions `images_node`
+      // wrote them: once the rules are read, and again immediately before
+      // Claude is called.
+      await publishStageLog(mastra, postId, "images", "Rules loaded, building prompt...")
+      const prompt = buildStagePrompt("images", rules, state)
 
+      await publishStageLog(mastra, postId, "images", "Calling Claude for image manifest...")
       const result = await mastra.getAgent("images").generate(prompt)
+
+      const tokensOut = result.usage?.outputTokens ?? 0
+      // Ahead of the parse, which is where Python wrote it: a manifest that
+      // turns out to be prose has still been paid for, and the line that says
+      // what it cost goes out before the line that says it was unusable.
+      await publishStageLog(mastra, postId, "images", `Manifest received (${tokensOut} tokens)`)
 
       const meta = {
         postId,
@@ -209,7 +222,7 @@ export const imagesManifestStep = createStep({
         stageStartedAtMs,
         model: result.response?.modelId ?? "",
         tokensIn: result.usage?.inputTokens ?? 0,
-        tokensOut: result.usage?.outputTokens ?? 0,
+        tokensOut,
       }
 
       const parsed = parseManifest(result.text)
@@ -224,29 +237,46 @@ export const imagesManifestStep = createStep({
       const manifest = imageManifestSchema.parse(parsed)
 
       if (pythonTruthy(manifest.error)) {
-        mastra.getLogger()?.warn(`Manifest parse failed: ${String(manifest.error)}`, {
+        // Python published this rather than logging it, so it goes on the event
+        // bus and onto the row's trail. The two `data` keys are its own, and
+        // this is one of only three call sites in the whole pipeline that pass
+        // any.
+        await publishStageLog(
+          mastra,
           postId,
-          stage: "images",
-          rawSnippet: rawSnippet(result.text),
-        })
+          "images",
+          `Manifest parse failed: ${String(manifest.error)}`,
+          {
+            level: "warning",
+            data: { error: manifest.error, raw_snippet: rawSnippet(result.text) },
+          },
+        )
         return { ...meta, parseFailed: true, manifest, images: [] }
       }
 
-      return {
-        ...meta,
-        parseFailed: false,
-        manifest,
-        // `manifest.get("images", [])`: absent is `[]`, and an explicit `null`
-        // is *not*, which is why this tests key presence rather than using `??`.
-        // A present non-array value fails the schema here, where Python would
-        // enumerate whatever it is (`len(None)` raises, a string yields its
-        // characters). Neither golden fixture has one and no rule in
-        // `rules/blog-images.md` asks for one, so the divergence stays a hard
-        // error rather than an invented behaviour.
-        images: imagesManifestOutputSchema.shape.images.parse(
-          "images" in manifest ? manifest.images : [],
-        ),
-      }
+      // `manifest.get("images", [])`: absent is `[]`, and an explicit `null`
+      // is *not*, which is why this tests key presence rather than using `??`.
+      // A present non-array value fails the schema here, where Python would
+      // enumerate whatever it is (`len(None)` raises, a string yields its
+      // characters). Neither golden fixture has one and no rule in
+      // `rules/blog-images.md` asks for one, so the divergence stays a hard
+      // error rather than an invented behaviour.
+      const images = imagesManifestOutputSchema.shape.images.parse(
+        "images" in manifest ? manifest.images : [],
+      )
+      // Python's `num_images` line, written from the parsed manifest one
+      // statement before it created the media directory and the Gemini client.
+      // Both of those are the workflow's `.map()` in this port, so the line
+      // stays here: it is about the manifest, not about the fan-out, and
+      // computing the count is what raises on a null `images` in both stacks.
+      await publishStageLog(
+        mastra,
+        postId,
+        "images",
+        `Generating ${images.length} images via Gemini...`,
+      )
+
+      return { ...meta, parseFailed: false, manifest, images }
     } catch (error) {
       // Python's `warning` / `retry` entry, from the `except` block that
       // wrapped the whole stage. Written under the stage's name rather than
