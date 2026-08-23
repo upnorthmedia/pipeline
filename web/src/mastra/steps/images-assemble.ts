@@ -25,6 +25,7 @@ import { imageManifestSchema, imagesManifestStep } from "./images-manifest"
 import {
   announceStageComplete,
   markRerunComplete,
+  recordStageRetry,
   skippedStageOutput,
   stageStepOutputSchema,
 } from "./stage-io"
@@ -91,89 +92,98 @@ export const imagesAssembleStep = createStep({
   id: "images-assemble",
   inputSchema: z.array(generatedImageSchema),
   outputSchema: imagesStageOutputSchema,
-  execute: async ({ inputData, getStepResult, mastra }) => {
+  execute: async ({ inputData, getStepResult, mastra, retryCount }) => {
     const manifestResult = getStepResult(imagesManifestStep)
-    const { postId, stages, stageStartedAtMs, parseFailed, skipped } = manifestResult
+    try {
+      const { postId, stages, stageStartedAtMs, parseFailed, skipped } = manifestResult
 
-    if (skipped) {
-      // Nothing ran, so there is nothing to fold, write or bill. Returned from
-      // here rather than from the manifest step because the fan-out sits
-      // between them and this is the step whose output leaves the workflow.
-      return {
-        ...skippedStageOutput({ postId, stages }, "images"),
-        totalGenerated: 0,
-        totalFailed: 0,
-        parseFailed: false,
-        gemini: null,
+      if (skipped) {
+        // Nothing ran, so there is nothing to fold, write or bill. Returned from
+        // here rather than from the manifest step because the fan-out sits
+        // between them and this is the step whose output leaves the workflow.
+        return {
+          ...skippedStageOutput({ postId, stages }, "images"),
+          totalGenerated: 0,
+          totalFailed: 0,
+          parseFailed: false,
+          gemini: null,
+        }
       }
-    }
-    // One timer over the whole stage, read once so both meta records carry the
-    // same value the way Python's single `timer.duration` did.
-    const durationS = (Date.now() - stageStartedAtMs) / 1000
+      // One timer over the whole stage, read once so both meta records carry the
+      // same value the way Python's single `timer.duration` did.
+      const durationS = (Date.now() - stageStartedAtMs) / 1000
 
-    const claudeMeta = {
-      postId,
-      stages,
-      stage: "images" as const,
-      skipped: false,
-      model: manifestResult.model,
-      tokensIn: manifestResult.tokensIn,
-      tokensOut: manifestResult.tokensOut,
-    }
+      const claudeMeta = {
+        postId,
+        stages,
+        stage: "images" as const,
+        skipped: false,
+        model: manifestResult.model,
+        tokensIn: manifestResult.tokensIn,
+        tokensOut: manifestResult.tokensOut,
+      }
 
-    if (parseFailed) {
-      // `timer.duration` is still 0 here: Python returns from *inside* the
-      // `with` block, and `StageTimer` only computes the elapsed time in
-      // `__exit__`. So a failed manifest is reported as taking no time, and
-      // there is no Gemini record because no image was attempted.
-      await saveStageOutput(postId, "images", manifestResult.manifest, {
-        images: STATUS_FAILED,
-      })
-      // No rerun completion check here: the stage just marked itself failed, so
-      // the "every stage complete" it would ask about cannot be true.
-      const failedOutput = {
+      if (parseFailed) {
+        // `timer.duration` is still 0 here: Python returns from *inside* the
+        // `with` block, and `StageTimer` only computes the elapsed time in
+        // `__exit__`. So a failed manifest is reported as taking no time, and
+        // there is no Gemini record because no image was attempted.
+        await saveStageOutput(postId, "images", manifestResult.manifest, {
+          images: STATUS_FAILED,
+        })
+        // No rerun completion check here: the stage just marked itself failed, so
+        // the "every stage complete" it would ask about cannot be true.
+        const failedOutput = {
+          ...claudeMeta,
+          durationS: 0,
+          totalGenerated: 0,
+          totalFailed: 0,
+          parseFailed: true,
+          gemini: null,
+        }
+        // Announced even though the stage marked itself failed: Python's node
+        // returned normally on this branch, so the worker loop reached its
+        // `stage_complete` publish with `duration_s` still 0. The failure shows
+        // up as `stage_status.images = "failed"` on the row the browser refetches.
+        await announceStageComplete(mastra, failedOutput)
+        return failedOutput
+      }
+
+      const images = inputData.map((result) => result.spec)
+      const manifest = imageManifestSchema.parse(foldManifest(manifestResult.manifest, images))
+      const totalGenerated = Number(manifest.total_generated)
+
+      await saveStageOutput(postId, "images", manifest, { images: STATUS_COMPLETE })
+      await markRerunComplete({ postId, stages })
+
+      // Python seeds `gemini_model` with the requested id and overwrites it with
+      // whatever each successful call reported, so a stage that billed nothing
+      // still records the id it would have used.
+      const billed = inputData.map((result) => result.usage).filter((usage) => usage !== null)
+
+      const output = {
         ...claudeMeta,
-        durationS: 0,
-        totalGenerated: 0,
-        totalFailed: 0,
-        parseFailed: true,
-        gemini: null,
-      }
-      // Announced even though the stage marked itself failed: Python's node
-      // returned normally on this branch, so the worker loop reached its
-      // `stage_complete` publish with `duration_s` still 0. The failure shows
-      // up as `stage_status.images = "failed"` on the row the browser refetches.
-      await announceStageComplete(mastra, failedOutput)
-      return failedOutput
-    }
-
-    const images = inputData.map((result) => result.spec)
-    const manifest = imageManifestSchema.parse(foldManifest(manifestResult.manifest, images))
-    const totalGenerated = Number(manifest.total_generated)
-
-    await saveStageOutput(postId, "images", manifest, { images: STATUS_COMPLETE })
-    await markRerunComplete({ postId, stages })
-
-    // Python seeds `gemini_model` with the requested id and overwrites it with
-    // whatever each successful call reported, so a stage that billed nothing
-    // still records the id it would have used.
-    const billed = inputData.map((result) => result.usage).filter((usage) => usage !== null)
-
-    const output = {
-      ...claudeMeta,
-      durationS,
-      totalGenerated,
-      totalFailed: images.length - totalGenerated,
-      parseFailed: false,
-      gemini: {
-        stage: "images_gemini" as const,
-        model: billed.at(-1)?.model ?? GEMINI_IMAGE_MODEL_ID,
-        tokensIn: billed.reduce((sum, usage) => sum + usage.tokensIn, 0),
-        tokensOut: billed.reduce((sum, usage) => sum + usage.tokensOut, 0),
         durationS,
-      },
+        totalGenerated,
+        totalFailed: images.length - totalGenerated,
+        parseFailed: false,
+        gemini: {
+          stage: "images_gemini" as const,
+          model: billed.at(-1)?.model ?? GEMINI_IMAGE_MODEL_ID,
+          tokensIn: billed.reduce((sum, usage) => sum + usage.tokensIn, 0),
+          tokensOut: billed.reduce((sum, usage) => sum + usage.tokensOut, 0),
+          durationS,
+        },
+      }
+      await announceStageComplete(mastra, output)
+      return output
+    } catch (error) {
+      // Python's `warning` / `retry` entry, under the stage's name. The post id
+      // comes from the manifest step's result, resolved before the `try` so the
+      // catch has it: a `getStepResult` that itself threw is the one failure
+      // this record cannot cover, and it has no post id to record against.
+      await recordStageRetry("images", manifestResult.postId, retryCount, error)
+      throw error
     }
-    await announceStageComplete(mastra, output)
-    return output
   },
 })

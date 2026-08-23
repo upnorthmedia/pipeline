@@ -38,6 +38,7 @@ import {
   announceStageStart,
   gateResumeSchema,
   gateSuspendSchema,
+  recordStageRetry,
   reviewGate,
   shouldRunStage,
   stageStepInputSchema,
@@ -168,82 +169,93 @@ export const imagesManifestStep = createStep({
   outputSchema: imagesManifestOutputSchema,
   resumeSchema: gateResumeSchema,
   suspendSchema: gateSuspendSchema,
-  execute: async ({ inputData, mastra, resumeData, suspend }) => {
-    const { postId } = inputData
-    const stageStartedAtMs = Date.now()
+  execute: async ({ inputData, mastra, resumeData, suspend, retryCount }) => {
+    try {
+      const { postId } = inputData
+      const stageStartedAtMs = Date.now()
 
-    const state = await loadPipelineState(postId)
-    if (!shouldRunStage("images", inputData, state.stageStatus)) {
-      // The `continue` in Python's stage loop, expressed one step earlier than
-      // the other stages express it: the skip has to be decided before the
-      // manifest call, and the two steps behind the fan-out read it from here.
-      return {
+      const state = await loadPipelineState(postId)
+      if (!shouldRunStage("images", inputData, state.stageStatus)) {
+        // The `continue` in Python's stage loop, expressed one step earlier than
+        // the other stages express it: the skip has to be decided before the
+        // manifest call, and the two steps behind the fan-out read it from here.
+        return {
+          postId,
+          stages: inputData.stages,
+          skipped: true,
+          stageStartedAtMs,
+          model: "",
+          tokensIn: 0,
+          tokensOut: 0,
+          parseFailed: false,
+          manifest: {},
+          images: [],
+        }
+      }
+
+      // The gate sits immediately after the skip check and before anything the
+      // stage spends, which is where Python put it: a paused stage bills nothing.
+      const gate = await reviewGate("images", inputData, state.stageSettings, resumeData)
+      if (gate) return suspend(gate)
+      await announceStageStart(mastra, "images", inputData)
+      const prompt = buildStagePrompt("images", loadRules("images"), state)
+
+      const result = await mastra.getAgent("images").generate(prompt)
+
+      const meta = {
         postId,
         stages: inputData.stages,
-        skipped: true,
+        skipped: false,
         stageStartedAtMs,
-        model: "",
-        tokensIn: 0,
-        tokensOut: 0,
-        parseFailed: false,
-        manifest: {},
-        images: [],
+        model: result.response?.modelId ?? "",
+        tokensIn: result.usage?.inputTokens ?? 0,
+        tokensOut: result.usage?.outputTokens ?? 0,
       }
-    }
 
-    // The gate sits immediately after the skip check and before anything the
-    // stage spends, which is where Python put it: a paused stage bills nothing.
-    const gate = await reviewGate("images", inputData, state.stageSettings, resumeData)
-    if (gate) return suspend(gate)
-    await announceStageStart(mastra, "images", inputData)
-    const prompt = buildStagePrompt("images", loadRules("images"), state)
+      const parsed = parseManifest(result.text)
+      // Python does `manifest.get("error")` straight away, so a manifest that is
+      // not a mapping raises out of the stage rather than being stored. `json`
+      // and `JSON.parse` both admit arrays and scalars, so this is reachable.
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new TypeError(
+          `image manifest parsed to ${Array.isArray(parsed) ? "an array" : typeof parsed}, not an object`,
+        )
+      }
+      const manifest = imageManifestSchema.parse(parsed)
 
-    const result = await mastra.getAgent("images").generate(prompt)
+      if (pythonTruthy(manifest.error)) {
+        mastra.getLogger()?.warn(`Manifest parse failed: ${String(manifest.error)}`, {
+          postId,
+          stage: "images",
+          rawSnippet: rawSnippet(result.text),
+        })
+        return { ...meta, parseFailed: true, manifest, images: [] }
+      }
 
-    const meta = {
-      postId,
-      stages: inputData.stages,
-      skipped: false,
-      stageStartedAtMs,
-      model: result.response?.modelId ?? "",
-      tokensIn: result.usage?.inputTokens ?? 0,
-      tokensOut: result.usage?.outputTokens ?? 0,
-    }
-
-    const parsed = parseManifest(result.text)
-    // Python does `manifest.get("error")` straight away, so a manifest that is
-    // not a mapping raises out of the stage rather than being stored. `json`
-    // and `JSON.parse` both admit arrays and scalars, so this is reachable.
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new TypeError(
-        `image manifest parsed to ${Array.isArray(parsed) ? "an array" : typeof parsed}, not an object`,
-      )
-    }
-    const manifest = imageManifestSchema.parse(parsed)
-
-    if (pythonTruthy(manifest.error)) {
-      mastra.getLogger()?.warn(`Manifest parse failed: ${String(manifest.error)}`, {
-        postId,
-        stage: "images",
-        rawSnippet: rawSnippet(result.text),
-      })
-      return { ...meta, parseFailed: true, manifest, images: [] }
-    }
-
-    return {
-      ...meta,
-      parseFailed: false,
-      manifest,
-      // `manifest.get("images", [])`: absent is `[]`, and an explicit `null`
-      // is *not*, which is why this tests key presence rather than using `??`.
-      // A present non-array value fails the schema here, where Python would
-      // enumerate whatever it is (`len(None)` raises, a string yields its
-      // characters). Neither golden fixture has one and no rule in
-      // `rules/blog-images.md` asks for one, so the divergence stays a hard
-      // error rather than an invented behaviour.
-      images: imagesManifestOutputSchema.shape.images.parse(
-        "images" in manifest ? manifest.images : [],
-      ),
+      return {
+        ...meta,
+        parseFailed: false,
+        manifest,
+        // `manifest.get("images", [])`: absent is `[]`, and an explicit `null`
+        // is *not*, which is why this tests key presence rather than using `??`.
+        // A present non-array value fails the schema here, where Python would
+        // enumerate whatever it is (`len(None)` raises, a string yields its
+        // characters). Neither golden fixture has one and no rule in
+        // `rules/blog-images.md` asks for one, so the divergence stays a hard
+        // error rather than an invented behaviour.
+        images: imagesManifestOutputSchema.shape.images.parse(
+          "images" in manifest ? manifest.images : [],
+        ),
+      }
+    } catch (error) {
+      // Python's `warning` / `retry` entry, from the `except` block that
+      // wrapped the whole stage. Written under the stage's name rather than
+      // this sub-step's, because the log reader groups on `stage` and Python
+      // only ever wrote `images` here. `imagesWorkflow` carries the retry
+      // policy of its own (item 5.5c-iii-b-2-b-i), so `retryCount` is the
+      // attempt number the same way it is for the five single-step stages.
+      await recordStageRetry("images", inputData.postId, retryCount, error)
+      throw error
     }
   },
 })

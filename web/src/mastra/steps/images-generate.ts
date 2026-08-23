@@ -20,6 +20,7 @@ import { requireApiKey } from "../api-keys"
 import { generateOneImage } from "../images/generate-one"
 import type { ImageSpec } from "../images/generate-one"
 import { imageSpecSchema } from "./images-manifest"
+import { recordStageRetry } from "./stage-io"
 
 export const imageJobSchema = z.object({
   postId: z.uuid(),
@@ -60,15 +61,26 @@ export const imagesGenerateStep = createStep({
   id: "images-generate",
   inputSchema: imageJobSchema,
   outputSchema: generatedImageSchema,
-  execute: async ({ inputData }) => {
-    const apiKey = await requireApiKey("gemini")
-    const { spec, usage } = await generateOneImage({
-      spec: inputData.spec as ImageSpec,
-      index: inputData.index,
-      postId: inputData.postId,
-      mediaDir: inputData.mediaDir,
-      apiKey,
-    })
-    return { spec: imageSpecSchema.parse(spec), usage }
+  execute: async ({ inputData, retryCount }) => {
+    try {
+      const apiKey = await requireApiKey("gemini")
+      const { spec, usage } = await generateOneImage({
+        spec: inputData.spec as ImageSpec,
+        index: inputData.index,
+        postId: inputData.postId,
+        mediaDir: inputData.mediaDir,
+        apiKey,
+      })
+      return { spec: imageSpecSchema.parse(spec), usage }
+    } catch (error) {
+      // Python's `warning` / `retry` entry, from the `except` block that
+      // wrapped the whole stage. Written under the stage's name rather than
+      // this sub-step's, because the log reader groups on `stage` and Python
+      // only ever wrote `images` here. `imagesWorkflow` carries the retry
+      // policy of its own (item 5.5c-iii-b-2-b-i), so `retryCount` is the
+      // attempt number the same way it is for the five single-step stages.
+      await recordStageRetry("images", inputData.postId, retryCount, error)
+      throw error
+    }
   },
 })

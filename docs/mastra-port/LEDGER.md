@@ -12299,7 +12299,7 @@ three pieces are separately verifiable, so they are separate items.
       $ uv run ruff format --check .
       9 files would be reformatted, 131 files already formatted
       ```
-    - [ ] 5.5c-iii The failure entries from Python's exception branch: the `warning` /
+    - [x] 5.5c-iii The failure entries from Python's exception branch: the `warning` /
       `retry` entry while attempts remain and the `error` / `stage_error` entry once
       they are spent. These go beside the `stage_error` publish in
       `web/src/mastra/failure-recorder.ts`, and the retry half has to be settled against
@@ -12477,7 +12477,7 @@ three pieces are separately verifiable, so they are separate items.
         $ cd api && uv run ruff format --check .
         9 files would be reformatted, 131 files already formatted
         ```
-      - [ ] 5.5c-iii-b The `warning` / `retry` entry while attempts remain (split: the
+      - [x] 5.5c-iii-b The `warning` / `retry` entry while attempts remain (split: the
         entry cannot be written until the port has a retry policy to write it about, and
         deciding that policy moves `attempts` in three places that already have tests.
         Split into 5.5c-iii-b-1 the retry policy, 5.5c-iii-b-2 the entry.)
@@ -12611,7 +12611,7 @@ three pieces are separately verifiable, so they are separate items.
           9 files would be reformatted, 131 files already formatted
           ```
 
-        - [ ] 5.5c-iii-b-2 The `warning` / `retry` entry itself, written from inside the
+        - [x] 5.5c-iii-b-2 The `warning` / `retry` entry itself, written from inside the
           step where `retryCount` and the thrown error are both in hand, since the
           `workflows-finish` listener only ever sees a run whose attempts are spent.
 
@@ -12806,7 +12806,7 @@ three pieces are separately verifiable, so they are separate items.
             9 files would be reformatted, 131 files already formatted
             ```
 
-          - [ ] 5.5c-iii-b-2-b The entry for the `images` stage (split: the measurement
+          - [x] 5.5c-iii-b-2-b The entry for the `images` stage (split: the measurement
             that unblocks it turned up a real defect, and the entry cannot be written
             until that is fixed. Split into 5.5c-iii-b-2-b-i the measurement plus the
             retry policy it forces onto `imagesWorkflow`, and 5.5c-iii-b-2-b-ii the
@@ -12986,14 +12986,204 @@ three pieces are separately verifiable, so they are separate items.
               9 files would be reformatted, 131 files already formatted
               ```
 
-            - [ ] 5.5c-iii-b-2-b-ii The `warning` / `retry` entry itself, written from
+            - [x] 5.5c-iii-b-2-b-ii The `warning` / `retry` entry itself, written from
               inside the `images` sub-steps. Now unblocked: the attempt number is the
               sub-step's own `retryCount` against `imagesWorkflow`'s policy, which
-              5.5c-iii-b-2-b-i measured to be a single ascending sequence. Open
-              question for that iteration: whether one entry per failing sub-step is
-              right, or whether only `images-manifest` should write one, since Python
-              wrote exactly one entry per stage per attempt and a fan-out of five
-              images can fail five ways at once.
+              5.5c-iii-b-2-b-i measured to be a single ascending sequence.
+
+              `recordStageRetry()` needed no change: 5.5c-iii-b-2-a built it as a
+              free function over `(stage, postId, retryCount, error)`, so this item
+              is three `try` / `catch` wrappers and the tests that pin them.
+              `images-manifest`, `images-generate` and `images-assemble` each call it
+              with the stage name `"images"` and rethrow unchanged.
+
+              **The open question, answered: all three sub-steps write, and the entry
+              is filed under `images`, not under the sub-step.** The reasoning, and
+              what was rejected:
+
+              1. *Only `images-manifest` writes.* Rejected. `images-assemble` is the
+                 sub-step that writes the row, so a failure there is exactly the
+                 failure an operator most needs the record of, and it would have been
+                 silent. The fan-out risk that motivated the question turns out to be
+                 near-theoretical: `generateOneImage` is documented and implemented as
+                 never throwing (`web/src/mastra/images/generate-one.ts:138`, every
+                 provider, optimizer and filesystem failure is recorded on the returned
+                 entry), so `images-generate` can only throw on the credential read or
+                 on its own `imageSpecSchema.parse`.
+              2. *File the entry under the sub-step's id.* Rejected. The two readers
+                 that consume `execution_logs` group on `stage`
+                 (`GET /api/posts/{id}/logs`, `GET /api/analytics/logs`), and Python
+                 only ever wrote `images` there. Which sub-step threw stays recoverable
+                 from `data.error`.
+              3. *One entry per failing fan-out branch is a deviation, recorded here.*
+                 A vanished Gemini credential would fail all five `images-generate`
+                 branches at once and write five identical entries for the one attempt,
+                 where Python wrote one per stage per attempt. Left as is rather than
+                 deduplicated: the branches genuinely do retry independently (see the
+                 asymmetry `workflows/images.ts` already records), so five entries is
+                 the honest report of five retries, and suppressing four of them would
+                 need cross-branch state the step does not have.
+
+              **The blind spot, stated rather than papered over.** `images-assemble`
+              takes its post id from `getStepResult(imagesManifestStep)`, resolved
+              before the `try` so the `catch` has it. A `getStepResult` that itself
+              threw writes no entry, because there is no post id to write it against.
+              That is the same class of blind spot 5.5c-iii-b-2-a recorded for input
+              schema validation, which throws before `execute` is entered at all.
+
+              The pre-implementation run, failing for the right reason (the entry does
+              not exist yet), before the three wrappers were added:
+
+              ```
+              $ pnpm exec vitest run src/mastra/steps/images-retry-entry.test.ts
+               ✗ 'images-manifest' on the way out > writes the stage's retry entry while attempts remain
+               ✗ 'images-generate' on the way out > writes the stage's retry entry while attempts remain
+               ✗ 'images-assemble' on the way out > writes the stage's retry entry while attempts remain
+              AssertionError: expected [] to deeply equal [ { ts: Any<String>, …(5) } ]
+               Test Files  1 failed (1)
+                    Tests  3 failed | 6 passed (9)
+              ```
+
+              The whole `execution_logs` trail of the real failing nested run in
+              `workflows/images-retry.test.ts`, read off the row after the run: real
+              evented engine, real Redis Streams, real Postgres storage, real database,
+              with only the Claude call stubbed to throw.
+
+              ```
+              [
+                {
+                  "ts": "2026-08-23T01:07:55.427+00:00",
+                  "event": "stage_start",
+                  "level": "info",
+                  "stage": "images",
+                  "message": "Starting images..."
+                },
+                {
+                  "ts": "2026-08-23T01:07:55.428+00:00",
+                  "data": {
+                    "error": "manifest provider exploded",
+                    "attempt": 1,
+                    "max_attempts": 3
+                  },
+                  "event": "retry",
+                  "level": "warning",
+                  "stage": "images",
+                  "message": "Pipeline attempt 1 failed, retrying..."
+                },
+                {
+                  "ts": "2026-08-23T01:07:55.435+00:00",
+                  "event": "stage_start",
+                  "level": "info",
+                  "stage": "images",
+                  "message": "Starting images..."
+                },
+                {
+                  "ts": "2026-08-23T01:07:55.436+00:00",
+                  "data": {
+                    "error": "manifest provider exploded",
+                    "attempt": 2,
+                    "max_attempts": 3
+                  },
+                  "event": "retry",
+                  "level": "warning",
+                  "stage": "images",
+                  "message": "Pipeline attempt 2 failed, retrying..."
+                },
+                {
+                  "ts": "2026-08-23T01:07:55.441+00:00",
+                  "event": "stage_start",
+                  "level": "info",
+                  "stage": "images",
+                  "message": "Starting images..."
+                }
+              ]
+              ```
+
+              Three attempts, two retries, and nothing after the last attempt, which is
+              Python's `if job_try < MAX_ATTEMPTS:` gate holding across the nested
+              workflow boundary.
+
+              The new direct-call file. A real run can only ever fail inside
+              `images-manifest`, because a failing manifest never reaches the fan-out
+              and `generateOneImage` never throws, so the other two sub-steps' catches
+              are unreachable from a real run and need driving directly:
+
+              ```
+              $ pnpm exec vitest run --reporter=verbose src/mastra/steps/images-retry-entry.test.ts
+               ✓ 'images-manifest' on the way out > writes the stage's retry entry while attempts remain 28ms
+               ✓ 'images-manifest' on the way out > writes nothing on the attempt that spends the last one 5ms
+               ✓ 'images-manifest' on the way out > rethrows the error unchanged, so the engine still sees the failure 5ms
+               ✓ 'images-generate' on the way out > writes the stage's retry entry while attempts remain 3ms
+               ✓ 'images-generate' on the way out > writes nothing on the attempt that spends the last one 2ms
+               ✓ 'images-generate' on the way out > rethrows the error unchanged, so the engine still sees the failure 2ms
+               ✓ 'images-assemble' on the way out > writes the stage's retry entry while attempts remain 2ms
+               ✓ 'images-assemble' on the way out > writes nothing on the attempt that spends the last one 1ms
+               ✓ 'images-assemble' on the way out > rethrows the error unchanged, so the engine still sees the failure 1ms
+               ✓ images-manifest, which is the sub-step a real failing run reaches > leaves the announcement it already wrote in front of the retry 3ms
+               ✓ images-manifest, which is the sub-step a real failing run reaches > records the error the agent threw, not the step's own wrapper 3ms
+               Test Files  1 passed (1)
+                    Tests  11 passed (11)
+              ```
+
+              The real nested run, with the two assertions this item adds:
+
+              ```
+              $ pnpm exec vitest run --reporter=verbose src/mastra/workflows/images-retry.test.ts
+               ✓ declares the pipeline's policy on the nested workflow itself 0ms
+               ✓ calls the manifest provider once per attempt Python's max_tries allowed 0ms
+               ✓ fails the parent run once those attempts are spent 0ms
+               ✓ announces the stage once per attempt, as a retried step re-runs its whole body 0ms
+               ✓ records a retry for every attempt but the last, under the stage's own name 1ms
+               ✓ interleaves the retry after every attempt that is followed by another 0ms
+               Test Files  1 passed (1)
+                    Tests  6 passed (6)
+              ```
+
+              **Negative controls.** Each mutation applied on its own, both files run
+              together (17 tests), then reverted.
+
+              | Mutation | Result | What it shows |
+              | --- | --- | --- |
+              | `images-manifest`'s `catch` removed (file reverted to `HEAD`) | 5 failed of 17 | The real nested run and the manifest half of the direct-call file both depend on it. |
+              | `retryCount + 1` in all three catches | 6 failed of 17 | The off-by-one is caught in both directions: it inflates the attempt number on every entry and makes the last attempt write one it should not. |
+              | `"images-manifest"` used as the stage name instead of `"images"` | 3 failed of 17 | The stage name the log reader groups on is pinned, not incidental. |
+              | `catch` removed from `images-generate` and `images-assemble` only | 2 failed of 17, and the real nested run still passes | The two sub-steps a real run cannot reach are carried entirely by the direct-call file. Without it this change would have looked complete with two thirds of it missing. |
+
+              Frontend gates, from `web/`:
+
+              ```
+              $ pnpm exec tsc --noEmit
+              (exit 0, no output)
+
+              $ pnpm run lint
+              > eslint
+              (exit 0, no output)
+
+              $ pnpm exec vitest run
+               Test Files  2 failed | 90 passed (92)
+                    Tests  9 failed | 1618 passed | 7 skipped (1635)
+              # The Phase 0 baseline: 6 in `image-preview.test.tsx` plus 3 in
+              # `PostDetail.test.tsx`. No new failure.
+              # The first run of the suite showed 10 failed, the known
+              # `scaffold-check.test.ts` flake already recorded in `todo.md`; it
+              # passes on its own and on the second full run.
+
+              $ pnpm run build
+              ✓ Compiled successfully
+              ```
+
+              Python, untouched by this item (no file under `api/` changed):
+
+              ```
+              $ cd api && uv run pytest -q
+              120 failed, 241 passed, 25 errors in 12.83s
+
+              $ cd api && uv run ruff check .
+              Found 32 errors.
+
+              $ cd api && uv run ruff format --check .
+              9 files would be reformatted, 131 files already formatted
+              ```
     - [ ] 5.5c-iv `publishStageLog()` and the `log` event: the 28 call sites inside the
       six stage nodes, and the module-level `set_event_context` /
       `clear_event_context` they read, which has no equivalent in a step that already

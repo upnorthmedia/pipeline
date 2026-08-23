@@ -81,6 +81,14 @@ const testMastra = new Mastra({
   agents: { images: imagesAgent },
 })
 
+async function readLogs(): Promise<Record<string, unknown>[]> {
+  const [row] = await db
+    .select({ logs: posts.executionLogs })
+    .from(posts)
+    .where(eq(posts.id, POST_ID))
+  return (row?.logs ?? []) as Record<string, unknown>[]
+}
+
 let result: { status: string }
 let agentGenerate: ReturnType<typeof vi.spyOn>
 /** The engine's stderr, captured so the expected step errors are asserted on. */
@@ -150,20 +158,52 @@ describe("the images stage under the pipeline's retry policy", () => {
     expect(result.status).toBe("failed")
   })
 
-  it("announces the stage once per attempt, as a retried step re-runs its whole body", () => {
+  it("announces the stage once per attempt, as a retried step re-runs its whole body", async () => {
     // Python's job retry re-entered `_run_pipeline()` and re-announced the
     // stage it resumed on, so a `stage_start` per attempt is parity rather
-    // than an artefact. Asserted here because it is the visible trace of the
-    // retry in `execution_logs`, which is what item 5.5c-iii-b-2-b-ii adds the
-    // matching `retry` entry to.
-    return db
-      .select({ logs: posts.executionLogs })
-      .from(posts)
-      .where(eq(posts.id, POST_ID))
-      .then(([row]) => {
-        const entries = (row?.logs ?? []) as { stage?: string; event?: string }[]
-        expect(entries.filter((entry) => entry.event === "stage_start")).toHaveLength(MAX_ATTEMPTS)
-        expect(entries.every((entry) => entry.stage === "images")).toBe(true)
-      })
+    // than an artefact.
+    const entries = await readLogs()
+    expect(entries.filter((entry) => entry.event === "stage_start")).toHaveLength(MAX_ATTEMPTS)
+    expect(entries.every((entry) => entry.stage === "images")).toBe(true)
+  })
+
+  // Item 5.5c-iii-b-2-b-ii: the `warning` / `retry` entry, written from inside
+  // the sub-step. The five single-step stages got theirs in 5.5c-iii-b-2-a;
+  // this is the same entry from the one stage that is a nested workflow, and
+  // this run is the only place its interleaving can be observed for real.
+  it("records a retry for every attempt but the last, under the stage's own name", async () => {
+    const retries = (await readLogs()).filter((entry) => entry.event === "retry")
+    expect(retries).toEqual([
+      {
+        ts: expect.any(String),
+        stage: "images",
+        level: "warning",
+        event: "retry",
+        message: "Pipeline attempt 1 failed, retrying...",
+        data: { attempt: 1, max_attempts: MAX_ATTEMPTS, error: BOOM },
+      },
+      {
+        ts: expect.any(String),
+        stage: "images",
+        level: "warning",
+        event: "retry",
+        message: "Pipeline attempt 2 failed, retrying...",
+        data: { attempt: 2, max_attempts: MAX_ATTEMPTS, error: BOOM },
+      },
+    ])
+    expect(retries).toHaveLength(MAX_ATTEMPTS - 1)
+  })
+
+  it("interleaves the retry after every attempt that is followed by another", async () => {
+    // The whole trail, in order. The sub-step's `retryCount` against
+    // `imagesWorkflow`'s own policy is a single ascending sequence, so the
+    // entries read exactly like a single-step stage's do.
+    expect((await readLogs()).map((entry) => `${entry.level}/${entry.event}`)).toEqual([
+      "info/stage_start",
+      "warning/retry",
+      "info/stage_start",
+      "warning/retry",
+      "info/stage_start",
+    ])
   })
 })
