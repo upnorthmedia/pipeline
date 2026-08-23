@@ -724,3 +724,12 @@
   compose volume and the repo directory are two different stores of the same namespace, and
   a run started in one is only fully viewable in the other's absence. Related to the already
   recorded Railway gap where `web` and `worker` cannot share `/media` at all.
+
+- [investigate] 2026-08-23 `GET /api/posts` answers `500` with an empty body when its database
+  is unreachable (verified by stopping the compose `db` container under a live page:
+  `{"status":500,"body":""}`), so the client has nothing of the server's own to show and the
+  new error state on `/` falls back to its own wording. Every ported handler returns
+  `{"detail": "..."}` for the failures it anticipates; an unanticipated throw appears to reach
+  Next's default 500 instead. Worth deciding whether the route handlers need a shared catch
+  that answers `{"detail": ...}` for unexpected errors too, since Phase 8's error states are
+  only as informative as the bodies they get.

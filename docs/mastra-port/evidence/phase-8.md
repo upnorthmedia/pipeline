@@ -175,3 +175,184 @@ TestingLibraryElementError: Unable to find an element with the text: Run Next.
 TestingLibraryElementError: Unable to find an element with the text: Execution Logs.
       Tests  3 failed | 12 passed (15)
 ```
+
+## 8.2
+
+`/` (the dashboard home) is the posts list: there is no `/posts` route, only `/posts/new`,
+`/posts/batch` and `/posts/[id]`.
+
+```
+$ find web/src/app -name page.tsx | sort
+web/src/app/auth/[path]/page.tsx
+web/src/app/monitor/page.tsx
+web/src/app/page.tsx
+web/src/app/posts/[id]/page.tsx
+web/src/app/posts/batch/page.tsx
+web/src/app/posts/new/page.tsx
+web/src/app/profiles/[id]/page.tsx
+web/src/app/profiles/page.tsx
+web/src/app/settings/page.tsx
+```
+
+### What the four states were before
+
+Loading and success existed. Empty and error did not, in a way that mattered:
+`fetchPosts()` caught every failure into `toast.error("Failed to load posts")` and left
+`postList` empty, so a failed load rendered the empty state. The page told a user whose
+request had just 500'd that they had no posts and offered them "Create your first post". The
+same copy also served a filter that matched nothing, so three different situations rendered
+one screen.
+
+### Tests first
+
+The five new or changed cases in `web/src/app/PostsList.test.tsx` against the unchanged page:
+
+```
+$ pnpm -C web test --run src/app/PostsList.test.tsx
+      Tests  5 failed | 11 passed (16)
+ × shows empty state when no posts
+ × tells a filtered empty result apart from an empty account
+ × shows the server's own message and a retry when the list fails
+ × falls back to its own wording when the failure carries no message
+ × counts one post without a plural
+```
+
+After the change:
+
+```
+$ pnpm -C web test --run src/app/PostsList.test.tsx
+ ✓ src/app/PostsList.test.tsx (16 tests) 487ms
+ Test Files  1 passed (1)
+      Tests  16 passed (16)
+```
+
+The pre-existing `act(...)` warning in "shows loading skeletons initially" is gone too: the
+profile list resolved after the test body finished and set state outside `act`, so that test
+now leaves both requests pending.
+
+### The states, live
+
+`pnpm -C web dev` on :3000 against the compose `db` and `redis`, driven with
+`npx -y chrome-devtools-axi`. Signed in through the real form as two users: the owner of the
+one post from item 7.6, and a second user who owns no profiles and so sees no posts.
+
+Success and the count, read out of the page as the post's owner:
+
+```
+$ npx -y chrome-devtools-axi eval '() => document.body.innerText.slice(100,400)'
+atch\nNew Post\nAll Posts\nAll profiles\n\tTopic\tStage\tProgress\tPri\tCreated\t\n\t\n
+How small businesses choose a local SEO agency\n
+how-small-businesses-choose-a-local-seo-agency\n\n\tCOMPLETE\t\n6/6\n\t0\t1h ago\t
+```
+
+with the header line reading `1 total post`, not `1 total posts`.
+
+Empty, as the user who owns nothing:
+
+```
+No posts yet
+Every post starts here and runs the six pipeline stages.
+Create your first post
+```
+
+Filtered empty, after typing a search that matches nothing:
+
+```
+No posts match these filters
+Widen the search or the status and profile filters.
+Clear filters
+```
+
+Error, produced by stopping the database container under a live page and clicking Refresh:
+
+```
+$ docker stop objective-port-jena-46c1e6-1-db-1
+$ npx -y chrome-devtools-axi eval '() => { ...aria-label="Refresh posts"...click() }'
+$ npx -y chrome-devtools-axi eval '() => document.body.innerText.slice(0,600)'
+Posts\n\nPost list unavailable\n...\nCould not load posts\n
+The request failed and the server gave no reason.\n\nRetry
+```
+
+The route answers a 500 with an empty body when its database is gone, which is why the
+fallback wording is what the page shows here rather than a message of the server's own:
+
+```
+$ npx -y chrome-devtools-axi eval '() => fetch("/api/posts").then(async r => ({status: r.status, body: (await r.text()).slice(0,180)}))'
+{"status":500,"body":""}
+```
+
+The `{"detail": ...}` path is covered by the test above. Starting the database and clicking
+`Retry` in the page recovered it with no reload:
+
+```
+$ docker start objective-port-jena-46c1e6-1-db-1
+$ npx -y chrome-devtools-axi eval '() => { ...textContent==="Retry"...click() }'
+$ npx -y chrome-devtools-axi eval '() => document.body.innerText.slice(100,400)'
+No posts yet\n\nEvery post starts here and runs the six pipeline stages.\n\nCreate your first post
+```
+
+Loading, captured by making `/api/posts` hang and clicking Refresh, which is also the proof
+that the skeletons are now reachable from a refresh and a retry and not only from first mount:
+
+```
+Posts\n\nLoading posts...\n\nBatch\nNew Post\nAll Posts\nAll profiles\n\tTopic\tStage\tProgress\tPri\tCreated\t\n\n\t\n\t\n\t\n\t\n\t\n\t\n
+```
+
+### Screenshots
+
+Before pairs were captured by checking out `git show HEAD:web/src/app/page.tsx` over the file
+with the dev server hot-reloading, driving the same four situations, then restoring the new
+version.
+
+| File | State |
+| --- | --- |
+| `ui/8.2-posts-success-{before,after}.png` | one post, header count singular in the after |
+| `ui/8.2-posts-empty-{before,after}.png` | user who owns no posts |
+| `ui/8.2-posts-empty-filtered-{before,after}.png` | search matching nothing |
+| `ui/8.2-posts-error-{before,after}.png` | database stopped under the page |
+| `ui/8.2-posts-loading-after.png` | `/api/posts` hanging |
+
+`8.2-posts-empty-before.png` and `8.2-posts-error-before.png` are byte-identical
+(`md5 62ff2c7da1705dbfa2c3b5059dacd235` for both). That is the finding, not a capture
+mistake: the old page rendered a failed load and an empty account as the same screen.
+
+### Console
+
+The page had one open Chrome issue before this change, "A form field element should have an
+id or name attribute", from the two unnamed row checkboxes and the unlabelled search box.
+With `name` and `aria-label` on all three:
+
+```
+$ npx -y chrome-devtools-axi console
+console:
+## Console messages
+<no console messages found>
+$ npx -y chrome-devtools-axi stop
+status: stopped
+```
+
+### Gates
+
+```
+$ pnpm -C web exec tsc --noEmit
+exit=0
+
+$ pnpm -C web lint
+exit=0
+
+$ pnpm -C web test
+ Test Files  2 failed | 136 passed (138)
+      Tests  9 failed | 4545 passed | 7 skipped (4561)
+
+$ pnpm -C web build
+build exit=0
+```
+
+The 9 failures are the standing baseline (6 in `image-preview.test.tsx`, 3 in
+`PostDetail.test.tsx`); the passing count rises by 4, which is the four new cases (the fifth
+red case before the change was the existing empty-state test, whose copy this item changed
+from "No posts found" to "No posts yet" so that it no longer doubles as the failure state).
+`pnpm -C web build` prints
+15 `BetterAuthError: You are using the default secret` lines, which are pre-existing: this
+worktree's `.env` has no `BETTER_AUTH_SECRET` (`grep -c` returns 0) and `.env.example`
+documents it.

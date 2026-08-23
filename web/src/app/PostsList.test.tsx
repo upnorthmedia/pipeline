@@ -88,7 +88,10 @@ describe("PostsPage", () => {
   });
 
   it("shows loading skeletons initially", () => {
+    // Both requests stay pending: a profile list resolving after the test body
+    // has finished updates state outside act() and prints a warning.
     mockPostsList.mockReturnValue(new Promise(() => {})); // never resolves
+    mockProfilesList.mockReturnValue(new Promise(() => {}));
     const { container } = renderWithProviders(<PostsPage />);
     const skeletons = container.querySelectorAll("[class*='animate-pulse']");
     expect(skeletons.length).toBeGreaterThan(0);
@@ -98,8 +101,67 @@ describe("PostsPage", () => {
     mockPostsList.mockResolvedValue([]);
     renderWithProviders(<PostsPage />);
     await waitFor(() => {
-      expect(screen.getByText("No posts found")).toBeInTheDocument();
+      expect(screen.getByText("No posts yet")).toBeInTheDocument();
       expect(screen.getByText("Create your first post")).toBeInTheDocument();
+    });
+  });
+
+  it("tells a filtered empty result apart from an empty account", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+
+    mockPostsList.mockResolvedValue([]);
+    await user.type(screen.getByPlaceholderText("Search posts..."), "zzz");
+
+    await waitFor(() => {
+      expect(screen.getByText("No posts match these filters")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Create your first post")).not.toBeInTheDocument();
+
+    mockPostsList.mockResolvedValue(testPosts);
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+    expect(screen.getByPlaceholderText("Search posts...")).toHaveValue("");
+  });
+
+  it("shows the server's own message and a retry when the list fails", async () => {
+    const user = userEvent.setup();
+    mockPostsList.mockRejectedValueOnce(
+      new Error(JSON.stringify({ detail: "profile 9 does not belong to you" }))
+    );
+    renderWithProviders(<PostsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Could not load posts")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("profile 9 does not belong to you")
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+    expect(screen.queryByText("Could not load posts")).not.toBeInTheDocument();
+  });
+
+  it("falls back to its own wording when the failure carries no message", async () => {
+    mockPostsList.mockRejectedValue(new Error("Failed to fetch"));
+    renderWithProviders(<PostsPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("The request failed and the server gave no reason.")
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("counts one post without a plural", async () => {
+    mockPostsList.mockResolvedValue([testPosts[0]]);
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("1 total post")).toBeInTheDocument();
     });
   });
 

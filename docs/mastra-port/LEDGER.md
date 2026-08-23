@@ -1451,9 +1451,19 @@ screenshots via `npx -y chrome-devtools-axi` into
   it. Caught and fixed a defect where a rerun stage kept the superseded attempt's tokens and
   cost, which also double-counted them into the run total.
   Evidence: [`evidence/phase-8.md` #8.1](../mastra-port/evidence/phase-8.md)
-- [ ] 8.2 `/` (dashboard home): loading, empty, error, success states.
+- [x] 8.2 `/` (dashboard home): loading, empty, error, success states.
+  `/` is the posts list; there is no `/posts` route. The page had no error state at all: every
+  failed load became a toast and rendered the empty state, so a 500 told the user they had no
+  posts and offered "Create your first post". It now has a distinct error block with the
+  server's own message and a working Retry, an empty state that tells a filtered no-match from
+  an account with nothing in it, and skeletons reachable from refresh and retry rather than
+  only from first mount. Four before/after screenshot pairs, one loading capture, and a
+  console that went from one open form-field issue to silent.
+  Evidence: [`evidence/phase-8.md` #8.2](../mastra-port/evidence/phase-8.md)
 - [ ] 8.3 `/posts/[id]`: four states, plus visual hierarchy and spacing pass.
 - [ ] 8.4 posts list: four states, plus visual hierarchy and spacing pass.
+  Same route as 8.2 (`web/src/app/page.tsx`), so the four states are already done and checked
+  there. What remains under this item is only the visual hierarchy and spacing pass.
 - [ ] 8.5 `/posts/new` and `/posts/batch`: four states.
 - [ ] 8.6 `/profiles` and `/profiles/[id]`: four states.
 - [ ] 8.7 `/settings`: four states, plus visual hierarchy and spacing pass.

@@ -13,6 +13,7 @@ import {
   ExternalLink,
   RefreshCw,
   FileSpreadsheet,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,7 +52,13 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { PipelineProgress } from "@/components/pipeline-progress";
 import { StageBadge } from "@/components/stage-badge";
-import { posts, profiles, type Post, type Profile } from "@/lib/api";
+import {
+  posts,
+  profiles,
+  apiErrorMessage,
+  type Post,
+  type Profile,
+} from "@/lib/api";
 import { toast } from "sonner";
 
 const STATUS_FILTERS = [
@@ -80,6 +87,7 @@ export default function PostsPage() {
   const [postList, setPostList] = useState<Post[]>([]);
   const [profileList, setProfileList] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [profileFilter, setProfileFilter] = useState<string>("all");
@@ -87,25 +95,48 @@ export default function PostsPage() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
 
-  const fetchPosts = useCallback(async () => {
-    try {
-      const params: Record<string, string> = {};
-      if (statusFilter !== "all") params.status = statusFilter;
-      if (profileFilter !== "all") params.profile_id = profileFilter;
-      if (search) params.q = search;
-      const data = await posts.list(params);
-      setPostList(data);
-    } catch {
-      toast.error("Failed to load posts");
-    } finally {
-      setLoading(false);
-    }
-  }, [statusFilter, profileFilter, search]);
+  /**
+   * `skeletons` is opt-in because this runs on every keystroke in the search
+   * box: swapping the rows for skeletons that often reads as flicker, so only
+   * the first load and an explicit refresh or retry ask for them.
+   */
+  const fetchPosts = useCallback(
+    async ({ skeletons = false }: { skeletons?: boolean } = {}) => {
+      if (skeletons) setLoading(true);
+      try {
+        const params: Record<string, string> = {};
+        if (statusFilter !== "all") params.status = statusFilter;
+        if (profileFilter !== "all") params.profile_id = profileFilter;
+        if (search) params.q = search;
+        const data = await posts.list(params);
+        setPostList(data);
+        setError(null);
+      } catch (e) {
+        // A route handler that dies before it can answer sends an empty
+        // 500 body, so there is often nothing of the server's own to show.
+        setError(
+          apiErrorMessage(e, "The request failed and the server gave no reason.")
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [statusFilter, profileFilter, search]
+  );
 
   useEffect(() => {
     fetchPosts();
     profiles.list().then(setProfileList).catch(() => {});
   }, [fetchPosts]);
+
+  const filtersActive =
+    statusFilter !== "all" || profileFilter !== "all" || search.trim() !== "";
+
+  const clearFilters = () => {
+    setStatusFilter("all");
+    setProfileFilter("all");
+    setSearch("");
+  };
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -168,11 +199,20 @@ export default function PostsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Posts</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {postList.length} total posts
+            {loading
+              ? "Loading posts..."
+              : error
+                ? "Post list unavailable"
+                : `${postList.length} total post${postList.length === 1 ? "" : "s"}`}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" onClick={fetchPosts}>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Refresh posts"
+            onClick={() => fetchPosts({ skeletons: true })}
+          >
             <RefreshCw className="h-4 w-4" />
           </Button>
           <Link href="/posts/batch">
@@ -195,6 +235,8 @@ export default function PostsPage() {
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
+            name="q"
+            aria-label="Search posts"
             placeholder="Search posts..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -256,6 +298,8 @@ export default function PostsPage() {
               <TableHead className="w-10">
                 <input
                   type="checkbox"
+                  name="select-all-posts"
+                  aria-label="Select all posts"
                   checked={
                     postList.length > 0 && selected.size === postList.length
                   }
@@ -284,15 +328,57 @@ export default function PostsPage() {
                   <TableCell><Skeleton className="h-4 w-4" /></TableCell>
                 </TableRow>
               ))
+            ) : error ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={7} className="h-40 text-center">
+                  <AlertCircle className="mx-auto h-5 w-5 text-destructive" />
+                  <p className="mt-2 text-sm font-medium">Could not load posts</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{error}</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => fetchPosts({ skeletons: true })}
+                  >
+                    <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                    Retry
+                  </Button>
+                </TableCell>
+              </TableRow>
             ) : postList.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="h-32 text-center">
-                  <p className="text-muted-foreground">No posts found</p>
-                  <Link href="/posts/new">
-                    <Button variant="link" className="mt-2">
-                      Create your first post
-                    </Button>
-                  </Link>
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={7} className="h-40 text-center">
+                  {filtersActive ? (
+                    <>
+                      <p className="text-sm font-medium">
+                        No posts match these filters
+                      </p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Widen the search or the status and profile filters.
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-3"
+                        onClick={clearFilters}
+                      >
+                        Clear filters
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm font-medium">No posts yet</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Every post starts here and runs the six pipeline stages.
+                      </p>
+                      <Link href="/posts/new">
+                        <Button size="sm" className="mt-3">
+                          <Plus className="h-3.5 w-3.5 mr-1.5" />
+                          Create your first post
+                        </Button>
+                      </Link>
+                    </>
+                  )}
                 </TableCell>
               </TableRow>
             ) : (
@@ -305,6 +391,8 @@ export default function PostsPage() {
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
+                      name={`select-${post.id}`}
+                      aria-label={`Select ${post.topic}`}
                       checked={selected.has(post.id)}
                       onChange={() => toggleSelect(post.id)}
                       className="h-4 w-4 rounded border-border"
@@ -343,7 +431,12 @@ export default function PostsPage() {
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          aria-label={`Actions for ${post.topic}`}
+                        >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
@@ -355,7 +448,7 @@ export default function PostsPage() {
                           Open
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                          onClick={() => posts.pause(post.id).then(fetchPosts)}
+                          onClick={() => posts.pause(post.id).then(() => fetchPosts())}
                         >
                           <Pause className="h-3.5 w-3.5 mr-2" />
                           Pause
