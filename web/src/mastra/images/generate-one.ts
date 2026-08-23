@@ -76,11 +76,33 @@ export interface ImageUsage {
   model: string
 }
 
+/**
+ * Which of Python's three branches produced the entry, stated rather than
+ * inferred.
+ *
+ * `_generate_one` publishes a different line from each of its three exits: an
+ * `image_generated` on the success path, an `image_failed` from the `except`,
+ * and nothing at all from the no-prompt short circuit. The caller has to pick
+ * one, and the returned entry does not say which branch it came from: a short
+ * circuit and a provider failure both come back with `generated: false`, a
+ * `usage` of `null` and an `error` string, so the only thing separating them is
+ * the text, and a provider error whose message happened to read `no prompt`
+ * would be published as if it were a short circuit. This is the branch itself,
+ * carrying the two values each line interpolates so the caller re-derives
+ * nothing.
+ */
+export type ImageOutcome =
+  | { kind: "generated"; bytes: number; url: string }
+  | { kind: "failed"; error: string }
+  | { kind: "no-prompt" }
+
 export interface GeneratedImage {
   /** The manifest entry to store, with the stage's bookkeeping keys applied. */
   spec: ImageSpec
   /** Non-null exactly when the provider returned, success or not. */
   usage: ImageUsage | null
+  /** The branch taken, for the caller that publishes Python's per-image line. */
+  outcome: ImageOutcome
 }
 
 export interface GenerateOneImageOptions {
@@ -151,6 +173,7 @@ export async function generateOneImage(
     return {
       spec: { ...spec, generated: false, error: NO_PROMPT_ERROR, index },
       usage: null,
+      outcome: { kind: "no-prompt" },
     }
   }
 
@@ -182,21 +205,19 @@ export async function generateOneImage(
     const filename = isFeatured ? featuredFilename(ext) : pathStem(declared) + ext
 
     await writeFile(path.join(mediaDir, filename), bytes)
+    const url = `/media/${postId}/${filename}`
 
     return {
-      spec: {
-        ...spec,
-        generated: true,
-        size_bytes: bytes.length,
-        url: `/media/${postId}/${filename}`,
-        index,
-      },
+      spec: { ...spec, generated: true, size_bytes: bytes.length, url, index },
       usage,
+      outcome: { kind: "generated", bytes: bytes.length, url },
     }
   } catch (error) {
+    const message = errorText(error)
     return {
-      spec: { ...spec, generated: false, error: errorText(error), index },
+      spec: { ...spec, generated: false, error: message, index },
       usage,
+      outcome: { kind: "failed", error: message },
     }
   }
 }

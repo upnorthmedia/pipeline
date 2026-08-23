@@ -27,7 +27,12 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 
 import corpus from "./data/image-generation-parity.json"
 import type { GeneratedImage, ImageSpec } from "./generate-one"
-import { featuredFilename, generateOneImage, pathStem } from "./generate-one"
+import {
+  NO_PROMPT_ERROR,
+  featuredFilename,
+  generateOneImage,
+  pathStem,
+} from "./generate-one"
 
 vi.mock("./gemini", () => ({
   generateImage: vi.fn(),
@@ -228,6 +233,84 @@ describe("generateOneImage usage accounting", () => {
     const index = corpus.images.findIndex((image) => image.id === "provider-error")
     expect(results[index].usage).toBeNull()
     expect(results[index].spec.error).toBe(corpus.images[index].error)
+  })
+})
+
+/**
+ * Item 5.5c-iv-d-2. The two lines Python published from inside `_generate_one`
+ * pick themselves by which branch produced the entry, and the branch is not
+ * recoverable from the entry: a no-prompt short circuit and a provider failure
+ * both come back with `generated: false`, a `usage` of `null` and an `error`
+ * string, and only the branch decides whether anything is published at all.
+ * `outcome` is that branch, stated by the function that took it.
+ */
+describe("generateOneImage outcome", () => {
+  it("names the branch every corpus entry took", async () => {
+    const { results } = await runManifest()
+
+    const kinds = results.map((result) => result.outcome.kind)
+    expect(kinds).toEqual(
+      corpus.images.map((image) => {
+        if (image.generated) return "generated"
+        return image.error === NO_PROMPT_ERROR ? "no-prompt" : "failed"
+      }),
+    )
+  })
+
+  it("carries the two values the `image_generated` line interpolates", async () => {
+    const { results } = await runManifest()
+
+    for (const [index, image] of corpus.images.entries()) {
+      if (!image.generated) continue
+      const { outcome, spec } = results[index]
+      expect(outcome).toEqual({
+        kind: "generated",
+        // The byte count and the url the entry itself claims, so the line a
+        // browser is shown and the manifest the dashboard renders cannot
+        // disagree. Read off the result rather than the corpus because sharp
+        // and Pillow do not encode to the same size (see `withoutSizeBytes`).
+        bytes: spec.size_bytes,
+        url: spec.url,
+      })
+    }
+  })
+
+  it("carries the message the `image_failed` line interpolates", async () => {
+    const { results } = await runManifest()
+
+    const index = corpus.images.findIndex((image) => image.id === "provider-error")
+    expect(results[index].outcome).toEqual({
+      kind: "failed",
+      error: corpus.images[index].error,
+    })
+  })
+
+  it("distinguishes a provider error that says `no prompt` from the short circuit", async () => {
+    // The inference the discriminant exists to prevent. Both entries below end
+    // up stored with `error: "no prompt"`, and Python published a line for one
+    // of them and nothing for the other.
+    installGeminiStub()
+    generateImageMock.mockRejectedValue(new Error(NO_PROMPT_ERROR))
+
+    const failed = await generateOneImage({
+      spec: { id: "misleading", filename: "x.png", prompt: "a prompt the provider rejects" },
+      index: 0,
+      postId: corpus.post_id,
+      mediaDir,
+      apiKey: "test-key-not-a-real-credential",
+    })
+    const shortCircuited = await generateOneImage({
+      spec: { id: "empty", filename: "y.png" },
+      index: 1,
+      postId: corpus.post_id,
+      mediaDir,
+      apiKey: "test-key-not-a-real-credential",
+    })
+
+    expect(failed.spec.error).toBe(NO_PROMPT_ERROR)
+    expect(shortCircuited.spec.error).toBe(NO_PROMPT_ERROR)
+    expect(failed.outcome).toEqual({ kind: "failed", error: NO_PROMPT_ERROR })
+    expect(shortCircuited.outcome).toEqual({ kind: "no-prompt" })
   })
 })
 

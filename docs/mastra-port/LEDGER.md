@@ -11943,8 +11943,11 @@ three pieces are separately verifiable, so they are separate items.
     Redis key prefix while 85 other files run in parallel; every other real-run file
     isolates itself with a `keyPrefix`. In `todo.md` as `[investigate]`. It touches no
     topic this item writes.
-  - [ ] 5.5c `execution_logs` and the `log` event: Python's `append_execution_log()` and
+  - [x] 5.5c `execution_logs` and the `log` event: Python's `append_execution_log()` and
     `publish_stage_log()`, which write the same entry to the column and the bus.
+    (All four sub-items done: 5.5c-i the writer plus the three runner entries, 5.5c-ii
+    `pipeline_start`, 5.5c-iii the two failure entries, 5.5c-iv all 28 stage call sites.
+    Evidence under each.)
 
     Split, because it is two writers with different call sites and different failure
     behaviour. `append_execution_log()` is a database statement with nine call sites, six
@@ -13184,10 +13187,14 @@ three pieces are separately verifiable, so they are separate items.
               $ cd api && uv run ruff format --check .
               9 files would be reformatted, 131 files already formatted
               ```
-    - [ ] 5.5c-iv `publishStageLog()` and the `log` event: the 28 call sites inside the
+    - [x] 5.5c-iv `publishStageLog()` and the `log` event: the 28 call sites inside the
       six stage nodes, and the module-level `set_event_context` /
       `clear_event_context` they read, which has no equivalent in a step that already
       receives `mastra`.
+
+      All four sub-items done: 5.5c-iv-a the helper plus `outline` / `write` / `ready`,
+      5.5c-iv-b `research`'s five, 5.5c-iv-c `edit`'s seven, 5.5c-iv-d `images`' seven.
+      All 28 of Python's call sites are ported; evidence under each sub-item.
 
       Split, because the 28 calls are neither evenly spread nor all the same shape:
 
@@ -13835,8 +13842,10 @@ three pieces are separately verifiable, so they are separate items.
         $ cd api && uv run ruff format --check .
         9 files would be reformatted, 131 files already formatted
         ```
-      - [ ] 5.5c-iv-d `images`' seven call sites, spread across the nested workflow's
+      - [x] 5.5c-iv-d `images`' seven call sites, spread across the nested workflow's
         three sub-steps, including the per-image lines inside the `.foreach()` fan-out.
+        (Both sub-items done: 5.5c-iv-d-1 the five in `images_node` before the fan-out,
+        5.5c-iv-d-2 the two inside `_generate_one`. Evidence under each.)
 
         Split, because the seven do not sit in one step and the two halves have
         different problems. Five of them are inside `images_node` before the fan-out and
@@ -14068,7 +14077,7 @@ three pieces are separately verifiable, so they are separate items.
           9 files would be reformatted, 131 files already formatted
           ```
 
-        - [ ] 5.5c-iv-d-2 The two call sites inside `_generate_one`, which publish under
+        - [x] 5.5c-iv-d-2 The two call sites inside `_generate_one`, which publish under
           the event names `image_generated` and `image_failed` rather than `log`, each with
           a `data` payload, from inside the `.foreach()` fan-out.
 
@@ -14081,6 +14090,185 @@ three pieces are separately verifiable, so they are separate items.
           publish callback or an explicit outcome discriminant on the return; pick one,
           argue the other down, and check `use-sse.ts` and `debug-log-panel.tsx` for what
           they already do with the two event names before choosing the payload.
+
+          **The design question, answered: an outcome discriminant on the return.**
+          `generateOneImage` now returns `outcome`, a three-member discriminated union
+          (`{kind: "generated", bytes, url}` / `{kind: "failed", error}` /
+          `{kind: "no-prompt"}`), and `imagesGenerateStep` publishes off it. The two
+          values each line interpolates ride on the discriminant rather than being read
+          back off the entry, so the message a browser sees and the manifest the
+          dashboard renders cannot drift.
+
+          The publish callback is argued down on three counts. It would put an `await` on
+          a transport inside the one function whose oracle is a pure data fixture
+          (`images/data/image-generation-parity.json`), so all 40 of `generate-one.test.ts`'s
+          parity assertions would have to carry a stub they do not otherwise need. It
+          would put pipeline I/O outside a Mastra primitive, where the structural rule in
+          section 2 of the objective puts it inside one. And the only thing it buys,
+          publishing one statement earlier, is unobservable: nothing runs between
+          `generateOneImage`'s return and the step's publish. The one place it is *not*
+          unobservable is recorded as a deviation below.
+
+          **What `use-sse.ts` and `debug-log-panel.tsx` do with the two names: nothing.**
+          `NAMED_EVENTS` in `web/src/hooks/use-sse.ts` lists eight names and neither of
+          these is among them, so `EventSource` drops both today exactly as it dropped
+          Python's. That is not a defect this item introduces or fixes: the port
+          reproduces what Python published, and whether the hook should listen for two
+          more names is item 5.5d's contract question. Logged in `todo.md`.
+
+          ```
+          $ grep -n "image_generated\|image_failed" web/src/hooks/use-sse.ts \
+              web/src/components/debug-log-panel.tsx; echo "exit $?"
+          exit 1
+          ```
+
+          Python's rendering of both messages, the adjacent logger line, and both `data`
+          dicts, with the values `workflows/images.test.ts`'s real runs produce:
+
+          ```
+          $ python3 -c "
+          i = 0; image_bytes = b'x' * 232
+          image_url = '/media/00000000-0000-4000-8000-0000000000f3/shot-0.webp'
+          print(repr(f'Image {i} generated ({len(image_bytes)} bytes)'))
+          print(repr({'index': i, 'bytes': len(image_bytes), 'path': image_url}))
+          i = 2; e = Exception('no prompt')
+          print(repr(f'Image {i} failed: {e}'))
+          print(repr(f'Failed to generate image {i}: {e}'))
+          print(repr({'index': i, 'error': str(e)}))"
+          'Image 0 generated (232 bytes)'
+          {'index': 0, 'bytes': 232, 'path': '/media/00000000-0000-4000-8000-0000000000f3/shot-0.webp'}
+          'Image 2 failed: no prompt'
+          'Failed to generate image 2: no prompt'
+          {'index': 2, 'error': 'no prompt'}
+          ```
+
+          **Recorded decisions.**
+
+          1. **`logger.error` stays, beside the publish.** Python ran both from the same
+             `except` (`api/src/pipeline/stages/images.py:191-201`). Items 5.5c-iv-c and
+             5.5c-iv-d-1 moved lines *off* the logger, and this is deliberately the
+             opposite call: those were lines Python only ever published and the port had
+             wrongly logged, where this one Python both logged and published, and the two
+             have different readers (an operator tailing the worker, and a browser).
+          2. **The no-prompt branch publishes nothing.** Python returns from it before the
+             semaphore and before either call, so an entry the model gave no prompt leaves
+             no trace on the bus or on the row. Pinned by an assertion that the trail
+             contains no entry for that index, not just by a count.
+          3. **The entry is filed under `stage: "images"`.** Same reason as
+             5.5c-iii-b-2-b-ii: both `execution_logs` readers group on `stage`, and Python
+             passed `stage="images"` from inside the fan-out.
+          4. **The discriminant is on the step's output schema, not just its local
+             variable.** The fan-out's output is persisted in the workflow snapshot, and
+             `imagesAssembleStep` parses it back; leaving `outcome` off the schema would
+             have made the step's declared output disagree with what it returns.
+
+          **Recorded deviation.** Python's success publish sits *inside* the same `try`
+          that catches provider errors, so a dead Redis there turned a generated image
+          into a stored failure and then raised out of the failure publish. Here the
+          publish is one statement outside `generateOneImage`, so a dead Redis fails the
+          step and the engine retries it under `imagesWorkflow.retryConfig`. The port's
+          behaviour is the better one and the divergence is confined to a
+          transport-failure path.
+
+          Pre-implementation, with the tests written and the implementation absent:
+
+          ```
+          $ cd web && npx vitest run src/mastra/images/generate-one.test.ts \
+              src/mastra/steps/images-generate.test.ts
+           Test Files  2 failed (2)
+                Tests  11 failed | 40 passed (51)
+          ```
+
+          Those 11 are exactly the 11 new assertions: 4 in `generate-one.test.ts` on the
+          discriminant and 7 in `images-generate.test.ts` on the two lines.
+
+          The real five-image run in `workflows/images.test.ts`, read back off
+          `posts.execution_logs` (the row is written by the process that publishes, so it
+          cannot race the assertion; `.foreach()` appends in completion order, so the
+          entries are sorted by the index each carries):
+
+          ```
+          $ pnpm -C web exec vitest run --reporter=verbose src/mastra/workflows/images.test.ts
+           ✓ publishes one `image_generated` per entry, on the row, in manifest order
+           ✓ publishes `image_failed` for a provider error that reads like the short circuit
+           Test Files  1 passed (1)
+                Tests  10 passed (10)
+          ```
+
+          The second of those is the inference control, run against the real evented
+          engine rather than argued about: one entry's Gemini call fails with the message
+          `"no prompt"`, so the stored entry is byte-identical to a short circuit
+          (`generated: false`, `error: "no prompt"`, no `usage`), and the run still
+          records `Image 2 failed: no prompt` at level `error` plus the four
+          `image_generated` lines.
+
+          Negative controls, each applied alone and reverted:
+
+          | Control | Result |
+          | --- | --- |
+          | Drop the `no-prompt` early return, so the short circuit publishes too | 4 failed |
+          | Drop Python's adjacent `logger.error` line | 1 failed |
+          | Publish both lines under the default `log` event name | 6 failed |
+          | Send the failure line at the default `info` level | 2 failed |
+          | Infer the branch from the returned entry instead of the discriminant | 1 failed |
+          | Rename the `path` data key to `url` | 3 failed |
+
+          The inference control failing exactly one test is the point of the misleading-error
+          run: it is the only assertion in the suite that can tell the discriminant from a
+          plausible re-derivation, and without it the whole design decision would have been
+          unpinned.
+
+          Frontend gates. HEAD measured by reverting every changed file first: 1663 tests,
+          1645 passed, 11 failed, which is the 9 known plus two flakes
+          (`pipeline-events > carries Python's log payload and nothing else`, an instance
+          of the `received`-ordering defect already recorded in `todo.md`, and
+          `scaffold-check > emits the workflow lifecycle events the trace view will read`,
+          likewise recorded). This change adds 15 tests and leaves the 9 known failures
+          untouched. The full suite was run three times here and reported 9, 10 and 9
+          failures; the varying one is a flake, and the 9-failure runs are the baseline
+          set exactly:
+
+          ```
+          $ pnpm -C web exec tsc --noEmit
+          exit 0
+
+          $ pnpm -C web lint
+          > content-pipeline-dashboard@0.1.0 lint
+          > eslint
+          exit 0
+
+          $ pnpm -C web test
+           FAIL  src/app/posts/PostDetail.test.tsx > PostDetailPage > renders stage logs when present
+           FAIL  src/app/posts/PostDetail.test.tsx > PostDetailPage > renders stage tabs
+           FAIL  src/app/posts/PostDetail.test.tsx > PostDetailPage > shows Run Next and Run All buttons when not running or complete
+           FAIL  src/components/__tests__/image-preview.test.tsx > ImagePreview > displays alt text
+           FAIL  src/components/__tests__/image-preview.test.tsx > ImagePreview > displays image with filename
+           FAIL  src/components/__tests__/image-preview.test.tsx > ImagePreview > displays placement info
+           FAIL  src/components/__tests__/image-preview.test.tsx > ImagePreview > displays prompt text
+           FAIL  src/components/__tests__/image-preview.test.tsx > ImagePreview > displays style metadata
+           FAIL  src/components/__tests__/image-preview.test.tsx > ImagePreview > renders image cards from manifest
+           Test Files  2 failed | 91 passed (93)
+                Tests  9 failed | 1662 passed | 7 skipped (1678)
+
+          $ pnpm -C web build
+          exit 0
+          ```
+
+          Those 9 are the Phase 0 baseline: 6 in `image-preview.test.tsx` and 3 in
+          `PostDetail.test.tsx`.
+
+          Python gates, unchanged because nothing under `api/` was touched:
+
+          ```
+          $ cd api && uv run pytest -q
+          120 failed, 241 passed, 25 errors in 15.02s
+
+          $ cd api && uv run ruff check .
+          Found 32 errors.
+
+          $ cd api && uv run ruff format --check .
+          9 files would be reformatted, 131 files already formatted
+          ```
   - [ ] 5.5d `GET /api/events/{post_id}` and `GET /api/events`, as Next.js route handlers
     serving `text/event-stream` in `use-sse.ts`'s named-event shape, subscribed to the
     topic rather than to an in-process stream.

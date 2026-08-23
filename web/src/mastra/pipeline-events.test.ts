@@ -432,7 +432,9 @@ describe("a run that executes every stage", () => {
       edit: 5,
       // Four: the manifest step's own lines (item 5.5c-iv-d-1). The stubbed
       // manifest declares no images, so the fan-out runs zero times and the
-      // two per-image lines (5.5c-iv-d-2) are not due on this run.
+      // two per-image lines (item 5.5c-iv-d-2) are not due on this run. They
+      // would not be counted here in any case: neither uses the `log` event
+      // name, which is what `perStage` filters on.
       images: 4,
       ready: 3,
     })
@@ -751,9 +753,9 @@ describe("what a run writes to execution_logs", () => {
   it("stores a progress line with no data key, as Python's `if data:` did", async () => {
     const entries = await logsFor(FULL_POST_ID)
     const lines = entries.filter((item) => item.event === "log")
-    // None of the 25 call sites ported so far passes `data`: the only three
-    // that do are `images`' parse-failure warning and the two per-image lines,
-    // and this run reaches none of them.
+    // None of Python's 28 call sites passes `data` except three: `images`'
+    // parse-failure warning and its two per-image lines, and this run reaches
+    // none of them.
     for (const entry of lines) {
       expect(Object.keys(entry).sort()).toEqual(["event", "level", "message", "stage", "ts"])
     }

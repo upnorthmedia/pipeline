@@ -29,6 +29,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 
 import { closeDb, getDb, posts } from "../../db"
 import { GEMINI_IMAGE_MODEL_ID } from "../images/gemini"
+import { NO_PROMPT_ERROR } from "../images/generate-one"
 import { mastra, pubsub } from "../index"
 import { imagesWorkflow } from "../workflows/images"
 import { foldManifest, imagesAssembleStep, imagesStageOutputSchema } from "./images-assemble"
@@ -108,6 +109,24 @@ function manifestOutputOf(fixture: Fixture, postId: string): ImagesManifestOutpu
 }
 
 /**
+ * The `outcome` the fan-out would have reported for an entry Python already
+ * stored (item 5.5c-iv-d-2).
+ *
+ * Reconstructed from the stored entry, which production deliberately refuses to
+ * do (see `ImageOutcome`): here the fixture *is* the record of which branch ran,
+ * so this states the fixture rather than inferring a branch at runtime.
+ * `imagesAssembleStep` reads only `spec` and `usage`; this exists because the
+ * fan-out's output schema now carries the discriminant.
+ */
+function fixtureOutcome(stored: Record<string, unknown>): GeneratedImageOutput["outcome"] {
+  if (stored.generated === true) {
+    return { kind: "generated", bytes: Number(stored.size_bytes), url: String(stored.url) }
+  }
+  if (stored.error === NO_PROMPT_ERROR) return { kind: "no-prompt" }
+  return { kind: "failed", error: String(stored.error) }
+}
+
+/**
  * The fan-out's results for a fixture: every entry exactly as Python stored it,
  * and no usage anywhere, because every recorded Gemini call was a 429 and
  * `generate_image` raised before any token was reported.
@@ -116,6 +135,7 @@ function fixtureResults(fixture: Fixture): GeneratedImageOutput[] {
   return fixture.stage_output.image_manifest.images.map((stored) => ({
     spec: stored as GeneratedImageOutput["spec"],
     usage: null,
+    outcome: fixtureOutcome(stored as Record<string, unknown>),
   }))
 }
 
@@ -134,11 +154,16 @@ function corpusResults(): GeneratedImageOutput[] {
   return corpus.images.map((stored, index) => {
     const prompt = inputs[index].prompt
     if (typeof prompt !== "string" || prompt === "") {
-      return { spec: stored as unknown as GeneratedImageOutput["spec"], usage: null }
+      return {
+        spec: stored as unknown as GeneratedImageOutput["spec"],
+        usage: null,
+        outcome: fixtureOutcome(stored as unknown as Record<string, unknown>),
+      }
     }
     call += 1
     return {
       spec: stored as unknown as GeneratedImageOutput["spec"],
+      outcome: fixtureOutcome(stored as unknown as Record<string, unknown>),
       usage:
         prompt === "RAISE"
           ? null

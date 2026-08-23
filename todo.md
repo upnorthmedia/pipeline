@@ -362,3 +362,35 @@
   it carries the raw JSON value in both stacks. A fix means porting Python's `str()` for
   arbitrary JSON (container `repr`, `True`/`False`/`None`, single-quoted strings), which
   is its own item; left alone under ledger item 5.5c-iv-d-1 to keep that diff scoped.
+- [confirmed] 2026-08-23 `web/src/hooks/use-sse.ts` does not listen for `image_generated`
+  or `image_failed`. `NAMED_EVENTS` lists eight names and neither is among them, so the
+  two per-image lines the `images` fan-out publishes are delivered as named SSE events
+  and dropped by `EventSource` before any handler sees them. Verified with
+  `grep -n "image_generated\|image_failed" web/src/hooks/use-sse.ts
+  web/src/components/debug-log-panel.tsx`, which exits 1. This is Python's behaviour
+  reproduced, not a regression: the Python stack published the same two names onto the
+  same channel and the same hook dropped them there too, so a browser has never seen
+  per-image progress. Both lines do reach `posts.execution_logs`, so
+  `GET /api/posts/{id}/logs` shows them. Whether the hook should gain the two names is a
+  contract decision for ledger item 5.5d (the SSE route handlers), not a bug fix; left
+  alone under 5.5c-iv-d-2 because adding names to `NAMED_EVENTS` changes what
+  `debug-log-panel.tsx` renders mid-run.
+- [investigate] 2026-08-23 New sighting of the `received`-ordering defect recorded above:
+  `pipeline-events.test.ts > carries Python's log payload and nothing else` failed at HEAD
+  during the 5.5c-iv-d-2 baseline measurement and passed on the following three runs. It
+  does `eventsFor(FULL_POST_ID, "log").find(e => e.data.stage === "outline")` and asserts
+  the payload is the first of `outline`'s three lines, so it fails whenever the
+  subscriber's row read resolves the second line ahead of the first. Same root cause and
+  same fix as the entry above (record a delivery index synchronously at the top of the
+  subscriber and sort by it); this is the first time it has been observed failing rather
+  than argued to be unsound.
+- [investigate] 2026-08-23 Running `pnpm -C web test` leaves untracked WebP files in the
+  repo's `media/test-123/` directory (six appeared during the 5.5c-iv-d-2 iteration, named
+  `featured-<mmddyy>-<nn>.webp`). `mediaRoot()` falls back to `<cwd>/../media` when
+  `MEDIA_DIR` is unset, so some suite exercising the featured-filename path writes into
+  the real media root instead of a tmpdir. The 39 `.png` files already committed there
+  are the Python-era version of the same leak. Not traced to a specific test file: no
+  test under `web/src/mastra` references `test-123`, so the post id is coming from
+  somewhere else. Deleted by hand under 5.5c-iv-d-2; the fix is either an
+  `afterAll` cleanup in whichever suite writes them or a `MEDIA_DIR` default in
+  `vitest.setup`, plus a `.gitignore` entry for `media/`.

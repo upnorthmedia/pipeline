@@ -69,6 +69,8 @@ const MANIFEST = {
 const POST_ID = "00000000-0000-4000-8000-0000000000f3"
 /** A second post, for the run whose manifest never parses. */
 const UNPARSEABLE_POST_ID = "00000000-0000-4000-8000-0000000000f4"
+/** A third, for the run whose provider fails one entry with a misleading message. */
+const MISLEADING_POST_ID = "00000000-0000-4000-8000-0000000000f5"
 
 const db = getDb()
 let mediaRootDir: string
@@ -77,6 +79,8 @@ let promptsSent: string[]
 let agentGenerate: ReturnType<typeof vi.spyOn>
 /** The parse-failure branch logs a warning; capture it instead of printing it. */
 let warnings: { message: string; meta: unknown }[]
+/** Python's `logger.error` beside the `image_failed` publish, likewise captured. */
+let loggedErrors: string[]
 
 /** The workflow's own Mastra instance: separate topics, same database. */
 const pubsub = new RedisStreamsPubSub({
@@ -107,6 +111,11 @@ beforeAll(async () => {
     meta: unknown,
   ) => {
     warnings.push({ message, meta })
+  }) as never)
+
+  loggedErrors = []
+  vi.spyOn(testMastra.getLogger(), "error").mockImplementation(((message: string) => {
+    loggedErrors.push(message)
   }) as never)
 
   promptsSent = []
@@ -152,7 +161,9 @@ beforeAll(async () => {
     images: "auto",
     ready: "auto",
   } as const
-  await db.delete(posts).where(inArray(posts.id, [POST_ID, UNPARSEABLE_POST_ID]))
+  await db
+    .delete(posts)
+    .where(inArray(posts.id, [POST_ID, UNPARSEABLE_POST_ID, MISLEADING_POST_ID]))
   await db.insert(posts).values({
     id: POST_ID,
     slug: "images-workflow-run",
@@ -169,6 +180,14 @@ beforeAll(async () => {
     stageStatus,
     stageSettings,
   })
+  await db.insert(posts).values({
+    id: MISLEADING_POST_ID,
+    slug: "images-workflow-misleading-error",
+    topic: "images workflow misleading error",
+    currentStage: "edit",
+    stageStatus,
+    stageSettings,
+  })
 
   await storage.init()
   await testMastra.startWorkers()
@@ -180,7 +199,9 @@ beforeAll(async () => {
 afterAll(async () => {
   await testMastra.stopWorkers()
   await pubsub.close()
-  await db.delete(posts).where(inArray(posts.id, [POST_ID, UNPARSEABLE_POST_ID]))
+  await db
+    .delete(posts)
+    .where(inArray(posts.id, [POST_ID, UNPARSEABLE_POST_ID, MISLEADING_POST_ID]))
   await closeDb()
   await rm(mediaRootDir, { recursive: true, force: true })
   delete process.env.MEDIA_DIR
@@ -234,6 +255,37 @@ describe("the images workflow, executed by the evented engine", () => {
     const files = await readdir(path.join(mediaRootDir, POST_ID))
 
     expect(files.sort()).toEqual(MANIFEST.images.map((_, index) => `shot-${index}.webp`))
+  })
+
+  /**
+   * Item 5.5c-iv-d-2, on a real run: the fan-out's own per-image line, written
+   * by the process that generated the image rather than by the step that folds
+   * the manifest back together.
+   */
+  it("publishes one `image_generated` per entry, on the row, in manifest order", async () => {
+    const [row] = await db.select().from(posts).where(inArray(posts.id, [POST_ID]))
+    const stored = row.imageManifest as { images: Record<string, unknown>[] }
+    const entries = ((row.executionLogs ?? []) as Record<string, unknown>[]).filter(
+      (entry) => entry.event === "image_generated" || entry.event === "image_failed",
+    )
+
+    // `.foreach()` runs three at a time, so the entries are appended in
+    // completion order rather than manifest order; sorted by the index each
+    // one carries, they have to cover the manifest exactly once.
+    const byIndex = [...entries].sort(
+      (a, b) =>
+        Number((a.data as { index: number }).index) - Number((b.data as { index: number }).index),
+    )
+    expect(byIndex).toEqual(
+      stored.images.map((image) => ({
+        ts: expect.any(String),
+        stage: "images",
+        level: "info",
+        event: "image_generated",
+        message: `Image ${image.index} generated (${image.size_bytes} bytes)`,
+        data: { index: image.index, bytes: image.size_bytes, path: image.url },
+      })),
+    )
   })
 
   it("returns both meta records, with Gemini's usage summed over the fan-out", () => {
@@ -316,5 +368,47 @@ describe("the images workflow, executed by the evented engine", () => {
     ])
     // The "Generating N images" line is on the far side of the short-circuit,
     // so a failed parse never claims images are being generated.
+  }, 60_000)
+
+  /**
+   * The inference item 5.5c-iv-d-2's discriminant exists to prevent, run
+   * against the real engine rather than argued about.
+   *
+   * One entry's provider call fails with a message that reads exactly like the
+   * no-prompt short circuit, so the stored entry is indistinguishable from an
+   * entry the model never gave a prompt for: same `generated: false`, same
+   * `error`, same absent `usage`. Python published `image_failed` for it and
+   * nothing for the short circuit, so a step that picked its line by reading
+   * the entry back would go silent here.
+   */
+  it("publishes `image_failed` for a provider error that reads like the short circuit", async () => {
+    generateImageMock.mockImplementation(async ({ prompt }: { prompt: string }) => {
+      if (prompt === "prompt 2") throw new Error("no prompt")
+      return { imageBytes: PNG, model: "gemini-3.1-flash-image-preview", tokensIn: 7, tokensOut: 11 }
+    })
+
+    const run = await imagesWorkflow.createRun()
+    const misleading = await run.start({ inputData: { postId: MISLEADING_POST_ID } })
+    expect(misleading.status).toBe("success")
+
+    const [row] = await db.select().from(posts).where(inArray(posts.id, [MISLEADING_POST_ID]))
+    const stored = row.imageManifest as { images: Record<string, unknown>[] }
+    expect(stored.images[2]).toMatchObject({ generated: false, error: "no prompt", index: 2 })
+
+    const entries = ((row.executionLogs ?? []) as Record<string, unknown>[]).filter(
+      (entry) => entry.event === "image_generated" || entry.event === "image_failed",
+    )
+    expect(entries.filter((entry) => entry.event === "image_generated")).toHaveLength(4)
+    expect(entries.filter((entry) => entry.event === "image_failed")).toEqual([
+      {
+        ts: expect.any(String),
+        stage: "images",
+        level: "error",
+        event: "image_failed",
+        message: "Image 2 failed: no prompt",
+        data: { index: 2, error: "no prompt" },
+      },
+    ])
+    expect(loggedErrors).toEqual(["Failed to generate image 2: no prompt"])
   }, 60_000)
 })

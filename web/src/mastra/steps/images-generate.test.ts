@@ -44,6 +44,7 @@ import sharp from "sharp"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, posts } from "../../db"
+import { TOPIC_PIPELINE_EVENTS } from "../pipeline-events"
 import geminiCorpus from "../images/data/gemini-parity.json"
 import corpus from "../images/data/image-generation-parity.json"
 import { GEMINI_API_BASE, GEMINI_IMAGE_MODEL_ID } from "../images/gemini"
@@ -138,6 +139,46 @@ const promptlessSpec = {
   placement: { location: "after_section", after_section: "Conclusion" },
 }
 
+/**
+ * Item 5.5c-iv-d-2: what the two per-image lines are published onto, and the
+ * logger Python wrote its adjacent `logger.error` to.
+ *
+ * A stub transport rather than a real `Mastra`, because the assertions below
+ * are about which event the step chose and what it interpolated; the topic and
+ * the envelope are `pipeline-events.ts`'s contract and are asserted there. The
+ * execution-log half of every publish lands on the real row.
+ */
+const published: { topic: string; payload: Record<string, unknown> }[] = []
+const loggedErrors: string[] = []
+
+const stepMastra = {
+  pubsub: {
+    publish: async (topic: string, event: { data: Record<string, unknown> }) => {
+      published.push({ topic, payload: event.data })
+    },
+  },
+  getLogger: () => ({
+    debug: () => {},
+    error: (message: string) => {
+      loggedErrors.push(message)
+    },
+  }),
+}
+
+/** The published payloads, in publish order, for one event name. */
+function publishedOf(event: string): Record<string, unknown>[] {
+  return published.filter((entry) => entry.payload.event === event).map((entry) => entry.payload)
+}
+
+/** The post's stored trail, for the entries the fan-out wrote. */
+async function storedImageEntries(): Promise<Record<string, unknown>[]> {
+  const [row] = await db.select().from(posts).where(eq(posts.id, POST_ID))
+  const entries = (row.executionLogs ?? []) as Record<string, unknown>[]
+  return entries.filter(
+    (entry) => entry.event === "image_generated" || entry.event === "image_failed",
+  )
+}
+
 type ExecuteParams = Parameters<typeof imagesGenerateStep.execute>[0]
 type AssembleParams = Parameters<typeof imagesAssembleStep.execute>[0]
 
@@ -149,6 +190,7 @@ let promptless: GeneratedImageOutput
 async function generate(spec: Record<string, unknown>, index: number) {
   return (await imagesGenerateStep.execute({
     inputData: { postId: POST_ID, mediaDir, index, spec },
+    mastra: stepMastra,
   } as unknown as ExecuteParams)) as GeneratedImageOutput
 }
 
@@ -273,6 +315,82 @@ describe("imagesGenerateStep against a recorded Gemini success", () => {
   })
 })
 
+/**
+ * Item 5.5c-iv-d-2: the two `publish_stage_log` calls inside `_generate_one`.
+ *
+ * They are the only two in the pipeline that do not use the `log` event name,
+ * and the only two published from inside a fan-out. Their `data` payloads are
+ * two of the three in the whole port that carry one at all.
+ */
+describe("the per-image lines the fan-out publishes", () => {
+  it("publishes one `image_generated` per generated entry and nothing else", () => {
+    expect(publishedOf("image_generated")).toHaveLength(2)
+    expect(published).toHaveLength(2)
+  })
+
+  it("interpolates Python's message and carries its three data keys", () => {
+    const [first, second] = publishedOf("image_generated")
+
+    expect(first).toEqual({
+      event: "image_generated",
+      post_id: POST_ID,
+      stage: "images",
+      message: `Image 0 generated (${content.spec.size_bytes} bytes)`,
+      level: "info",
+      timestamp: expect.any(String),
+      data: { index: 0, bytes: content.spec.size_bytes, path: content.spec.url },
+    })
+    expect(second.message).toBe(`Image 1 generated (${featured.spec.size_bytes} bytes)`)
+    expect(second.data).toEqual({
+      index: 1,
+      bytes: featured.spec.size_bytes,
+      path: featured.spec.url,
+    })
+  })
+
+  it("publishes onto the one pipeline topic", () => {
+    expect(published.map((entry) => entry.topic)).toEqual([
+      TOPIC_PIPELINE_EVENTS,
+      TOPIC_PIPELINE_EVENTS,
+    ])
+  })
+
+  it("says nothing about the entry the model gave no prompt", () => {
+    // Python's no-prompt branch returns before the semaphore and before either
+    // publish, so the dashboard never learns the entry existed. `promptless`
+    // was generated in `beforeAll`, so its absence here is a real absence.
+    expect(promptless.spec.generated).toBe(false)
+    expect(publishedOf("image_generated").map((payload) => payload.data)).not.toContainEqual(
+      expect.objectContaining({ index: 2 }),
+    )
+    expect(publishedOf("image_failed")).toEqual([])
+    expect(loggedErrors).toEqual([])
+  })
+
+  it("stores each line on the post's own trail", async () => {
+    const entries = await storedImageEntries()
+
+    expect(entries).toEqual([
+      {
+        ts: expect.any(String),
+        stage: "images",
+        level: "info",
+        event: "image_generated",
+        message: `Image 0 generated (${content.spec.size_bytes} bytes)`,
+        data: { index: 0, bytes: content.spec.size_bytes, path: content.spec.url },
+      },
+      {
+        ts: expect.any(String),
+        stage: "images",
+        level: "info",
+        event: "image_generated",
+        message: `Image 1 generated (${featured.spec.size_bytes} bytes)`,
+        data: { index: 1, bytes: featured.spec.size_bytes, path: featured.spec.url },
+      },
+    ])
+  })
+})
+
 describe("the generated images reach the stored manifest and the ready prompt", () => {
   /** The manifest step's output as it would have been for these three entries. */
   const manifestOutput: ImagesManifestOutput = {
@@ -332,5 +450,79 @@ describe("the generated images reach the stored manifest and the ready prompt", 
     expect(prompt).toContain(String(featured.spec.url))
     expect(prompt).not.toContain(promptlessSpec.id)
     expect(prompt).not.toContain("no prompt")
+  })
+})
+
+/**
+ * The failure half of item 5.5c-iv-d-2, on its own transport so the request
+ * capture the success assertions rest on is left alone.
+ *
+ * Python logged the failure *and* published it, from the same `except` block,
+ * so both are ported: the operator's server log keeps the line it had, and the
+ * browser gains the one it never received because `use-sse.ts` does not listen
+ * for this event name (recorded under the item in the ledger).
+ */
+describe("an image whose provider call fails", () => {
+  let failed: GeneratedImageOutput
+  const failRequests: string[] = []
+
+  beforeAll(async () => {
+    published.length = 0
+    loggedErrors.length = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      failRequests.push(String(input))
+      return new Response(JSON.stringify({ error: { status: "UNAVAILABLE" } }), {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      })
+    })
+
+    failed = await generate(
+      { ...contentSpec, id: "doomed", filename: "doomed.png", prompt: "a doomed image" },
+      7,
+    )
+  }, 30_000)
+
+  it("records the entry as failed without a file", () => {
+    expect(failRequests).toHaveLength(1)
+    expect(failed.spec.generated).toBe(false)
+    expect(failed.spec.url).toBeUndefined()
+    expect(failed.usage).toBeNull()
+  })
+
+  it("publishes `image_failed` at level error with Python's two data keys", () => {
+    const error = String(failed.spec.error)
+    // The provider's own text, not a restatement of it: the same string the
+    // manifest entry stores is what the line and the payload carry.
+    expect(error).toContain("503")
+    expect(publishedOf("image_failed")).toEqual([
+      {
+        event: "image_failed",
+        post_id: POST_ID,
+        stage: "images",
+        message: `Image 7 failed: ${error}`,
+        level: "error",
+        timestamp: expect.any(String),
+        data: { index: 7, error },
+      },
+    ])
+    expect(publishedOf("image_generated")).toEqual([])
+  })
+
+  it("writes Python's adjacent logger line as well", () => {
+    expect(loggedErrors).toEqual([`Failed to generate image 7: ${String(failed.spec.error)}`])
+  })
+
+  it("stores the line on the post's own trail", async () => {
+    const entries = await storedImageEntries()
+
+    expect(entries.at(-1)).toEqual({
+      ts: expect.any(String),
+      stage: "images",
+      level: "error",
+      event: "image_failed",
+      message: `Image 7 failed: ${String(failed.spec.error)}`,
+      data: { index: 7, error: String(failed.spec.error) },
+    })
   })
 })
