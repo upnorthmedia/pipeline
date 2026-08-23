@@ -9809,11 +9809,132 @@ three pieces are separately verifiable, so they are separate items.
             3 in `PostDetail.test.tsx`). pytest is above its baseline of 125 failed /
             236 passed / 25 errors. ruff's 32 and 9 are the recorded baselines.
 
-          - [ ] 5.3c-iii-b-1-b-ii The container blocks and the two remaining block rules:
-            `block_quote`, `list` (`list_parser.py`, which carries the tight/loose rule
-            and nesting depth), `ref_link` and `raw_html`/`block_html`, plus the `list`
-            and `block_quote` renderer methods. Its oracle must also carry the
-            `list`-vs-`thematic_break` and `list`-vs-`setext` precedence cases.
+          - [ ] 5.3c-iii-b-1-b-ii The container blocks and the two remaining block
+            rules. (Split: `block_quote` alone is `extract_block_quote`'s two scan
+            strategies plus the child-state recursion, `list` is the whole 269-line
+            `list_parser.py` with the tight/loose rule and the per-item break scanner,
+            and `ref_link`/`raw_html` share nothing with either. One oracle each:
+            -ii-1 block quotes, -ii-2 lists, -ii-3 reference links and raw HTML.)
+            - [x] 5.3c-iii-b-1-b-ii-1 `block_quote`: `extract_block_quote`'s
+              require-marker and lazy-continuation branches, the child `BlockState` and
+              its nesting depth, `prepend_token`, and the `block_quote` renderer method.
+
+              `block_quote` is the first rule in this converter with a body of its own.
+              `extract_block_quote` peels the `>` markers off into a fresh source string
+              and reparses it in a child `BlockState`, which is what makes a quote nest,
+              and it picks between two scan strategies by asking whether the quote's
+              *first* line would start a code block:
+
+              * **require-marker.** If `blank_line`, `indent_code` or `fenced_code`
+                matches the first line once its marker is stripped, only lines carrying a
+                `>` continue the quote. `>     code` followed by an unmarked line ends
+                the quote at the code.
+              * **lazy.** Otherwise an unmarked line continues the quote, unless it
+                starts one of `blank_line`, `thematic_break`, `fenced_code`, `list` or
+                `block_html`. Those five are parsed on the **outer** state and the quote
+                token is then inserted *before* the block they produced, which is the
+                only reason `BlockState.prepend_token` exists.
+
+              The oracle is `api/scripts/export_wp_html_quote_parity.py`: 56 inputs run
+              through the real `markdown_to_wp_html` with its output recorded verbatim
+              into `web/src/mastra/wordpress/data/wp-html-quote-parity.json`. Nothing in
+              the test file is a hand-written expectation.
+
+              ```
+              $ cd api && PYTHONPATH=. uv run python scripts/export_wp_html_quote_parity.py
+              wrote 56 cases to /Users/cody/.../web/src/mastra/wordpress/data/wp-html-quote-parity.json
+
+              $ cd web && pnpm exec vitest run src/mastra/wordpress/wp-html-quotes.test.ts
+               ✓ src/mastra/wordpress/wp-html-quotes.test.ts (67 tests) 7ms
+               Test Files  1 passed (1)
+                    Tests  67 passed (67)
+              ```
+
+              67 tests: the 56 replay cases, 10 negative controls, and 1 structural check
+              on the oracle file itself.
+
+              **`block_quote` is removed from the unported-rule list in
+              `wp-html-blocks.test.ts`** (91 tests there now, was 92), because it is
+              ported. `list`, `ref_link` and `raw_html` still throw there; their ledger
+              ids in the thrown message are now `5.3c-iii-b-1-b-ii-2` and
+              `-ii-3`, which the existing `toContain("5.3c-iii-b-1-b-ii")` assertion
+              still satisfies.
+
+              **`block_html` is now a registered pattern.** It is in mistune's
+              `SPECIFICATION` but not in `DEFAULT_RULES`, so -b-i had no reason to carry
+              it. The lazy branch scans for it by name, so the whole
+              `BLOCK_TAGS`/`PRE_TAGS` table had to come across for the alternation to
+              break in the same places. Its handler throws until -ii-3.
+
+              **One regex difference this rule introduced.** Four of the block-quote
+              patterns are compiled *without* `re.M`, where Python's `$` matches at the
+              end of the string **or just before a single trailing newline**. JavaScript's
+              bare `$` only matches at the end. That is the new `EOS` lookahead
+              (`(?=\n?$)`); using `$` would have made `_LINE_BLANK_END` miss the
+              blank-line-at-end test on a quote body ending in `\n\n\n`, which decides
+              whether the *next* line is lazy.
+
+              **One hand-written control was wrong, and the oracle said so.** The first
+              draft asserted that an unmarked `## Title` under a quote stays literal text
+              because `atx_heading` is not in the break list. It does not: the lazy line
+              joins the quote's body and the *child* parse then turns it into a heading
+              inside the blockquote. The replay case caught it, the control was corrected
+              to assert the real distinction (heading inside, thematic break outside), and
+              no production code changed.
+
+              Gates, all from the repo root unless noted:
+
+              ```
+              $ cd web && pnpm exec tsc --noEmit
+              tsc exit=0
+
+              $ cd web && pnpm lint
+              lint exit=0
+
+              $ cd web && pnpm test
+               Test Files  2 failed | 105 passed (107)
+                    Tests  9 failed | 2440 passed | 7 skipped (2456)
+
+              $ cd web && pnpm build
+              ✓ Compiled successfully in 4.1s
+              build exit=0
+
+              $ cd api && uv run pytest -q     # .env sourced
+              120 failed, 241 passed, 25 errors in 15.09s
+
+              $ cd api && uv run ruff check .
+              Found 32 errors.
+
+              $ cd api && uv run ruff format --check .
+              9 files would be reformatted, 137 files already formatted
+
+              $ cd api && uv run ruff check scripts/export_wp_html_quote_parity.py
+              All checks passed!
+
+              $ cd api && uv run ruff format --check scripts/export_wp_html_quote_parity.py
+              1 file already formatted
+              ```
+
+              The 9 frontend failures are the Phase 0 baseline (6 in
+              `image-preview.test.tsx`, 3 in `PostDetail.test.tsx`). Two earlier runs of
+              the same suite reported 10, the extra being
+              `scaffold-check.test.ts > emits the workflow lifecycle events`, which passes
+              in isolation and is the already-logged cross-file race on the shared Redis
+              `workflows` topic (`todo.md`, four entries). Adding a 107th test file
+              reshuffles vitest's file scheduling, which is enough to change how often it
+              lands; it is not caused by anything in this item, and no `wp-html` code
+              touches Redis. pytest is above its baseline of 125 failed / 236 passed /
+              25 errors. ruff's 32 and 9 are the recorded baselines.
+            - [ ] 5.3c-iii-b-1-b-ii-2 `list` (`list_parser.py`): the per-item break
+              scanner, the continuation width, the tight/loose rule and the nesting
+              depth, plus the `list`, `list_item` and `block_text` renderer methods. Its
+              oracle must also carry the `list`-vs-`thematic_break` and
+              `list`-vs-`setext` precedence cases.
+            - [ ] 5.3c-iii-b-1-b-ii-3 `ref_link` (with `parse_link_href`,
+              `parse_link_title`, `unikey` and `escape_url`, and the `ref_links` env the
+              inline layer reads) and `raw_html`/`block_html` (the seven CommonMark HTML
+              block rules and the `BLOCK_TAGS`/`PRE_TAGS` tables), plus the `block_html`
+              renderer method.
           - [ ] 5.3c-iii-b-1-b-iii The inline rules: `escape`, `codespan`, `emphasis`,
             `strong`, `link`, `image`, `auto_link`, `auto_email` and `inline_html`, plus
             the `emphasis`, `strong`, `link`, `codespan` and `image` renderer methods.

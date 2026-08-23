@@ -18,13 +18,22 @@
  * `thematic_break`, plus the paragraph fallback and the two inline break
  * tokens a multi-line paragraph produces.
  *
- * Not ported yet: `block_quote`, `list`, `ref_link` and `raw_html`
- * (5.3c-iii-b-1-b-ii), and the inline rules `escape`, `codespan`, `emphasis`,
- * `link`, `auto_link`, `auto_email` and `inline_html` (5.3c-iii-b-1-b-iii).
- * Their *patterns* are registered here in mistune's rule order, because rule
- * order is what decides whether `- - -` is a thematic break or a list, and
- * their handlers throw `UnportedMarkdownError`. A half-ported converter that
- * silently rendered a list as a paragraph would be worse than one that stops.
+ * Ported here too (ledger 5.3c-iii-b-1-b-ii-1): `block_quote`, which is the
+ * first rule with a body of its own. `extract_block_quote` peels the `>`
+ * markers off into a fresh source string and reparses it in a child state, so
+ * a quote nests, and it picks between two scan strategies depending on whether
+ * the first line would start a code block. Its lazy-continuation branch can
+ * hand a following block (a fence, a thematic break) to the outer parser and
+ * then *prepend* the quote before it, which is why `prepend_token` exists.
+ *
+ * Not ported yet: `list` (5.3c-iii-b-1-b-ii-2), `ref_link` and
+ * `raw_html`/`block_html` (5.3c-iii-b-1-b-ii-3), and the inline rules `escape`,
+ * `codespan`, `emphasis`, `link`, `auto_link`, `auto_email` and `inline_html`
+ * (5.3c-iii-b-1-b-iii). Their *patterns* are registered here in mistune's rule
+ * order, because rule order is what decides whether `- - -` is a thematic
+ * break or a list, and their handlers throw `UnportedMarkdownError`. A
+ * half-ported converter that silently rendered a list as a paragraph would be
+ * worse than one that stops.
  *
  * Regex translation notes:
  *
@@ -37,6 +46,9 @@
  * * `re.search(src, pos)` is a global-flagged `exec` with `lastIndex = pos`,
  *   and `re.match(src, pos)` is a sticky-flagged one. Both keep looking at the
  *   whole string for the anchors, which is what Python does.
+ * * A few of the block-quote patterns are compiled *without* `re.M`, where
+ *   Python's `$` matches at the end of the string or just before a single
+ *   trailing newline. That is `EOS` below, not JavaScript's bare `$`.
  * * Python's `\s` matches `\x1c`-`\x1f` and `\x85` where JavaScript's does not,
  *   and JavaScript's matches `\ufeff` where Python's does not. Neither set
  *   appears in article markdown, and the difference is confined to the
@@ -71,6 +83,8 @@ export class UnportedMarkdownError extends Error {
 const SOL = "(?<![^\\n])";
 /** Python `$` under `re.M`. */
 const EOL = "(?![^\\n])";
+/** Python `$` with no `re.M`: the end of the string, or before one trailing newline. */
+const EOS = "(?=\\n?$)";
 
 /** `string.punctuation`, as a character class. */
 const PUNCTUATION = "[!\"#$%&'()*+,\\-./:;<=>?@\\[\\\\\\]^_`{|}~]";
@@ -83,6 +97,21 @@ const AUTO_EMAIL =
   "<[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9]" +
   "(?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?" +
   "(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*>";
+/** `helpers.BLOCK_TAGS`. */
+const BLOCK_TAGS = [
+  "address", "article", "aside", "base", "basefont", "blockquote", "body",
+  "caption", "center", "col", "colgroup", "dd", "details", "dialog", "dir",
+  "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form",
+  "frame", "frameset", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header",
+  "hr", "html", "iframe", "legend", "li", "link", "main", "menu", "menuitem",
+  "meta", "nav", "noframes", "ol", "optgroup", "option", "p", "param",
+  "section", "source", "summary", "table", "tbody", "td", "tfoot", "th",
+  "thead", "title", "tr", "track", "ul",
+];
+/** `helpers.PRE_TAGS`. */
+const PRE_TAGS = ["pre", "script", "style", "textarea"];
+const BLOCK_TAGS_PATTERN = `(${[...BLOCK_TAGS, ...PRE_TAGS].join("|")})`;
+
 const INLINE_HTML =
   "<" +
   HTML_TAGNAME +
@@ -110,6 +139,11 @@ const BLOCK_SPECIFICATION: Record<string, string> = {
   block_quote: `${SOL} {0,3}>(?<quote_1>.*?)${EOL}`,
   list: `${SOL}(?<list_1> {0,3})(?<list_2>[*+-]|\\d{1,9}[.)])(?<list_3>[ \\t]*|[ \\t].+)${EOL}`,
   raw_html: `${SOL} {0,3}(?:</?${HTML_TAGNAME}|<!--|<\\?|<![A-Z]|<!\\[CDATA\\[)`,
+  // Registered but not in `DEFAULT_RULES`: `extract_block_quote` scans for it
+  // by name when it decides whether a lazy continuation line has ended a quote.
+  block_html:
+    `${SOL} {0,3}(?:(?:</?${BLOCK_TAGS_PATTERN}(?:[ \\t]+|\\n|${EOL}))` +
+    `|<!--|<\\?|<![A-Z]|<!\\[CDATA\\[)`,
 };
 
 /** `BlockParser.DEFAULT_RULES`. The order decides the alternation order. */
@@ -200,6 +234,11 @@ function expandLeadingTab(text: string, width = 4): string {
   );
 }
 
+/** `util.expand_tab`. */
+function expandTab(text: string, space = "    "): string {
+  return text.replace(EXPAND_TAB_RE, (_m, spaces: string) => spaces + space);
+}
+
 const INDENT_CODE_TRIM = new RegExp(`${SOL} {1,4}`, "g");
 const ATX_HEADING_TRIM = /(\s+|^)#+\s*$/;
 
@@ -209,6 +248,28 @@ class BlockState {
   tokens: Token[] = [];
   cursor = 0;
   cursorMax = 0;
+  readonly parent?: BlockState;
+
+  constructor(parent?: BlockState) {
+    this.parent = parent;
+  }
+
+  childState(src: string): BlockState {
+    const child = new BlockState(this);
+    child.process(src);
+    return child;
+  }
+
+  /** How many quotes (or, later, lists) this state is nested inside. */
+  depth(): number {
+    let d = 0;
+    let parent = this.parent;
+    while (parent) {
+      d += 1;
+      parent = parent.parent;
+    }
+    return d;
+  }
 
   process(src: string): void {
     this.src = src;
@@ -226,6 +287,11 @@ class BlockState {
 
   lastToken(): Token | undefined {
     return this.tokens[this.tokens.length - 1];
+  }
+
+  /** `prepend_token`: insert before the last token, not at the front. */
+  prependToken(token: Token): void {
+    this.tokens.splice(this.tokens.length - 1, 0, token);
   }
 
   addParagraph(text: string): void {
@@ -248,14 +314,31 @@ class BlockState {
   }
 }
 
-const BLOCK_SC = compileSc(BLOCK_SPECIFICATION, BLOCK_RULES, "g");
+/** `Parser.compile_sc`'s cache, keyed the way Python keys it plus the flags. */
+const SC_CACHE = new Map<string, RegExp>();
+
+function blockSc(rules: readonly string[], flags: string): RegExp {
+  const key = `${flags}\u0000${rules.join("|")}`;
+  let sc = SC_CACHE.get(key);
+  if (!sc) {
+    sc = compileSc(BLOCK_SPECIFICATION, rules, flags);
+    SC_CACHE.set(key, sc);
+  }
+  return sc;
+}
+
 /** `compile_sc(["thematic_break", "list"])`, which `setex_heading` falls back to. */
 const SETEX_FALLBACK_RULES = ["thematic_break", "list"] as const;
-const SETEX_FALLBACK_SC = compileSc(
-  BLOCK_SPECIFICATION,
-  SETEX_FALLBACK_RULES,
-  "y",
-);
+/** `compile_sc(["blank_line", "indent_code", "fenced_code"])` in `extract_block_quote`. */
+const QUOTE_MARKER_RULES = ["blank_line", "indent_code", "fenced_code"] as const;
+/** The block rules that end a block quote's lazy continuation. */
+const QUOTE_BREAK_RULES = [
+  "blank_line",
+  "thematic_break",
+  "fenced_code",
+  "list",
+  "block_html",
+] as const;
 
 /**
  * `BlockParser.parse_method`. Returns the new cursor, or `undefined` when the
@@ -283,11 +366,13 @@ function parseBlockMethod(
     case "indent_code":
       return parseIndentCode(m, state);
     case "block_quote":
+      return parseBlockQuote(m, state);
     case "list":
+      throw new UnportedMarkdownError(rule, "5.3c-iii-b-1-b-ii-2");
     case "ref_link":
-      throw new UnportedMarkdownError(rule, "5.3c-iii-b-1-b-ii");
     case "raw_html":
-      throw new UnportedMarkdownError(rule, "5.3c-iii-b-1-b-ii");
+    case "block_html":
+      throw new UnportedMarkdownError(rule, "5.3c-iii-b-1-b-ii-3");
     /* istanbul ignore next: BLOCK_RULES is exhaustive above */
     default:
       throw new Error(`markdownToWpHtml: unknown block rule "${rule}"`);
@@ -321,8 +406,9 @@ function parseSetexHeading(
     return m.index + m[0].length + 1;
   }
 
-  SETEX_FALLBACK_SC.lastIndex = state.cursor;
-  const m2 = SETEX_FALLBACK_SC.exec(state.src);
+  const fallbackSc = blockSc(SETEX_FALLBACK_RULES, "y");
+  fallbackSc.lastIndex = state.cursor;
+  const m2 = fallbackSc.exec(state.src);
   if (m2) {
     return parseBlockMethod(matchedRule(m2, SETEX_FALLBACK_RULES), m2, state);
   }
@@ -403,10 +489,126 @@ function parseIndentCode(
   return m.index + m[0].length;
 }
 
+/** `block_parser._BLOCK_QUOTE_TRIM`: one leading space off every line. */
+const BLOCK_QUOTE_TRIM = new RegExp(`${SOL} ?`, "g");
+/** `block_parser._BLOCK_QUOTE_LEADING`: the `>` marker and the spaces before it. */
+const BLOCK_QUOTE_LEADING = new RegExp(`${SOL} *>`, "g");
+/** `block_parser._LINE_BLANK_END`, compiled without `re.M`. */
+const LINE_BLANK_END = new RegExp(`\\n[ \\t]*\\n${EOS}`);
+/** `block_parser._STRICT_BLOCK_QUOTE`, compiled without `re.M`. */
+const STRICT_BLOCK_QUOTE = new RegExp(
+  `(?: {0,3}>[^\\n]*(?:\\n|${EOS}))+`,
+  "y",
+);
+/** `BlockParser.max_nested_level`. */
+const MAX_NESTED_LEVEL = 6;
+
+/**
+ * `BlockParser.extract_block_quote`. Returns the quote's body with its `>`
+ * markers stripped, plus the end position of a block the lazy branch parsed on
+ * the outer state (which the caller must then step over).
+ */
+function extractBlockQuote(
+  m: RegExpExecArray,
+  state: BlockState,
+): [string, number | undefined] {
+  // Clean up first, so the code-block test below sees what the child will.
+  let text = (m.groups?.quote_1 ?? "") + "\n";
+  text = expandLeadingTab(text, 3);
+  text = text.replace(BLOCK_QUOTE_TRIM, "");
+
+  const markerSc = blockSc(QUOTE_MARKER_RULES, "y");
+  markerSc.lastIndex = 0;
+  const requireMarker = markerSc.exec(text) !== null;
+
+  state.cursor = m.index + m[0].length + 1;
+
+  let endPos: number | undefined;
+  if (requireMarker) {
+    // A quote whose first line starts a code block only continues on lines
+    // that carry the marker; nothing may be lazy.
+    STRICT_BLOCK_QUOTE.lastIndex = state.cursor;
+    const m2 = STRICT_BLOCK_QUOTE.exec(state.src);
+    if (m2) {
+      text += trimQuoteMarkers(m2[0]);
+      state.cursor = m2.index + m2[0].length;
+    }
+  } else {
+    let prevBlankLine = false;
+    const breakSc = blockSc(QUOTE_BREAK_RULES, "y");
+    while (state.cursor < state.cursorMax) {
+      STRICT_BLOCK_QUOTE.lastIndex = state.cursor;
+      const m3 = STRICT_BLOCK_QUOTE.exec(state.src);
+      if (m3) {
+        const quote = trimQuoteMarkers(m3[0]);
+        text += quote;
+        state.cursor = m3.index + m3[0].length;
+        prevBlankLine =
+          quote.trim() === "" ? true : LINE_BLANK_END.test(quote);
+        continue;
+      }
+
+      if (prevBlankLine) {
+        // CommonMark Example 249: a blank line is needed between a block quote
+        // and a following paragraph, so laziness stops here.
+        break;
+      }
+
+      breakSc.lastIndex = state.cursor;
+      const m4 = breakSc.exec(state.src);
+      if (m4) {
+        endPos = parseBlockMethod(
+          matchedRule(m4, QUOTE_BREAK_RULES),
+          m4,
+          state,
+        );
+        if (endPos) break;
+      }
+
+      // Lazy continuation line.
+      const pos = state.findLineEnd();
+      text += expandLeadingTab(state.getText(pos), 3);
+      state.cursor = pos;
+    }
+  }
+
+  // CommonMark Example 6: the second tab counts as four spaces.
+  return [expandTab(text), endPos];
+}
+
+function trimQuoteMarkers(quote: string): string {
+  let out = quote.replace(BLOCK_QUOTE_LEADING, "");
+  out = expandLeadingTab(out, 3);
+  return out.replace(BLOCK_QUOTE_TRIM, "");
+}
+
+/** `BlockParser.parse_block_quote`. */
+function parseBlockQuote(m: RegExpExecArray, state: BlockState): number {
+  const [text, endPos] = extractBlockQuote(m, state);
+  const child = state.childState(text);
+  const rules =
+    state.depth() >= MAX_NESTED_LEVEL - 1
+      ? BLOCK_RULES.filter((rule) => rule !== "block_quote")
+      : BLOCK_RULES;
+
+  parseBlocks(child, rules);
+  const token: Token = { type: "block_quote", children: child.tokens };
+  if (endPos) {
+    state.prependToken(token);
+    return endPos;
+  }
+  state.tokens.push(token);
+  return state.cursor;
+}
+
 /** `BlockParser.parse`. */
-function parseBlocks(state: BlockState): void {
+function parseBlocks(
+  state: BlockState,
+  rules: readonly string[] = BLOCK_RULES,
+): void {
+  const sc = blockSc(rules, "g");
   while (state.cursor < state.cursorMax) {
-    const m = search(BLOCK_SC, state.src, state.cursor);
+    const m = search(sc, state.src, state.cursor);
     if (!m) break;
 
     if (m.index > state.cursor) {
@@ -414,7 +616,7 @@ function parseBlocks(state: BlockState): void {
       state.cursor = m.index;
     }
 
-    const endPos = parseBlockMethod(matchedRule(m, BLOCK_RULES), m, state);
+    const endPos = parseBlockMethod(matchedRule(m, rules), m, state);
     if (endPos) {
       state.cursor = endPos;
     } else {
@@ -511,6 +713,12 @@ function renderToken(token: Token): string {
         `<!-- /wp:code -->\n\n`
       );
     }
+    case "block_quote":
+      return (
+        "<!-- wp:quote -->\n" +
+        `<blockquote class="wp-block-quote">${renderChildren(token)}</blockquote>\n` +
+        "<!-- /wp:quote -->\n\n"
+      );
     case "thematic_break":
       return (
         "<!-- wp:separator -->\n" +
