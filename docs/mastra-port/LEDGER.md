@@ -15809,7 +15809,290 @@ three pieces are separately verifiable, so they are separate items.
   error bodies and row-level ownership, but it does not prove the internal-links
   panel's search box, its infinite scroll (`page < data.pages`) or its delete
   button work end to end against them. That check belongs to Phase 8 item 8.6.
-- [ ] 5.8 `analytics`
+- [ ] 5.8 `analytics` (split: four endpoints over 519 lines, each with its own
+  aggregation. `/dashboard` is five grouped queries, `/costs` and `/models` are raw
+  `jsonb_each` unrolls of `stage_logs` with their own arithmetic, `/logs` is a
+  `jsonb_array_elements` explorer with seven filters and pagination. Split into
+  5.8a `/dashboard`, 5.8b `/costs`, 5.8c `/models`, 5.8d `/logs`.)
+  - [x] 5.8a `GET /api/analytics/dashboard`.
+
+    Ported to `web/src/app/api/analytics/dashboard/route.ts`. Five independent
+    aggregates, all inner-joining `website_profiles` on `user_id`, assembled into the
+    `DashboardStats` shape `web/src/lib/api.ts` already declares. `api.ts` needed no
+    change: every field and type already matched what the handler returns.
+
+    The five queries were compiled off the real SQLAlchemy rather than read off the
+    Python, because two of them build their FROM implicitly:
+
+    ```
+    $ cd api && PYTHONPATH=. uv run python -c "
+    <the five selects from dashboard_stats(), compiled with the postgresql dialect>
+    "
+    --- by_status
+    SELECT anon_1.current_stage, count(anon_1.id) AS count_1
+    FROM (SELECT ... FROM posts JOIN website_profiles ON posts.profile_id = website_profiles.id
+    WHERE website_profiles.user_id = %(user_id_1)s) AS anon_1 GROUP BY anon_1.current_stage
+    --- avg
+    SELECT avg(EXTRACT(epoch FROM posts.completed_at) - EXTRACT(epoch FROM posts.created_at)) AS avg_1
+    FROM posts JOIN website_profiles ON posts.profile_id = website_profiles.id
+    WHERE website_profiles.user_id = %(user_id_1)s AND posts.completed_at IS NOT NULL
+    --- by_profile
+    SELECT website_profiles.name, count(posts.id) AS count
+    FROM posts JOIN website_profiles ON posts.profile_id = website_profiles.id
+    WHERE website_profiles.user_id = %(user_id_1)s GROUP BY website_profiles.name ORDER BY count(posts.id) DESC
+     LIMIT %(param_1)s
+    --- over_time
+    SELECT CAST(posts.created_at AS DATE) AS date, count(posts.id) AS count
+    FROM posts JOIN website_profiles ON posts.profile_id = website_profiles.id
+    WHERE website_profiles.user_id = %(user_id_1)s AND posts.created_at >= %(created_at_1)s GROUP BY date ORDER BY date
+    --- today
+    SELECT count(posts.id) AS count_1
+    FROM posts JOIN website_profiles ON posts.profile_id = website_profiles.id
+    WHERE website_profiles.user_id = %(user_id_1)s AND posts.created_at >= %(created_at_1)s
+    ```
+
+    The `by_status` subquery selects every `Post` column and then counts one of them, so
+    the port reads `current_stage` and `count(id)` off `posts` directly; the grouped
+    result is identical and the 44-column projection is not.
+
+    **`days` filters only `over_time`.** `by_status`, the average, `by_profile` and the
+    completion rate all read the caller's whole history, which is not what the parameter
+    name suggests but is what the monitor page's overview tab has always shown. Pinned by
+    the "excludes posts older than the days window" test, which asserts the same row is
+    absent from `over_time` and present in `total`.
+
+    **Four Python arithmetic details preserved, each with its own test.**
+
+    - `total` is `sum(by_status.values())`, every group, not the sum of named buckets. A
+      post with a null or unrecognised `current_stage` is in the denominator of
+      `completion_rate`.
+    - `json.dumps` renders a `None` dict key as the string `"null"`, so a post whose
+      stage was never written appears under that key rather than being dropped:
+
+      ```
+      $ cd api && uv run python -c "
+      import json
+      from fastapi.encoders import jsonable_encoder
+      print(json.dumps(jsonable_encoder({None: 3, 'pending': 1})))
+      "
+      {"null": 3, "pending": 1}
+      ```
+
+    - `round()` is half to even. `completion_rate` uses `pythonRound(x, 1)`, the helper
+      item 3.x added for `analytics.py`, not `Math.round`: 1 complete of 16 posts is
+      exactly 6.25 and reports 6.2.
+    - `avg_duration_s` is tested for truthiness *before* rounding
+      (`round(v, 0) if v else None`), so an average of exactly zero reports `null` and
+      not `0`.
+
+    **`avg_duration_s` is an integer on the wire, and the reason is FastAPI's encoder.**
+    `EXTRACT(epoch FROM ...)` returns `numeric` on Postgres 17, so the average reached
+    asyncpg as a `Decimal`, and FastAPI's `decimal_encoder` returns an `int` for a
+    Decimal whose exponent is `>= 0`:
+
+    ```
+    $ set -a && . .env && set +a && cd api && PYTHONPATH=. uv run python -c "
+    <run the avg select through get_session(), then func.version() and current_setting('TimeZone')>
+    "
+    avg type: <class 'decimal.Decimal'> Decimal('303.1177400000000000')
+    PostgreSQL 17.8 on aarch64-unknown-linux-musl, ...
+    tz: UTC
+    ```
+
+    ```
+    $ cd api && uv run python -c "
+    import json
+    from decimal import Decimal
+    from fastapi.encoders import jsonable_encoder
+    print(json.dumps(jsonable_encoder(round(Decimal('1234.6'), 0))))
+    print(json.dumps(jsonable_encoder(round(1234.6, 0))))
+    "
+    1235
+    1235.0
+    ```
+
+    `pg` hands the same `numeric` back as a string, so the handler calls `Number()` on it
+    before rounding. The one thing that cannot survive is a tie beyond double precision:
+    `Decimal` rounds the exact value where the port rounds its nearest double. An average
+    of epoch differences would have to be an exact `.5` at the 17th significant digit to
+    diverge, which no real duration is.
+
+    **Deviation: `?days=` repeated keeps the last value, not the first.** Same divergence
+    recorded under 5.3c-i: Starlette's `QueryParams.get()` returns the last value of a
+    repeated key and `URLSearchParams.get()` returns the first, so the handler reads
+    `getAll("days").at(-1)`. Unlike `?stage=`, `days` is a required `int` once present,
+    so `?days=` is an `int_parsing` 422 rather than a fallback to 30.
+
+    **Not a deviation, measured: the `over_time` date needs no `::text` cast.** Bare `pg`
+    parses a `date` (OID 1082) into a `Date` at the *local* midnight, which would have
+    put an ISO timestamp where Python put `str(datetime.date)`. drizzle's node-postgres
+    driver replaces that parser with the identity, so the column arrives as
+    `YYYY-MM-DD` already:
+
+    ```
+    $ cd web && node -e "
+    const {Pool}=require('pg');
+    const p=new Pool({connectionString:process.env.DATABASE_URL_SYNC});
+    p.query(\"select current_setting('TimeZone') as tz, avg(1.5::numeric) as a, cast(now() as date) as d, cast(now() as date)::text as dt from posts\")
+     .then(r=>console.log(r.rows[0])).finally(()=>p.end());
+    "
+    { tz: 'UTC', a: '1.5000000000000000', d: 2026-08-23T05:00:00.000Z, dt: '2026-08-23' }
+
+    $ npx vitest run src/app/api/analytics/probe-date.test.ts   # drizzle, throwaway probe
+    typeof d string "2026-08-23"
+    typeof t string "2026-08-23"
+    ```
+
+    The cast was written first and then removed, because negative control 5 below proved
+    it changed nothing. The `over_time` test pins the string, so a driver upgrade that
+    dropped the override fails a test rather than shipping ISO timestamps. The cast
+    itself resolves in the session time zone, which is `UTC` on this server for both
+    drivers, so the two stacks bucket a post into the same day.
+
+    Note the one place the two halves of the response can disagree with each other, in
+    both stacks: `over_time` buckets by the *session* time zone while `posts_today`
+    counts from a UTC midnight computed in the application. They agree only because the
+    server's TimeZone is UTC.
+
+    Pre-implementation, with the handler stubbed to `Response.json({})`:
+
+    ```
+    $ cd web && npx vitest run src/app/api/analytics/dashboard.test.ts
+     Test Files  1 failed (1)
+          Tests  23 failed (23)
+    ```
+
+    The 23 tests run against the real database and real BetterAuth sessions:
+
+    ```
+    $ cd web && npx vitest run src/app/api/analytics/dashboard.test.ts --reporter=verbose
+     + GET /api/analytics/dashboard > rejects an unauthenticated request 4ms
+     + GET /api/analytics/dashboard > answers an empty history with zeros and a null average 17ms
+     + ... > the days query parameter > answers a non-numeric value with pydantic's int_parsing 422 3ms
+     + ... > the days query parameter > answers an empty value with a 422 rather than falling back to 30 2ms
+     + ... > the days query parameter > enforces ge=1 with pydantic's ctx bound 2ms
+     + ... > the days query parameter > enforces le=365 with pydantic's ctx bound 2ms
+     + ... > the days query parameter > keeps the last value of a repeated key, as Starlette's QueryParams did 11ms
+     + ... > by_status and the totals > buckets by current_stage and sums every group into total 8ms
+     + ... > by_status and the totals > counts a null current_stage under the "null" key, as json.dumps did 6ms
+     + ... > by_status and the totals > rounds completion_rate half to even, not half up 8ms
+     + ... > by_status and the totals > reports a completion rate of 0 rather than dividing by zero 4ms
+     + ... > avg_duration_s > averages completed_at minus created_at and rounds to a whole number 7ms
+     + ... > avg_duration_s > emits a number, not the numeric string pg hands back 5ms
+     + ... > avg_duration_s > reports null when nothing has completed 5ms
+     + ... > avg_duration_s > reports null for an average of exactly zero, as Python's truthiness test did 5ms
+     + ... > by_profile > orders by post count descending 9ms
+     + ... > by_profile > limits the list to ten rows 26ms
+     + ... > by_profile > groups by profile name, so two profiles sharing a name are one row 8ms
+     + ... > over_time and posts_today > groups by UTC date, ascending, within the days window 7ms
+     + ... > over_time and posts_today > excludes posts older than the days window 5ms
+     + ... > over_time and posts_today > counts posts_today from UTC midnight, not from the days window 6ms
+     + ... > scoping > excludes another user's posts from every aggregate 9ms
+     + ... > scoping > excludes a post whose profile_id is null, through the inner join 5ms
+
+     Test Files  1 passed (1)
+          Tests  23 passed (23)
+       Duration  710ms
+    ```
+
+    (vitest writes its pass glyph as a check mark; transcribed as `+` here.)
+
+    Negative controls, each reverted after measuring. Nine were run; the fifth is the
+    interesting one, because it had no teeth and that is what removed the cast:
+
+    | # | Mutation | Result |
+    | --- | --- | --- |
+    | 1 | `pythonRound(rate, 1)` becomes `Math.round(rate * 1000) / 10` | 1 failed, 22 passed |
+    | 2 | truthiness check becomes `avgSeconds === null` | 1 failed, 22 passed |
+    | 3 | drop `Number()` and use the string `pg` returned | 3 failed, 20 passed |
+    | 4 | skip the null `current_stage` bucket instead of keying it `"null"` | 1 failed, 22 passed |
+    | 5 | drop the `::text` cast on the `over_time` date | **23 passed, no teeth** |
+    | 6 | `getAll("days").at(-1)` becomes `get("days")` | 1 failed, 22 passed |
+    | 7 | `by_profile` groups by `name, id` instead of `name` | 1 failed, 22 passed |
+    | 8 | drop the ten-profile `limit` | 1 failed, 22 passed |
+    | 9 | exclude the null bucket from `total` | 1 failed, 22 passed |
+
+    ```
+    ### 1. half-up rounding for completion_rate
+           x rounds completion_rate half to even, not half up 13ms
+          Tests  1 failed | 22 passed (23)
+    ### 2. null-check instead of Python truthiness
+           x reports null for an average of exactly zero, as Python's truthiness test did 7ms
+          Tests  1 failed | 22 passed (23)
+    ### 3. leave the numeric as the string pg returned
+           x averages completed_at minus created_at and rounds to a whole number 9ms
+           x emits a number, not the numeric string pg hands back 6ms
+           x reports null for an average of exactly zero, as Python's truthiness test did 5ms
+          Tests  3 failed | 20 passed (23)
+    ### 4. drop the null current_stage bucket
+           x counts a null current_stage under the "null" key, as json.dumps did 10ms
+          Tests  1 failed | 22 passed (23)
+    ### 5. drop the ::text cast on the over_time date
+          Tests  23 passed (23)
+    ### 6. first value of a repeated ?days= instead of the last
+           x keeps the last value of a repeated key, as Starlette's QueryParams did 8ms
+          Tests  1 failed | 22 passed (23)
+    ### 7. group by_profile by id as well as name
+           x groups by profile name, so two profiles sharing a name are one row 11ms
+          Tests  1 failed | 22 passed (23)
+    ### 8. drop the ten-profile cap
+           x limits the list to ten rows 27ms
+          Tests  1 failed | 22 passed (23)
+    ### 9. exclude the null bucket from total
+           x counts a null current_stage under the "null" key, as json.dumps did 8ms
+          Tests  1 failed | 22 passed (23)
+    RESTORED CLEAN
+    ```
+
+    Gates (run from inside `web/`, per the invocation note under 5.5e-iii, with the repo
+    `.env` sourced):
+
+    ```
+    $ npx tsc --noEmit
+    TSC EXIT=0
+    (no output)
+
+    $ npx eslint
+    LINT EXIT=0
+    (no output)
+
+    $ npx vitest run
+     Test Files  2 failed | 95 passed (97)
+          Tests  9 failed | 1813 passed | 7 skipped (1829)
+    # 9 failed is the recorded baseline: 6 in image-preview.test.tsx and 3 in
+    # PostDetail.test.tsx. The scaffold-check lifecycle-event flake recorded under
+    # 5.6 did not fire on this run. Passing count 1790 -> 1813 (+23).
+
+    $ npx next build
+    BUILD EXIT=0
+    v Compiled successfully in 4.2s
+    |- f /api/analytics/dashboard
+    # The BetterAuth "default secret" lines are the pre-existing, environment-driven
+    # warning recorded under item 1.2.
+
+    $ cd api && uv run pytest -q
+    120 failed, 241 passed, 25 errors in 15.08s
+    # Baseline under 5.3c-iii-a was 125 failed, 236 passed, 25 errors, so this is five
+    # fewer failures. No Python file changed in this iteration (`git status` lists only
+    # the two new TypeScript files), so the move is environmental; it was not
+    # investigated, and it is a move in the safe direction.
+
+    $ cd api && uv run ruff check .
+    Found 32 errors.
+
+    $ cd api && uv run ruff format --check .
+    9 files would be reformatted, 131 files already formatted
+    ```
+
+    **Not covered.** No browser drives `/monitor`'s overview tab against this handler.
+    The proof is direct handler calls, which is the right level for the aggregation and
+    the scoping, but it does not prove the tab's charts render the payload. That check
+    belongs to Phase 8 item 8.8. The `days` selector on that tab is also never exercised
+    end to end: `analytics.dashboard()` is called with no argument, so the dashboard only
+    ever requests `?days=30`.
+  - [ ] 5.8b `GET /api/analytics/costs`
+  - [ ] 5.8c `GET /api/analytics/models`
+  - [ ] 5.8d `GET /api/analytics/logs`
 - [ ] 5.9 `wordpress`
 - [ ] 5.10 `nextjs` (HMAC signing from `hmac_signing.py` and the webhook contract with
   `packages/create-mdx-blog` preserved exactly)
