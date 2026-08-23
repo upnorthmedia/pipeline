@@ -12175,6 +12175,196 @@ three pieces are separately verifiable, so they are separate items.
           Split this again if the HMAC signing and the webhook client turn out to be more
           than one iteration; `packages/create-mdx-blog` consumes that contract and is out
           of scope for changes.
+
+          Split, as that paragraph allowed for. The HMAC half turned out to be *already
+          done*: `web/src/lib/hmac-signing.ts` ports `sign_payload` and item 5.9's
+          `POST /api/profiles/{id}/nextjs/test` already signs a payload with it, so
+          nothing here re-does it. What is left is four things that do not fit one
+          iteration, because two of them are content transforms with their own oracles
+          before any of it reaches a step:
+
+          - 5.3c-iii-b-2-a `apply_frontmatter_mapping`, the user-configured transform.
+          - 5.3c-iii-b-2-b `_apply_mapping_to_content`, which is a `yaml.safe_load` and a
+            `yaml.dump(default_flow_style=False, allow_unicode=True)` round trip over the
+            post's frontmatter block. PyYAML's emitter decides quoting, key order, line
+            width and unicode escaping, and the result is what lands in the reader's repo,
+            so it needs its own oracle and probably its own split.
+          - 5.3c-iii-b-2-c The payload: content selection, the manifest walk that
+            base64-encodes each image off disk, and `json.dumps` of the seven-key body
+            whose bytes the signature is computed over.
+          - 5.3c-iii-b-2-d The Mastra step and workflow: the three guards, the
+            `nextjs_publish_status` transitions, the webhook `POST` and its 200 check, and
+            the three SSE events with `_fail`.
+          - 5.3c-iii-b-2-e The `output_format == "nextjs"` branch of
+            `POST /{post_id}/publish`, which removes the temporary fall-through.
+
+          - [x] 5.3c-iii-b-2-a `apply_frontmatter_mapping` from
+            `api/src/services/frontmatter_mapping.py`, the transform a user's saved
+            mapping runs over a post's frontmatter before the payload is built.
+
+            Ported to `web/src/mastra/nextjs/frontmatter-mapping.ts`. Thirty lines of
+            Python, and almost every one of them is a distinction JavaScript spells the
+            same way as its opposite, so the port is pinned by an oracle rather than by
+            reading:
+
+            - `jena_field in jena_frontmatter` in the string-target branch is key
+              membership, so a field stored as `null` is copied through, while
+              `jena_frontmatter.get(jena_field)` in the dict-target branch cannot tell a
+              stored `null` from an absent key. The same field takes both branches
+              depending on the mapping, and they disagree about it.
+            - `value is None` and `default is not None` are identity against `None`, not
+              truthiness. `false`, `0`, `""` and `[]` are all values, and all defaults.
+            - `isinstance(target, dict)` excludes a list, so a target stored as an array
+              is skipped entirely rather than read for a `key`.
+            - the `continue` after a default is taken means a default is never wrapped by
+              `transform: "array"`; only a real value is.
+
+            **Four shapes an object-based transcription would lose**, which is why both
+            the mapping and the frontmatter are `Map`s and so is the result:
+
+            - `__proto__` is an ordinary dict key in Python. `result["__proto__"] = v` on
+              an object literal is a prototype write, not a field: the test asserts
+              `Object.hasOwn(naive, "__proto__") === false` after exactly that write.
+              Both a source field and a target key can be `__proto__`, and the oracle
+              covers both.
+            - `target.get("key", jena_field)` hands back whatever the mapping stored, so
+              the result's keys are not all strings. `{"key": null}` produces a `None` key
+              and `{"key": 5}` an `int` key, which an object would stringify.
+            - an object reorders integer-like keys ahead of the rest; Python's dict and a
+              `Map` both keep insertion order. A mapping onto targets `"10"` and `"2"`
+              comes out in that order here and reversed through `Object.fromEntries`.
+            - Python hashes `True` with `1`, so two targets writing those two keys write
+              one entry. `Map` does not, so `setResultKey` looks for the twin.
+
+            **One divergence, deliberate:** a mapping whose `key` is a list or an object
+            raises `TypeError: unhashable type: 'list'` out of the hook in Python, and the
+            hook does not catch it, so the publish fails. The port raises the same
+            `TypeError` with the same message rather than stringifying the key, because
+            the alternative is publishing a post Python refused to publish. Two oracle
+            cases record it.
+
+            The oracle is `web/src/mastra/nextjs/data/nextjs-frontmatter-mapping-parity.json`,
+            written by `api/scripts/export_frontmatter_mapping_parity.py`, which asserts
+            the fifteen lines it is describing are still in the real function
+            (`inspect.getsource`) before it runs them, so the recorded answers cannot
+            drift without the export failing. 55 cases; both the inputs and the result are
+            pair lists, and the result's keys carry their Python type.
+
+            ```
+            $ cd api && PYTHONPATH=. uv run python scripts/export_frontmatter_mapping_parity.py
+            wrote 55 cases to .../web/src/mastra/nextjs/data/nextjs-frontmatter-mapping-parity.json (42 with a non-empty result, 2 raising)
+
+            $ pnpm -C web vitest run src/mastra/nextjs/frontmatter-mapping.test.ts
+             v src/mastra/nextjs/frontmatter-mapping.test.ts (61 tests) 4ms
+             Test Files  1 passed (1)
+                  Tests  61 passed (61)
+               Duration  401ms
+            ```
+
+            Twenty-one mutations, each applied to the module alone and reverted after
+            measuring. Eighteen are killed:
+
+            ```
+            1  membership check becomes a value check                1 failed | 60 passed (61)
+            2  the dict target check accepts a list                  1 failed | 60 passed (61)
+            3  an unhashable list key is written rather than raised   1 failed | 60 passed (61)
+            4  an unhashable dict key is written rather than raised   1 failed | 60 passed (61)
+            5  a stored null key falls back to the source field       1 failed | 60 passed (61)
+            6  the key fallback is dropped                            1 failed | 60 passed (61)
+            7  a default stored as null is treated as a default       1 failed | 60 passed (61)
+            8  the default check becomes truthiness                   3 failed | 58 passed (61)
+            9  the first value check becomes truthiness               2 failed | 59 passed (61)
+            10 the second value check only sees an absent key         1 failed | 60 passed (61)
+            11 the continue after a default is dropped                SURVIVED
+            12 any transform wraps                                    5 failed | 56 passed (61)
+            13 the array transform wraps a list too                   2 failed | 59 passed (61)
+            14 the array transform is applied to a default too        1 failed | 60 passed (61)
+            15 the true/1 key equivalence is dropped                  1 failed | 60 passed (61)
+            16 the twin lookup runs even for a key already present    SURVIVED
+            17 the target fields are read without a hasOwn guard      SURVIVED
+            18 the mapping is walked in reverse                       6 failed | 55 passed (61)
+            19 a string target writes the source field name          12 failed | 49 passed (61)
+            20 the dict branch reads the frontmatter under the target key  16 failed | 45 passed (61)
+            21 an absent key is not None                             10 failed | 51 passed (61)
+            ```
+
+            The three survivors are equivalent mutants, and the argument is the same one
+            Python's own source supports:
+
+            - **11** deletes the `continue` after a default is written. The very next
+              statement is `if (isNone(value)) continue`, and the branch was only entered
+              because `value` is `None`, so control leaves the iteration at the same point
+              either way. Python carries the identical redundancy.
+            - **16** removes the `if (!result.has(key))` guard around the twin lookup. If
+              the key is already present its twin cannot also be present, because the
+              lookup that inserted it would have merged them; the map starts empty, so the
+              invariant holds by induction and the guard can never change the answer.
+            - **17** replaces the `Object.hasOwn` read of `transform` and `default` with a
+              direct property read. `Object.prototype` carries neither name, and the
+              mapping's targets are `JSON.parse` output whose prototype is
+              `Object.prototype`, so the two reads agree on every value reachable from the
+              `nextjs_frontmatter_map` JSONB column. Killing it would need
+              `Object.create({default: ...})`, which no JSONB decode produces, so a
+              control for it would pin depth rather than a defect.
+
+            Two oracle cases were added mid-item for mutations 4 and 10, which the first
+            53 did not reach: no case had a dict-shaped `key`, and no case had a source
+            field stored as `null` with no default beside it.
+
+            Gates:
+
+            ```
+            $ pnpm -C web tsc --noEmit
+            TSC EXIT=0
+            (no output)
+
+            $ pnpm -C web lint
+            LINT EXIT=0
+            (no output)
+
+            $ pnpm -C web test
+             Test Files  2 failed | 119 passed (121)
+                  Tests  9 failed | 4011 passed | 7 skipped (4027)
+            # the 9 are the Phase 0 baseline: 6 in image-preview.test.tsx and 3 in
+            # PostDetail.test.tsx, and no other file failed. Passing 3950 -> 4011 (+61).
+
+            $ pnpm -C web build
+            v Compiled successfully in 4.2s
+
+            $ cd api && uv run ruff check scripts/export_frontmatter_mapping_parity.py
+            All checks passed!
+            $ cd api && uv run ruff format --check scripts/export_frontmatter_mapping_parity.py
+            1 file already formatted
+
+            $ cd api && set -a && . ../.env && set +a && uv run pytest -q
+            120 failed, 241 passed, 25 errors in 15.21s
+            # the Phase 0 baseline exactly, unchanged by this item
+            ```
+
+          - [ ] 5.3c-iii-b-2-b `_apply_mapping_to_content`: the `---` fence split, the
+            `yaml.safe_load` of the frontmatter block and the
+            `yaml.dump(mapped, default_flow_style=False, allow_unicode=True)` that
+            rebuilds it. Note before starting: `sort_keys` defaults to `True`, and
+            PyYAML's `represent_mapping` wraps the sort in `try/except TypeError`, so the
+            emitted key order is sorted when the mapped keys are mutually comparable and
+            insertion-ordered when they are not (which 5.3c-iii-b-2-a can produce, with a
+            `None` or `int` key beside strings). Split again if the emitter's quoting and
+            wrapping rules do not fit one iteration.
+          - [ ] 5.3c-iii-b-2-c The payload: `post.ready_content or post.final_md_content
+            or ""`, the `image_manifest` walk that reads each image off disk and
+            base64-encodes it, and the `json.dumps` whose exact bytes the signature covers.
+          - [ ] 5.3c-iii-b-2-d The Mastra step and workflow for `publish_to_nextjs`: the
+            profile, webhook-configuration and decrypt guards, the
+            `nextjs_publish_status` transitions with `nextjs_published_at`, the webhook
+            `POST` with `X-Jena-Signature` and its 200 check, and the `publish_start` /
+            `publish_complete` / `publish_error` events with `_fail`. `web/src/db/schema.ts`
+            types `nextjs_frontmatter_map` as `Record<string, string>`, which the dict
+            shaped targets contradict; widen it to `Record<string, unknown>` here, where
+            the column is first read.
+          - [ ] 5.3c-iii-b-2-e The `output_format == "nextjs"` branch of
+            `POST /{post_id}/publish`: `nextjs_publish_status = "pending"`, the start of
+            the new workflow, and the removal of the temporary fall-through recorded under
+            5.3c-iii-b-1-d.
   - [x] 5.3d Exports, logs and analytics (split: five endpoints, and `/export/all`
     needs a zip writer this repo does not have while `/analytics` needs the analytics
     service wired to the route. Split into 5.3d-i the two plain exports, 5.3d-ii
