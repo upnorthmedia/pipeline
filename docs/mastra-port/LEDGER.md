@@ -1372,11 +1372,24 @@ pages that use it work with the Python API stopped.
     `NEXT_PUBLIC_APP_URL` build arg, and `docs/mastra-port/railway.md` with the two env
     tables and the gaps.
     Evidence: [`evidence/phase-7.md` #7.2b](../mastra-port/evidence/phase-7.md)
-- [ ] 7.3 Document the Mastra Studio workflow: running it locally alongside `next dev` against
+- [x] 7.3 Document the Mastra Studio workflow: running it locally alongside `next dev` against
   the same Postgres, `server.studioBase` if a custom mount path is used, and an explicit
   statement that Studio is never publicly exposed (auth or private network only).
+  Landed as `docs/mastra-port/studio.md`, plus a `pnpm -C web studio` script. Studio and
+  `next dev` run together on 4111 and 3000 against the same `.env`, and Studio lists
+  `pipeline` with all six stages between `pipeline-start` and `pipeline-complete`, the six
+  agents, and runs it did not start. The script sets `MASTRA_WORKERS=false`, because
+  `mastra dev` otherwise starts Mastra's execution workers, joins the orchestration consumer
+  group and steals steps from the real `worker` (measured: it was the only live consumer, and
+  it drained the stale dev backlog on boot). `server.studioBase` is not used; the app
+  configures no `server` key, so Studio is at the root of 4111. Nothing in either Railway
+  service or either compose file starts or publishes Studio.
+  Evidence: [`evidence/phase-7.md` #7.3](../mastra-port/evidence/phase-7.md)
 - [ ] 7.4 Update `CLAUDE.md`, `README.md`, and `.env` documentation to the new architecture,
   commands, and env vars. Every command listed must be one actually run successfully.
+  `CLAUDE.md` does not exist yet and has to be created here. Per definition-of-done 13 it
+  must carry the Studio invocation; link `docs/mastra-port/studio.md` rather than restating
+  it.
 - [ ] 7.5 Move `rules/` handling and any remaining assets that lived under `api/`.
 - [ ] 7.6 `docker-compose up` brings up a working stack and a post goes from creation to `ready`
   with images through the UI, executing in the worker service.

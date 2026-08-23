@@ -1201,3 +1201,240 @@ compose prod ok
 
 9 failures is the standing baseline for this tree (6 in `image-preview.test.tsx`, 3 in
 `PostDetail.test.tsx`), unchanged, with 4510 passing.
+
+## 7.3
+
+Mastra Studio, documented and re-verified against the finished six-stage workflow.
+
+### What landed
+
+- `docs/mastra-port/studio.md`: the whole Studio workflow. How to run it alongside
+  `next dev` against the same Postgres, why the script disables Mastra's execution
+  workers, what Studio shows for this app, `server.studioBase` for a custom mount path,
+  and the never-publicly-exposed rule with the four places that hold it.
+- `web/package.json` gains `"studio": "MASTRA_WORKERS=false mastra dev --env ../.env"`,
+  so the two things that are easy to get wrong (the env path and the worker opt-out) are
+  not left to memory.
+- `docs/mastra-port/studio/7.3-studio-workflows-list.png` and
+  `docs/mastra-port/studio/7.3-studio-pipeline-detail.png`, captured from the server the
+  script starts.
+
+Item 2.5 proved Studio connects at all, against a two-step scaffold workflow. This item
+is the same check against `pipeline` plus the operational rules, and it is what definition
+-of-done 13 rests on.
+
+### Studio and `next dev` at the same time
+
+`docker compose up -d db redis` first; the entry point opens both connections at import
+time.
+
+```
+$ pnpm -C web studio
+> content-pipeline-dashboard@0.1.0 studio /Users/.../web
+> MASTRA_WORKERS=false mastra dev --env ../.env
+
+◐ Preparing development environment...
+✓ Initial bundle complete
+◇ Starting Mastra dev server...
+
+ mastra  1.26.0 ready in 1273 ms
+
+│ Studio: http://localhost:4111
+│ API:    http://localhost:4111/api
+
+◯ watching for file changes...
+```
+
+Both servers answering, with `next dev` already running on 3000:
+
+```
+$ echo "next /api/health -> $(curl -s -w ' [%{http_code}]' http://localhost:3000/api/health)"
+next /api/health -> {"status":"ok"} [200]
+$ curl -s -o /dev/null -w '%{http_code}' http://localhost:4111/
+200
+$ curl -s -o /dev/null -w '%{http_code}' http://localhost:4111/api/workflows
+200
+```
+
+`pnpm -C web dev` needs no env sourcing of its own: `next.config.ts` reads the repo-root
+`.env` at import time. Started with `DATABASE_URL`, `DATABASE_URL_SYNC` and `REDIS_URL`
+explicitly unset in its environment, a database-backed route still answers its auth check
+rather than failing to connect:
+
+```
+$ env -u DATABASE_URL -u DATABASE_URL_SYNC -u REDIS_URL pnpm -C web dev
+- Local:         http://localhost:3000
+✓ Ready in 430ms
+$ curl -s -w ' [%{http_code}]' http://localhost:3000/api/profiles
+{"detail":"Not authenticated"} [401]
+```
+
+### Studio lists the workflow and all six stages
+
+Read back out of the server the script starts:
+
+```
+$ curl -s http://localhost:4111/api/workflows | node -e 'let s="";process.stdin.on("data",
+    d=>s+=d).on("end",()=>{const w=JSON.parse(s);for(const[k,v]of Object.entries(w))
+    console.log(k,"->",v.name,"| steps:",Object.keys(v.steps).join(", "))})'
+pipeline -> pipeline | steps: pipeline-start, research, outline, write, edit, images, ready, pipeline-complete
+images -> images | steps: images-manifest, mapping_images_0, images-generate, images-assemble
+scaffoldCheck -> scaffold-check | steps: scaffold-first, scaffold-second
+sitemapCrawl -> sitemap-crawl | steps: sitemap-crawl
+recrawlCheck -> recrawl-check | steps: recrawl-check
+wordpressPublish -> wordpress-publish | steps: wordpress-publish
+nextjsPublish -> nextjs-publish | steps: nextjs-publish
+
+$ curl -s http://localhost:4111/api/agents | node -e 'let s="";process.stdin.on("data",
+    d=>s+=d).on("end",()=>console.log(Object.keys(JSON.parse(s)).join(", ")))'
+research, outline, write, edit, images, ready
+```
+
+The rendered graph, from the accessibility tree of `/workflows/pipeline`:
+
+```
+$ npx -y chrome-devtools-axi snapshot --full
+    ... group "Edge from boundary-start to node-pipeline-start"
+    ... group "Edge from node-pipeline-start to node-research"
+    ... group "Edge from node-research to node-outline"
+    ... group "Edge from node-outline to node-write"
+    ... group "Edge from node-write to node-edit"
+    ... group "Edge from node-edit to node-images"
+    ... group "Edge from node-images to node-ready"
+    ... group "Edge from node-ready to node-pipeline-complete"
+    ... group "Edge from node-pipeline-complete to boundary-end"
+      ... StaticText "pipeline-start"
+      ... StaticText "research"
+      ... StaticText "outline"
+      ... StaticText "write"
+      ... StaticText "edit"
+      ... StaticText "images"
+      ... StaticText "ready"
+      ... StaticText "pipeline-complete"
+```
+
+The workflows list row for `pipeline`, same snapshot source:
+
+```
+link "pipeline 1 — 256 runs in progress 1380 runs awaiting input 8"
+    url="http://localhost:4111/workflows/pipeline"
+```
+
+Screenshots (`npx -y chrome-devtools-axi open <url>` then
+`npx -y chrome-devtools-axi screenshot <path> --full-page`):
+
+- `studio/7.3-studio-workflows-list.png`: all seven registered workflows with their step
+  counts.
+- `studio/7.3-studio-pipeline-detail.png`: the `8 steps` badge, the linear graph above,
+  the run form generated from the workflow's Zod `inputSchema` (`Post Id` required,
+  `Stages`), and Recent runs carrying `success`, `suspended` and `failed` rows.
+
+```
+$ npx -y chrome-devtools-axi console
+console:
+## Console messages
+<no console messages found>
+```
+
+### Studio reads the shared Postgres
+
+Two run ids Studio rendered under Recent runs, looked up in the database that also holds
+`posts`:
+
+```
+$ docker compose exec -T db psql -U pipeline -d content_pipeline -c "select workflow_name,
+    run_id, snapshot->>'status' as status from mastra_workflow_snapshot where run_id in
+    ('ebb81311-4571-4c01-b243-ae333d3ff4f5','31d71692-d6a6-4533-8701-359d2a11dad0');"
+ workflow_name |                run_id                | status
+---------------+--------------------------------------+---------
+ pipeline      | 31d71692-d6a6-4533-8701-359d2a11dad0 | success
+ pipeline      | ebb81311-4571-4c01-b243-ae333d3ff4f5 | failed
+(2 rows)
+```
+
+### Why the script sets `MASTRA_WORKERS=false`
+
+`mastra dev` starts Mastra's execution workers, not only the Studio UI. A bare
+`pnpm exec mastra dev --env ../.env` joined the `mastra-orchestration` consumer group on
+the `workflows` topic and immediately drained the stale backlog on the shared dev Redis,
+failing runs whose posts are long gone:
+
+```
+$ pnpm exec mastra dev --env ../.env
+ mastra  1.26.0 ready in 1084 ms
+│ Studio: http://localhost:4111
+ERROR [2026-08-23 14:48:44.870] (content-pipeline): Post 78cf6df4-... not found for WP publish
+ERROR [2026-08-23 14:48:44.871] (content-pipeline): Profile 0dfc106e-... not found
+ERROR [2026-08-23 14:48:44.873] (content-pipeline): Post 7a7c91af-... not found for Next.js publish
+```
+
+Attribution, using the same 15 s liveness threshold as `worker-health.ts`
+(`XINFO CONSUMERS ... | paste - - - - - - - - | awk '$6 < 15000 {print $2, "idle="$6"ms"}'`):
+
+```
+# bare `mastra dev` running, plus `next dev`
+mastra-orchestration-775555ad-700e-47e6-8ca0-476c9a4e7893 idle=632ms
+
+# after `pkill -f "mastra dev"`, `next dev` still up and answering 200
+(no output)
+
+# `pnpm -C web studio` (MASTRA_WORKERS=false), 18 s after boot
+(no output)
+```
+
+So the live consumer was the dev server, `next dev` never joins the group, and the flag
+turns Studio into the pure observer it is documented as. `MASTRA_WORKERS` is read by the
+`Mastra` constructor (`@mastra/core@1.61.0`,
+`dist/mastra-Bn5mWcPE.js:912-914`: `const rawWorkersEnv = process.env.MASTRA_WORKERS;`
+then `if (rawWorkersEnv === "false") workersOption = false;`),
+and with the flag Studio still lists every workflow and agent, because those come from
+storage over HTTP rather than from a worker.
+
+### `server.studioBase`
+
+Not used: no `server` key is configured, so Studio sits at the root of port 4111. The
+option exists for a custom mount path and is documented from the installed types rather
+than from memory:
+
+```
+$ sed -n '230,235p' web/node_modules/@mastra/core/dist/server/types.d.ts
+    /**
+     * Base path for Mastra Studio UI
+     * @default '/'
+     * @example '/my-mastra-studio'
+     */
+    studioBase?: string;
+```
+
+### Studio is not exposed
+
+```
+$ grep -n "startCommand\|start:" .railway/railway.ts
+86:    start: "node server.js",
+113:    start: "node .mastra/worker/index.mjs",
+$ grep -n "4111" docker-compose.yml docker-compose.prod.yml web/Dockerfile; echo "exit=$?"
+exit=1
+```
+
+Neither Railway service nor either compose file starts or publishes a Studio server, and
+only `web` has a public domain. `studio.md` states the rule for anyone who points Studio at
+a deployed environment: behind auth or on a private network, never a public domain.
+
+### Gates
+
+Only `web/package.json`'s `scripts` and documentation changed, so the test and build gates
+cannot be affected by it; the two gates that read `package.json` were run.
+
+```
+$ pnpm -C web exec tsc --noEmit
+tsc exit=0
+$ pnpm -C web lint
+> eslint
+lint exit=0
+```
+
+Note the `exec`: on the installed pnpm (10.26.2) the objective's literal
+`pnpm -C web tsc --noEmit` fails with
+`ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "web" not found`, because `tsc` is not a
+script in `web/package.json` and pnpm no longer falls back to the local binary. Logged in
+`todo.md` against item 9.1, which has to paste every gate command.

@@ -14,7 +14,8 @@
     "db:migrate": "drizzle-kit migrate",
     "auth:migrate": "node --env-file=../.env scripts/auth-migrate.mts",
     "worker:build": "mastra worker build -o .mastra/worker",
-    "worker": "mastra worker start --dir .mastra/worker"
+    "worker": "mastra worker start --dir .mastra/worker",
+    "studio": "MASTRA_WORKERS=false mastra dev --env ../.env"
   },
   "dependencies": {
     "@better-auth/stripe": "^1.5.4",

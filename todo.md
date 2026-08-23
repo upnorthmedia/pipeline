@@ -698,3 +698,10 @@
   months of test runs accumulate; the stale backlog is the same one every worker boot drains.
   Worth deciding on a `MAXLEN` trim or a separate Redis database for tests, which item 9.1
   already has a related reason to want.
+
+- [confirmed] 2026-08-23 The objective's literal typecheck gate `pnpm -C web tsc --noEmit`
+  does not run on the installed pnpm (10.26.2): it exits 254 with
+  `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "web" not found`, because `tsc` is not a
+  script in `web/package.json`. The working form is `pnpm -C web exec tsc --noEmit`
+  (exit 0). Item 9.1 has to paste every gate command, so it needs the `exec` form or a
+  `typecheck` script in `web/package.json`.
