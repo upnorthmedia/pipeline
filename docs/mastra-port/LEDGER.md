@@ -12011,8 +12011,170 @@ three pieces are separately verifiable, so they are separate items.
             120 failed, 241 passed, 25 errors in 15.15s
             # the Phase 0 baseline exactly, unchanged by this item
             ```
-        - [ ] 5.3c-iii-b-1-d The `output_format == "wordpress"` branch of
+        - [x] 5.3c-iii-b-1-d The `output_format == "wordpress"` branch of
           `POST /{post_id}/publish`, starting the workflow above.
+
+          `web/src/app/api/posts/[id]/publish/route.ts` ports `publish_post()`, and
+          `web/src/mastra/start-wordpress-publish.ts` is the
+          `enqueue_job("publish_to_wordpress", post_id)` it made. The start helper lives
+          beside `start-pipeline.ts` and `start-crawl.ts` for the same reason those do:
+          starting a run is the boundary between `web` and `worker`, so `startAsync()`
+          publishes `workflow.start` onto Redis Streams and returns, and the uploads plus
+          the two WordPress requests happen in the worker process.
+
+          Python's shape is three checks and an enqueue, and the order between the second
+          and the third is load-bearing: the content check runs before the format check,
+          so a post with an unsupported `output_format` and nothing written yet is the
+          "No content to publish" 400 rather than the format one. The default value of
+          `posts.output_format` is `both`, which makes that the common case rather than a
+          corner.
+
+          Four behaviours preserved, each with its own test:
+
+          - `not post.ready_content and not post.final_md_content` is Python truthiness,
+            so a post whose `ready_content` is `""` falls through to `final_md_content`
+            rather than counting as content. That is the same rule the exports use
+            (5.3d-i) and `??` fails it.
+          - the status written is `pending`, not `publishing`. `publishing` is what
+            `wordpressPublishStep` sets from inside the run, so the row says `pending`
+            for the time between this response and the worker picking the event up.
+          - `str(post_id)` was the *parsed* `uuid.UUID`, so the echoed `post_id` was the
+            lowercase canonical form however the client cased the path, and Postgres
+            compares the `uuid` column case-insensitively either way. The handler echoes
+            the stored id.
+          - a null `output_format` was interpolated into the trailing 400 as `'None'`,
+            because Python formatted the value straight into the f-string.
+
+          **One divergence, temporary and named.** Python had a second branch that
+          enqueued `publish_to_nextjs`, and the workflow behind it does not exist:
+          `api/src/services/nextjs_publish.py` is still Python-only. Until item
+          5.3c-iii-b-2 ports it, an `output_format` of `nextjs` takes the trailing 400
+          with every other unsupported format. That 400 was listed under 5.3c-iii-b-2 in
+          the split, but a handler needs a terminal branch, so it landed here and
+          5.3c-iii-b-2 only inserts the `nextjs` branch above it.
+
+          The write carries `ownedByCaller()` as well as the id even though the preceding
+          `SELECT` already proved ownership, matching `/run` and `/pause`; and
+          `updated_at` is hand-stamped, the deviation recorded under 5.2b, 5.3b-ii and
+          5.3c-iii-a, so re-publishing an already `pending` post bumps it where
+          SQLAlchemy's `onupdate` emitted no `UPDATE` at all.
+
+          The twenty tests are in `web/src/app/api/posts/run-control.test.ts`, which now
+          covers all six per-post pipeline-control endpoints against the real database,
+          real BetterAuth sessions and the real Redis Streams bus. The start is recorded
+          through a mock that reads `wp_publish_status` back *before* handing the start
+          on, which is the only way to observe that Python committed `pending` before it
+          enqueued: the worker overwrites the value as soon as it picks the event up, so
+          an assertion made after the response cannot tell the two orders apart. That is
+          the same "assert from inside the boundary" trick 5.3c-iii-b-1-c-iii needed for
+          `publishing`.
+
+          ```
+          $ pnpm -C web vitest run src/app/api/posts/run-control.test.ts --reporter=verbose
+           v POST /api/posts/{post_id}/publish > rejects an unauthenticated request 1ms
+           v POST /api/posts/{post_id}/publish > answers a malformed path uuid with FastAPI's 422 2ms
+           v POST /api/posts/{post_id}/publish > answers a post that does not exist with a 404 2ms
+           v POST /api/posts/{post_id}/publish > answers another user's post with the same 404, starting nothing 4ms
+           v POST /api/posts/{post_id}/publish > answers a post whose profile_id is null with a 404 3ms
+           v POST /api/posts/{post_id}/publish > refuses a post with neither ready_content nor final_md_content 6ms
+           v POST /api/posts/{post_id}/publish > treats empty content as absent, the way a falsy Python string was 6ms
+           v POST /api/posts/{post_id}/publish > publishes a post whose only content is ready_content 8ms
+           v POST /api/posts/{post_id}/publish > publishes a post whose ready_content is empty but has a draft to fall back on 6ms
+           v POST /api/posts/{post_id}/publish > checks for content before it looks at output_format 5ms
+           v POST /api/posts/{post_id}/publish > writes wp_publish_status = pending and answers 202 6ms
+           v POST /api/posts/{post_id}/publish > commits pending before it starts the run, so the worker never races the write 4ms
+           v POST /api/posts/{post_id}/publish > leaves the Next.js publish column alone 6ms
+           v POST /api/posts/{post_id}/publish > re-publishes a post that already failed, clearing the status back to pending 6ms
+           v POST /api/posts/{post_id}/publish > starts nothing for a pipeline run: publishing is its own workflow 5ms
+           v POST /api/posts/{post_id}/publish > answers an output_format Python had no branch for with a 400 naming it 5ms
+           v POST /api/posts/{post_id}/publish > renders a null output_format the way Python interpolated None 4ms
+           v POST /api/posts/{post_id}/publish > takes that same 400 for nextjs, which is this item's one divergence 5ms
+           v POST /api/posts/{post_id}/publish > echoes the stored id, not the path casing, as `str(post_id)` did 5ms
+           v POST /api/posts/{post_id}/publish > publishes a real workflow.start for wordpress-publish 32ms
+           Test Files  1 passed (1)
+                Tests  73 passed (73)
+             Start at  08:09:34
+             Duration  2.69s (transform 220ms, setup 82ms, import 877ms, tests 1.66s, environment 0ms)
+          ```
+
+          The last of those is a real start over the bus, not a recorded one: the fixture
+          profile carries no WordPress credentials, so a worker started by another test
+          file that picks the event up stops at the credentials guard without an upload or
+          an outbound request. The 53 tests already in the file are the five other control
+          endpoints, unchanged.
+
+          Twenty mutations, each applied to the handler alone and reverted after
+          measuring. All twenty are killed:
+
+          ```
+          1  ownership predicate dropped from the lookup            2 failed | 71 passed (73)
+          2  content guard deleted                                  3 failed | 70 passed (73)
+          3  content guard tests for null instead of falsiness      1 failed | 72 passed (73)
+          4  content guard reads only ready_content                10 failed | 63 passed (73)
+          5  content guard reads only final_md_content              1 failed | 72 passed (73)
+          6  status written as publishing rather than pending       7 failed | 66 passed (73)
+          7  run started before the status is committed             4 failed | 69 passed (73)
+          8  run never started                                      5 failed | 68 passed (73)
+          9  status write dropped, run still started                7 failed | 66 passed (73)
+          10 202 becomes 200                                        6 failed | 67 passed (73)
+          11 output_format check dropped, every format publishes    3 failed | 70 passed (73)
+          12 nextjs joins the wordpress branch                      1 failed | 72 passed (73)
+          13 null output_format interpolated as JavaScript null     1 failed | 72 passed (73)
+          14 format check runs before the content check             1 failed | 72 passed (73)
+          15 404 dropped, an unknown post answers 400               3 failed | 70 passed (73)
+          16 auth check dropped                                     1 failed | 72 passed (73)
+          17 uuid guard dropped                                     1 failed | 72 passed (73)
+          18 the nextjs publish column is written too               1 failed | 72 passed (73)
+          19 pipeline run started in place of the publish workflow  6 failed | 67 passed (73)
+          20 response echoes the raw path id, not the stored one    1 failed | 72 passed (73)
+          ```
+
+          Mutation 20 survived the first pass, against the 72-test suite, and is the one
+          gap the twenty found: every test until then handed the endpoint a path id that
+          was already the stored lowercase form, so `id` and `post.id` were the same
+          string. The uppercase-path test above was added for it, and the whole table was
+          then re-measured against the 73-test suite, which is the run pasted here.
+
+          Gates:
+
+          ```
+          $ pnpm -C web tsc --noEmit
+          TSC EXIT=0
+          (no output)
+
+          $ pnpm -C web lint
+          LINT EXIT=0
+          (no output)
+
+          $ pnpm -C web test
+           Test Files  2 failed | 118 passed (120)
+                Tests  9 failed | 3950 passed | 7 skipped (3966)
+          # the 9 are the Phase 0 baseline: 6 in image-preview.test.tsx and 3 in
+          # PostDetail.test.tsx. Passing count 3930 -> 3950 (+20).
+          # Two of the three full runs made for this item reported 10 failures instead,
+          # the extra being src/mastra/workflows/scaffold-check.test.ts: that is the
+          # flake recorded under 5.3c-iii-b-1-c-ii-2, and the failing file list on those
+          # runs was exactly the baseline two plus scaffold-check.
+
+          $ pnpm -C web build
+          v Compiled successfully in 4.3s
+          |- f /api/posts/[id]/publish
+          # The 15 BetterAuth "default secret" lines are the pre-existing,
+          # environment-driven warning recorded under item 1.2.
+
+          $ cd api && set -a && . ../.env && set +a && uv run pytest -q
+          120 failed, 241 passed, 25 errors in 15.07s
+          # the Phase 0 baseline exactly, unchanged by this item
+          ```
+
+        - [ ] 5.3c-iii-b-2 The Next.js publish workflow (`publish_to_nextjs` in
+          `api/src/pipeline/publish.py` plus `api/src/services/nextjs_publish.py`, 188
+          lines, with `hmac_signing.py` preserved exactly), the
+          `output_format == "nextjs"` branch of `POST /{post_id}/publish` that starts it,
+          and the removal of the temporary fall-through recorded under 5.3c-iii-b-1-d.
+          Split this again if the HMAC signing and the webhook client turn out to be more
+          than one iteration; `packages/create-mdx-blog` consumes that contract and is out
+          of scope for changes.
   - [x] 5.3d Exports, logs and analytics (split: five endpoints, and `/export/all`
     needs a zip writer this repo does not have while `/analytics` needs the analytics
     service wired to the route. Split into 5.3d-i the two plain exports, 5.3d-ii

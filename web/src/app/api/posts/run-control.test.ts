@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
- * The five pipeline-control endpoints on a single post: `/run`, `/run-all`,
- * `/rerun`, `/restart` and `/pause`.
+ * The six pipeline-control endpoints on a single post: `/run`, `/run-all`,
+ * `/rerun`, `/restart`, `/pause` and `/publish`.
  *
  * They run against the real database and real BetterAuth sessions, so the
  * `website_profiles.user_id` scoping is exercised for real, and the enqueues
@@ -41,6 +41,7 @@ import { POST as pausePost } from "./[id]/pause/route"
 import { POST as restartPipeline } from "./[id]/restart/route"
 import { POST as rerunStage } from "./[id]/rerun/route"
 import { POST as runStage } from "./[id]/run/route"
+import { POST as publishPost } from "./[id]/publish/route"
 import { POST as runAll } from "./[id]/run-all/route"
 import { STAGE_CONTENT_COLUMN } from "./run-control"
 
@@ -56,6 +57,37 @@ vi.mock("@/mastra/start-pipeline", async (importOriginal) => {
       start.calls.push({ postId, stages })
       if (start.mode === "skip") return "not-started"
       return actual.startPipeline(postId, stages as never)
+    },
+  }
+})
+
+/**
+ * `/publish` starts a different workflow from the other five, so it gets its
+ * own recorder. The mock reads the row back before handing the start on, which
+ * is the only way to see that Python committed `wp_publish_status = "pending"`
+ * *before* it enqueued: the worker overwrites the value as soon as it picks the
+ * event up, so an assertion made after the response cannot tell the two orders
+ * apart.
+ */
+const wpStart = vi.hoisted(() => ({
+  mode: "skip" as "real" | "skip",
+  calls: [] as { postId: string; statusAtStart: string | null }[],
+}))
+
+vi.mock("@/mastra/start-wordpress-publish", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/mastra/start-wordpress-publish")>()
+  const { getDb, posts } = await import("@/db")
+  const { eq } = await import("drizzle-orm")
+  return {
+    startWordPressPublish: async (postId: string) => {
+      const [row] = await getDb()
+        .select({ status: posts.wpPublishStatus })
+        .from(posts)
+        .where(eq(posts.id, postId))
+        .limit(1)
+      wpStart.calls.push({ postId, statusAtStart: row?.status ?? null })
+      if (wpStart.mode === "skip") return "not-started"
+      return actual.startWordPressPublish(postId)
     },
   }
 })
@@ -156,13 +188,23 @@ function restart(id: string, cookie?: string) {
   })
 }
 
-/** Resolves once a `workflow.start` for `pipeline` carrying `postId` arrives. */
-async function waitForStart(postId: string, timeoutMs = 15_000): Promise<StartEvent> {
+function publish(id: string, cookie?: string) {
+  return publishPost(apiRequest(`${URL_BASE}/${id}/publish`, { cookie, method: "POST" }), {
+    params: Promise.resolve({ id }),
+  })
+}
+
+/** Resolves once a `workflow.start` for `workflowId` carrying `postId` arrives. */
+async function waitForStart(
+  postId: string,
+  timeoutMs = 15_000,
+  workflowId = "pipeline",
+): Promise<StartEvent> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
     const match = started.find(
       (event) =>
-        event.data?.workflowId === "pipeline" &&
+        event.data?.workflowId === workflowId &&
         (event.data?.prevResult?.output as { postId?: string } | undefined)?.postId === postId,
     )
     if (match) return match
@@ -188,6 +230,8 @@ beforeAll(async () => {
 afterEach(async () => {
   start.mode = "skip"
   start.calls.length = 0
+  wpStart.mode = "skip"
+  wpStart.calls.length = 0
   started.length = 0
   await clearFixtures()
 })
@@ -845,5 +889,210 @@ describe("POST /api/posts/{post_id}/pause", () => {
 
     expect((await pause(post.id, user.cookie)).status).toBe(200)
     expect((await readPost(post.id)).currentStage).toBe("paused")
+  })
+})
+
+// --- POST /api/posts/{post_id}/publish --------------------------------------
+
+describe("POST /api/posts/{post_id}/publish", () => {
+  /** A post that has content and asks for WordPress: the branch this item ports. */
+  function wordpressPost(userId: string, values: Partial<typeof posts.$inferInsert> = {}) {
+    return insertPost(userId, {
+      outputFormat: "wordpress",
+      finalMdContent: "# Draft\n\nBody.",
+      ...values,
+    })
+  }
+
+  it("rejects an unauthenticated request", async () => {
+    const response = await publish(MISSING_ID)
+    expect(response.status).toBe(401)
+    expect(wpStart.calls).toEqual([])
+  })
+
+  it("answers a malformed path uuid with FastAPI's 422", async () => {
+    const response = await publish("not-a-uuid", user.cookie)
+    expect(response.status).toBe(422)
+    expect(await response.json()).toMatchObject({
+      detail: [{ type: "uuid_parsing", loc: ["path", "post_id"] }],
+    })
+  })
+
+  it("answers a post that does not exist with a 404", async () => {
+    const response = await publish(MISSING_ID, user.cookie)
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ detail: "Post not found" })
+    expect(wpStart.calls).toEqual([])
+  })
+
+  it("answers another user's post with the same 404, starting nothing", async () => {
+    const post = await wordpressPost(other.userId)
+    const response = await publish(post.id, user.cookie)
+
+    expect(response.status).toBe(404)
+    expect(wpStart.calls).toEqual([])
+    expect((await readPost(post.id)).wpPublishStatus).toBeNull()
+  })
+
+  it("answers a post whose profile_id is null with a 404", async () => {
+    // The inner join in `_get_user_post()` makes an orphan post invisible, even
+    // though a publish needs the profile it is missing.
+    const [orphan] = await db
+      .insert(posts)
+      .values({
+        slug: `${PREFIX}${randomUUID()}`,
+        topic: "Orphan",
+        outputFormat: "wordpress",
+        finalMdContent: "# Draft",
+      })
+      .returning()
+
+    expect((await publish(orphan.id, user.cookie)).status).toBe(404)
+    expect(wpStart.calls).toEqual([])
+  })
+
+  it("refuses a post with neither ready_content nor final_md_content", async () => {
+    const post = await wordpressPost(user.userId, { finalMdContent: null })
+    const response = await publish(post.id, user.cookie)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ detail: "No content to publish" })
+    expect(wpStart.calls).toEqual([])
+    expect((await readPost(post.id)).wpPublishStatus).toBeNull()
+  })
+
+  it("treats empty content as absent, the way a falsy Python string was", async () => {
+    const post = await wordpressPost(user.userId, { readyContent: "", finalMdContent: "" })
+    const response = await publish(post.id, user.cookie)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ detail: "No content to publish" })
+  })
+
+  it("publishes a post whose only content is ready_content", async () => {
+    const post = await wordpressPost(user.userId, {
+      readyContent: "# Ready",
+      finalMdContent: null,
+    })
+
+    expect((await publish(post.id, user.cookie)).status).toBe(202)
+    expect(wpStart.calls).toEqual([{ postId: post.id, statusAtStart: "pending" }])
+  })
+
+  it("publishes a post whose ready_content is empty but has a draft to fall back on", async () => {
+    const post = await wordpressPost(user.userId, { readyContent: "" })
+
+    expect((await publish(post.id, user.cookie)).status).toBe(202)
+    expect(wpStart.calls).toEqual([{ postId: post.id, statusAtStart: "pending" }])
+  })
+
+  it("checks for content before it looks at output_format", async () => {
+    // Python's order: an unsupported format with nothing to publish is the
+    // content 400, not the format one.
+    const post = await insertPost(user.userId, { outputFormat: "both" })
+    const response = await publish(post.id, user.cookie)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ detail: "No content to publish" })
+  })
+
+  it("writes wp_publish_status = pending and answers 202", async () => {
+    const post = await wordpressPost(user.userId)
+    const response = await publish(post.id, user.cookie)
+
+    expect(response.status).toBe(202)
+    expect(await response.json()).toEqual({ status: "queued", post_id: post.id })
+    expect((await readPost(post.id)).wpPublishStatus).toBe("pending")
+  })
+
+  it("commits pending before it starts the run, so the worker never races the write", async () => {
+    const post = await wordpressPost(user.userId)
+    await publish(post.id, user.cookie)
+
+    // Read from inside the start, not after it: `wordpressPublishStep`
+    // overwrites `pending` with `publishing` as soon as it runs.
+    expect(wpStart.calls).toEqual([{ postId: post.id, statusAtStart: "pending" }])
+  })
+
+  it("leaves the Next.js publish column alone", async () => {
+    const post = await wordpressPost(user.userId, { nextjsPublishStatus: "published" })
+    await publish(post.id, user.cookie)
+
+    const row = await readPost(post.id)
+    expect(row.wpPublishStatus).toBe("pending")
+    expect(row.nextjsPublishStatus).toBe("published")
+  })
+
+  it("re-publishes a post that already failed, clearing the status back to pending", async () => {
+    const post = await wordpressPost(user.userId, { wpPublishStatus: "failed" })
+
+    expect((await publish(post.id, user.cookie)).status).toBe(202)
+    expect((await readPost(post.id)).wpPublishStatus).toBe("pending")
+  })
+
+  it("starts nothing for a pipeline run: publishing is its own workflow", async () => {
+    const post = await wordpressPost(user.userId)
+    await publish(post.id, user.cookie)
+
+    expect(start.calls).toEqual([])
+  })
+
+  it("answers an output_format Python had no branch for with a 400 naming it", async () => {
+    const post = await wordpressPost(user.userId, { outputFormat: "markdown" })
+    const response = await publish(post.id, user.cookie)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      detail: "Publishing not supported for output_format 'markdown'",
+    })
+    expect(wpStart.calls).toEqual([])
+  })
+
+  it("renders a null output_format the way Python interpolated None", async () => {
+    const post = await wordpressPost(user.userId, { outputFormat: null })
+    const response = await publish(post.id, user.cookie)
+
+    expect(await response.json()).toEqual({
+      detail: "Publishing not supported for output_format 'None'",
+    })
+  })
+
+  it("takes that same 400 for nextjs, which is this item's one divergence", async () => {
+    // Python enqueued `publish_to_nextjs` here. The workflow behind it is
+    // ledger item 5.3c-iii-b-2 and does not exist yet, so the format falls
+    // through to the trailing 400 until it lands.
+    const post = await wordpressPost(user.userId, { outputFormat: "nextjs" })
+    const response = await publish(post.id, user.cookie)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      detail: "Publishing not supported for output_format 'nextjs'",
+    })
+    expect((await readPost(post.id)).nextjsPublishStatus).toBeNull()
+  })
+
+  it("echoes the stored id, not the path casing, as `str(post_id)` did", async () => {
+    // FastAPI parsed the path into a `uuid.UUID`, so `str(post_id)` was the
+    // lowercase canonical form however the client cased it, and Postgres
+    // compares the `uuid` column case-insensitively either way.
+    const post = await wordpressPost(user.userId)
+    const response = await publish(post.id.toUpperCase(), user.cookie)
+
+    expect(response.status).toBe(202)
+    expect(await response.json()).toEqual({ status: "queued", post_id: post.id })
+    expect(wpStart.calls).toEqual([{ postId: post.id, statusAtStart: "pending" }])
+  })
+
+  it("publishes a real workflow.start for wordpress-publish", async () => {
+    // The profile carries no WordPress credentials, so a worker that picks this
+    // event up stops at the credentials guard: no upload, no outbound request.
+    wpStart.mode = "real"
+    const post = await wordpressPost(user.userId)
+
+    expect((await publish(post.id, user.cookie)).status).toBe(202)
+
+    const event = await waitForStart(post.id, 15_000, "wordpress-publish")
+    expect(event.type).toBe("workflow.start")
+    expect(event.data?.prevResult?.output).toEqual({ postId: post.id })
   })
 })
