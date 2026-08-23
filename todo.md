@@ -549,3 +549,21 @@
   item 5.3c-iii-b-1-b-iii-c, which fixed the same mistake in the `emphasis` pattern; the
   file already has `PY_SPACE` for exactly this, so the fix is a two-line swap plus corpus
   cases, but `linebreak` and `softbreak` are outside that item's scope.
+- [confirmed] 2026-08-23 WordPress publishing uploads no images at all in production. The
+  media sweep in `api/src/pipeline/publish.py` keeps a file only when
+  `mimetypes.guess_type(img_file.name)` returns an `image/*` type, and the images stage
+  writes every file as `.webp` (`_optimize_image` in `api/src/pipeline/stages/images.py`
+  returns `".webp"`). `.webp` is not in the Python 3.12 builtin mimetypes table; it arrived
+  in 3.13. The deployed image is `python:3.12-slim`, which has no file from
+  `mimetypes.knownfiles`, so the builtin table is the whole table there and
+  `guess_type("x.webp")` is `(None, None)`. Verified with
+  `docker run --rm python:3.12-slim python -c "import mimetypes; print(mimetypes.guess_type('a.webp'))"`
+  → `(None, None)`. The bug is invisible on a macOS developer machine, where
+  `/etc/apache2/mime.types` exists and grows the table from 152 entries to 1036, so
+  `.webp` resolves there. Consequence: the WordPress post is published with no uploaded
+  media, no featured image and the local `/media/...` URLs left unrewritten in its HTML.
+  Ledger item 5.3c-iii-b-1-c-ii-1 ports the Python behaviour faithfully, bug included, and
+  pins it with an oracle; the fix is one table entry in
+  `web/src/mastra/wordpress/mimetypes.ts` (plus the same in Python while `api/` still
+  exists) but it changes what publishing does, so it needs to be a deliberate change rather
+  than a side effect of the port.

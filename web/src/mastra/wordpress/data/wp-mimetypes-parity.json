@@ -1,0 +1,1521 @@
+{
+  "pythonVersion": "3.12.14",
+  "knownfilesPresent": [],
+  "typesMap": [
+    [
+      ".js",
+      "text/javascript"
+    ],
+    [
+      ".mjs",
+      "text/javascript"
+    ],
+    [
+      ".json",
+      "application/json"
+    ],
+    [
+      ".webmanifest",
+      "application/manifest+json"
+    ],
+    [
+      ".doc",
+      "application/msword"
+    ],
+    [
+      ".dot",
+      "application/msword"
+    ],
+    [
+      ".wiz",
+      "application/msword"
+    ],
+    [
+      ".nq",
+      "application/n-quads"
+    ],
+    [
+      ".nt",
+      "application/n-triples"
+    ],
+    [
+      ".bin",
+      "application/octet-stream"
+    ],
+    [
+      ".a",
+      "application/octet-stream"
+    ],
+    [
+      ".dll",
+      "application/octet-stream"
+    ],
+    [
+      ".exe",
+      "application/octet-stream"
+    ],
+    [
+      ".o",
+      "application/octet-stream"
+    ],
+    [
+      ".obj",
+      "application/octet-stream"
+    ],
+    [
+      ".so",
+      "application/octet-stream"
+    ],
+    [
+      ".oda",
+      "application/oda"
+    ],
+    [
+      ".pdf",
+      "application/pdf"
+    ],
+    [
+      ".p7c",
+      "application/pkcs7-mime"
+    ],
+    [
+      ".ps",
+      "application/postscript"
+    ],
+    [
+      ".ai",
+      "application/postscript"
+    ],
+    [
+      ".eps",
+      "application/postscript"
+    ],
+    [
+      ".trig",
+      "application/trig"
+    ],
+    [
+      ".m3u",
+      "application/vnd.apple.mpegurl"
+    ],
+    [
+      ".m3u8",
+      "application/vnd.apple.mpegurl"
+    ],
+    [
+      ".xls",
+      "application/vnd.ms-excel"
+    ],
+    [
+      ".xlb",
+      "application/vnd.ms-excel"
+    ],
+    [
+      ".ppt",
+      "application/vnd.ms-powerpoint"
+    ],
+    [
+      ".pot",
+      "application/vnd.ms-powerpoint"
+    ],
+    [
+      ".ppa",
+      "application/vnd.ms-powerpoint"
+    ],
+    [
+      ".pps",
+      "application/vnd.ms-powerpoint"
+    ],
+    [
+      ".pwz",
+      "application/vnd.ms-powerpoint"
+    ],
+    [
+      ".wasm",
+      "application/wasm"
+    ],
+    [
+      ".bcpio",
+      "application/x-bcpio"
+    ],
+    [
+      ".cpio",
+      "application/x-cpio"
+    ],
+    [
+      ".csh",
+      "application/x-csh"
+    ],
+    [
+      ".dvi",
+      "application/x-dvi"
+    ],
+    [
+      ".gtar",
+      "application/x-gtar"
+    ],
+    [
+      ".hdf",
+      "application/x-hdf"
+    ],
+    [
+      ".h5",
+      "application/x-hdf5"
+    ],
+    [
+      ".latex",
+      "application/x-latex"
+    ],
+    [
+      ".mif",
+      "application/x-mif"
+    ],
+    [
+      ".cdf",
+      "application/x-netcdf"
+    ],
+    [
+      ".nc",
+      "application/x-netcdf"
+    ],
+    [
+      ".p12",
+      "application/x-pkcs12"
+    ],
+    [
+      ".pfx",
+      "application/x-pkcs12"
+    ],
+    [
+      ".ram",
+      "application/x-pn-realaudio"
+    ],
+    [
+      ".pyc",
+      "application/x-python-code"
+    ],
+    [
+      ".pyo",
+      "application/x-python-code"
+    ],
+    [
+      ".sh",
+      "application/x-sh"
+    ],
+    [
+      ".shar",
+      "application/x-shar"
+    ],
+    [
+      ".swf",
+      "application/x-shockwave-flash"
+    ],
+    [
+      ".sv4cpio",
+      "application/x-sv4cpio"
+    ],
+    [
+      ".sv4crc",
+      "application/x-sv4crc"
+    ],
+    [
+      ".tar",
+      "application/x-tar"
+    ],
+    [
+      ".tcl",
+      "application/x-tcl"
+    ],
+    [
+      ".tex",
+      "application/x-tex"
+    ],
+    [
+      ".texi",
+      "application/x-texinfo"
+    ],
+    [
+      ".texinfo",
+      "application/x-texinfo"
+    ],
+    [
+      ".roff",
+      "application/x-troff"
+    ],
+    [
+      ".t",
+      "application/x-troff"
+    ],
+    [
+      ".tr",
+      "application/x-troff"
+    ],
+    [
+      ".man",
+      "application/x-troff-man"
+    ],
+    [
+      ".me",
+      "application/x-troff-me"
+    ],
+    [
+      ".ms",
+      "application/x-troff-ms"
+    ],
+    [
+      ".ustar",
+      "application/x-ustar"
+    ],
+    [
+      ".src",
+      "application/x-wais-source"
+    ],
+    [
+      ".xsl",
+      "application/xml"
+    ],
+    [
+      ".rdf",
+      "application/xml"
+    ],
+    [
+      ".wsdl",
+      "application/xml"
+    ],
+    [
+      ".xpdl",
+      "application/xml"
+    ],
+    [
+      ".zip",
+      "application/zip"
+    ],
+    [
+      ".3gp",
+      "audio/3gpp"
+    ],
+    [
+      ".3gpp",
+      "audio/3gpp"
+    ],
+    [
+      ".3g2",
+      "audio/3gpp2"
+    ],
+    [
+      ".3gpp2",
+      "audio/3gpp2"
+    ],
+    [
+      ".aac",
+      "audio/aac"
+    ],
+    [
+      ".adts",
+      "audio/aac"
+    ],
+    [
+      ".loas",
+      "audio/aac"
+    ],
+    [
+      ".ass",
+      "audio/aac"
+    ],
+    [
+      ".au",
+      "audio/basic"
+    ],
+    [
+      ".snd",
+      "audio/basic"
+    ],
+    [
+      ".mp3",
+      "audio/mpeg"
+    ],
+    [
+      ".mp2",
+      "audio/mpeg"
+    ],
+    [
+      ".opus",
+      "audio/opus"
+    ],
+    [
+      ".aif",
+      "audio/x-aiff"
+    ],
+    [
+      ".aifc",
+      "audio/x-aiff"
+    ],
+    [
+      ".aiff",
+      "audio/x-aiff"
+    ],
+    [
+      ".ra",
+      "audio/x-pn-realaudio"
+    ],
+    [
+      ".wav",
+      "audio/x-wav"
+    ],
+    [
+      ".avif",
+      "image/avif"
+    ],
+    [
+      ".bmp",
+      "image/bmp"
+    ],
+    [
+      ".gif",
+      "image/gif"
+    ],
+    [
+      ".ief",
+      "image/ief"
+    ],
+    [
+      ".jpg",
+      "image/jpeg"
+    ],
+    [
+      ".jpe",
+      "image/jpeg"
+    ],
+    [
+      ".jpeg",
+      "image/jpeg"
+    ],
+    [
+      ".heic",
+      "image/heic"
+    ],
+    [
+      ".heif",
+      "image/heif"
+    ],
+    [
+      ".png",
+      "image/png"
+    ],
+    [
+      ".svg",
+      "image/svg+xml"
+    ],
+    [
+      ".tiff",
+      "image/tiff"
+    ],
+    [
+      ".tif",
+      "image/tiff"
+    ],
+    [
+      ".ico",
+      "image/vnd.microsoft.icon"
+    ],
+    [
+      ".ras",
+      "image/x-cmu-raster"
+    ],
+    [
+      ".pnm",
+      "image/x-portable-anymap"
+    ],
+    [
+      ".pbm",
+      "image/x-portable-bitmap"
+    ],
+    [
+      ".pgm",
+      "image/x-portable-graymap"
+    ],
+    [
+      ".ppm",
+      "image/x-portable-pixmap"
+    ],
+    [
+      ".rgb",
+      "image/x-rgb"
+    ],
+    [
+      ".xbm",
+      "image/x-xbitmap"
+    ],
+    [
+      ".xpm",
+      "image/x-xpixmap"
+    ],
+    [
+      ".xwd",
+      "image/x-xwindowdump"
+    ],
+    [
+      ".eml",
+      "message/rfc822"
+    ],
+    [
+      ".mht",
+      "message/rfc822"
+    ],
+    [
+      ".mhtml",
+      "message/rfc822"
+    ],
+    [
+      ".nws",
+      "message/rfc822"
+    ],
+    [
+      ".css",
+      "text/css"
+    ],
+    [
+      ".csv",
+      "text/csv"
+    ],
+    [
+      ".html",
+      "text/html"
+    ],
+    [
+      ".htm",
+      "text/html"
+    ],
+    [
+      ".md",
+      "text/markdown"
+    ],
+    [
+      ".markdown",
+      "text/markdown"
+    ],
+    [
+      ".n3",
+      "text/n3"
+    ],
+    [
+      ".txt",
+      "text/plain"
+    ],
+    [
+      ".bat",
+      "text/plain"
+    ],
+    [
+      ".c",
+      "text/plain"
+    ],
+    [
+      ".h",
+      "text/plain"
+    ],
+    [
+      ".ksh",
+      "text/plain"
+    ],
+    [
+      ".pl",
+      "text/plain"
+    ],
+    [
+      ".srt",
+      "text/plain"
+    ],
+    [
+      ".rtx",
+      "text/richtext"
+    ],
+    [
+      ".tsv",
+      "text/tab-separated-values"
+    ],
+    [
+      ".vtt",
+      "text/vtt"
+    ],
+    [
+      ".py",
+      "text/x-python"
+    ],
+    [
+      ".rst",
+      "text/x-rst"
+    ],
+    [
+      ".etx",
+      "text/x-setext"
+    ],
+    [
+      ".sgm",
+      "text/x-sgml"
+    ],
+    [
+      ".sgml",
+      "text/x-sgml"
+    ],
+    [
+      ".vcf",
+      "text/x-vcard"
+    ],
+    [
+      ".xml",
+      "text/xml"
+    ],
+    [
+      ".mp4",
+      "video/mp4"
+    ],
+    [
+      ".mpeg",
+      "video/mpeg"
+    ],
+    [
+      ".m1v",
+      "video/mpeg"
+    ],
+    [
+      ".mpa",
+      "video/mpeg"
+    ],
+    [
+      ".mpe",
+      "video/mpeg"
+    ],
+    [
+      ".mpg",
+      "video/mpeg"
+    ],
+    [
+      ".mov",
+      "video/quicktime"
+    ],
+    [
+      ".qt",
+      "video/quicktime"
+    ],
+    [
+      ".webm",
+      "video/webm"
+    ],
+    [
+      ".avi",
+      "video/x-msvideo"
+    ],
+    [
+      ".movie",
+      "video/x-sgi-movie"
+    ]
+  ],
+  "commonTypes": [
+    [
+      ".rtf",
+      "application/rtf"
+    ],
+    [
+      ".midi",
+      "audio/midi"
+    ],
+    [
+      ".mid",
+      "audio/midi"
+    ],
+    [
+      ".jpg",
+      "image/jpg"
+    ],
+    [
+      ".pict",
+      "image/pict"
+    ],
+    [
+      ".pct",
+      "image/pict"
+    ],
+    [
+      ".pic",
+      "image/pict"
+    ],
+    [
+      ".webp",
+      "image/webp"
+    ],
+    [
+      ".xul",
+      "text/xul"
+    ]
+  ],
+  "encodingsMap": [
+    [
+      ".gz",
+      "gzip"
+    ],
+    [
+      ".Z",
+      "compress"
+    ],
+    [
+      ".bz2",
+      "bzip2"
+    ],
+    [
+      ".xz",
+      "xz"
+    ],
+    [
+      ".br",
+      "br"
+    ]
+  ],
+  "suffixMap": [
+    [
+      ".svgz",
+      ".svg.gz"
+    ],
+    [
+      ".tgz",
+      ".tar.gz"
+    ],
+    [
+      ".taz",
+      ".tar.gz"
+    ],
+    [
+      ".tz",
+      ".tar.gz"
+    ],
+    [
+      ".tbz2",
+      ".tar.bz2"
+    ],
+    [
+      ".txz",
+      ".tar.xz"
+    ]
+  ],
+  "usesParams": [
+    "",
+    "ftp",
+    "hdl",
+    "prospero",
+    "http",
+    "imap",
+    "https",
+    "shttp",
+    "rtsp",
+    "rtsps",
+    "rtspu",
+    "sip",
+    "sips",
+    "mms",
+    "sftp",
+    "tel"
+  ],
+  "schemeChars": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-.",
+  "cases": [
+    {
+      "name": "webp, what the images stage writes",
+      "url": "featured-082326-abc.webp",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "png",
+      "url": "a.png",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "jpg",
+      "url": "a.jpg",
+      "strict": true,
+      "type": "image/jpeg",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "jpeg",
+      "url": "a.jpeg",
+      "strict": true,
+      "type": "image/jpeg",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "jpe",
+      "url": "a.jpe",
+      "strict": true,
+      "type": "image/jpeg",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "gif",
+      "url": "a.gif",
+      "strict": true,
+      "type": "image/gif",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "avif",
+      "url": "a.avif",
+      "strict": true,
+      "type": "image/avif",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "heic",
+      "url": "a.heic",
+      "strict": true,
+      "type": "image/heic",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "svg",
+      "url": "a.svg",
+      "strict": true,
+      "type": "image/svg+xml",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "ico",
+      "url": "a.ico",
+      "strict": true,
+      "type": "image/vnd.microsoft.icon",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "bmp",
+      "url": "a.bmp",
+      "strict": true,
+      "type": "image/bmp",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "tiff",
+      "url": "a.tiff",
+      "strict": true,
+      "type": "image/tiff",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "html",
+      "url": "a.html",
+      "strict": true,
+      "type": "text/html",
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "json",
+      "url": "a.json",
+      "strict": true,
+      "type": "application/json",
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "txt",
+      "url": "a.txt",
+      "strict": true,
+      "type": "text/plain",
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "pdf",
+      "url": "a.pdf",
+      "strict": true,
+      "type": "application/pdf",
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "mp4",
+      "url": "a.mp4",
+      "strict": true,
+      "type": "video/mp4",
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "upper png",
+      "url": "a.PNG",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "mixed jpg",
+      "url": "a.JpG",
+      "strict": true,
+      "type": "image/jpeg",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "upper jpeg",
+      "url": "A.JPEG",
+      "strict": true,
+      "type": "image/jpeg",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "no dot",
+      "url": "noext",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "empty",
+      "url": "",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "bare dot",
+      "url": ".",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "two dots",
+      "url": "..",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "three dots",
+      "url": "...",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "trailing dot",
+      "url": "a.",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "dotfile",
+      "url": ".png",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "dotfile with two leading dots",
+      "url": "..png",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "dotfile with a real extension",
+      "url": ".hidden.png",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "single leading dot then extension",
+      "url": ".a.png",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "gzipped png",
+      "url": "a.png.gz",
+      "strict": true,
+      "type": "image/png",
+      "encoding": "gzip",
+      "isImage": true
+    },
+    {
+      "name": "gzipped png, upper GZ",
+      "url": "a.png.GZ",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "compressed png, upper Z",
+      "url": "a.png.Z",
+      "strict": true,
+      "type": "image/png",
+      "encoding": "compress",
+      "isImage": true
+    },
+    {
+      "name": "compressed png, lower z",
+      "url": "a.png.z",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "bzip2 png",
+      "url": "a.png.bz2",
+      "strict": true,
+      "type": "image/png",
+      "encoding": "bzip2",
+      "isImage": true
+    },
+    {
+      "name": "xz png",
+      "url": "a.png.xz",
+      "strict": true,
+      "type": "image/png",
+      "encoding": "xz",
+      "isImage": true
+    },
+    {
+      "name": "brotli png",
+      "url": "a.png.br",
+      "strict": true,
+      "type": "image/png",
+      "encoding": "br",
+      "isImage": true
+    },
+    {
+      "name": "encoding with no type left",
+      "url": "a.gz",
+      "strict": true,
+      "type": null,
+      "encoding": "gzip",
+      "isImage": false
+    },
+    {
+      "name": "encoding twice",
+      "url": "a.png.gz.gz",
+      "strict": true,
+      "type": null,
+      "encoding": "gzip",
+      "isImage": false
+    },
+    {
+      "name": "svgz",
+      "url": "a.svgz",
+      "strict": true,
+      "type": "image/svg+xml",
+      "encoding": "gzip",
+      "isImage": true
+    },
+    {
+      "name": "svgz, upper",
+      "url": "a.SVGZ",
+      "strict": true,
+      "type": "image/svg+xml",
+      "encoding": "gzip",
+      "isImage": true
+    },
+    {
+      "name": "tgz",
+      "url": "a.tgz",
+      "strict": true,
+      "type": "application/x-tar",
+      "encoding": "gzip",
+      "isImage": false
+    },
+    {
+      "name": "taz",
+      "url": "a.taz",
+      "strict": true,
+      "type": "application/x-tar",
+      "encoding": "gzip",
+      "isImage": false
+    },
+    {
+      "name": "tz",
+      "url": "a.tz",
+      "strict": true,
+      "type": "application/x-tar",
+      "encoding": "gzip",
+      "isImage": false
+    },
+    {
+      "name": "tbz2",
+      "url": "a.tbz2",
+      "strict": true,
+      "type": "application/x-tar",
+      "encoding": "bzip2",
+      "isImage": false
+    },
+    {
+      "name": "txz",
+      "url": "a.txz",
+      "strict": true,
+      "type": "application/x-tar",
+      "encoding": "xz",
+      "isImage": false
+    },
+    {
+      "name": "tar.gz spelled out",
+      "url": "a.tar.gz",
+      "strict": true,
+      "type": "application/x-tar",
+      "encoding": "gzip",
+      "isImage": false
+    },
+    {
+      "name": "tgz after a tar",
+      "url": "a.tar.tgz",
+      "strict": true,
+      "type": "application/x-tar",
+      "encoding": "gzip",
+      "isImage": false
+    },
+    {
+      "name": "svgz behind a gz",
+      "url": "a.svgz.gz",
+      "strict": true,
+      "type": null,
+      "encoding": "gzip",
+      "isImage": false
+    },
+    {
+      "name": "leading space",
+      "url": " a.png",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "trailing space",
+      "url": "a.png ",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "leading NUL",
+      "url": "\u0000a.png",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "leading space before a scheme",
+      "url": " http:a.png#b.gif",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "leading nbsp before a scheme",
+      "url": " http:a.png#b.gif",
+      "strict": true,
+      "type": "image/gif",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "tab inside the extension",
+      "url": "a.p\tng",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "tab inside a scheme",
+      "url": "ht\ttp:a.png#b.gif",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "newline inside a scheme",
+      "url": "ht\ntp:a.png#b.gif",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "tab inside the path after a scheme",
+      "url": "http:a.p\tng",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "trailing space after a scheme",
+      "url": "http:a.png ",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "fragment, no scheme",
+      "url": "a.png#b.gif",
+      "strict": true,
+      "type": "image/gif",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "fragment, with scheme",
+      "url": "http:a.png#b.gif",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "query, no scheme",
+      "url": "a.png?x=b.gif",
+      "strict": true,
+      "type": "image/gif",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "query, with scheme",
+      "url": "http:a.png?x=b.gif",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "one-character scheme",
+      "url": "d:a.png#b.gif",
+      "strict": true,
+      "type": "image/gif",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "two-character scheme",
+      "url": "ht:a.png#b.gif",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "colon first",
+      "url": ":a.png#b.gif",
+      "strict": true,
+      "type": "image/gif",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "digit before the colon",
+      "url": "1a:a.png#b.gif",
+      "strict": true,
+      "type": "image/gif",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "non-ascii before the colon",
+      "url": "éa:a.png#b.gif",
+      "strict": true,
+      "type": "image/gif",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "space in the scheme",
+      "url": "ht p:a.png#b.gif",
+      "strict": true,
+      "type": "image/gif",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "plus in the scheme",
+      "url": "ht+p:a.png#b.gif",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "dot in the scheme",
+      "url": "ht.p:a.png#b.gif",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "underscore in the scheme",
+      "url": "ht_p:a.png#b.gif",
+      "strict": true,
+      "type": "image/gif",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "uppercase http with params",
+      "url": "HTTP:a;b.png",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "unknown scheme with params",
+      "url": "HTTQ:a;b.png",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "http with params",
+      "url": "http:a;b.png",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "http with a semicolon after the extension",
+      "url": "http:a.png;b",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "data with no comma",
+      "url": "data:image",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "data with a comma",
+      "url": "data:foo,bar",
+      "strict": true,
+      "type": "text/plain",
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "data with a semicolon",
+      "url": "data:foo;base64,bar",
+      "strict": true,
+      "type": "text/plain",
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "data with an equals",
+      "url": "data:a=b,c",
+      "strict": true,
+      "type": "text/plain",
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "data empty type",
+      "url": "data:,x",
+      "strict": true,
+      "type": "text/plain",
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "uppercase data scheme",
+      "url": "DATA:foo,bar",
+      "strict": true,
+      "type": "text/plain",
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "leading space before a data scheme",
+      "url": " data:foo,bar",
+      "strict": true,
+      "type": "text/plain",
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "tab inside a data scheme",
+      "url": "da\tta:foo,bar",
+      "strict": true,
+      "type": "text/plain",
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "single uppercase letter extension",
+      "url": "a.K",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "kelvin sign extension",
+      "url": "a.K",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "astral extension",
+      "url": "a.😀",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "combining mark in the name",
+      "url": "á.png",
+      "strict": true,
+      "type": "image/png",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "midi strict",
+      "url": "a.midi",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "xul strict",
+      "url": "a.xul",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "pict strict",
+      "url": "a.pict",
+      "strict": true,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "midi non-strict",
+      "url": "a.midi",
+      "strict": false,
+      "type": "audio/midi",
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "mid non-strict",
+      "url": "a.mid",
+      "strict": false,
+      "type": "audio/midi",
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "jpg non-strict, strict map wins",
+      "url": "a.jpg",
+      "strict": false,
+      "type": "image/jpeg",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "pict non-strict",
+      "url": "a.pict",
+      "strict": false,
+      "type": "image/pict",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "pct non-strict",
+      "url": "a.pct",
+      "strict": false,
+      "type": "image/pict",
+      "encoding": null,
+      "isImage": true
+    },
+    {
+      "name": "xul non-strict",
+      "url": "a.xul",
+      "strict": false,
+      "type": "text/xul",
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "rtf non-strict",
+      "url": "a.rtf",
+      "strict": false,
+      "type": "application/rtf",
+      "encoding": null,
+      "isImage": false
+    },
+    {
+      "name": "gzipped pict non-strict",
+      "url": "a.pict.gz",
+      "strict": false,
+      "type": "image/pict",
+      "encoding": "gzip",
+      "isImage": true
+    },
+    {
+      "name": "unknown non-strict",
+      "url": "a.zzz",
+      "strict": false,
+      "type": null,
+      "encoding": null,
+      "isImage": false
+    }
+  ]
+}

@@ -11338,9 +11338,162 @@ three pieces are separately verifiable, so they are separate items.
             $ cd api && uv run ruff format --check scripts/export_wp_publish_metadata_parity.py
             1 file already formatted
             ```
-          - [ ] 5.3c-iii-b-1-c-ii The media-directory sweep: the sorted walk, the
-            `mimetypes` image filter, the per-file upload with its manifest alt text, the
-            featured-media resolution and the local-to-remote URL rewrite.
+          - [ ] 5.3c-iii-b-1-c-ii The media-directory sweep. Split into three: the
+            `mimetypes` filter is a pure function over a filename and is the only part of
+            the sweep that can be pinned against Python with no filesystem and no network,
+            the walk is a filesystem enumeration whose ordering rule is the thing worth
+            testing, and the upload loop is HTTP plus the featured-media and URL-rewrite
+            bookkeeping.
+            - [x] 5.3c-iii-b-1-c-ii-1 `mimetypes.guess_type`, the image filter.
+
+              Ported to `web/src/mastra/wordpress/mimetypes.ts` as
+              `guessTypeFromFilename()`, with `splitext()` and the four tables exported so
+              the test can check them rather than trust a transcription. The oracle is
+              `web/src/mastra/wordpress/data/wp-mimetypes-parity.json`, written by
+              `api/scripts/export_mimetypes_parity.py`: the four tables verbatim plus 100
+              `guess_type` cases, 91 strict and 9 not.
+
+              **The oracle cannot be generated on this machine, and that is the main
+              finding of this item.** `mimetypes.init()` reads `mimetypes.knownfiles`, and
+              on macOS `/etc/apache2/mime.types` exists. Reading it grows the strict table
+              from 152 entries to 1036, adds 45 `image/*` extensions and changes `.ico`
+              from `image/vnd.microsoft.icon` to `image/x-icon`. The deployed interpreter
+              is `python:3.12-slim`, where no knownfile exists at all, so the builtin
+              table is the whole table there. The export script asserts both
+              `sys.version_info[:2] == (3, 12)` and that no knownfile is present, and is
+              run inside that image:
+
+              ```
+              $ docker run --rm -v "$PWD":/w -w /w python:3.12-slim python api/scripts/export_mimetypes_parity.py
+              wrote 152 strict types, 9 common types and 100 cases (50 classified as images) to /w/web/src/mastra/wordpress/data/wp-mimetypes-parity.json
+              ```
+
+              **`.webp` is not in the Python 3.12 builtin table.** It arrived in 3.13. The
+              images stage writes every file as `.webp`, so in production
+              `guess_type("featured-082326-abc.webp")` is `(None, None)` and the media
+              sweep skips every image the pipeline generated: no uploads, no featured
+              image, and the local `/media/...` URLs left in the published HTML. This port
+              reproduces that, and the defect is logged in `todo.md` rather than fixed
+              here, because fixing it changes what publishing does.
+
+              ```
+              $ docker run --rm python:3.12-slim python -c "import mimetypes, os; print([f for f in mimetypes.knownfiles if os.path.isfile(f)], len(mimetypes.MimeTypes().types_map[True]), mimetypes.guess_type('a.webp'))"
+              [] 152 (None, None)
+              ```
+
+              **Four behaviours the port had to get right.**
+
+              * `guess_type` runs the argument through `urllib.parse.urlparse` but only
+                uses the parsed path when a scheme of more than one character was found.
+                Otherwise it re-reads the **raw** argument, so none of `urlsplit`'s
+                cleaning survives: `urlsplit` lstrips U+0000-U+0020 and deletes every tab,
+                CR and LF, but `"a.p\tng"` is still `(None, None)` while
+                `"ht\ttp:a.png#b.gif"` is `image/png`. Equally, the schemeless branch keeps
+                the fragment and the query in the path, so `"a.png#b.gif"` is `image/gif`
+                and `"http:a.png#b.gif"` is `image/png`.
+              * `urlparse` also strips a `;` suffix from the path, but only for a scheme in
+                `uses_params`, and only after lowercasing the scheme. `"HTTP:a;b.png"` is
+                `(None, None)` and `"HTTQ:a;b.png"` is `image/png`.
+              * `encodings_map` is matched case sensitively and the type tables are not.
+                `"a.png.gz"` is `("image/png", "gzip")`, `"a.png.GZ"` is `(None, None)`,
+                and `"a.png.Z"` is `("image/png", "compress")`. `suffix_map` runs before
+                the encoding is stripped and is matched case insensitively, so `"a.SVGZ"`
+                is `("image/svg+xml", "gzip")`; it is not reapplied afterwards, so
+                `"a.svgz.gz"` is `(None, "gzip")`.
+              * `posixpath.splitext` skips leading dots, so `".png"` and `"..png"` have no
+                extension while `".hidden.png"` does.
+
+              **The input domain is one POSIX path component**, which is what
+              `Path.iterdir()` yields, so it cannot contain `/`. That makes the `//` netloc
+              split, its IPv6 bracket validation and the `'/' in url` half of
+              `_splitparams` unreachable. They are not ported and
+              `guessTypeFromFilename` throws a `TypeError` rather than guessing if a
+              caller ever passes a slash; the export script refuses to record a case with
+              one.
+
+              Beyond the oracle, 105993 randomly generated slash-free names (seeded, built
+              from an alphabet of the characters every branch keys off) were run through
+              the real `mimetypes.guess_type` inside `python:3.12-slim` and through the
+              port: **0 differed**. Twenty-eight mutations of the port were then run
+              against both the test file and that corpus; twenty-three were caught.
+
+              | # | mutation | result |
+              | --- | --- | --- |
+              | 1 | leading space is not stripped | caught |
+              | 2 | the C0 strip runs at both ends | caught |
+              | 3 | a leading colon starts a scheme | SURVIVED |
+              | 4 | a digit may open a scheme | caught |
+              | 5 | the scheme is not lowercased | caught |
+              | 6 | tab, CR and LF are kept | caught |
+              | 7 | the schemeless branch reads the cleaned copy | caught |
+              | 8 | a one-character scheme is accepted | caught |
+              | 9 | every scheme splits params | caught |
+              | 10 | params are never split | caught |
+              | 11 | the fragment stays in the path | caught |
+              | 12 | the query stays in the path | caught |
+              | 13 | the data semicolon is searched past the comma | SURVIVED |
+              | 14 | a data type with an equals is kept | SURVIVED |
+              | 15 | a data type without a slash is kept | caught |
+              | 16 | a comma-less data URL is text/plain | caught |
+              | 17 | `splitext` accepts a dot at the separator | SURVIVED |
+              | 18 | `splitext` does not skip leading dots | caught |
+              | 19 | `splitext` drops the dot from the extension | caught |
+              | 20 | `suffix_map` is matched case sensitively | caught |
+              | 21 | `suffix_map` is applied at most once | SURVIVED |
+              | 22 | `encodings_map` is matched case insensitively | caught |
+              | 23 | the encoding suffix is not stripped | caught |
+              | 24 | the type lookup is case sensitive | caught |
+              | 25 | `strict` still falls back to `common_types` | caught |
+              | 26 | an unknown type drops the encoding | caught |
+              | 27 | scheme characters are not validated | caught |
+              | 28 | the data branch keys off the raw prefix | caught |
+
+              All five survivors are unobservable rather than untested, and each also
+              produced 0 differences across the 105993-case corpus.
+
+              * 3: `i > 0` and `i >= 0` differ only at `i == 0`, which needs `url[0] == ':'`,
+                which fails the `url[0].isalpha()` test standing beside it.
+              * 13 and 14: within a slash-free component the candidate type is a substring
+                of a string with no `/`, so `'/' not in type` always holds and the data
+                branch always yields `text/plain` whenever a comma is present. Neither
+                mutation can change which prefix that verdict is drawn from.
+              * 17: `dotIndex >= sepIndex` differs only when both are `-1`, and then the
+                leading-dot loop does not execute and both spellings return `(p, "")`.
+              * 21: every `suffix_map` value ends in `.gz`, `.bz2` or `.xz`, and none of
+                those is a `suffix_map` key, so the loop can never run a second time.
+
+              ```
+              $ pnpm -C web exec vitest run src/mastra/wordpress/mimetypes.test.ts
+               Test Files  1 passed (1)
+                    Tests  212 passed (212)
+              ```
+
+              Gates, both stacks. The frontend failure count is the recorded 9-failure
+              baseline: 6 in `image-preview.test.tsx` and 3 in `PostDetail.test.tsx`.
+
+              ```
+              $ pnpm -C web exec tsc --noEmit
+              (no output, exit 0)
+              $ pnpm -C web lint
+              (no output, exit 0)
+              $ pnpm -C web test
+               Test Files  2 failed | 115 passed (117)
+                    Tests  9 failed | 3788 passed | 7 skipped (3804)
+              $ pnpm -C web build
+              ✓ Compiled successfully in 4.1s
+              $ set -a && . ./.env && set +a && cd api && uv run pytest -q
+              120 failed, 241 passed, 25 errors in 15.20s
+              $ cd api && uv run ruff check scripts/export_mimetypes_parity.py
+              All checks passed!
+              $ cd api && uv run ruff format --check scripts/export_mimetypes_parity.py
+              1 file already formatted
+              ```
+            - [ ] 5.3c-iii-b-1-c-ii-2 The sorted walk: `media_dir.is_dir()`, the
+              `sorted(media_dir.iterdir())` ordering and the `is_file()` filter.
+            - [ ] 5.3c-iii-b-1-c-ii-3 The upload loop: the per-file `upload_media` call
+              with its manifest alt text defaulting to the title, the featured-media
+              resolution with its manifest-or-first fallback, and the local-to-remote URL
+              rewrite over the rendered HTML.
           - [ ] 5.3c-iii-b-1-c-iii The publish workflow itself: the profile and credential
             guards, the create/update branch, the `wp_publish_status` transitions and the
             `publish_start` / `publish_complete` / `publish_error` events with `_fail`.
