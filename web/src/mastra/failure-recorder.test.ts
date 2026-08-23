@@ -169,7 +169,15 @@ async function waitForFailure(id: string, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs
   for (;;) {
     const row = await readPost(id)
-    if (row?.currentStage === "failed") return row
+    // Both conditions, because `recordRunFailure` writes the row, publishes,
+    // and only then appends the `stage_error` entry (item 5.5c-iii-a follows
+    // Python's own order for that one pair). Returning on `currentStage` alone
+    // hands the suite a row snapshot taken before the append landed, which
+    // showed up as three intermittent failures in the trail assertions.
+    const logged = ((row?.executionLogs ?? []) as Record<string, unknown>[]).some(
+      (entry) => entry.event === "stage_error",
+    )
+    if (row?.currentStage === "failed" && logged) return row
     if (Date.now() > deadline) throw new Error(`post ${id} was never marked failed`)
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
@@ -444,11 +452,15 @@ describe("a pipeline run that fails", () => {
     expect(executionLogsOf(failedRow).map((entry) => `${entry.event}/${entry.stage}`)).toEqual([
       "pipeline_start/",
       "stage_start/research",
+      // `research`'s progress lines (item 5.5c-iv-b): three of its five, because
+      // the stubbed response validates on the first attempt, so neither the
+      // failure line nor the degraded line is reached.
+      "log/research",
+      "log/research",
+      "log/research",
       "stage_complete/research",
       "stage_start/outline",
-      // `outline`'s three progress lines (item 5.5c-iv). `research` has none
-      // yet; its call sites are a later sub-item, and this list will say so
-      // when they land.
+      // `outline`'s three progress lines (item 5.5c-iv-a).
       "log/outline",
       "log/outline",
       "log/outline",

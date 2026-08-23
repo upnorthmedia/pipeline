@@ -13414,8 +13414,214 @@ three pieces are separately verifiable, so they are separate items.
         9 files would be reformatted, 131 files already formatted
         ```
 
-      - [ ] 5.5c-iv-b `research`'s five call sites, which sit inside its validator retry
+      - [x] 5.5c-iv-b `research`'s five call sites, which sit inside its validator retry
         loop and so are written once per attempt rather than once per stage.
+
+        The five, from `api/src/pipeline/stages/research.py`: the rules-loaded line at
+        :55, the provider-call line at :79 inside the loop, the validation-failed line
+        at :98 inside the loop, the degraded line at :109 in the loop's `else` clause,
+        and the received line at :120 after the `finally`. Ported into
+        `web/src/mastra/steps/research.ts` at the same five positions.
+
+        **Decision 1: Python's `for ... else` becomes the post-loop
+        `if (!isValidResearch(text))` that was already there.** The step's existing
+        degraded-research branch is exactly the `else` clause's condition, because a
+        `break` only happens on a valid response. So the fifth call site attaches to a
+        branch the port already had rather than needing new control flow, and the
+        `mastra.getLogger()?.error(...)` beside it is Python's `logger.error` from the
+        same clause.
+
+        **Decision 2: the failure line is written on the final attempt too, and it
+        still reads "retrying...".** Python wrote it from inside the loop body with no
+        guard, so a run that exhausts all three attempts records
+        `Response validation failed (attempt 3), retrying...` and then the degraded
+        line. Reproduced rather than corrected: the line is what a reader of the run
+        log has always seen, and the `else` line is what tells them the stage gave up.
+        This is the opposite of `recordStageRetry`'s gate (item 5.5c-iii-b-2-a), which
+        is guarded, because that one claims another attempt from the engine.
+
+        **Decision 3: the degraded message keeps Python's em dash, written as
+        `\u2014`.** The message goes straight onto the wire and into
+        `debug-log-panel.tsx`, so its bytes are a contract. This port's own rule bans
+        the character in source, so it is an escape in both
+        `DEGRADED_RESEARCH_MESSAGE` and the test's `PYTHON_DEGRADED_MESSAGE`; the
+        string each builds is byte-identical to Python's. Recorded as a deliberate
+        deviation from the writing rule, cross-checked below.
+
+        **Decision 4: the model name stays in the message rather than being read off
+        the response.** Python hardcoded `Calling Perplexity sonar-pro`, so the line
+        still says `sonar-pro` if the provider answers as an alias. Matching
+        5.5c-iv-a's treatment of `Calling Claude for outline...`.
+
+        Python's own rendering of all eight distinct messages, for byte comparison
+        against the stored entries below. **Every `\u2014` in this item's pasted
+        output is a transcription of the em dash character, which the commands
+        actually printed and which this document may not contain.** Confirmed as
+        U+2014 in the Python source:
+
+        ```
+        $ sed -n 109,114p api/src/pipeline/stages/research.py | hexdump -C | grep -n "e2 80"
+        7:00000060  e2 80 94 20 22 0a 20 20   20 20 20 20 20 20 20 20  |... ".          |
+        ```
+
+        ```
+        $ cd api && python3 -c "
+        MAX=3
+        for attempt in (1,2,3):
+            msg = (f'Calling Perplexity sonar-pro (attempt {attempt}/{MAX})...'
+                   if attempt>1 else 'Calling Perplexity sonar-pro...')
+            print(repr(msg))
+            print(repr(f'Response validation failed (attempt {attempt}), retrying...'))
+        print(repr('WARNING: Research quality may be degraded \u2014 Perplexity returned unexpected responses.'))
+        print(repr(f'Received {60} tokens in {0.0:.1f}s'))"
+        'Calling Perplexity sonar-pro...'
+        'Response validation failed (attempt 1), retrying...'
+        'Calling Perplexity sonar-pro (attempt 2/3)...'
+        'Response validation failed (attempt 2), retrying...'
+        'Calling Perplexity sonar-pro (attempt 3/3)...'
+        'Response validation failed (attempt 3), retrying...'
+        'WARNING: Research quality may be degraded \u2014 Perplexity returned unexpected responses.'
+        'Received 60 tokens in 0.0s'
+        ```
+
+        A real run of the step against the real database, driven with a refusal on
+        every attempt so all nine lines are reached. Published payload and stored
+        entry, dumped from a throwaway probe:
+
+        ```
+        published (9 of 9, `log` events only)
+          {event: log, level: info,    stage: research, post_id: <id>,
+           message: "Rules loaded, building prompt...",         timestamp: 2026-08-23T01:35:38.303+00:00}
+          {event: log, level: info,    message: "Calling Perplexity sonar-pro..."}
+          {event: log, level: warning, message: "Response validation failed (attempt 1), retrying..."}
+          {event: log, level: info,    message: "Calling Perplexity sonar-pro (attempt 2/3)..."}
+          {event: log, level: warning, message: "Response validation failed (attempt 2), retrying..."}
+          {event: log, level: info,    message: "Calling Perplexity sonar-pro (attempt 3/3)..."}
+          {event: log, level: warning, message: "Response validation failed (attempt 3), retrying..."}
+          {event: log, level: error,
+           message: "WARNING: Research quality may be degraded \u2014 Perplexity returned unexpected responses."}
+          {event: log, level: info,    message: "Received 60 tokens in 0.0s"}
+
+        stored in posts.execution_logs (same nine, `ts` in place of `timestamp`,
+        no post_id, no data key)
+          {ts: 2026-08-23T01:35:38.303+00:00, stage: research, level: info,
+           event: log, message: "Rules loaded, building prompt..."}
+          ... (eight more, messages identical to the published list above)
+        ```
+
+        Every message matches Python's rendering above character for character,
+        including the em dash.
+
+        Pre-implementation, the five new tests failing for the right reason:
+
+        ```
+        $ cd web && npx vitest run src/mastra/steps/research.test.ts
+        Tests  5 failed | 11 passed (16)
+        # all five in `research step progress lines`, each on an empty
+        # execution_logs or an `announced` array carrying only the two
+        # announcements.
+        ```
+
+        After:
+
+        ```
+        $ cd web && npx vitest run src/mastra/steps/research.test.ts --reporter=verbose
+        ✓ research step prompt parity > sends the prompt the Python stage sent for how-to-choose-a-crm-for-a-small-team
+        ✓ research step prompt parity > sends the prompt the Python stage sent for best-time-tracking-tools-for-agencies
+        ✓ research step persistence and output > commits the research to its column and reports Python's stage meta
+        ✓ research step persistence and output > fails loudly on a post that does not exist rather than billing a call
+        ✓ research step meta-response retry loop > retries a meta-response with the reinforced prompt and sums both calls' tokens
+        ✓ research step meta-response retry loop > stops after the attempt cap and keeps the last response, as Python does
+        ✓ isValidResearch > accepts the golden fixtures' research documents
+        ✓ isValidResearch > rejects every refusal phrasing Python listed
+        ✓ isValidResearch > rejects a clean response that covers fewer than two expected sections
+        ✓ research step announcement > announces the stage on the event bus, in Python's payload shape
+        ✓ research step announcement > commits the stage before it reports it complete, and not before it starts
+        ✓ research step progress lines > writes Python's three lines when the first attempt validates
+        ✓ research step progress lines > names the attempt only after the first, and warns on each failure
+        ✓ research step progress lines > warns on the last attempt too, then reports the stage degraded
+        ✓ research step progress lines > publishes each line, interleaved with the two announcements
+        ✓ research step progress lines > carries Python's payload on a progress line and stores no data key
+        Test Files  1 passed (1)
+             Tests  16 passed (16)
+        ```
+
+        Changed assertions on the two files that run the real workflow, both real
+        behaviour changes rather than test edits to force a pass:
+
+        - `pipeline-events.test.ts`: `LOGGING_STAGES` gains `research`, the per-stage
+          `log` count for `research` moves from 0 to 3, and the whole-trail assertion
+          now interleaves three `log` entries between `research`'s two announcements.
+          Three and not five because the stubbed response validates on the first
+          attempt, so neither the failure line nor the degraded line is reached.
+        - `failure-recorder.test.ts`: the failing run's trail gains `research`'s three
+          lines ahead of `stage_complete/research`.
+
+        Negative controls, each reverted after measuring, run over
+        `research.test.ts`, `pipeline-events.test.ts` and `failure-recorder.test.ts`
+        together (91 tests):
+
+        | Control | Result |
+        | --- | --- |
+        | Drop the rules-loaded line | 9 failed, 82 passed |
+        | Always name the attempt, dropping Python's ternary | 4 failed, 87 passed |
+        | Skip the failure line on the final attempt | 1 failed, 90 passed |
+        | Write the degraded line at `warning` instead of `error` | 1 failed, 15 passed (research only) |
+        | Drop the received line | 8 failed, 83 passed |
+
+        **Two pre-existing test flakes fixed on the way, both measured at HEAD before
+        the change.** Neither is an assertion edit; both are test infrastructure.
+
+        1. `stage-log.test.ts` and `pipeline-start.test.ts` both used post id
+           `...0055d1`. vitest runs files in parallel, so each file's `beforeEach`
+           delete raced the other's insert and the loser failed on `posts_pkey`.
+           `stage-log.test.ts` moves to `...0055d3`, with the reason recorded beside
+           the constant.
+        2. `failure-recorder.test.ts`'s `waitForFailure()` returned as soon as
+           `current_stage` read `failed`, but `recordRunFailure` writes the row,
+           publishes, and only then appends the `stage_error` entry (item 5.5c-iii-a
+           follows Python's order for that one pair). The snapshot could therefore
+           predate the append. It now also waits for the entry to be present.
+
+        Measured at HEAD, with this iteration's four files reverted:
+
+        ```
+        $ cd web && npx vitest run
+        Test Files  3 failed | 90 passed (93)
+             Tests  12 failed | 1629 passed | 7 skipped (1648)
+        # 9 baseline (6 image-preview, 3 PostDetail) plus the three
+        # failure-recorder trail assertions racing the append.
+        ```
+
+        Frontend gates:
+
+        ```
+        $ cd web && npx tsc --noEmit
+        TSC EXIT=0
+
+        $ cd web && npx eslint
+        LINT EXIT=0
+
+        $ cd web && npx vitest run
+        Test Files  2 failed | 91 passed (93)
+             Tests  9 failed | 1637 passed | 7 skipped (1653)
+        # 9 failed is the recorded baseline: 6 in image-preview.test.tsx and 3 in
+        # PostDetail.test.tsx, both pre-existing. Passing count 1632 -> 1637 (+5),
+        # and the three failure-recorder races are gone.
+
+        $ cd web && npx next build
+        BUILD EXIT=0
+        ✓ Compiled successfully in 4.3s
+
+        $ cd api && uv run pytest -q
+        120 failed, 241 passed, 25 errors in 15.15s
+
+        $ cd api && uv run ruff check .
+        Found 32 errors.
+
+        $ cd api && uv run ruff format --check .
+        9 files would be reformatted, 131 files already formatted
+        ```
       - [ ] 5.5c-iv-c `edit`'s seven call sites, which report the link-validation and
         quality passes and are the only ones in the six stages that carry `data`.
       - [ ] 5.5c-iv-d `images`' seven call sites, spread across the nested workflow's

@@ -109,7 +109,7 @@ function replayMastra(replies: Replay[]) {
   const prompts: string[] = []
   const warnings: string[] = []
   const errors: string[] = []
-  const announced: unknown[] = []
+  const announced: Record<string, unknown>[] = []
   /**
    * The row as it stood at the moment each announcement was published, keyed by
    * event name.
@@ -350,7 +350,10 @@ describe("research step announcement", () => {
   it("announces the stage on the event bus, in Python's payload shape", async () => {
     const { announced } = await runStep(fixtureIds[0], [replayOf(fixtures[0])])
 
-    expect(announced).toEqual([
+    // Filtered, because item 5.5c-iv-b interleaved three `log` events between
+    // these two. The whole ordered sequence, announcements and progress lines
+    // together, is asserted in the progress-line suite below.
+    expect(announced.filter((event) => event.event !== "log")).toEqual([
       {
         event: "stage_start",
         post_id: fixtureIds[0],
@@ -375,5 +378,143 @@ describe("research step announcement", () => {
     // Python's order, both times: the row is written, then the browser is told.
     expect(rowOnAnnounce.stage_start.research).toBe("running")
     expect(rowOnAnnounce.stage_complete.research).toBe(STATUS_COMPLETE)
+  })
+})
+
+/**
+ * Verbatim from the `else` clause of the retry loop in
+ * `api/src/pipeline/stages/research.py:109`.
+ *
+ * The em dash is written as an escape rather than as the character because
+ * this port's own writing rule forbids the character in source; the value it
+ * builds is byte-identical to Python's, which is what matters, because
+ * `debug-log-panel.tsx` renders this message straight into the run log.
+ */
+const PYTHON_DEGRADED_MESSAGE =
+  "WARNING: Research quality may be degraded \u2014 Perplexity returned unexpected responses."
+
+/** The stored progress lines for a post, in the order the step wrote them. */
+async function progressLines(postId: string) {
+  const [row] = await db.select({ logs: posts.executionLogs }).from(posts).where(eq(posts.id, postId))
+  return ((row?.logs ?? []) as Record<string, unknown>[])
+    .filter((entry) => entry.event === "log")
+    .map((entry) => [entry.level, entry.message])
+}
+
+describe("research step progress lines", () => {
+  it("writes Python's three lines when the first attempt validates", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    await runStep(fixtureIds[0], [replayOf(fixture)])
+
+    const lines = await progressLines(fixtureIds[0])
+    expect(lines.slice(0, 2)).toEqual([
+      ["info", "Rules loaded, building prompt..."],
+      // Python named the model in the message rather than reading it back off
+      // the response, so the line says `sonar-pro` even when the provider
+      // answers as something else.
+      ["info", "Calling Perplexity sonar-pro..."],
+    ])
+    expect(lines[2][0]).toBe("info")
+    // The token count is the fixture's; the duration is real elapsed time
+    // around the replayed call, rendered to one decimal the way Python's
+    // `f"{total_duration:.1f}"` did.
+    expect(lines[2][1]).toMatch(
+      new RegExp(`^Received ${fixture.stage_output._stage_meta.tokens_out} tokens in \\d+\\.\\ds$`),
+    )
+    expect(lines).toHaveLength(3)
+  })
+
+  it("names the attempt only after the first, and warns on each failure", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    await runStep(fixtureIds[0], [REFUSAL, replayOf(fixture)])
+
+    const lines = await progressLines(fixtureIds[0])
+    expect(lines.slice(0, 4)).toEqual([
+      ["info", "Rules loaded, building prompt..."],
+      // Python's ternary: the bare form on attempt 1, the counted form after.
+      ["info", "Calling Perplexity sonar-pro..."],
+      ["warning", "Response validation failed (attempt 1), retrying..."],
+      ["info", `Calling Perplexity sonar-pro (attempt 2/${MAX_RESEARCH_ATTEMPTS})...`],
+    ])
+    expect(lines[4][0]).toBe("info")
+    expect(lines[4][1]).toMatch(
+      new RegExp(
+        `^Received ${REFUSAL.usage.outputTokens + replayOf(fixture).usage.outputTokens} tokens in \\d+\\.\\ds$`,
+      ),
+    )
+    expect(lines).toHaveLength(5)
+  })
+
+  it("warns on the last attempt too, then reports the stage degraded", async () => {
+    vi.setSystemTime(new Date(fixtures[0].captured_at))
+
+    await runStep(fixtureIds[0], [REFUSAL])
+
+    const lines = await progressLines(fixtureIds[0])
+    // Python wrote the failure line inside the loop body, so the final attempt
+    // gets one as well and it still says "retrying..." when nothing follows.
+    // The `else` clause's line is what tells a reader the stage gave up.
+    expect(lines.slice(0, 8)).toEqual([
+      ["info", "Rules loaded, building prompt..."],
+      ["info", "Calling Perplexity sonar-pro..."],
+      ["warning", "Response validation failed (attempt 1), retrying..."],
+      ["info", `Calling Perplexity sonar-pro (attempt 2/${MAX_RESEARCH_ATTEMPTS})...`],
+      ["warning", "Response validation failed (attempt 2), retrying..."],
+      ["info", `Calling Perplexity sonar-pro (attempt 3/${MAX_RESEARCH_ATTEMPTS})...`],
+      ["warning", "Response validation failed (attempt 3), retrying..."],
+      ["error", PYTHON_DEGRADED_MESSAGE],
+    ])
+    expect(lines).toHaveLength(9)
+  })
+
+  it("publishes each line, interleaved with the two announcements", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { announced } = await runStep(fixtureIds[0], [replayOf(fixture)])
+
+    // The stub records inside `publish`, which the step awaits, so this array
+    // is in publish order rather than in whatever order a subscriber's reads
+    // resolved. That makes the position of each progress line assertable here
+    // in a way `pipeline-events.test.ts` cannot promise.
+    expect(announced.map((event) => [event.event, event.level ?? event.message])).toEqual([
+      ["stage_start", "Starting research..."],
+      ["log", "info"],
+      ["log", "info"],
+      ["log", "info"],
+      ["stage_complete", undefined],
+    ])
+  })
+
+  it("carries Python's payload on a progress line and stores no data key", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { announced } = await runStep(fixtureIds[0], [replayOf(fixture)])
+
+    expect(announced.find((event) => event.event === "log")).toEqual({
+      event: "log",
+      post_id: fixtureIds[0],
+      stage: "research",
+      message: "Rules loaded, building prompt...",
+      level: "info",
+      timestamp: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T[\d:.]+\+00:00$/),
+    })
+
+    const [row] = await db
+      .select({ logs: posts.executionLogs })
+      .from(posts)
+      .where(eq(posts.id, fixtureIds[0]))
+    for (const entry of ((row?.logs ?? []) as Record<string, unknown>[]).filter(
+      (item) => item.event === "log",
+    )) {
+      // Python's `**({"data": data} if data else {})`: none of research's five
+      // call sites passes `data`, so no entry carries the key at all.
+      expect(Object.keys(entry).sort()).toEqual(["event", "level", "message", "stage", "ts"])
+    }
   })
 })

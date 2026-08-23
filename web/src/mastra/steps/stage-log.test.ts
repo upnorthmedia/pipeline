@@ -24,7 +24,13 @@ import { closeDb, getDb, posts } from "../../db"
 import { publishStageLog } from "./stage-io"
 import type { StageLogContext } from "./stage-io"
 
-const POST_ID = "00000000-0000-4000-8000-0000000055d1"
+/**
+ * Distinct from every other suite's, and specifically from
+ * `pipeline-start.test.ts`'s: vitest runs files in parallel, so two files
+ * sharing a post id race their own `beforeEach` delete against the other's
+ * insert and fail on `posts_pkey`.
+ */
+const POST_ID = "00000000-0000-4000-8000-0000000055d3"
 /** Not a uuid, so the append's `WHERE id = ...` fails in postgres rather than matching nothing. */
 const BROKEN_POST_ID = "not-a-uuid"
 

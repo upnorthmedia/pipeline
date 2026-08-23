@@ -308,7 +308,7 @@ afterAll(async () => {
  * a stage that quietly stopped logging, and a stage that started, both have to
  * fail here rather than be absorbed by a looser assertion.
  */
-const LOGGING_STAGES = ["outline", "write", "ready"] as const
+const LOGGING_STAGES = ["research", "outline", "write", "ready"] as const
 
 describe("a run that executes every stage", () => {
   it("announces each of the six stages exactly once, in pipeline order", () => {
@@ -411,7 +411,10 @@ describe("a run that executes every stage", () => {
     // `stage_start`/`research`. Ordering is pinned on `execution_logs` below,
     // where the entry is written by the publishing process itself.
     expect(perStage).toEqual({
-      research: 0,
+      // Three, not five: the stubbed research validates on the first attempt,
+      // so neither the failure line nor the degraded line is reached. Both are
+      // asserted in `steps/research.test.ts`, which can drive a refusal.
+      research: 3,
       outline: 3,
       write: 3,
       edit: 0,
@@ -602,9 +605,11 @@ describe("what a run writes to execution_logs", () => {
       ...STAGES.flatMap((stage) => [
         ["stage_start", stage],
         // The stage's own progress lines, item 5.5c-iv, sitting between the two
-        // announcements the runner made around the node. Only three stages have
-        // them so far; `research`, `edit` and `images` are later sub-items, and
-        // this list is what will say so when they land.
+        // announcements the runner made around the node. Four stages have them
+        // so far, all three lines each: `research` reaches only three of its
+        // five here because the stub validates on the first attempt. `edit` and
+        // `images` are later sub-items, and this list is what will say so when
+        // they land.
         ...((LOGGING_STAGES as readonly string[]).includes(stage)
           ? [
               ["log", stage],
@@ -689,6 +694,11 @@ describe("what a run writes to execution_logs", () => {
         .filter((entry) => entry.event === "log" && entry.stage === stage)
         .map((entry) => entry.message)
 
+    expect(messagesFor("research")).toEqual([
+      "Rules loaded, building prompt...",
+      "Calling Perplexity sonar-pro...",
+      expect.stringMatching(/^Received 20 tokens in \d+\.\ds$/),
+    ])
     expect(messagesFor("outline")).toEqual([
       "Rules loaded, building prompt...",
       "Calling Claude for outline...",

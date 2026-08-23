@@ -22,9 +22,11 @@ import { STATUS_COMPLETE } from "../state"
 import {
   announceStageComplete,
   announceStageStart,
+  formatSeconds,
   gateResumeSchema,
   gateSuspendSchema,
   markRerunComplete,
+  publishStageLog,
   recordStageRetry,
   reviewGate,
   shouldRunStage,
@@ -55,6 +57,18 @@ export const REFUSAL_PATTERNS = [
 ]
 
 const REFUSAL_RE = new RegExp(REFUSAL_PATTERNS.join("|"), "i")
+
+/**
+ * The line Python wrote when every attempt came back a meta-response, from the
+ * `else` clause of the retry loop.
+ *
+ * The em dash is an escape rather than the character because this port's
+ * writing rule forbids the character in source. The string it builds is
+ * byte-identical to Python's, which is the part that matters: the message goes
+ * straight onto the wire and into `debug-log-panel.tsx`.
+ */
+export const DEGRADED_RESEARCH_MESSAGE =
+  "WARNING: Research quality may be degraded \u2014 Perplexity returned unexpected responses."
 
 /** Sections a valid research document is expected to cover. */
 export const EXPECTED_SECTIONS = ["keyword", "pain point", "competitor", "search intent"]
@@ -99,7 +113,13 @@ export const researchStep = createStep({
       const gate = await reviewGate("research", inputData, state.stageSettings, resumeData)
       if (gate) return suspend(gate)
       await announceStageStart(mastra, "research", inputData)
-      const prompt = buildStagePrompt("research", loadRules("research"), state)
+      const rules = loadRules("research")
+      // Python's five progress lines, in the five positions `research_node`
+      // wrote them: after the rules are read, before each provider call, after
+      // each response that fails the validator, once the loop gives up, and
+      // once the stage has an answer to report.
+      await publishStageLog(mastra, postId, "research", "Rules loaded, building prompt...")
+      const prompt = buildStagePrompt("research", rules, state)
       const agent = mastra.getAgent("research")
 
       let text = ""
@@ -109,6 +129,19 @@ export const researchStep = createStep({
       let durationMs = 0
 
       for (let attempt = 1; attempt <= MAX_RESEARCH_ATTEMPTS; attempt += 1) {
+        // Python's ternary: the bare form on the first call, the counted form
+        // on every retry. The model is named from the message rather than read
+        // off the response, which is Python's own wording and means the line
+        // still says `sonar-pro` if the provider answers as an alias.
+        await publishStageLog(
+          mastra,
+          postId,
+          "research",
+          attempt > 1
+            ? `Calling Perplexity sonar-pro (attempt ${attempt}/${MAX_RESEARCH_ATTEMPTS})...`
+            : "Calling Perplexity sonar-pro...",
+        )
+
         const startedAt = Date.now()
         const result = await agent.generate(attempt === 1 ? prompt : reinforcedPrompt(prompt))
         durationMs += Date.now() - startedAt
@@ -127,6 +160,18 @@ export const researchStep = createStep({
           attempt,
           maxAttempts: MAX_RESEARCH_ATTEMPTS,
         })
+        // Python wrote this from inside the loop body, so the final attempt
+        // gets one too and it still reads "retrying..." when nothing follows.
+        // Reproduced rather than corrected: the line is what a reader of the
+        // run log has always seen, and the `else` line below is what tells
+        // them the stage actually gave up.
+        await publishStageLog(
+          mastra,
+          postId,
+          "research",
+          `Response validation failed (attempt ${attempt}), retrying...`,
+          { level: "warning" },
+        )
       }
 
       if (!isValidResearch(text)) {
@@ -136,7 +181,20 @@ export const researchStep = createStep({
         mastra.getLogger()?.error("all research attempts returned meta-responses, using the last", {
           postId,
         })
+        await publishStageLog(mastra, postId, "research", DEGRADED_RESEARCH_MESSAGE, {
+          level: "error",
+        })
       }
+
+      // Python summed every attempt's duration and reported the total, so a
+      // stage that retried twice reports what it actually spent.
+      const durationS = durationMs / 1000
+      await publishStageLog(
+        mastra,
+        postId,
+        "research",
+        `Received ${tokensOut} tokens in ${formatSeconds(durationS)}s`,
+      )
 
       await saveStageOutput(postId, "research", text, { research: STATUS_COMPLETE })
       await markRerunComplete(inputData)
@@ -149,7 +207,7 @@ export const researchStep = createStep({
         model,
         tokensIn,
         tokensOut,
-        durationS: durationMs / 1000,
+        durationS,
       }
       await announceStageComplete(mastra, output)
       return output

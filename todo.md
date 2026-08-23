@@ -327,3 +327,21 @@
   basis: "sends pipeline_complete after the last stage_complete", which reads
   `order.at(-1)`. It has not been seen to flake, but nothing stops it. A sound fix is to
   record the delivery index synchronously at the top of the subscriber and sort by it.
+- [confirmed, fixed 2026-08-23] Two test files shared post id
+  `00000000-0000-4000-8000-0000000055d1`: `web/src/mastra/steps/stage-log.test.ts` and
+  `web/src/mastra/steps/pipeline-start.test.ts`. vitest runs files in parallel, so each
+  file's `beforeEach` delete raced the other's insert and the loser failed on
+  `posts_pkey` with `duplicate key value`. Seen as 6 failures in a full-suite run under
+  ledger item 5.5c-iv-b; it did not fire on the previous run, so it is scheduling
+  dependent rather than deterministic. Fixed by moving `stage-log.test.ts` to
+  `...0055d3`. Worth a sweep: nothing in the suite enforces that post ids are unique
+  across files, and the convention of deriving them from the ledger item number makes a
+  collision likely again.
+- [confirmed, fixed 2026-08-23] `waitForFailure()` in
+  `web/src/mastra/failure-recorder.test.ts` returned as soon as `current_stage` read
+  `failed`, which is a snapshot that can predate the `stage_error` execution_logs entry:
+  `recordRunFailure` writes the row, publishes, and only then appends (item 5.5c-iii-a
+  reproduces Python's order for that one pair). The three trail assertions built on that
+  snapshot failed intermittently. Measured at HEAD before the 5.5c-iv-b change (12 failed
+  against the 9-failure baseline), so it was pre-existing. Fixed by having the poll also
+  require the entry to be present.
