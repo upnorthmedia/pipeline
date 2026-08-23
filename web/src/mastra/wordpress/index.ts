@@ -226,7 +226,10 @@ export class WordPressClient {
     imageBytes: Uint8Array<ArrayBuffer>,
     filename: string,
     mimeType = "image/png",
-    altText = "",
+    // `unknown` rather than `string` because the only caller reads it out of
+    // `image_manifest`, and Python forwards whatever is stored there into the
+    // patch body. The truthiness gate below is the only thing that inspects it.
+    altText: unknown = "",
   ): Promise<unknown> {
     const media = await this.request("POST", `${this.apiUrl}/media`, {
       body: imageBytes,

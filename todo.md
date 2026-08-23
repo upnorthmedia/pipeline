@@ -573,3 +573,15 @@
   `web/src/mastra/wordpress/mimetypes.ts` (plus the same in Python while `api/` still
   exists) but it changes what publishing does, so it needs to be a deliberate change rather
   than a side effect of the port.
+- [confirmed] 2026-08-23 The local-to-remote image URL rewrite in
+  `api/src/pipeline/publish.py` corrupts a media URL that is a prefix of another one. The
+  loop is `for local, remote in image_map.items(): wp_html = wp_html.replace(local, remote)`
+  over a map keyed in the walk's sorted order, so with both `a.png` and `a.png.png` in the
+  media directory the shorter key rewrites the longer URL's prefix first and the longer
+  file's `source_url` is never inserted: `/media/p1/a.png.png` becomes
+  `https://wp.example/one.png.png`, which 404s. Recorded verbatim in
+  `web/src/mastra/wordpress/data/wp-media-upload-parity.json` (case "an earlier local URL
+  that prefixes a later one rewrites its prefix") and reproduced by the port under ledger
+  item 5.3c-iii-b-1-c-ii-3. Not reachable through the images stage, which names every file
+  with a timestamp, so the fix (rewrite longest key first, or one pass with a single
+  alternation) is a deliberate behaviour change rather than part of the port.

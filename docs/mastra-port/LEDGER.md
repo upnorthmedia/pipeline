@@ -11701,10 +11701,176 @@ three pieces are separately verifiable, so they are separate items.
               $ cd web && pnpm test           # replaced by a one-line dummy test file
                     Tests  10 failed | 3788 passed | 7 skipped (3805)
               ```
-            - [ ] 5.3c-iii-b-1-c-ii-3 The upload loop: the per-file `upload_media` call
+            - [x] 5.3c-iii-b-1-c-ii-3 The upload loop: the per-file `upload_media` call
               with its manifest alt text defaulting to the title, the featured-media
               resolution with its manifest-or-first fallback, and the local-to-remote URL
               rewrite over the rendered HTML.
+
+              Ported to `web/src/mastra/wordpress/media-upload.ts` as
+              `uploadMediaFiles()` and `rewriteImageUrls()`, with
+              `sweepMediaDirectory()` composing them onto `listMediaFiles()` and
+              `guessTypeFromFilename()` so the whole sweep of 5.3c-iii-b-1-c-ii now has
+              one entry point. The oracle is
+              `web/src/mastra/wordpress/data/wp-media-upload-parity.json`, written by
+              `api/scripts/export_media_upload_parity.py`, which pulls the twenty upload
+              lines and the two rewrite lines out of the real `publish_to_wordpress` with
+              `inspect.getsource`, asserts their exact shape, and executes them over real
+              files in a scratch directory against a recording stand-in for the WordPress
+              client: 26 cases recording the upload arguments, the image map, the featured
+              media id and the rewritten document.
+
+              **The oracle has to be generated inside the deployed image**, and the reason
+              is the finding of this item. `mimetypes.guess_type` decides which files this
+              loop uploads, and its table depends on both the interpreter and the host:
+              Python 3.13 added `.webp` to the builtin table and 3.12 does not have it,
+              and macOS has `/etc/apache2/mime.types`, which `mimetypes.init()` reads.
+              Generating on this machine (`uv run`, Python 3.13.12) recorded
+              `image/webp` for a `.webp` file and produced three test failures against the
+              port, whose table came from `python:3.12-slim`. The script now refuses to
+              run anywhere but the deployed image and the corpus pins the deployed answer:
+
+              ```
+              $ docker run --rm -v "$PWD":/w -w /w/api jena-api-oracle python -c "
+              import sys, os, mimetypes
+              print(sys.version)
+              print([f for f in mimetypes.knownfiles if os.path.isfile(f)])
+              print(mimetypes.guess_type('a.webp'), mimetypes.guess_type('a.png'))"
+              3.12.14 (main, Aug 13 2026, 19:43:20) [GCC 14.2.0]
+              []
+              (None, None) ('image/png', None)
+              ```
+
+              That is the already-recorded production bug of 5.3c-iii-b-1-c-ii-1 seen from
+              the other end: oracle case "a .webp file is not an image to the deployed
+              table, so it is skipped" records that the images stage's own output is
+              skipped, `featured_media_id` stays `null`, and the local
+              `/media/p1/featured-082326-abc.webp` URL survives into the published HTML.
+              Already in `todo.md`; the port reproduces it rather than fixing it.
+
+              Four behaviours the obvious transcription gets wrong, each with an oracle
+              case:
+
+              * `img_info.get("alt_text", title)` falls back to the title only when the
+                key is **absent**, so `""` and `null` are forwarded. `info.alt_text ??
+                title` fails two cases.
+              * `featured_media_id = media.get("id")` can put the variable back to `null`,
+                which re-arms the `elif` for the next file: the fallback is "the first
+                upload that has an id", and an id of `0` stops the search because `0 is
+                not None`.
+              * a `featured_filename` that matches no file leaves the featured media
+                unset, and an empty one (a manifest url ending in `/`) is falsy and takes
+                the first-image path.
+              * `str.replace(local, remote)` is `replaceAll` **except** that JavaScript
+                reads `$&`, `` $` ``, `$'`, `$$` and `$1` in the replacement as
+                substitution patterns. Spelled `split(local).join(remote)`; the oracle
+                carries a `source_url` holding all five.
+
+              Two error paths are reproduced with Python's own messages, because the
+              publish hook's `except Exception` writes `str(e)` to the post: a response
+              that is not a dict raises `'list' object has no attribute 'get'` from
+              `media.get`, and a non-string `source_url` raises `replace() argument 2 must
+              be str, not int` from the rewrite, after every upload has already happened.
+              Note that CPython spells the `None` singleton `None` in that message and
+              `NoneType` in the `AttributeError`; both spellings are in the oracle.
+
+              One divergence is deliberate and small: `WordPressClient.uploadMedia`'s
+              `altText` parameter is widened from `string` to `unknown`, because the value
+              comes out of `image_manifest` and Python forwards whatever is stored there
+              into the patch body. The truthiness gate is the only thing that reads it.
+
+              The rewrite's insertion-order pass corrupts a local URL that is a prefix of
+              a later one (`/media/p1/a.png.png` becomes
+              `https://wp.example/one.png.png`). Recorded verbatim in the oracle,
+              reproduced by the port, and logged in `todo.md`; the images stage's
+              timestamped filenames make it unreachable in practice.
+
+              Twenty mutations, sixteen killed:
+
+              | Mutation | Outcome |
+              | --- | --- |
+              | alt: `??` instead of `hasOwn` | killed |
+              | alt: `in` instead of `hasOwn` | killed |
+              | alt: always the title | killed |
+              | mime: `includes` instead of `startsWith` | **survived, equivalent** |
+              | mime: drop the null guard | killed |
+              | mime: `break` instead of `continue` | killed |
+              | source_url: fallback `null` instead of `""` | killed |
+              | mediaGet: `??` instead of `hasOwn` | killed |
+              | mediaGet: no guard for a non-object response | killed |
+              | featured: drop the falsy `featuredFilename` guard | **survived, equivalent** |
+              | featured: `==` null instead of `===` null | **survived, equivalent** |
+              | featured: drop the `!featuredFilename` half of the fallback | killed |
+              | featured: `featuredFilename === null` instead of falsy | killed |
+              | featured: first match wins instead of last | **survived, equivalent** |
+              | rewrite: `replaceAll` instead of `split`/`join` | killed |
+              | rewrite: `replace`, so only the first occurrence | killed |
+              | rewrite: reverse insertion order | killed |
+              | rewrite: no `TypeError` for a non-string remote | killed |
+              | rewrite: `RegExp` instead of a literal match | killed |
+              | typeName: `list` reported as `object` | killed |
+
+              The first mutation pass had six survivors; two became kills. `alt: in
+              instead of hasOwn` survived because the control used
+              `JSON.parse('{"__proto__": ...}')`, which gives an **own** `__proto__`
+              property and leaves the prototype chain alone, so `in` and `hasOwn` agree on
+              it. Replaced with `Object.create({ alt_text: "injected" })`, which is
+              unreachable from a JSONB column but pins the guard. `mediaGet: ?? instead of
+              hasOwn` survived because no oracle case had a stored `null` for
+              `source_url`; two cases were added, and both raise at the rewrite rather
+              than at the upload, which is what pinned the message spellings above.
+
+              The four remaining survivors are equivalent over the reachable domain:
+
+              * `includes` vs `startsWith`: no value in the mimetypes table contains
+                `image/` anywhere but at index 0, which is now asserted as a test rather
+                than argued.
+              * dropping the falsy `featuredFilename` guard: the mutated `if` differs only
+                for a file named `""` or `null`, and `iterdir()` yields neither. The guard
+                is redundant in the Python original too.
+              * `==` vs `===` null: `mediaGet` returns either a present JSON value or the
+                `null` fallback, and a JSON value is never `undefined`.
+              * first match wins vs last: `featuredMediaId` cannot be non-null when the
+                match is reached, because the `elif` cannot fire while `featuredFilename`
+                is truthy and two files in one directory cannot share a name.
+
+              ```
+              $ docker build -t jena-api-oracle api
+              $ docker run --rm -v "$PWD":/w -w /w/api jena-api-oracle \
+                    python scripts/export_media_upload_parity.py
+              wrote web/src/mastra/wordpress/data/wp-media-upload-parity.json with 26 cases
+
+              $ cd web && pnpm vitest run src/mastra/wordpress/media-upload.test.ts
+               ✓ src/mastra/wordpress/media-upload.test.ts (34 tests) 25ms
+               Test Files  1 passed (1)
+                    Tests  34 passed (34)
+
+              $ cd web && pnpm tsc --noEmit
+              (no output, exit 0)
+
+              $ cd web && pnpm lint
+              (no output, exit 0)
+
+              $ cd web && pnpm build
+              ✓ Compiled successfully in 4.2s
+              # the BetterAuthError lines about the default secret are the
+              # pre-existing prerender noise of a shell without BETTER_AUTH_SECRET
+
+              $ cd web && pnpm test
+               Test Files  2 failed | 117 passed (119)
+                    Tests  9 failed | 3901 passed | 7 skipped (3917)
+              # the 9 are the baseline: 6 in image-preview.test.tsx and 3 in
+              # PostDetail.test.tsx. The scaffold-check flake recorded under
+              # 5.3c-iii-b-1-c-ii-2 did not fire on this run.
+
+              $ cd api && uv run ruff check scripts/export_media_upload_parity.py
+              All checks passed!
+              $ cd api && uv run ruff format --check scripts/export_media_upload_parity.py
+              1 file already formatted
+
+              $ cd api && set -a && . ../.env && set +a && uv run pytest -q
+              120 failed, 241 passed, 25 errors in 15.01s
+              # the Phase 0 baseline exactly, unchanged by this item
+              ```
           - [ ] 5.3c-iii-b-1-c-iii The publish workflow itself: the profile and credential
             guards, the create/update branch, the `wp_publish_status` transitions and the
             `publish_start` / `publish_complete` / `publish_error` events with `_fail`.
