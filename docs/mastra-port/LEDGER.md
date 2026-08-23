@@ -9701,7 +9701,125 @@ three pieces are separately verifiable, so they are separate items.
 
         - [ ] 5.3c-iii-b-1-b `markdown_to_wp_html` (`api/src/services/wp_html.py`), the
           markdown-to-Gutenberg-block converter the publish hook runs the article
-          through.
+          through. (Split: the file is a 127-line mistune 3 renderer, but the renderer
+          is the easy half. Which lines become a heading and which a paragraph is
+          decided by mistune's tokenizer, and that tokenizer is another 900 lines across
+          `block_parser.py`, `list_parser.py` and `inline_parser.py`, none of which has a
+          JavaScript equivalent that agrees with it. Pointing `marked` or
+          `mdast-util-from-markdown` at the same input and hoping is not a port: it
+          silently diverges exactly where the corpus is thin. Split by tokenizer layer,
+          one oracle each: 5.3c-iii-b-1-b-i leaf blocks, -b-ii container blocks,
+          -b-iii inline.)
+
+          - [x] 5.3c-iii-b-1-b-i The frontmatter strip, the newline normalisation, the
+            block scan loop and the leaf blocks: `blank_line`, `fenced_code`,
+            `indent_code`, `atx_heading`, `setex_heading`, `thematic_break` and the
+            paragraph fallback, plus the two inline break tokens a multi-line paragraph
+            produces.
+
+            `web/src/mastra/wordpress/wp-html.ts` ports mistune's `BlockParser.parse`
+            loop and `BlockState` rather than wrapping a JavaScript markdown library,
+            because the behaviours that matter here are all tokenizer behaviours:
+            `Para.\n--` rewrites the paragraph above it into an `<h2>`, `    code` at the
+            top of a document is a paragraph rather than a code block because the
+            function calls `.strip()` first, an unclosed fence still closes at the end of
+            the document, and a backtick inside a backtick fence's info string stops the
+            fence from being a fence.
+
+            **The patterns for the four unported block rules and the seven unported
+            inline rules are registered anyway, in mistune's rule order, and their
+            handlers throw `UnportedMarkdownError`.** Rule order is what decides whether
+            `- - -` is a thematic break or a list, so a scanner missing those
+            alternatives is not the same scanner. Throwing rather than falling through to
+            a paragraph means wiring the converter into the publish workflow before
+            -b-ii and -b-iii land cannot silently flatten a list or drop a link.
+
+            The oracle is `api/scripts/export_wp_html_block_parity.py`: 72 inputs run
+            through the real `markdown_to_wp_html` with its output recorded verbatim into
+            `web/src/mastra/wordpress/data/wp-html-block-parity.json`. Nothing in the
+            test file is a hand-written expectation.
+
+            ```
+            $ cd api && PYTHONPATH=. uv run python scripts/export_wp_html_block_parity.py
+            wrote 72 cases to /Users/cody/.../web/src/mastra/wordpress/data/wp-html-block-parity.json
+
+            $ cd web && pnpm exec vitest run src/mastra/wordpress/wp-html-blocks.test.ts
+             ✓ src/mastra/wordpress/wp-html-blocks.test.ts (92 tests) 5ms
+             Test Files  1 passed (1)
+                  Tests  92 passed (92)
+            ```
+
+            92 tests: the 72 replay cases, 9 negative controls, 10 unported-rule
+            assertions (5 block, 5 inline) and 1 structural check on the oracle file
+            itself.
+
+            **Regex translation, four differences that would each have shipped a wrong
+            article.** Python compiles the block rules with `re.M`, where `^` matches at
+            the start of the string or after `\n` and `$` before `\n` or at the end;
+            JavaScript's `m` flag also breaks on `\r`, `\u2028` and
+            `\u2029`. The anchors
+            are spelled `(?<![^\n])` and `(?![^\n])` instead and no `m` flag is used.
+            `re.search(src, pos)` is a `g`-flagged `exec` with `lastIndex = pos` and
+            `re.match(src, pos)` is a `y`-flagged one, both of which keep looking at the
+            whole string for the anchors the way Python does. `m.lastgroup` is emulated
+            by walking the rule list in order and taking the first named group that
+            participated. And Python's `str.strip(chars)` strips a *set* of characters,
+            so `text.strip(string.whitespace)` in `parse_atx_heading` is not `trim()`.
+
+            **One case moved out of this corpus.** A backtick fence whose info string
+            holds a backtick is declined, and the line falls back to a paragraph that
+            still holds those backticks, which is a codespan. Its rendered form belongs
+            to the -b-iii corpus. The decline itself is asserted here, by asserting the
+            input reaches the inline parser at all.
+
+            Gates, all from the repo root unless noted:
+
+            ```
+            $ cd web && pnpm exec tsc --noEmit
+            tsc exit=0
+
+            $ cd web && pnpm lint
+            lint exit=0
+
+            $ cd web && pnpm test
+             Test Files  2 failed | 104 passed (106)
+                  Tests  9 failed | 2374 passed | 7 skipped (2390)
+
+            $ cd web && pnpm build
+            ✓ Compiled successfully in 4.5s
+            build exit=0
+
+            $ cd api && uv run pytest -q     # .env sourced
+            120 failed, 241 passed, 25 errors in 15.09s
+
+            $ cd api && uv run ruff check .
+            Found 32 errors.
+
+            $ cd api && uv run ruff format --check .
+            9 files would be reformatted, 136 files already formatted
+
+            $ cd api && uv run ruff check scripts/export_wp_html_block_parity.py
+            All checks passed!
+
+            $ cd api && uv run ruff format --check scripts/export_wp_html_block_parity.py
+            1 file already formatted
+            ```
+
+            The 9 frontend failures are the Phase 0 baseline (6 in `image-preview.test.tsx`,
+            3 in `PostDetail.test.tsx`). pytest is above its baseline of 125 failed /
+            236 passed / 25 errors. ruff's 32 and 9 are the recorded baselines.
+
+          - [ ] 5.3c-iii-b-1-b-ii The container blocks and the two remaining block rules:
+            `block_quote`, `list` (`list_parser.py`, which carries the tight/loose rule
+            and nesting depth), `ref_link` and `raw_html`/`block_html`, plus the `list`
+            and `block_quote` renderer methods. Its oracle must also carry the
+            `list`-vs-`thematic_break` and `list`-vs-`setext` precedence cases.
+          - [ ] 5.3c-iii-b-1-b-iii The inline rules: `escape`, `codespan`, `emphasis`,
+            `strong`, `link`, `image`, `auto_link`, `auto_email` and `inline_html`, plus
+            the `emphasis`, `strong`, `link`, `codespan` and `image` renderer methods.
+            Note that `image` is an inline token that the Gutenberg renderer turns into a
+            block comment, so an image inside a paragraph nests one. Its oracle must
+            include the backtick-info-string fence case moved out of the -b-i corpus.
         - [ ] 5.3c-iii-b-1-c The Mastra WordPress publish workflow
           (`api/src/pipeline/publish.py`): the media-directory sweep, the manifest-driven
           featured image and alt text, the local-to-remote URL rewrite, the create/update
