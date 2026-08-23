@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import parity from "./data/wp-html-list-parity.json";
-import { UnportedMarkdownError, markdownToWpHtml } from "./wp-html";
+import { markdownToWpHtml } from "./wp-html";
 
 /**
  * `markdown_to_wp_html`'s list handling, replayed against the real Python
@@ -136,15 +136,17 @@ describe("the list oracle has teeth", () => {
     expect(markdownToWpHtml(seven).split("<ul>").length - 1).toBe(6);
   });
 
-  it("still refuses the rules that are not ported yet, inside a list item", () => {
-    // An item reparses its body, so an unported rule in an item must stop the
-    // converter rather than flatten to text. This read `- <div>raw</div>` until
-    // 5.3c-iii-b-1-b-ii-3-a ported `raw_html` and `- [label]: https://example.com`
-    // until -ii-3-b-2 ported `ref_link`, which finished the block layer, and
-    // `- an *emphasised* word` until -iii-c ported `emphasis`; `link` is the
-    // last inline rule left to refuse.
-    expect(() => markdownToWpHtml("- a [link](/b) here\n")).toThrowError(
-      UnportedMarkdownError,
+  it("reparses its body with the whole rule set, inside a list item", () => {
+    // An item reparses its body in a child state, so a rule that works at the
+    // top level has to work here too. This asserted a refusal while the rules
+    // were still landing: `- <div>raw</div>` until 5.3c-iii-b-1-b-ii-3-a ported
+    // `raw_html`, `- [label]: https://example.com` until -ii-3-b-2 ported
+    // `ref_link`, `- an *emphasised* word` until -iii-c ported `emphasis`, and
+    // this input until -iii-d ported `link`, which finished the port.
+    expect(markdownToWpHtml("- a [link](/b) here\n")).toBe(
+      "<!-- wp:list -->\n" +
+        '<ul><li>a <a href="/b">link</a> here</li>\n</ul>\n' +
+        "<!-- /wp:list -->\n\n",
     );
   });
 });

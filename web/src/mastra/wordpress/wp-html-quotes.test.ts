@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import parity from "./data/wp-html-quote-parity.json";
-import { UnportedMarkdownError, markdownToWpHtml } from "./wp-html";
+import { markdownToWpHtml } from "./wp-html";
 
 /**
  * `markdown_to_wp_html`'s block-quote handling, replayed against the real
@@ -120,17 +120,19 @@ describe("the quote oracle has teeth", () => {
     );
   });
 
-  it("still refuses the rules that are not ported yet, inside a quote", () => {
-    // A quote reparses its body, so an unported rule in a quote must stop the
-    // converter rather than flatten to a paragraph. This read `> - item` until
-    // 5.3c-iii-b-1-b-ii-2 ported `list`, `> <div>raw</div>` until -ii-3-a ported
-    // `raw_html` and `> [label]: https://example.com` until -ii-3-b-2 ported
-    // `ref_link`, which finished the block layer; all three are now replay cases
-    // in `wp-html-lists.test.ts`, `wp-html-raw-html.test.ts` and
-    // `wp-html-ref-link.test.ts`. `> an *emphasised* word` read here until
-    // -iii-c ported `emphasis`; `link` is the last inline rule left to refuse.
-    expect(() => markdownToWpHtml("> a [link](/b) here\n")).toThrowError(
-      UnportedMarkdownError,
+  it("reparses its body with the whole rule set, inside a quote", () => {
+    // A quote reparses its body in a child state, so a rule that works at the
+    // top level has to work here too. This asserted a refusal while the rules
+    // were still landing: `> - item` until 5.3c-iii-b-1-b-ii-2 ported `list`,
+    // `> <div>raw</div>` until -ii-3-a ported `raw_html`,
+    // `> [label]: https://example.com` until -ii-3-b-2 ported `ref_link`,
+    // `> an *emphasised* word` until -iii-c ported `emphasis`, and this input
+    // until -iii-d ported `link`, which finished the port.
+    expect(markdownToWpHtml("> a [link](/b) here\n")).toBe(
+      "<!-- wp:quote -->\n" +
+        '<blockquote class="wp-block-quote"><!-- wp:paragraph -->\n' +
+        '<p>a <a href="/b">link</a> here</p>\n<!-- /wp:paragraph -->\n\n' +
+        "</blockquote>\n<!-- /wp:quote -->\n\n",
     );
   });
 });

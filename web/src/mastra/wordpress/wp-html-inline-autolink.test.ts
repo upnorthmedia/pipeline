@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import parity from "./data/wp-html-inline-autolink-parity.json";
 import {
   MissingRendererError,
-  UnportedMarkdownError,
   markdownToWpHtml,
   parseInlineTokens,
   renderTokens,
@@ -236,14 +235,10 @@ describe("hand written controls", () => {
     }
   });
 
-  it("still stops on the inline rules that are not ported yet", () => {
-    for (const [markdown, rule] of [["[a](/b)\n", "link"]] as const) {
-      expect(() => markdownToWpHtml(markdown)).toThrow(UnportedMarkdownError);
-      try {
-        markdownToWpHtml(markdown);
-      } catch (err) {
-        expect((err as UnportedMarkdownError).rule).toBe(rule);
-      }
-    }
+  it("renders a link now that -iii-d has ported the last inline rule", () => {
+    expect(markdownToWpHtml("[a](/b)\n")).toBe(
+      '<!-- wp:paragraph -->\n<p><a href="/b">a</a></p>\n' +
+        "<!-- /wp:paragraph -->\n\n",
+    );
   });
 });

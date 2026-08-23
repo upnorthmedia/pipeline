@@ -9699,9 +9699,13 @@ three pieces are separately verifiable, so they are separate items.
           1 file already formatted
           ```
 
-        - [ ] 5.3c-iii-b-1-b `markdown_to_wp_html` (`api/src/services/wp_html.py`), the
+        - [x] 5.3c-iii-b-1-b `markdown_to_wp_html` (`api/src/services/wp_html.py`), the
           markdown-to-Gutenberg-block converter the publish hook runs the article
-          through. (Split: the file is a 127-line mistune 3 renderer, but the renderer
+          through. Closed by -b-iii: all three layers are checked, so
+          `web/src/mastra/wordpress/wp-html.ts` is a whole-function port of
+          `markdown_to_wp_html`, tokenizer included, with 1124 replay and control tests
+          across nine `wp-html*` test files, plus the 103 in `escape-url.test.ts` for
+          `util.escape_url`. (Split: the file is a 127-line mistune 3 renderer, but the renderer
           is the easy half. Which lines become a heading and which a paragraph is
           decided by mistune's tokenizer, and that tokenizer is another 900 lines across
           `block_parser.py`, `list_parser.py` and `inline_parser.py`, none of which has a
@@ -10546,9 +10550,12 @@ three pieces are separately verifiable, so they are separate items.
                   $ cd api && uv run ruff format --check scripts/export_wp_html_ref_link_parity.py
                   1 file already formatted
                   ```
-          - [ ] 5.3c-iii-b-1-b-iii The inline rules: `escape`, `codespan`, `emphasis`,
+          - [x] 5.3c-iii-b-1-b-iii The inline rules: `escape`, `codespan`, `emphasis`,
             `strong`, `link`, `image`, `auto_link`, `auto_email` and `inline_html`, plus
             the `emphasis`, `strong`, `link`, `codespan` and `image` renderer methods.
+            Closed by -iii-d: all four sub-items are checked with their own oracle and
+            evidence, and every rule in `InlineParser.DEFAULT_RULES` plus the appended
+            `softbreak` is ported.
             Note that `image` is an inline token that the Gutenberg renderer turns into a
             block comment, so an image inside a paragraph nests one. Its oracle must
             include the backtick-info-string fence case moved out of the -b-i corpus.
@@ -11024,10 +11031,184 @@ three pieces are separately verifiable, so they are separate items.
               $ cd api && uv run ruff format --check scripts/export_wp_html_inline_emphasis_parity.py
               1 file already formatted
               ```
-            - [ ] 5.3c-iii-b-1-b-iii-d `link` and `image`, `parse_link_label`,
+            - [x] 5.3c-iii-b-1-b-iii-d `link` and `image`, `parse_link_label`,
               `parse_link_text`, `parse_link`, the `in_link` / `in_image` guards, the
               `state.env['ref_links']` lookup, and the `link` and `image` renderer
               methods.
+
+              Done. `web/src/mastra/wordpress/wp-html.ts` gains `parseLinkLabel`,
+              `parseLinkText`, `parseLinkAttrs` (mistune's `helpers.parse_link`),
+              `parseLinkToken`, `parseLinkRule` and the `image` renderer case;
+              `parseLinkHref` grows the `block` parameter it was written without, so the
+              inline `LINK_HREF_INLINE_RE` branch now shares it with the block one.
+              `PREVENT_BACKSLASH` moved up beside `PUNCTUATION` because the inline href
+              and square-bracket patterns need it before the inline section runs.
+
+              **This finishes `markdown_to_wp_html`.** Every rule in
+              `BlockParser.DEFAULT_RULES` and `InlineParser.DEFAULT_RULES` is ported, so
+              `UnportedMarkdownError` had no throw site left and is deleted along with
+              `UNPORTED_INLINE_RULES`; the six test files that asserted a refusal now
+              assert the real Python output instead. `MissingRendererError` stays: it is
+              where mistune raises `AttributeError` for an `inline_html` token, which is
+              a renderer gap rather than a parser one.
+
+              **One real divergence found and fixed.** `helpers.LINK_LABEL` spells
+              `\\.` and Python's `.` without `re.S` is exactly `[^\n]`, while
+              JavaScript's also refuses `\r`, U+2028 and U+2029. A backslash before a
+              line separator is therefore inside a label to mistune and would have ended
+              it here, so the class is spelled out. Reachable through both layers, since
+              `LINK_LABEL` is also in the block `ref_link` pattern: with the JavaScript
+              dot, `[a\<U+2028>b]: /c` is not a definition and `[a\<U+2028>b]` is not a
+              reference, so the document renders as two literal paragraphs instead of one
+              link. Case in the corpus and a named control.
+
+              **Four behaviours worth naming**, each read off the real function first:
+
+              * An `image` is an inline token, so an image inside a paragraph nests a
+                `<!-- wp:image -->` block comment between the `<p>` tags. Invalid
+                Gutenberg, and exactly what Python emits.
+              * `_INLINE_SQUARE_BRACKET_RE` carries an even backslash run into its match
+                and `parse_link_text` compares the *whole* match against `"]"`, so `\\]`
+                raises the nesting level rather than lowering it, while `\]` is skipped
+                entirely.
+              * The two nesting guards are asymmetric: a link inside a link text and an
+                image inside an image alt are literal text, but a link inside an image alt
+                and an image inside a link text both still nest.
+              * `parse_link` passes `precedence_scan` the rule list without `link` in it,
+                which is what stops the scan from recursing into the rule that called it.
+
+              **Oracle.** `api/scripts/export_wp_html_inline_link_parity.py` writes
+              `web/src/mastra/wordpress/data/wp-html-inline-link-parity.json` from the
+              real Python: 91 whole-document `html_cases`, 2 `raising_cases` that pin the
+              `AttributeError` a tag in a paragraph causes, 23 `token_cases` through
+              `mistune.InlineParser.__call__` with an explicit `ref_links` env (the only
+              surface the token's `ref` and `label` fields and an empty title are visible
+              on) and 7 `render_cases` for `_GutenbergRenderer.image` and the `link` title
+              branch.
+
+              ```
+              $ cd api && PYTHONPATH=. uv run python scripts/export_wp_html_inline_link_parity.py
+              wrote 91 html cases, 2 raising cases, 23 token cases and 7 render cases to /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web/src/mastra/wordpress/data/wp-html-inline-link-parity.json
+              ```
+
+              Failing first, with `parseLinkRule` stubbed to `return undefined` on entry:
+
+              ```
+              $ pnpm -C web exec vitest run src/mastra/wordpress/wp-html-inline-link.test.ts
+               Test Files  1 failed (1)
+                    Tests  100 failed | 38 passed (138)
+              ```
+
+              Passing, and the whole `wordpress/` suite with the six updated files:
+
+              ```
+              $ pnpm -C web exec vitest run src/mastra/wordpress/wp-html-inline-link.test.ts
+               ✓ src/mastra/wordpress/wp-html-inline-link.test.ts (138 tests) 13ms
+               Test Files  1 passed (1)
+                    Tests  138 passed (138)
+              $ pnpm -C web exec vitest run src/mastra/wordpress/
+               ✓ src/mastra/wordpress/wordpress.test.ts (57 tests)
+               ✓ src/mastra/wordpress/wordpress-write.test.ts (33 tests)
+               ✓ src/mastra/wordpress/escape-url.test.ts (103 tests)
+               ✓ src/mastra/wordpress/wp-html-blocks.test.ts (84 tests)
+               ✓ src/mastra/wordpress/wp-html-quotes.test.ts (67 tests)
+               ✓ src/mastra/wordpress/wp-html-raw-html.test.ts (105 tests)
+               ✓ src/mastra/wordpress/wp-html-inline-autolink.test.ts (121 tests)
+               ✓ src/mastra/wordpress/wp-html-inline-emphasis.test.ts (111 tests)
+               ✓ src/mastra/wordpress/wp-html-inline-link.test.ts (138 tests)
+               ✓ src/mastra/wordpress/wp-html-inline-escape-codespan.test.ts (109 tests)
+               ✓ src/mastra/wordpress/wp-html-lists.test.ts (128 tests)
+               ✓ src/mastra/wordpress/wp-html-ref-link.test.ts (261 tests)
+               Test Files  12 passed (12)
+                    Tests  1317 passed (1317)
+              ```
+
+              **Negative controls**, twenty-six mutations, each applied to `wp-html.ts`
+              on its own and reverted (the file was `cmp`-checked against a saved copy
+              afterwards), with the eight `wp-html*` test files run against each:
+
+              | # | Mutation | Result |
+              | --- | --- | --- |
+              | 1 | `parse_link_text` compares only the bracket, not the whole match | caught |
+              | 2 | `parse_link_text` keeps the closing bracket in the text | caught |
+              | 3 | `parse_link_label` keeps the closing bracket in the label | caught |
+              | 4 | the inline href branch does not back the cursor off by one | caught |
+              | 5 | the href is percent encoded without being unescaped first | caught |
+              | 6 | the href is not percent encoded | caught |
+              | 7 | an empty title is stored rather than dropped | caught |
+              | 8 | the closing parenthesis is looked for after the href, not the title | caught |
+              | 9 | the two nesting guards are swapped | caught |
+              | 10 | the nesting guard is dropped | caught |
+              | 11 | the precedence scan is skipped | caught |
+              | 12 | the precedence scan uses the default rules, which include `link` | caught |
+              | 13 | a counted text running to the end of the source is still a link | **survived** |
+              | 14 | an empty second label overwrites the first | caught |
+              | 15 | an inline link returns the text end rather than the parenthesis end | caught |
+              | 16 | the empty `ref_links` guard is dropped | **survived** |
+              | 17 | the reference key is not case folded | caught |
+              | 18 | a reference link carries no `title` key at all | caught |
+              | 19 | the token builder sets the other nesting flag | caught |
+              | 20 | the token builder starts from a fresh state instead of a copy | caught |
+              | 21 | the image renderer reads the title instead of the url | caught |
+              | 22 | `LINK_LABEL` uses JavaScript's dot | caught |
+              | 23 | `PAREN_END_RE` uses JavaScript's whitespace class | caught |
+              | 24 | the square bracket scan drops `PREVENT_BACKSLASH` | caught |
+              | 25 | the inline href pattern is greedy | caught |
+              | 26 | the second label advances the cursor even when it does not parse | caught |
+
+              Six of these survived the first corpus and six cases were added for them:
+              `[a[b] c\\](/d)` (1, the even-backslash quirk only reaches the counter
+              when a nested bracket has already defeated `parse_link_label`),
+              `[a](/b "")` as a token case (7, an empty title is falsy in the renderer so
+              only the token shape shows it), `_a [b *c* d](/e) f_` (20, the copied
+              `in_emphasis` flag is what keeps `*c*` literal inside the link text),
+              `[a](/b "t"\x1c)` and `[a](/b "t"\ufeff)` (23, the two directions Python's
+              and JavaScript's whitespace sets disagree in), `[a[b] c\] d](/e)` (24) and
+              `[a][b` with a definition for `a` (26).
+
+              The two survivors are unobservable, not untested:
+
+              * **13.** Removing `if end_pos >= len(state.src) and label is None` opens
+                exactly one new path, `precedence_scan`, because the branches after it are
+                all behind `end_pos < len(state.src)` and the function returns `None` at
+                the bottom for a `None` label anyway. `precedence_scan` only wins when its
+                rule ends at `>= end_pos`, which here is `len(src)`, so the winning match
+                would have to end on the final `]` that produced `end_pos`. No inline rule
+                can: `codespan` ends on a backtick, `auto_link` and `inline_html` on `>`.
+                Checked empirically as well, by patching the guard out of mistune's own
+                `parse_link` and diffing the rendered HTML: 197502 generated documents over
+                an alphabet of the characters these rules care about, 0 differed.
+              * **16.** `if not ref_links: return None` guards a `.get` on the map that
+                follows, and an empty map's `get` returns nothing either way. In Python the
+                guard is load-bearing for `md.inline(s, {})`, where `env.get('ref_links')`
+                is `None` and the `.get` would raise; in the port `InlineEnv` types
+                `refLinks` as a required `Map`, so that shape does not exist. Kept for
+                faithfulness, and noted here so a later reader does not hunt for the input.
+
+              Gates, both stacks. `pnpm test` is at its recorded baseline: the same 9
+              failures in `image-preview.test.tsx` (6) and `PostDetail.test.tsx` (3),
+              neither of which imports `wp-html`, and both reproduce on their own.
+
+              ```
+              $ pnpm -C web exec tsc --noEmit
+              (no output, exit 0)
+              $ pnpm -C web lint
+              (no output, exit 0)
+              $ pnpm -C web test
+               Test Files  2 failed | 113 passed (115)
+                    Tests  9 failed | 3509 passed | 7 skipped (3525)
+              $ pnpm -C web exec vitest run src/app/posts/PostDetail.test.tsx src/components/__tests__/image-preview.test.tsx
+               Test Files  2 failed (2)
+                    Tests  9 failed | 15 passed (24)
+              $ pnpm -C web build
+              ✓ Compiled successfully
+              $ cd api && uv run pytest -q
+              120 failed, 241 passed, 25 errors in 15.16s
+              $ cd api && uv run ruff check scripts/export_wp_html_inline_link_parity.py
+              All checks passed!
+              $ cd api && uv run ruff format --check scripts/export_wp_html_inline_link_parity.py
+              1 file already formatted
+              ```
         - [ ] 5.3c-iii-b-1-c The Mastra WordPress publish workflow
           (`api/src/pipeline/publish.py`): the media-directory sweep, the manifest-driven
           featured image and alt text, the local-to-remote URL rewrite, the create/update

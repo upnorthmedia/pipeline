@@ -68,12 +68,18 @@
  * a tag inside a paragraph raises out of the renderer rather than converting;
  * `MissingRendererError` is where mistune raises `AttributeError`.
  *
- * Not ported yet: `emphasis` (5.3c-iii-b-1-b-iii-c), and `link` and `image`
- * (5.3c-iii-b-1-b-iii-d). Their *patterns* are registered here in mistune's rule
- * order, because rule order is what decides which of two rules matching at the
- * same offset wins, and their handlers throw `UnportedMarkdownError`. A
- * half-ported converter that silently dropped a link would be worse than one
- * that stops.
+ * Ported here too (ledger 5.3c-iii-b-1-b-iii-c): `emphasis`, which produces both
+ * the `emphasis` and the `strong` token and is the first rule to recurse into
+ * itself, and `precedence_scan`, which is what stops an emphasis run from
+ * cutting a codespan, an autolink or a tag in half.
+ *
+ * Ported here too (ledger 5.3c-iii-b-1-b-iii-d): `link` and `image`, the last
+ * rule and the only one that can decline. It is the only reader of
+ * `state.env.refLinks`, so this is where the block layer's `ref_link` output is
+ * finally observable, and it is also the only rule that walks the source by
+ * hand rather than through a single pattern. With it the whole of
+ * `markdown_to_wp_html` is ported, so nothing is left that raises for want of a
+ * handler.
  *
  * Regex translation notes:
  *
@@ -122,20 +128,11 @@ export type Token = {
   endPos?: number;
   /** `list` only, transient: where in `state.tokens` the list must be inserted. */
   tokIndex?: number;
+  /** `link` and `image` only, when resolved through a reference: the folded key. */
+  ref?: string;
+  /** `link` and `image` only, when resolved through a reference: the raw label. */
+  label?: string;
 };
-
-/** Thrown when the input uses a construct whose handler is not ported yet. */
-export class UnportedMarkdownError extends Error {
-  readonly rule: string;
-
-  constructor(rule: string, ledgerItem: string) {
-    super(
-      `markdownToWpHtml: the "${rule}" rule is not ported yet (ledger item ${ledgerItem})`,
-    );
-    this.name = "UnportedMarkdownError";
-    this.rule = rule;
-  }
-}
 
 /**
  * Thrown where mistune's `BaseRenderer._get_method` raises
@@ -190,7 +187,14 @@ const PY_WORD_BOUNDARY_AFTER = `(?!${PY_WORD})`;
 
 /** `string.punctuation`, as a character class. */
 const PUNCTUATION = "[!\"#$%&'()*+,\\-./:;<=>?@\\[\\\\\\]^_`{|}~]";
-const LINK_LABEL = "(?:[^\\\\\\[\\]]|\\\\.){0,500}";
+/** `helpers.PREVENT_BACKSLASH`: an even number of backslashes, so the next one escapes. */
+const PREVENT_BACKSLASH = "(?<!\\\\)(?:\\\\\\\\)*";
+/**
+ * `helpers.LINK_LABEL`. Python's `.` without `re.S` is exactly `[^\n]`, while
+ * JavaScript's also refuses `\r`, `U+2028` and `U+2029`, so a backslash before
+ * one of those is an escaped character to mistune and would end the label here.
+ */
+const LINK_LABEL = "(?:[^\\\\\\[\\]]|\\\\[^\\n]){0,500}";
 const HTML_TAGNAME = "[A-Za-z][A-Za-z0-9-]*";
 const HTML_ATTRIBUTES =
   "(?:\\s+[A-Za-z_:][A-Za-z0-9_.:-]*" +
@@ -1242,6 +1246,16 @@ const LINK_HREF_BLOCK_RE = new RegExp(
   `[ \\t]*\\n?[ \\t]*([^${PY_SPACE}]+)(?:[${PY_SPACE}]|${EOS})`,
   "y",
 );
+/**
+ * `helpers.LINK_HREF_INLINE_RE`. The href is lazy, so it stops at the first
+ * space or at a `)` that an odd backslash run is not escaping. The `)` and any
+ * even backslash run before it are inside the match, which is why the inline
+ * branch always backs the cursor off by one.
+ */
+const LINK_HREF_INLINE_RE = new RegExp(
+  `[ \\t]*\\n?[ \\t]*([^ \\t\\n]*?)(?:[ \\t\\n]|(?:${PREVENT_BACKSLASH}\\)))`,
+  "y",
+);
 /** `helpers.LINK_TITLE_RE`. */
 const LINK_TITLE_RE = new RegExp(
   `[ \\t\\n]+(` +
@@ -1254,21 +1268,20 @@ const LINK_TITLE_RE = new RegExp(
 const BLANK_TO_LINE = /[ \t]*\n/y;
 
 /**
- * `helpers.parse_link_href` in its `block=True` form. Python returns the pair
- * `(href, end_pos)` or `(None, None)`; this returns the pair as an object, or
- * `undefined`, because the two halves are never independently absent.
+ * `helpers.parse_link_href`. Python returns the pair `(href, end_pos)` or
+ * `(None, None)`; this returns the pair as an object, or `undefined`, because
+ * the two halves are never independently absent.
  *
- * The `block=False` branch (`LINK_HREF_INLINE_RE`) belongs to the inline `link`
- * rule and lands with ledger item 5.3c-iii-b-1-b-iii, so it is not ported here.
- *
- * The end position is off by one depending on how the bare form stopped: the
- * trailing `(?:\s|$)` consumes a whitespace character when there is one, and
- * mistune backs the cursor off it by comparing the last character of the match
+ * The angle-bracket form is shared. For the bare form the block and inline
+ * branches use different patterns and different end positions: both trail a
+ * character the href does not include, and only the block branch bothers to ask
+ * whether one was really consumed, by comparing the last character of the match
  * with the last character of the href.
  */
 function parseLinkHref(
   src: string,
   startPos: number,
+  block = false,
 ): { href: string; endPos: number } | undefined {
   const bracket = anchoredMatch(LINK_BRACKET_START, src, startPos);
   if (bracket) {
@@ -1278,12 +1291,18 @@ function parseLinkHref(
     return undefined;
   }
 
-  const m = anchoredMatch(LINK_HREF_BLOCK_RE, src, startPos);
+  const m = anchoredMatch(
+    block ? LINK_HREF_BLOCK_RE : LINK_HREF_INLINE_RE,
+    src,
+    startPos,
+  );
   if (!m) return undefined;
 
   const endPos = startPos + m[0].length;
   const href = m[1];
-  if (src[endPos - 1] === href[href.length - 1]) return { href, endPos };
+  if (block && src[endPos - 1] === href[href.length - 1]) {
+    return { href, endPos };
+  }
   return { href, endPos: endPos - 1 };
 }
 
@@ -1332,7 +1351,7 @@ function parseRefLink(
   const key = unikey(label);
   if (!key) return undefined;
 
-  const hrefMatch = parseLinkHref(state.src, m.index + m[0].length);
+  const hrefMatch = parseLinkHref(state.src, m.index + m[0].length, true);
   if (!hrefMatch) return undefined;
   let href: string | undefined = hrefMatch.href;
   let hrefPos: number | undefined = hrefMatch.endPos;
@@ -1437,14 +1456,6 @@ const PREC_DEFAULT_RULES = [
   "prec_auto_link",
   "prec_inline_html",
 ] as const;
-
-/** Which ledger item each still-unported inline rule belongs to. */
-const UNPORTED_INLINE_RULES: Record<string, string> = {
-  link: "5.3c-iii-b-1-b-iii-d",
-};
-
-/** `helpers.PREVENT_BACKSLASH`: an even number of backslashes, so the next one escapes. */
-const PREVENT_BACKSLASH = "(?<!\\\\)(?:\\\\\\\\)*";
 
 /** What may sit immediately before a closing run: an escaped marker, or a
  * character that is neither whitespace nor the marker itself. */
@@ -1597,6 +1608,208 @@ function parseInlineHtml(m: RegExpExecArray, state: InlineState): number {
   return m.index + html.length;
 }
 
+/** `helpers._INLINE_LINK_LABEL_RE`. */
+const INLINE_LINK_LABEL_RE = new RegExp(`${LINK_LABEL}\\]`, "yu");
+/** `helpers._INLINE_SQUARE_BRACKET_RE`. */
+const INLINE_SQUARE_BRACKET_RE = new RegExp(
+  `${PREVENT_BACKSLASH}[\\[\\]]`,
+  "gu",
+);
+/** `helpers.PAREN_END_RE`. Python's `\s`, so not the JavaScript escape. */
+const PAREN_END_RE = new RegExp(`[${PY_SPACE}]*\\)`, "yu");
+/** The rules `parse_link` hands `precedence_scan`: notably not `link` itself. */
+const LINK_PREC_RULES = [
+  "codespan",
+  "prec_auto_link",
+  "prec_inline_html",
+] as const;
+
+/**
+ * `helpers.parse_link_label`: the label of `[label]`, matched anchored.
+ *
+ * `LINK_LABEL` admits neither a bare `[` nor a bare `]`, so a label with a
+ * nested bracket in it fails here and `parse_link_text` picks it up instead.
+ */
+function parseLinkLabel(
+  src: string,
+  startPos: number,
+): { label: string; endPos: number } | undefined {
+  const m = anchoredMatch(INLINE_LINK_LABEL_RE, src, startPos);
+  if (!m) return undefined;
+  return { label: m[0].slice(0, -1), endPos: startPos + m[0].length };
+}
+
+/**
+ * `helpers.parse_link_text`: bracket counting from just inside the opening `[`.
+ *
+ * The pattern it searches with is `PREVENT_BACKSLASH` followed by a bracket, so
+ * the match can carry an even run of backslashes with it, and mistune compares
+ * the *whole* match against `"]"`. A closing bracket behind an even backslash
+ * run therefore raises the nesting level instead of lowering it.
+ */
+function parseLinkText(
+  src: string,
+  pos: number,
+): { text: string; endPos: number } | undefined {
+  const startPos = pos;
+  let level = 1;
+  let found = false;
+
+  while (pos < src.length) {
+    const m = search(INLINE_SQUARE_BRACKET_RE, src, pos);
+    if (!m) break;
+
+    pos = m.index + m[0].length;
+    if (m[0] === "]") {
+      level -= 1;
+      if (level === 0) {
+        found = true;
+        break;
+      }
+    } else {
+      level += 1;
+    }
+  }
+
+  if (found) return { text: src.slice(startPos, pos - 1), endPos: pos };
+  return undefined;
+}
+
+/**
+ * `helpers.parse_link`: the `(<url> "title")` half of an inline link, entered
+ * one character past the `(`.
+ *
+ * An empty title is dropped rather than stored, so `[a](/b "")` renders without
+ * the attribute.
+ */
+function parseLinkAttrs(
+  src: string,
+  pos: number,
+): { attrs: NonNullable<Token["attrs"]>; endPos: number } | undefined {
+  const href = parseLinkHref(src, pos);
+  if (!href) return undefined;
+
+  const title = parseLinkTitle(src, href.endPos, src.length);
+  const nextPos = title ? title.endPos : href.endPos;
+  const paren = anchoredMatch(PAREN_END_RE, src, nextPos);
+  if (!paren) return undefined;
+
+  const attrs: NonNullable<Token["attrs"]> = {
+    url: escapeUrl(unescapeChar(href.href)),
+  };
+  if (title?.title) attrs.title = title.title;
+  return { attrs, endPos: nextPos + paren[0].length };
+}
+
+/**
+ * `InlineParser._InlineParser__parse_link_token`: the link or image token, with
+ * its text re-parsed under the matching nesting flag.
+ */
+function parseLinkToken(
+  isImage: boolean,
+  text: string,
+  attrs: NonNullable<Token["attrs"]>,
+  state: InlineState,
+): Token {
+  const newState = state.copy();
+  newState.src = text;
+  if (isImage) {
+    newState.inImage = true;
+    return { type: "image", children: parseInline(newState), attrs };
+  }
+  newState.inLink = true;
+  return { type: "link", children: parseInline(newState), attrs };
+}
+
+/**
+ * `InlineParser.parse_link`. The only inline rule that can decline.
+ *
+ * The scan only matches the `[` or `![`, so everything after it is walked by
+ * hand: the label or the bracket-counted text, then a precedence scan, then one
+ * of three shapes decided by the character sitting at the end of the text. A
+ * `(` is an inline link, a `[` is a reference link with an explicit label, and
+ * anything else is a shortcut reference. Every path that fails to resolve
+ * returns `undefined`, and the scan loop then emits the `[` as text and
+ * restarts one character later.
+ */
+function parseLinkRule(
+  m: RegExpExecArray,
+  state: InlineState,
+): number | undefined {
+  const marker = m[0];
+  const pos = m.index + marker.length;
+  const isImage = marker[0] === "!";
+
+  // The guards are asymmetric: an image inside an image and a link inside a
+  // link are literal text, but a link inside an image is not.
+  if (isImage ? state.inImage : state.inLink) {
+    processText(marker, state);
+    return pos;
+  }
+
+  let label: string | undefined;
+  let text: string | undefined;
+  let endPos: number;
+
+  const labelMatch = parseLinkLabel(state.src, pos);
+  if (labelMatch) {
+    label = labelMatch.label;
+    endPos = labelMatch.endPos;
+  } else {
+    const textMatch = parseLinkText(state.src, pos);
+    if (!textMatch) return undefined;
+    text = textMatch.text;
+    endPos = textMatch.endPos;
+  }
+  if (text === undefined) text = label as string;
+
+  // A bracket-counted text that ran to the very end of the source has nothing
+  // left to be a link with. A label does, because it can still be a shortcut.
+  if (endPos >= state.src.length && label === undefined) return undefined;
+
+  const precPos = precedenceScan(m, state, endPos, LINK_PREC_RULES);
+  if (precPos) return precPos;
+
+  if (endPos < state.src.length) {
+    const c = state.src[endPos];
+    if (c === "(") {
+      const parsed = parseLinkAttrs(state.src, endPos + 1);
+      if (parsed) {
+        state.appendToken(parseLinkToken(isImage, text, parsed.attrs, state));
+        return parsed.endPos;
+      }
+      // A `(` that does not close falls through to the reference lookup.
+    } else if (c === "[") {
+      const second = parseLinkLabel(state.src, endPos + 1);
+      if (second) {
+        endPos = second.endPos;
+        // `[text][]` keeps the first label: an empty second one is ignored.
+        if (second.label) label = second.label;
+      }
+    }
+  }
+
+  if (label === undefined) return undefined;
+
+  const refLinks = state.env.refLinks;
+  if (refLinks.size === 0) return undefined;
+
+  const key = unikey(label);
+  const ref = refLinks.get(key);
+  if (!ref) return undefined;
+
+  const token = parseLinkToken(
+    isImage,
+    text,
+    { url: ref.url, title: ref.title ?? null },
+    state,
+  );
+  token.ref = key;
+  token.label = label;
+  state.appendToken(token);
+  return endPos;
+}
+
 /** `Parser.parse_method`: dispatch on the rule whose alternative matched. */
 function parseInlineMethod(
   m: RegExpExecArray,
@@ -1624,6 +1837,8 @@ function applyInlineRule(
       return parseCodespan(m, state);
     case "emphasis":
       return parseEmphasis(m, state);
+    case "link":
+      return parseLinkRule(m, state);
     case "auto_link":
       return parseAutoLink(m, state);
     case "auto_email":
@@ -1635,7 +1850,8 @@ function applyInlineRule(
       state.appendToken({ type: rule });
       return m.index + m[0].length;
     default:
-      throw new UnportedMarkdownError(rule, UNPORTED_INLINE_RULES[rule]);
+      /* istanbul ignore next: every rule in INLINE_RULES has a case above */
+      throw new Error(`markdownToWpHtml: no handler for the "${rule}" rule`);
   }
 }
 
@@ -1746,8 +1962,8 @@ function parseInline(state: InlineState): Token[] {
     const newPos = parseInlineMethod(m, state);
     if (!newPos) {
       // A handler that declines gives up its opening character to the text
-      // run and the scan restarts one past it. Only `link` declines, and that
-      // is ledger item 5.3c-iii-b-1-b-iii-d, so nothing reaches this yet.
+      // run and the scan restarts one past it. `link` is the only rule that
+      // declines, which is how an unresolvable `[a]` stays literal.
       pos = endPos + 1;
       processText(src.slice(endPos, pos), state);
     } else {
@@ -1810,6 +2026,17 @@ function renderToken(token: Token): string {
       const title = token.attrs?.title;
       if (title) return `<a href="${url}" title="${title}">${text}</a>`;
       return `<a href="${url}">${text}</a>`;
+    }
+    // An `image` is an inline token, so an image inside a paragraph nests a
+    // block comment inside the `<p>`. That is what the Python renderer does.
+    case "image": {
+      const src = token.attrs?.url ?? "";
+      const alt = renderChildren(token);
+      return (
+        "<!-- wp:image -->\n" +
+        `<figure class="wp-block-image"><img src="${src}" alt="${alt}"/></figure>\n` +
+        "<!-- /wp:image -->\n\n"
+      );
     }
     case "softbreak":
       return "\n";
@@ -1900,9 +2127,17 @@ export function markdownToWpHtml(markdownContent: string): string {
  * anything is rendered. This is the surface the flag is verified against, and
  * `web/src/mastra/wordpress/data/wp-html-inline-autolink-tokens-parity.json`
  * holds mistune's own answers for it.
+ *
+ * `refLinks` is the `env` mistune is called with. A document's own definitions
+ * arrive through the block layer, but a reference-link token carries `ref` and
+ * `label` fields the renderer ignores, so pinning those needs the env supplied
+ * directly.
  */
-export function parseInlineTokens(src: string): Token[] {
-  const state = new InlineState({ refLinks: new Map() });
+export function parseInlineTokens(
+  src: string,
+  refLinks: Map<string, RefLink> = new Map(),
+): Token[] {
+  const state = new InlineState({ refLinks });
   state.src = src;
   return parseInline(state);
 }
@@ -1911,10 +2146,10 @@ export function parseInlineTokens(src: string): Token[] {
  * The `state.env['ref_links']` map a document produces, as a plain object.
  *
  * `parse_ref_link` emits no token and `_GutenbergRenderer` never reads the env,
- * so this is the only way to observe the rule until the inline `link` rule
- * lands (ledger item 5.3c-iii-b-1-b-iii). It stops after the block parse, which
- * is where Python fills the env, so it works on documents whose inline layer is
- * still unported.
+ * so the rendered HTML shows only the definitions the `link` rule went on to
+ * resolve. This stops after the block parse, which is where Python fills the
+ * env, so it sees the definitions a document collected whether or not anything
+ * referenced them.
  */
 export function parseRefLinks(
   markdownContent: string,

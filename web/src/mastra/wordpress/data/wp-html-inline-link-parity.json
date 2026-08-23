@@ -1,0 +1,1168 @@
+{
+  "generated_by": "api/scripts/export_wp_html_inline_link_parity.py",
+  "source": "api/src/services/wp_html.py::markdown_to_wp_html",
+  "token_source": "mistune.InlineParser.__call__",
+  "mistune_version": "3.2.0",
+  "scope": "the inline link and image rules, parse_link_label, parse_link_text, parse_link, the in_link and in_image guards, the state.env['ref_links'] lookup and the image renderer method",
+  "html_cases": [
+    {
+      "name": "inline link",
+      "markdown": "[a](/b)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "inline link with a double quoted title",
+      "markdown": "[a](/b \"t\")\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\" title=\"t\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "inline link with a single quoted title",
+      "markdown": "[a](/b 't')\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\" title=\"t\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "inline link with an empty title",
+      "markdown": "[a](/b \"\")\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "inline link with an angle bracketed href",
+      "markdown": "[a](</b c>)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b%20c\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "inline link with an angle bracketed href and a title",
+      "markdown": "[a](</b> \"t\")\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\" title=\"t\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "inline link with an empty href",
+      "markdown": "[a]()\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "inline image",
+      "markdown": "![alt](/b.png)\n",
+      "html": "<!-- wp:paragraph -->\n<p><!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/b.png\" alt=\"alt\"/></figure>\n<!-- /wp:image -->\n\n</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "inline image with a title",
+      "markdown": "![alt](/b.png \"t\")\n",
+      "html": "<!-- wp:paragraph -->\n<p><!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/b.png\" alt=\"alt\"/></figure>\n<!-- /wp:image -->\n\n</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "image among text nests a block comment inside the paragraph",
+      "markdown": "a ![x](/b.png) c\n",
+      "html": "<!-- wp:paragraph -->\n<p>a <!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/b.png\" alt=\"x\"/></figure>\n<!-- /wp:image -->\n\n c</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "image alone in a paragraph",
+      "markdown": "![x](/b.png)\n",
+      "html": "<!-- wp:paragraph -->\n<p><!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/b.png\" alt=\"x\"/></figure>\n<!-- /wp:image -->\n\n</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "shortcut reference link",
+      "markdown": "[a]\n\n[a]: /b\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "collapsed reference link",
+      "markdown": "[a][]\n\n[a]: /b\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "full reference link",
+      "markdown": "[a][b]\n\n[b]: /c\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/c\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "shortcut reference image",
+      "markdown": "![a]\n\n[a]: /b.png\n",
+      "html": "<!-- wp:paragraph -->\n<p><!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/b.png\" alt=\"a\"/></figure>\n<!-- /wp:image -->\n\n</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "full reference image",
+      "markdown": "![a][b]\n\n[b]: /c.png\n",
+      "html": "<!-- wp:paragraph -->\n<p><!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/c.png\" alt=\"a\"/></figure>\n<!-- /wp:image -->\n\n</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "reference link with a title",
+      "markdown": "[a]\n\n[a]: /b \"t\"\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\" title=\"t\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "reference link resolved case insensitively",
+      "markdown": "[FOO]\n\n[foo]: /b\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\">FOO</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "reference label folds whitespace runs",
+      "markdown": "[a   b]\n\n[a b]: /c\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/c\">a   b</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "reference label folds a newline",
+      "markdown": "[a\nb]\n\n[a b]: /c\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/c\">a\nb</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "definition after the reference still resolves",
+      "markdown": "[a]\n\n[a]: /b\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "definition before the reference",
+      "markdown": "[a]: /b\n\n[a]\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "first definition of a key wins",
+      "markdown": "[a]\n\n[a]: /b\n\n[a]: /c\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "shortcut with no definition at all",
+      "markdown": "[a]\n",
+      "html": "<!-- wp:paragraph -->\n<p>[a]</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "full reference with an undefined label",
+      "markdown": "[a][b]\n\n[c]: /d\n",
+      "html": "<!-- wp:paragraph -->\n<p>[a][b]</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "shortcut with an undefined label but other definitions",
+      "markdown": "[a]\n\n[b]: /c\n",
+      "html": "<!-- wp:paragraph -->\n<p>[a]</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "unclosed bracket",
+      "markdown": "[a\n",
+      "html": "<!-- wp:paragraph -->\n<p>[a</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "unclosed parenthesis",
+      "markdown": "[a](/b\n",
+      "html": "<!-- wp:paragraph -->\n<p>[a](/b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "bracket at the very end of the source",
+      "markdown": "a [\n",
+      "html": "<!-- wp:paragraph -->\n<p>a [</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "empty brackets with no definition",
+      "markdown": "[]\n",
+      "html": "<!-- wp:paragraph -->\n<p>[]</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "bang bracket with no definition",
+      "markdown": "![a]\n",
+      "html": "<!-- wp:paragraph -->\n<p>![a]</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a declined link leaves its bracket and rescans from one past it",
+      "markdown": "[[a](/b)\n",
+      "html": "<!-- wp:paragraph -->\n<p>[<a href=\"/b\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "nested brackets in the link text",
+      "markdown": "[a [b] c](/d)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/d\">a [b] c</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "nested brackets cannot resolve as a reference",
+      "markdown": "[a [b] c]\n\n[a [b] c]: /d\n",
+      "html": "<!-- wp:paragraph -->\n<p>[a [b] c]</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>[a [b] c]: /d</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped bracket stays in the label",
+      "markdown": "[a\\]b](/c)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/c\">a]b</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped opening bracket in the label",
+      "markdown": "[a\\[b](/c)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/c\">a[b</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an even backslash run before a bracket raises the nesting level",
+      "markdown": "[a\\\\](/b)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\">a\\</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "unbalanced closing bracket inside the text",
+      "markdown": "[a]b](/c)\n",
+      "html": "<!-- wp:paragraph -->\n<p>[a]b](/c)</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an even backslash run before a bracket, reached through the counter",
+      "markdown": "[a[b] c\\\\](/d)\n",
+      "html": "<!-- wp:paragraph -->\n<p>[a[b] c\\](/d)</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an escaped bracket is invisible to the bracket counter",
+      "markdown": "[a[b] c\\] d](/e)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/e\">a[b] c] d</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an unclosed second label leaves its bracket behind",
+      "markdown": "[a][b\n\n[a]: /c\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/c\">a</a>[b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "counted text ending exactly at the end of the source",
+      "markdown": "[a [b] c]\n",
+      "html": "<!-- wp:paragraph -->\n<p>[a [b] c]</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "href stops at the first space",
+      "markdown": "[a](/b c)\n",
+      "html": "<!-- wp:paragraph -->\n<p>[a](/b c)</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "href with an escaped closing parenthesis",
+      "markdown": "[a](/b\\)c)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b)c\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "href with a balanced parenthesis is not balanced by mistune",
+      "markdown": "[a](/b(c))\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b(c\">a</a>)</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "href split across a newline",
+      "markdown": "[a](\n/b)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "href followed by a newline before the parenthesis",
+      "markdown": "[a](/b\n)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "href with an escaped space",
+      "markdown": "[a](/b\\ c)\n",
+      "html": "<!-- wp:paragraph -->\n<p>[a](/b\\ c)</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "href holding a percent sign is escaped",
+      "markdown": "[a](/b%c)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b%c\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "href holding a space inside angle brackets",
+      "markdown": "[a](</b c>)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b%20c\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "href holding a non ascii character is percent encoded",
+      "markdown": "[a](/caf\u00e9)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/caf%C3%A9\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "angle bracketed href holding a backslash refuses",
+      "markdown": "[a](</b\\c>)\n",
+      "html": "<!-- wp:paragraph -->\n<p>[a](</b\\c>)</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "title spanning a newline",
+      "markdown": "[a](/b\n\"t\")\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\" title=\"t\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "title holding an escaped quote",
+      "markdown": "[a](/b \"t\\\"u\")\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\" title=\"t\"u\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "title holding an escaped punctuation character",
+      "markdown": "[a](/b \"t\\-u\")\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\" title=\"t-u\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a file separator before the closing parenthesis",
+      "markdown": "[a](/b \"t\"\u001c)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\" title=\"t\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a byte order mark before the closing parenthesis",
+      "markdown": "[a](/b \"t\"\ufeff)\n",
+      "html": "<!-- wp:paragraph -->\n<p>[a](/b \"t\"\ufeff)</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a link inside a link text is literal text",
+      "markdown": "[a [b](/c) d](/e)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/e\">a [b](/c) d</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an image inside a link text still nests",
+      "markdown": "[a ![b](/c.png) d](/e)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/e\">a <!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/c.png\" alt=\"b\"/></figure>\n<!-- /wp:image -->\n\n d</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an image inside an image alt is literal text",
+      "markdown": "![a ![b](/c.png) d](/e.png)\n",
+      "html": "<!-- wp:paragraph -->\n<p><!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/e.png\" alt=\"a ![b](/c.png) d\"/></figure>\n<!-- /wp:image -->\n\n</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a link inside an image alt still nests",
+      "markdown": "![a [b](/c) d](/e.png)\n",
+      "html": "<!-- wp:paragraph -->\n<p><!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/e.png\" alt=\"a <a href=\"/c\">b</a> d\"/></figure>\n<!-- /wp:image -->\n\n</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an autolink inside a link text is not a link",
+      "markdown": "[a <https://x.co> b](/c)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/c\">a <https://x.co> b</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an email autolink inside a link text is not a link",
+      "markdown": "[a <u@x.co> b](/c)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/c\">a <u@x.co> b</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "emphasis inside a link text",
+      "markdown": "[a *b* c](/d)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/d\">a <em>b</em> c</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a link inside an emphasis",
+      "markdown": "*a [b](/c) d*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a <a href=\"/c\">b</a> d</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an emphasis flag carries into the link text",
+      "markdown": "_a [b *c* d](/e) f_\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a <a href=\"/e\">b *c* d</a> f</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "strong inside an image alt",
+      "markdown": "![a **b** c](/d.png)\n",
+      "html": "<!-- wp:paragraph -->\n<p><!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/d.png\" alt=\"a <strong>b</strong> c\"/></figure>\n<!-- /wp:image -->\n\n</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a codespan inside a link text",
+      "markdown": "[a `b` c](/d)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/d\">a <code>b</code> c</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an escape inside a link text",
+      "markdown": "[a \\* b](/c)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/c\">a * b</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an escaped opening bracket is not a link at all",
+      "markdown": "\\[a](/b)\n",
+      "html": "<!-- wp:paragraph -->\n<p>[a](/b)</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an escaped bang leaves a link",
+      "markdown": "\\![a](/b)\n",
+      "html": "<!-- wp:paragraph -->\n<p>!<a href=\"/b\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a soft break inside a link text",
+      "markdown": "[a\nb](/c)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/c\">a\nb</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a hard break inside a link text",
+      "markdown": "[a  \nb](/c)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/c\">a<br />\nb</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "two links in one paragraph",
+      "markdown": "[a](/b) and [c](/d)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\">a</a> and <a href=\"/d\">c</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a link immediately followed by another",
+      "markdown": "[a](/b)[c](/d)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b\">a</a><a href=\"/d\">c</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a codespan outruns the link",
+      "markdown": "[a `b](/c)` d](/e)\n",
+      "html": "<!-- wp:paragraph -->\n<p>[a <code>b](/c)</code> d](/e)</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a codespan ending inside the link text loses",
+      "markdown": "[a `b` c](/d)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/d\">a <code>b</code> c</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an autolink outruns the link",
+      "markdown": "[a <https://x.co/](/b)> c](/d)\n",
+      "html": "<!-- wp:paragraph -->\n<p>[a <a href=\"https://x.co/%5D(/b)\">https://x.co/](/b)</a> c](/d)</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an unclosed codespan inside a link text loses",
+      "markdown": "[a `b](/c)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/c\">a `b</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "link in an atx heading",
+      "markdown": "# a [b](/c) d\n",
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>a <a href=\"/c\">b</a> d</h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "link in a setext heading",
+      "markdown": "a [b](/c) d\n===\n",
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>a <a href=\"/c\">b</a> d</h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "link in a list item",
+      "markdown": "- a [b](/c) d\n",
+      "html": "<!-- wp:list -->\n<ul><li>a <a href=\"/c\">b</a> d</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "link in a block quote",
+      "markdown": "> a [b](/c) d\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>a <a href=\"/c\">b</a> d</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "image in a list item",
+      "markdown": "- ![a](/b.png)\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/b.png\" alt=\"a\"/></figure>\n<!-- /wp:image -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "link is not looked for inside a fenced code block",
+      "markdown": "```\n[a](/b)\n```\n",
+      "html": "<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>[a](/b)\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "reference definition inside a quote is visible outside it",
+      "markdown": "> [a]: /b\n\n[a]\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"></blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:paragraph -->\n<p><a href=\"/b\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "reference definition inside a list item is visible outside it",
+      "markdown": "- [a]: /b\n\n[a]\n",
+      "html": "<!-- wp:list -->\n<ul><li></li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:paragraph -->\n<p><a href=\"/b\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a backslash before a line separator stays inside the label",
+      "markdown": "[a\\\u2028b]: /c\n\n[a\\\u2028b]\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/c\">a\\\u2028b</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a backslash before a paragraph separator stays inside the label",
+      "markdown": "[a\\\u2029b]: /c\n\n[a\\\u2029b]\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/c\">a\\\u2029b</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped punctuation in a reference label",
+      "markdown": "[a\\-b]\n\n[a\\-b]: /c\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/c\">a-b</a></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped punctuation in an inline href",
+      "markdown": "[a](/b\\-c)\n",
+      "html": "<!-- wp:paragraph -->\n<p><a href=\"/b-c\">a</a></p>\n<!-- /wp:paragraph -->\n\n"
+    }
+  ],
+  "raising_cases": [
+    {
+      "name": "a tag winning the precedence scan has no renderer",
+      "markdown": "[a <span x=\"](/b)\"> c](/d)\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "a tag inside a link text has no renderer",
+      "markdown": "[a <span> b](/c)\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    }
+  ],
+  "token_cases": [
+    {
+      "name": "inline link token shape",
+      "src": "[a](/b)",
+      "ref_links": {},
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a"
+            }
+          ],
+          "attrs": {
+            "url": "/b"
+          }
+        }
+      ]
+    },
+    {
+      "name": "inline link with a title token shape",
+      "src": "[a](/b \"t\")",
+      "ref_links": {},
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a"
+            }
+          ],
+          "attrs": {
+            "url": "/b",
+            "title": "t"
+          }
+        }
+      ]
+    },
+    {
+      "name": "an empty title is absent from the attrs, not empty",
+      "src": "[a](/b \"\")",
+      "ref_links": {},
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a"
+            }
+          ],
+          "attrs": {
+            "url": "/b"
+          }
+        }
+      ]
+    },
+    {
+      "name": "image token shape",
+      "src": "![a](/b.png)",
+      "ref_links": {},
+      "tokens": [
+        {
+          "type": "image",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a"
+            }
+          ],
+          "attrs": {
+            "url": "/b.png"
+          }
+        }
+      ]
+    },
+    {
+      "name": "reference link carries ref and label",
+      "src": "[a]",
+      "ref_links": {
+        "A": {
+          "url": "/b",
+          "label": "a"
+        }
+      },
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a"
+            }
+          ],
+          "attrs": {
+            "url": "/b",
+            "title": null
+          },
+          "ref": "A",
+          "label": "a"
+        }
+      ]
+    },
+    {
+      "name": "reference link title is null when the definition has none",
+      "src": "[a]",
+      "ref_links": {
+        "A": {
+          "url": "/b",
+          "label": "a"
+        }
+      },
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a"
+            }
+          ],
+          "attrs": {
+            "url": "/b",
+            "title": null
+          },
+          "ref": "A",
+          "label": "a"
+        }
+      ]
+    },
+    {
+      "name": "reference link title is carried through when present",
+      "src": "[a]",
+      "ref_links": {
+        "A": {
+          "url": "/b",
+          "label": "a",
+          "title": "t"
+        }
+      },
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a"
+            }
+          ],
+          "attrs": {
+            "url": "/b",
+            "title": "t"
+          },
+          "ref": "A",
+          "label": "a"
+        }
+      ]
+    },
+    {
+      "name": "full reference keeps the second label",
+      "src": "[text][a]",
+      "ref_links": {
+        "A": {
+          "url": "/b",
+          "label": "a"
+        }
+      },
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "text"
+            }
+          ],
+          "attrs": {
+            "url": "/b",
+            "title": null
+          },
+          "ref": "A",
+          "label": "a"
+        }
+      ]
+    },
+    {
+      "name": "collapsed reference keeps the first label",
+      "src": "[a][]",
+      "ref_links": {
+        "A": {
+          "url": "/b",
+          "label": "a"
+        }
+      },
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a"
+            }
+          ],
+          "attrs": {
+            "url": "/b",
+            "title": null
+          },
+          "ref": "A",
+          "label": "a"
+        }
+      ]
+    },
+    {
+      "name": "reference image carries ref and label",
+      "src": "![a]",
+      "ref_links": {
+        "A": {
+          "url": "/b.png",
+          "label": "a"
+        }
+      },
+      "tokens": [
+        {
+          "type": "image",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a"
+            }
+          ],
+          "attrs": {
+            "url": "/b.png",
+            "title": null
+          },
+          "ref": "A",
+          "label": "a"
+        }
+      ]
+    },
+    {
+      "name": "the raw label is kept unfolded on the token",
+      "src": "[a   b]",
+      "ref_links": {
+        "A B": {
+          "url": "/c",
+          "label": "a b"
+        }
+      },
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a   b"
+            }
+          ],
+          "attrs": {
+            "url": "/c",
+            "title": null
+          },
+          "ref": "A B",
+          "label": "a   b"
+        }
+      ]
+    },
+    {
+      "name": "a carriage return in a label is a label character to Python",
+      "src": "[a\\\rb][x]",
+      "ref_links": {
+        "A\\ B": {
+          "url": "/c",
+          "label": "a b"
+        }
+      },
+      "tokens": [
+        {
+          "type": "text",
+          "raw": "["
+        },
+        {
+          "type": "text",
+          "raw": "a\\\rb]"
+        },
+        {
+          "type": "text",
+          "raw": "["
+        },
+        {
+          "type": "text",
+          "raw": "x]"
+        }
+      ]
+    },
+    {
+      "name": "an empty ref_links map declines every shortcut",
+      "src": "[a]",
+      "ref_links": {},
+      "tokens": [
+        {
+          "type": "text",
+          "raw": "["
+        },
+        {
+          "type": "text",
+          "raw": "a]"
+        }
+      ]
+    },
+    {
+      "name": "a link inside a link text is a text token",
+      "src": "[a [b](/c) d](/e)",
+      "ref_links": {},
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a "
+            },
+            {
+              "type": "text",
+              "raw": "["
+            },
+            {
+              "type": "text",
+              "raw": "b](/c) d"
+            }
+          ],
+          "attrs": {
+            "url": "/e"
+          }
+        }
+      ]
+    },
+    {
+      "name": "an image inside a link text is an image token",
+      "src": "[a ![b](/c.png) d](/e)",
+      "ref_links": {},
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a "
+            },
+            {
+              "type": "image",
+              "children": [
+                {
+                  "type": "text",
+                  "raw": "b"
+                }
+              ],
+              "attrs": {
+                "url": "/c.png"
+              }
+            },
+            {
+              "type": "text",
+              "raw": " d"
+            }
+          ],
+          "attrs": {
+            "url": "/e"
+          }
+        }
+      ]
+    },
+    {
+      "name": "an image inside an image alt is a text token",
+      "src": "![a ![b](/c.png) d](/e.png)",
+      "ref_links": {},
+      "tokens": [
+        {
+          "type": "image",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a "
+            },
+            {
+              "type": "text",
+              "raw": "!["
+            },
+            {
+              "type": "text",
+              "raw": "b](/c.png) d"
+            }
+          ],
+          "attrs": {
+            "url": "/e.png"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a link inside an image alt is a link token",
+      "src": "![a [b](/c) d](/e.png)",
+      "ref_links": {},
+      "tokens": [
+        {
+          "type": "image",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a "
+            },
+            {
+              "type": "link",
+              "children": [
+                {
+                  "type": "text",
+                  "raw": "b"
+                }
+              ],
+              "attrs": {
+                "url": "/c"
+              }
+            },
+            {
+              "type": "text",
+              "raw": " d"
+            }
+          ],
+          "attrs": {
+            "url": "/e.png"
+          }
+        }
+      ]
+    },
+    {
+      "name": "an autolink inside a link text is a text token",
+      "src": "[a <https://x.co> b](/c)",
+      "ref_links": {},
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a "
+            },
+            {
+              "type": "text",
+              "raw": "<https://x.co>"
+            },
+            {
+              "type": "text",
+              "raw": " b"
+            }
+          ],
+          "attrs": {
+            "url": "/c"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a declined link emits its bracket as text",
+      "src": "[a",
+      "ref_links": {},
+      "tokens": [
+        {
+          "type": "text",
+          "raw": "["
+        },
+        {
+          "type": "text",
+          "raw": "a"
+        }
+      ]
+    },
+    {
+      "name": "a declined bang bracket emits both characters",
+      "src": "![a",
+      "ref_links": {},
+      "tokens": [
+        {
+          "type": "text",
+          "raw": "!"
+        },
+        {
+          "type": "text",
+          "raw": "["
+        },
+        {
+          "type": "text",
+          "raw": "a"
+        }
+      ]
+    },
+    {
+      "name": "a tag inside a link text nests an inline_html token",
+      "src": "[a <span> b](/c)",
+      "ref_links": {},
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a "
+            },
+            {
+              "type": "inline_html",
+              "raw": "<span>"
+            },
+            {
+              "type": "text",
+              "raw": " b"
+            }
+          ],
+          "attrs": {
+            "url": "/c"
+          }
+        }
+      ]
+    },
+    {
+      "name": "precedence scan emits the scanned text then the winner",
+      "src": "[a `b](/c)` d](/e)",
+      "ref_links": {},
+      "tokens": [
+        {
+          "type": "text",
+          "raw": "[a "
+        },
+        {
+          "type": "codespan",
+          "raw": "b](/c)"
+        },
+        {
+          "type": "text",
+          "raw": " d](/e)"
+        }
+      ]
+    },
+    {
+      "name": "link children are parsed, not raw",
+      "src": "[a *b* `c`](/d)",
+      "ref_links": {},
+      "tokens": [
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a "
+            },
+            {
+              "type": "emphasis",
+              "children": [
+                {
+                  "type": "text",
+                  "raw": "b"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "raw": " "
+            },
+            {
+              "type": "codespan",
+              "raw": "c"
+            }
+          ],
+          "attrs": {
+            "url": "/d"
+          }
+        }
+      ]
+    }
+  ],
+  "render_cases": [
+    {
+      "name": "image with one text child",
+      "method": "image",
+      "token": {
+        "type": "image",
+        "children": [
+          {
+            "type": "text",
+            "raw": "a"
+          }
+        ],
+        "attrs": {
+          "url": "/b.png"
+        }
+      },
+      "html": "<!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/b.png\" alt=\"a\"/></figure>\n<!-- /wp:image -->\n\n"
+    },
+    {
+      "name": "image with no children",
+      "method": "image",
+      "token": {
+        "type": "image",
+        "children": [],
+        "attrs": {
+          "url": "/b.png"
+        }
+      },
+      "html": "<!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/b.png\" alt=\"\"/></figure>\n<!-- /wp:image -->\n\n"
+    },
+    {
+      "name": "image with a missing children key",
+      "method": "image",
+      "token": {
+        "type": "image",
+        "attrs": {
+          "url": "/b.png"
+        }
+      },
+      "html": "<!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/b.png\" alt=\"\"/></figure>\n<!-- /wp:image -->\n\n"
+    },
+    {
+      "name": "image ignores the title attribute",
+      "method": "image",
+      "token": {
+        "type": "image",
+        "children": [
+          {
+            "type": "text",
+            "raw": "a"
+          }
+        ],
+        "attrs": {
+          "url": "/b.png",
+          "title": "t"
+        }
+      },
+      "html": "<!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/b.png\" alt=\"a\"/></figure>\n<!-- /wp:image -->\n\n"
+    },
+    {
+      "name": "image alt text is interpolated raw",
+      "method": "image",
+      "token": {
+        "type": "image",
+        "children": [
+          {
+            "type": "text",
+            "raw": "a \" b & c"
+          }
+        ],
+        "attrs": {
+          "url": "/b.png"
+        }
+      },
+      "html": "<!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/b.png\" alt=\"a \" b & c\"/></figure>\n<!-- /wp:image -->\n\n"
+    },
+    {
+      "name": "image src is interpolated raw",
+      "method": "image",
+      "token": {
+        "type": "image",
+        "children": [],
+        "attrs": {
+          "url": "/b.png\" onerror=\"x"
+        }
+      },
+      "html": "<!-- wp:image -->\n<figure class=\"wp-block-image\"><img src=\"/b.png\" onerror=\"x\" alt=\"\"/></figure>\n<!-- /wp:image -->\n\n"
+    },
+    {
+      "name": "link title branch, which no reference definition without a title reaches",
+      "method": "link",
+      "token": {
+        "type": "link",
+        "children": [
+          {
+            "type": "text",
+            "raw": "a"
+          }
+        ],
+        "attrs": {
+          "url": "/b",
+          "title": "t"
+        }
+      },
+      "html": "<a href=\"/b\" title=\"t\">a</a>"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import parity from "./data/wp-html-inline-escape-codespan-parity.json";
-import { UnportedMarkdownError, markdownToWpHtml } from "./wp-html";
+import { markdownToWpHtml } from "./wp-html";
 
 /**
  * The inline `escape` and `codespan` rules, replayed against the real Python
@@ -112,16 +112,9 @@ describe("hand written controls", () => {
     expect(markdownToWpHtml("```a`b\n")).toBe(para("```a`b"));
   });
 
-  it("still stops on the inline rules that are not ported yet", () => {
-    for (const [markdown, rule] of [["[a](/b)\n", "link"]] as const) {
-      let thrown: unknown;
-      try {
-        markdownToWpHtml(markdown);
-      } catch (error) {
-        thrown = error;
-      }
-      expect(thrown).toBeInstanceOf(UnportedMarkdownError);
-      expect((thrown as UnportedMarkdownError).rule).toBe(rule);
-    }
+  it("renders a link now that -iii-d has ported the last inline rule", () => {
+    expect(markdownToWpHtml("[a](/b)\n")).toBe(
+      para('<a href="/b">a</a>'),
+    );
   });
 });

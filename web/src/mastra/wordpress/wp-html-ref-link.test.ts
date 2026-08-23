@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import parity from "./data/wp-html-ref-link-parity.json";
 import {
-  UnportedMarkdownError,
+  MissingRendererError,
   markdownToWpHtml,
   parseRefLinks,
 } from "./wp-html";
@@ -63,11 +63,12 @@ describe("markdownToWpHtml, reference link definitions", () => {
 describe("definitions the rule refuses", () => {
   /**
    * A refused definition leaves its line to the paragraph fallback, and that
-   * paragraph holds a `[`, which fires the inline `link` rule. That rule is
-   * ledger item 5.3c-iii-b-1-b-iii and still throws, so the rendered output
-   * cannot be compared yet; Python's HTML is pinned in the oracle for when it
-   * lands. The `ref_links` are compared either way, and they are what this item
-   * ports: every one of these must leave the env untouched by that definition.
+   * paragraph holds a `[`, which fires the inline `link` rule. That rule threw
+   * until ledger item 5.3c-iii-b-1-b-iii-d ported it, so the oracle carries
+   * `python_html` rather than `html`; it is now compared, alongside the
+   * `ref_links` this item ports, which every one of these must leave untouched
+   * by the definition it refused. One case leaves a tag in the paragraph, and
+   * `_GutenbergRenderer` has no `inline_html` method, so it raises instead.
    */
 
   it("covers every way a definition can be refused", () => {
@@ -82,16 +83,15 @@ describe("definitions the rule refuses", () => {
   );
 
   it.each(declines.map((d): [string, Decline] => [d.name, d]))(
-    "falls through to the unported inline link rule: %s",
+    "falls through to the paragraph Python rendered: %s",
     (_name, decline) => {
-      let thrown: unknown;
-      try {
-        markdownToWpHtml(decline.markdown);
-      } catch (error) {
-        thrown = error;
+      if (decline.python_html === null) {
+        expect(() => markdownToWpHtml(decline.markdown)).toThrowError(
+          MissingRendererError,
+        );
+        return;
       }
-      expect(thrown).toBeInstanceOf(UnportedMarkdownError);
-      expect((thrown as UnportedMarkdownError).rule).toBe("link");
+      expect(markdownToWpHtml(decline.markdown)).toBe(decline.python_html);
     },
   );
 });

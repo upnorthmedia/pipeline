@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import parity from "./data/wp-html-block-parity.json";
-import { UnportedMarkdownError, markdownToWpHtml } from "./wp-html";
+import { markdownToWpHtml } from "./wp-html";
 
 /**
  * `markdown_to_wp_html`'s block half, replayed against the real Python
@@ -111,38 +111,29 @@ describe("the oracle has teeth", () => {
   });
 });
 
-describe("constructs whose handlers are not ported yet", () => {
+describe("constructs this file used to refuse", () => {
   /**
-   * These throw rather than falling through to a paragraph, so that wiring the
-   * converter into the publish workflow before 5.3c-iii-b-1-b-iii lands cannot
-   * silently drop a link.
-   *
-   * Only inline rules are left. `block_quote` was listed here until
-   * 5.3c-iii-b-1-b-ii-1 ported it, `list` until -ii-2, `raw_html` until -ii-3-a
-   * and `ref_link` until -ii-3-b-2, which finished the block layer, and
-   * `escape` and `codespan` until -iii-a, `auto_link`, `auto_email` and
-   * `inline_html` until -iii-b, and `emphasis` until -iii-c; their coverage is
-   * now
-   * `wp-html-quotes.test.ts`, `wp-html-lists.test.ts`,
+   * Every rule listed here once threw rather than falling through to a
+   * paragraph, so that wiring the converter into the publish workflow before
+   * its handler landed could not silently drop content. `block_quote` was
+   * refused until 5.3c-iii-b-1-b-ii-1, `list` until -ii-2, `raw_html` until
+   * -ii-3-a, `ref_link` until -ii-3-b-2, `escape` and `codespan` until -iii-a,
+   * `auto_link`, `auto_email` and `inline_html` until -iii-b, `emphasis` until
+   * -iii-c and `link` until -iii-d, which finished the port. Their own coverage
+   * is `wp-html-quotes.test.ts`, `wp-html-lists.test.ts`,
    * `wp-html-raw-html.test.ts`, `wp-html-ref-link.test.ts`,
-   * `wp-html-inline-escape-codespan.test.ts` and
-   * `wp-html-inline-autolink.test.ts`.
+   * `wp-html-inline-escape-codespan.test.ts`,
+   * `wp-html-inline-autolink.test.ts`, `wp-html-inline-emphasis.test.ts` and
+   * `wp-html-inline-link.test.ts`; these two are the smoke test that the block
+   * layer in this file reaches them.
    */
 
-  it.each([["link", "a [link](https://example.com) here\n"]])(
-    "throws for the %s inline rule",
-    (rule, markdown) => {
-      expect(() => markdownToWpHtml(markdown)).toThrowError(
-        UnportedMarkdownError,
-      );
-      try {
-        markdownToWpHtml(markdown);
-      } catch (error) {
-        expect((error as UnportedMarkdownError).rule).toBe(rule);
-        expect((error as Error).message).toContain("5.3c-iii-b-1-b-iii");
-      }
-    },
-  );
+  it("renders a link now that -iii-d has ported the last rule", () => {
+    expect(markdownToWpHtml("a [link](https://example.com) here\n")).toBe(
+      '<!-- wp:paragraph -->\n<p>a <a href="https://example.com">link</a> here' +
+        "</p>\n<!-- /wp:paragraph -->\n\n",
+    );
+  });
 
   it("renders an emphasis now that -iii-c has ported the rule", () => {
     expect(markdownToWpHtml("an *emphasised* word\n")).toBe(
