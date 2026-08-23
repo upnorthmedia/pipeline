@@ -466,3 +466,13 @@
   its output, and Phase 7's `.env` documentation (item 7.4) is where the variable should be
   written down. Note this contradicts the iteration 95 note that the build *fails* without it;
   measured at HEAD on 2026-08-23 it exits 0 either way.
+- [confirmed] 2026-08-23 `GET /api/analytics/logs` in `api/src/api/analytics.py` answers a
+  500 for any `since` or `until` that `datetime.fromisoformat()` rejects. The parse sits
+  outside any `try`, the parameters are declared `str | None` so pydantic never validates
+  them, and the `ValueError` escapes the handler. Verified against the real router mounted
+  under `TestClient(raise_server_exceptions=False)`: `?since=nope`, `?until=nope` and
+  `?since=2026-13-01` all return `500 Internal Server Error`, while `?page=0` and
+  `?per_page=201` correctly return 422. Found while porting the `fromisoformat` round trip
+  (ledger item 5.8d-i). The port decides its answer in item 5.8d-ii; the precedent from
+  5.8b is a 422 rather than reproducing the 500. No fix applied to `api/`, which is deleted
+  in Phase 7.
