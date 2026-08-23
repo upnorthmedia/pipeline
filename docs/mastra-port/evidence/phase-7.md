@@ -118,3 +118,116 @@ The baseline is a snapshot of the end state, not a replay of Alembic 001-012. A 
 is already partly migrated cannot be brought forward with it: it builds an empty database only.
 That is the only case Phase 7 needs, since existing deployments already sit at Alembic head and
 Drizzle takes over from there, but it means the `drizzle/` folder has no downgrade path.
+
+## 7.1a
+
+The `/media` static mount, moved off FastAPI.
+
+### The audit that split 7.1
+
+`api/src/main.py` mounts ten routers, `/media` and `/health`. Every route the ten routers
+declare has a TypeScript handler already:
+
+```
+$ cd api && grep -rc "APIRouter(" src/api/*.py | awk -F: '{s+=$2} END {print "routers:",s}'
+routers: 10
+$ grep -rn "@router\.\(get\|post\|patch\|put\|delete\)" src/api/*.py | wc -l
+      52
+$ cd .. && grep -rho "export async function \(GET\|POST\|PATCH\|PUT\|DELETE\)" \
+    web/src/app/api --include="route.ts" | wc -l
+      53
+```
+
+The two sides were listed in full (each Python decorator's router prefix + path, each
+TypeScript handler's directory + methods) and diffed by hand: every one of the 52 Python
+routes has a TypeScript handler. The extra TypeScript method is
+`GET /api/settings/stage-models`, added in 6.3, which has no Python counterpart.
+`api/auth/[...all]/route.ts` is BetterAuth's own and exports its handlers differently, so it is
+outside both counts. What has no equivalent:
+
+- `app.mount("/media", StaticFiles(...))`, which is this item.
+- `GET /health`, which only `docker-compose.yml`'s healthcheck for the `api` service calls.
+  That service is deleted in 7.1c and the `web` service has its own healthcheck, so nothing
+  needs it.
+
+Two deliberate differences from `StaticFiles`, both stated in the handler's header comment:
+
+1. The request is scoped to the post's owner through `posts -> website_profiles.user_id`. The
+   mount was anonymous, which predates Alembic 010. A generated image is post content and
+   another user's file now answers exactly like a missing one, matching `_get_user_post()`.
+   Nothing but the browser reads these URLs: the WordPress and Next.js publish paths read the
+   same files off disk (`listMediaFiles()`, `nextjs/payload.ts`), never over HTTP.
+2. Content types come from a six-entry table, not from `guessTypeFromFilename()`. That
+   function reproduces Python 3.12's builtin table, which has no `.webp` entry, so Starlette
+   labelled every generated image `text/plain` and browsers rendered them only by sniffing.
+
+### Tests
+
+```
+$ npx vitest run "src/app/media"
+ RUN  v4.0.18 /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+
+ ✓ src/app/media/[...path]/route.test.ts (14 tests) 106ms
+
+ Test Files  1 passed (1)
+      Tests  14 passed (14)
+   Start at  13:21:10
+   Duration  551ms (transform 43ms, setup 72ms, import 311ms, tests 106ms, environment 0ms)
+```
+
+The 14 cover: 401 without a session; 404 for another user's file that exists on disk; 404 for a
+post with no profile; the bytes, content type and content length; the `application/octet-stream`
+fallback with `nosniff`; the entity tag, its 304 (which carries no `Content-Length`, since it
+carries no content) and its change when a re-run rewrites the same filename; `Last-Modified` from the file's mtime; a missing file; the post directory itself; a
+malformed post id; a `../` traversal; a trailing segment that must not alias a real file; and a
+subdirectory.
+
+### Mutation sweep
+
+Eleven mutations of `route.ts`, each run against the 14 tests, file restored between runs and a
+control run either side (both exit 0).
+
+| # | Mutation | Verdict |
+| --- | --- | --- |
+| M1 | `if (!user)` never fires | KILLED |
+| M2 | ownership predicate dropped from the `where` | KILLED |
+| M3 | `innerJoin` becomes `leftJoin` | SURVIVED (equivalent) |
+| M4 | containment check on the resolved path removed | KILLED |
+| M5 | `segments.length !== 2` becomes `< 2` | KILLED |
+| M6 | content type hardcoded to `image/webp` | KILLED |
+| M7 | entity tag becomes a constant | KILLED |
+| M8 | `Last-Modified` becomes `new Date()` | KILLED |
+| M9 | `isUuid` check never fires | KILLED |
+| M10 | `!info?.isFile()` becomes `!info` | KILLED |
+| M11 | the 304 branch never fires | KILLED |
+
+M3 is an equivalent mutant, not a coverage gap: `eq(websiteProfiles.userId, user.id)` in the
+`where` already excludes the null-profile row a `leftJoin` would keep, so the two joins cannot
+produce different results here. The join type is redundant with the predicate; the predicate is
+the thing M2 proves is load-bearing.
+
+M5 needed a test written for it. With `< 2`, `/media/<id>/a.webp/extra` served `a.webp`,
+because the third segment was silently dropped: a URL aliasing difference the other cases
+happened to 404 through. The "404s a trailing segment rather than letting it alias a real file"
+case closes it.
+
+### Gates
+
+```
+$ npx tsc --noEmit ; echo exit=$?
+exit=0
+$ npx eslint ; echo exit=$?
+exit=0
+$ npx next build
+├ ƒ /media/[...path]
+...
+ƒ  (Dynamic)  server-rendered on demand
+$ npx vitest run --reporter=dot
+ Test Files  2 failed | 130 passed (132)
+      Tests  9 failed | 4483 passed | 7 skipped (4499)
+   Duration  78.78s
+```
+
+The 9 failures are the known pre-existing set on this tree: 6 in
+`components/__tests__/image-preview.test.tsx` and 3 in `PostDetail.test.tsx`, both recorded in
+earlier iterations and unchanged by this item.

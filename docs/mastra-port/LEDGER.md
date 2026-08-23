@@ -1281,6 +1281,21 @@ pages that use it work with the Python API stopped.
 - [ ] 7.1 Delete `api/`. Remove the Python `api` and `worker` services from
   `docker-compose.yml` and `docker-compose.prod.yml` and replace them with the TypeScript
   `worker` service. Keep `db` and `redis`.
+
+  Split, because an audit of `api/src/main.py` against the ported handlers found the ten
+  routers all covered but two surfaces of the FastAPI app with no TypeScript equivalent, and
+  the dashboard still pointing its own client at `http://localhost:8055` by default. Deleting
+  `api/` before those move leaves a commit where generated images 404 in the dashboard.
+
+  - [x] 7.1a Serve `/media/<post_id>/<file>` from the Next.js app, replacing the
+    `StaticFiles` mount that `content-preview.tsx` and `image-preview.tsx` still resolve
+    every generated image through. `web/src/app/media/[...path]/route.ts`, 14 tests,
+    10 of 11 mutations killed (the eleventh is equivalent).
+    Evidence: [`evidence/phase-7.md` #7.1a](../mastra-port/evidence/phase-7.md)
+  - [ ] 7.1b Default the dashboard's `API_BASE` to its own origin instead of
+    `http://localhost:8055`, so no browser surface depends on the Python service.
+  - [ ] 7.1c Delete `api/` and rewrite `docker-compose.yml` and `docker-compose.prod.yml`
+    onto the TypeScript `worker` service, keeping `db` and `redis`.
 - [ ] 7.2 Railway deployment configuration for `web` and `worker` from this repo, with start
   commands, shared Postgres and Redis references, and documented per-service environment
   variables. Both import the same `web/src/mastra/index.ts`.
