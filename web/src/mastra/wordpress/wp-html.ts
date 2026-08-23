@@ -164,6 +164,30 @@ const EOL = "(?![^\\n])";
 /** Python `$` with no `re.M`: the end of the string, or before one trailing newline. */
 const EOS = "(?=\\n?$)";
 
+/**
+ * Python's `\s` for `str` patterns, spelled out. It is `str.isspace()`'s set,
+ * which holds `\x1c`-`\x1f` and `\x85` where JavaScript's `\s` does not, and
+ * lacks `\ufeff`, which JavaScript's has.
+ */
+const PY_SPACE =
+  "\\t\\n\\v\\f\\r \\x1c-\\x1f\\x85\\xa0\\u1680\\u2000-\\u200a" +
+  "\\u2028\\u2029\\u202f\\u205f\\u3000";
+
+/**
+ * Python's `\w` for `str` patterns. Verified exhaustively against CPython over
+ * every code point: it is exactly the Letter and Number general categories plus
+ * the underscore, where JavaScript's `\w` is `[A-Za-z0-9_]` alone. Needs the
+ * `u` flag, which is why every inline pattern is compiled with it.
+ */
+const PY_WORD = "[\\p{L}\\p{N}_]";
+/**
+ * Python's `\b` immediately before a word character, which is the only shape
+ * mistune uses it in: `\b_` and `_\b`. The boundary reduces to "the character
+ * on the other side is not a word character".
+ */
+const PY_WORD_BOUNDARY_BEFORE = `(?<!${PY_WORD})`;
+const PY_WORD_BOUNDARY_AFTER = `(?!${PY_WORD})`;
+
 /** `string.punctuation`, as a character class. */
 const PUNCTUATION = "[!\"#$%&'()*+,\\-./:;<=>?@\\[\\\\\\]^_`{|}~]";
 const LINK_LABEL = "(?:[^\\\\\\[\\]]|\\\\.){0,500}";
@@ -177,14 +201,69 @@ const AUTO_EMAIL =
   "(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*>";
 /** `helpers.BLOCK_TAGS`. */
 const BLOCK_TAGS = [
-  "address", "article", "aside", "base", "basefont", "blockquote", "body",
-  "caption", "center", "col", "colgroup", "dd", "details", "dialog", "dir",
-  "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form",
-  "frame", "frameset", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header",
-  "hr", "html", "iframe", "legend", "li", "link", "main", "menu", "menuitem",
-  "meta", "nav", "noframes", "ol", "optgroup", "option", "p", "param",
-  "section", "source", "summary", "table", "tbody", "td", "tfoot", "th",
-  "thead", "title", "tr", "track", "ul",
+  "address",
+  "article",
+  "aside",
+  "base",
+  "basefont",
+  "blockquote",
+  "body",
+  "caption",
+  "center",
+  "col",
+  "colgroup",
+  "dd",
+  "details",
+  "dialog",
+  "dir",
+  "div",
+  "dl",
+  "dt",
+  "fieldset",
+  "figcaption",
+  "figure",
+  "footer",
+  "form",
+  "frame",
+  "frameset",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "head",
+  "header",
+  "hr",
+  "html",
+  "iframe",
+  "legend",
+  "li",
+  "link",
+  "main",
+  "menu",
+  "menuitem",
+  "meta",
+  "nav",
+  "noframes",
+  "ol",
+  "optgroup",
+  "option",
+  "p",
+  "param",
+  "section",
+  "source",
+  "summary",
+  "table",
+  "tbody",
+  "td",
+  "tfoot",
+  "th",
+  "thead",
+  "title",
+  "tr",
+  "track",
+  "ul",
 ];
 /** `helpers.PRE_TAGS`. */
 const PRE_TAGS = ["pre", "script", "style", "textarea"];
@@ -242,13 +321,20 @@ const BLOCK_RULES = [
 const INLINE_SPECIFICATION: Record<string, string> = {
   escape: `(?:\\\\${PUNCTUATION})+`,
   codespan: "`{1,}",
-  emphasis: "\\*{1,3}(?=[^\\s*])|\\b_{1,3}(?=[^\\s_])",
+  // Python's `\s` and `\b` are both Unicode aware for `str` patterns, so the
+  // two spelled out below are not the JavaScript escapes of the same name.
+  emphasis: `\\*{1,3}(?=[^${PY_SPACE}*])|${PY_WORD_BOUNDARY_BEFORE}_{1,3}(?=[^${PY_SPACE}_])`,
   link: "!?\\[",
   auto_link: "<[A-Za-z][A-Za-z0-9.+-]{1,31}:[^<>\\x00-\\x20]*>",
   auto_email: AUTO_EMAIL,
   inline_html: INLINE_HTML,
   linebreak: "(?:\\\\| {2,})\\n\\s*",
   softbreak: " *\\n\\s*",
+  // Registered but not in `DEFAULT_RULES`: `precedence_scan` compiles these two
+  // by name to find the *start* of a construct that would outrank an emphasis
+  // or a link run. Python's `\d` is `[Nd]`, not `[0-9]`.
+  prec_auto_link: "<[A-Za-z][A-Za-z\\p{Nd}.+-]{1,31}:",
+  prec_inline_html: `</?${HTML_TAGNAME}|<!|<\\?`,
 };
 
 /** `InlineParser.DEFAULT_RULES` plus the `softbreak` appended when `hard_wrap` is off. */
@@ -303,14 +389,6 @@ function stripChars(s: string, chars: string): string {
 /** `string.whitespace`. */
 const PY_WHITESPACE = " \t\n\r\v\f";
 
-/**
- * Python's `\s` for `str` patterns, spelled out. It is `str.isspace()`'s set,
- * which holds `\x1c`-`\x1f` and `\x85` where JavaScript's `\s` does not, and
- * lacks `\ufeff`, which JavaScript's has.
- */
-const PY_SPACE =
-  "\\t\\n\\v\\f\\r \\x1c-\\x1f\\x85\\xa0\\u1680\\u2000-\\u200a" +
-  "\\u2028\\u2029\\u202f\\u205f\\u3000";
 const PY_SPACE_RUN = new RegExp(`[${PY_SPACE}]+`, "g");
 const PY_STRIP_RE = new RegExp(`^[${PY_SPACE}]+|[${PY_SPACE}]+$`, "g");
 
@@ -456,7 +534,11 @@ function blockSc(rules: readonly string[], flags: string): RegExp {
 /** `compile_sc(["thematic_break", "list"])`, which `setex_heading` falls back to. */
 const SETEX_FALLBACK_RULES = ["thematic_break", "list"] as const;
 /** `compile_sc(["blank_line", "indent_code", "fenced_code"])` in `extract_block_quote`. */
-const QUOTE_MARKER_RULES = ["blank_line", "indent_code", "fenced_code"] as const;
+const QUOTE_MARKER_RULES = [
+  "blank_line",
+  "indent_code",
+  "fenced_code",
+] as const;
 /** The block rules that end a block quote's lazy continuation. */
 const QUOTE_BREAK_RULES = [
   "blank_line",
@@ -624,10 +706,7 @@ const BLOCK_QUOTE_LEADING = new RegExp(`${SOL} *>`, "g");
 /** `block_parser._LINE_BLANK_END`, compiled without `re.M`. */
 const LINE_BLANK_END = new RegExp(`\\n[ \\t]*\\n${EOS}`);
 /** `block_parser._STRICT_BLOCK_QUOTE`, compiled without `re.M`. */
-const STRICT_BLOCK_QUOTE = new RegExp(
-  `(?: {0,3}>[^\\n]*(?:\\n|${EOS}))+`,
-  "y",
-);
+const STRICT_BLOCK_QUOTE = new RegExp(`(?: {0,3}>[^\\n]*(?:\\n|${EOS}))+`, "y");
 /** `BlockParser.max_nested_level`. */
 const MAX_NESTED_LEVEL = 6;
 
@@ -671,8 +750,7 @@ function extractBlockQuote(
         const quote = trimQuoteMarkers(m3[0]);
         text += quote;
         state.cursor = m3.index + m3[0].length;
-        prevBlankLine =
-          quote.trim() === "" ? true : LINE_BLANK_END.test(quote);
+        prevBlankLine = quote.trim() === "" ? true : LINE_BLANK_END.test(quote);
         continue;
       }
 
@@ -1331,12 +1409,61 @@ function parseBlocks(
   }
 }
 
-const INLINE_SC = compileSc(INLINE_SPECIFICATION, INLINE_RULES, "g");
+/**
+ * `Parser.compile_sc` over the inline specification, with the same cache.
+ *
+ * Every inline pattern is compiled with the `u` flag, because two of them spell
+ * out a Python character class that has no ASCII equivalent: `\p{L}\p{N}_` for
+ * `\w` in `emphasis` and `\p{Nd}` for `\d` in `prec_auto_link`.
+ */
+const INLINE_SC_CACHE = new Map<string, RegExp>();
+
+function inlineSc(rules: readonly string[], flags: string): RegExp {
+  const key = `${flags}\u0000${rules.join("|")}`;
+  let sc = INLINE_SC_CACHE.get(key);
+  if (!sc) {
+    sc = compileSc(INLINE_SPECIFICATION, rules, `${flags}u`);
+    INLINE_SC_CACHE.set(key, sc);
+  }
+  return sc;
+}
+
+const INLINE_SC = inlineSc(INLINE_RULES, "g");
+
+/** `precedence_scan`'s default rules, and the subset `parse_link` passes. */
+const PREC_DEFAULT_RULES = [
+  "codespan",
+  "link",
+  "prec_auto_link",
+  "prec_inline_html",
+] as const;
 
 /** Which ledger item each still-unported inline rule belongs to. */
 const UNPORTED_INLINE_RULES: Record<string, string> = {
-  emphasis: "5.3c-iii-b-1-b-iii-c",
   link: "5.3c-iii-b-1-b-iii-d",
+};
+
+/** `helpers.PREVENT_BACKSLASH`: an even number of backslashes, so the next one escapes. */
+const PREVENT_BACKSLASH = "(?<!\\\\)(?:\\\\\\\\)*";
+
+/** What may sit immediately before a closing run: an escaped marker, or a
+ * character that is neither whitespace nor the marker itself. */
+const EM_STAR_HEAD = `(?:${PREVENT_BACKSLASH}\\\\\\*|[^${PY_SPACE}*])`;
+const EM_USCORE_HEAD = `(?:${PREVENT_BACKSLASH}\\\\_|[^${PY_SPACE}_])`;
+
+/**
+ * `EMPHASIS_END_RE`. The head is what stops `*a *` from closing; the lookahead
+ * for one more marker character is what keeps `**` from closing a `*`. The `_`
+ * variants additionally require a word boundary after the run, which is why
+ * `snake_case_word` is one word rather than two emphasis runs.
+ */
+const EMPHASIS_END_RE: Record<string, RegExp> = {
+  "*": new RegExp(`${EM_STAR_HEAD}\\*(?!\\*)`, "gu"),
+  "**": new RegExp(`${EM_STAR_HEAD}\\*\\*(?!\\*)`, "gu"),
+  "***": new RegExp(`${EM_STAR_HEAD}\\*\\*\\*(?!\\*)`, "gu"),
+  _: new RegExp(`${EM_USCORE_HEAD}_(?!_)${PY_WORD_BOUNDARY_AFTER}`, "gu"),
+  __: new RegExp(`${EM_USCORE_HEAD}__(?!_)${PY_WORD_BOUNDARY_AFTER}`, "gu"),
+  ___: new RegExp(`${EM_USCORE_HEAD}___(?!_)${PY_WORD_BOUNDARY_AFTER}`, "gu"),
 };
 
 /** `InlineState`. */
@@ -1475,12 +1602,28 @@ function parseInlineMethod(
   m: RegExpExecArray,
   state: InlineState,
 ): number | undefined {
-  const rule = matchedRule(m, INLINE_RULES);
+  return applyInlineRule(matchedRule(m, INLINE_RULES), m, state);
+}
+
+/**
+ * `InlineParser._methods[rule]`.
+ *
+ * Split out from `parse_method` because `precedence_scan` reaches the same
+ * table by name, with a match produced by a single rule's own pattern rather
+ * than by the full alternation.
+ */
+function applyInlineRule(
+  rule: string,
+  m: RegExpExecArray,
+  state: InlineState,
+): number | undefined {
   switch (rule) {
     case "escape":
       return parseEscape(m, state);
     case "codespan":
       return parseCodespan(m, state);
+    case "emphasis":
+      return parseEmphasis(m, state);
     case "auto_link":
       return parseAutoLink(m, state);
     case "auto_email":
@@ -1494,6 +1637,98 @@ function parseInlineMethod(
     default:
       throw new UnportedMarkdownError(rule, UNPORTED_INLINE_RULES[rule]);
   }
+}
+
+/**
+ * `InlineParser.parse_emphasis`.
+ *
+ * The marker length decides everything: one `*` inside an emphasis and two
+ * inside a strong are literal text rather than a second nesting, and three open
+ * both at once and emit a `strong` wrapped in an `emphasis`. The span reaches to
+ * whatever `EMPHASIS_END_RE` finds first, and the text between is re-parsed with
+ * the matching flag set, so the guard applies to the children and not to the
+ * rest of the paragraph.
+ */
+function parseEmphasis(m: RegExpExecArray, state: InlineState): number {
+  const marker = m[0];
+  const mlen = marker.length;
+  const pos = m.index + mlen;
+
+  if (mlen === 1 && state.inEmphasis) {
+    processText(marker, state);
+    return pos;
+  }
+  if (mlen === 2 && state.inStrong) {
+    processText(marker, state);
+    return pos;
+  }
+
+  const m1 = search(EMPHASIS_END_RE[marker], state.src, pos);
+  if (!m1) {
+    processText(marker, state);
+    return pos;
+  }
+
+  const endPos = m1.index + m1[0].length;
+  const text = state.src.slice(pos, endPos - mlen);
+
+  const precPos = precedenceScan(m, state, endPos);
+  if (precPos) return precPos;
+
+  const newState = state.copy();
+  newState.src = text;
+  if (mlen === 1) {
+    newState.inEmphasis = true;
+    state.appendToken({ type: "emphasis", children: parseInline(newState) });
+  } else if (mlen === 2) {
+    newState.inStrong = true;
+    state.appendToken({ type: "strong", children: parseInline(newState) });
+  } else {
+    newState.inEmphasis = true;
+    newState.inStrong = true;
+    state.appendToken({
+      type: "emphasis",
+      children: [{ type: "strong", children: parseInline(newState) }],
+    });
+  }
+  return endPos;
+}
+
+/**
+ * `InlineParser.precedence_scan`.
+ *
+ * An emphasis run that swallowed the start of a codespan, an autolink or a tag
+ * loses to it: the scan looks inside the span for one of those openers, runs
+ * that rule from where it starts against the *whole* source, and if the rule
+ * ends at or past the emphasis closer the emphasis never happens. What was
+ * scanned becomes one text token, followed by whatever the winning rule
+ * produced. A rule that ends short of the closer changes nothing.
+ */
+function precedenceScan(
+  m: RegExpExecArray,
+  state: InlineState,
+  endPos: number,
+  rules: readonly string[] = PREC_DEFAULT_RULES,
+): number | undefined {
+  const markPos = m.index + m[0].length;
+  // `sc.search(state.src, mark_pos, end_pos)`: `endpos` truncates the subject,
+  // so a lookahead cannot see past the closer either.
+  const m1 = search(inlineSc(rules, "g"), state.src.slice(0, endPos), markPos);
+  if (!m1) return undefined;
+
+  const ruleName = matchedRule(m1, rules).replace(/^prec_/, "");
+  // `sc.match(state.src, m1.start())`: anchored, and against the full source.
+  const m2 = anchoredMatch(inlineSc([ruleName], "y"), state.src, m1.index);
+  if (!m2) return undefined;
+
+  const newState = state.copy();
+  newState.src = state.src;
+  const m2Pos = applyInlineRule(ruleName, m2, newState);
+  if (!m2Pos || m2Pos < endPos) return undefined;
+
+  state.appendToken({ type: "text", raw: state.src.slice(m.index, m2.index) });
+  for (const token of newState.tokens) state.appendToken(token);
+  return m2Pos;
 }
 
 /** `InlineParser.parse`. */
@@ -1565,6 +1800,10 @@ function renderToken(token: Token): string {
       return token.raw ?? "";
     case "codespan":
       return `<code>${token.raw ?? ""}</code>`;
+    case "emphasis":
+      return `<em>${renderChildren(token)}</em>`;
+    case "strong":
+      return `<strong>${renderChildren(token)}</strong>`;
     case "link": {
       const text = renderChildren(token);
       const url = token.attrs?.url ?? "";

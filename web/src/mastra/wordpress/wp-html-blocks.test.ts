@@ -51,8 +51,12 @@ describe("the oracle has teeth", () => {
 
   it("omits the level attribute for h2 only", () => {
     expect(markdownToWpHtml("## T\n")).toContain("<!-- wp:heading -->");
-    expect(markdownToWpHtml("# T\n")).toContain('<!-- wp:heading {"level":1} -->');
-    expect(markdownToWpHtml("### T\n")).toContain('<!-- wp:heading {"level":3} -->');
+    expect(markdownToWpHtml("# T\n")).toContain(
+      '<!-- wp:heading {"level":1} -->',
+    );
+    expect(markdownToWpHtml("### T\n")).toContain(
+      '<!-- wp:heading {"level":3} -->',
+    );
   });
 
   it("does not escape HTML metacharacters, in prose or in code", () => {
@@ -60,7 +64,9 @@ describe("the oracle has teeth", () => {
     // built on a library whose default renderer escapes would produce
     // `&amp;` and publish visibly wrong copy.
     expect(markdownToWpHtml("Tom & Jerry\n")).toContain("<p>Tom & Jerry</p>");
-    expect(markdownToWpHtml("```\n<b>&</b>\n```\n")).toContain("<code><b>&</b>\n</code>");
+    expect(markdownToWpHtml("```\n<b>&</b>\n```\n")).toContain(
+      "<code><b>&</b>\n</code>",
+    );
   });
 
   it("strips leading indentation from the document before parsing", () => {
@@ -68,7 +74,7 @@ describe("the oracle has teeth", () => {
     // are not an indented code block.
     expect(markdownToWpHtml("    code line\n")).toContain("<p>code line</p>");
     expect(markdownToWpHtml("Para.\n\n    code line\n")).toContain(
-      "<pre class=\"wp-block-code\"><code>code line</code></pre>",
+      '<pre class="wp-block-code"><code>code line</code></pre>',
     );
   });
 
@@ -114,24 +120,34 @@ describe("constructs whose handlers are not ported yet", () => {
    * Only inline rules are left. `block_quote` was listed here until
    * 5.3c-iii-b-1-b-ii-1 ported it, `list` until -ii-2, `raw_html` until -ii-3-a
    * and `ref_link` until -ii-3-b-2, which finished the block layer, and
-   * `escape` and `codespan` until -iii-a, and `auto_link`, `auto_email` and
-   * `inline_html` until -iii-b; their coverage is now
+   * `escape` and `codespan` until -iii-a, `auto_link`, `auto_email` and
+   * `inline_html` until -iii-b, and `emphasis` until -iii-c; their coverage is
+   * now
    * `wp-html-quotes.test.ts`, `wp-html-lists.test.ts`,
    * `wp-html-raw-html.test.ts`, `wp-html-ref-link.test.ts`,
    * `wp-html-inline-escape-codespan.test.ts` and
    * `wp-html-inline-autolink.test.ts`.
    */
 
-  it.each([
-    ["emphasis", "an *emphasised* word\n"],
-    ["link", "a [link](https://example.com) here\n"],
-  ])("throws for the %s inline rule", (rule, markdown) => {
-    expect(() => markdownToWpHtml(markdown)).toThrowError(UnportedMarkdownError);
-    try {
-      markdownToWpHtml(markdown);
-    } catch (error) {
-      expect((error as UnportedMarkdownError).rule).toBe(rule);
-      expect((error as Error).message).toContain("5.3c-iii-b-1-b-iii");
-    }
+  it.each([["link", "a [link](https://example.com) here\n"]])(
+    "throws for the %s inline rule",
+    (rule, markdown) => {
+      expect(() => markdownToWpHtml(markdown)).toThrowError(
+        UnportedMarkdownError,
+      );
+      try {
+        markdownToWpHtml(markdown);
+      } catch (error) {
+        expect((error as UnportedMarkdownError).rule).toBe(rule);
+        expect((error as Error).message).toContain("5.3c-iii-b-1-b-iii");
+      }
+    },
+  );
+
+  it("renders an emphasis now that -iii-c has ported the rule", () => {
+    expect(markdownToWpHtml("an *emphasised* word\n")).toBe(
+      "<!-- wp:paragraph -->\n<p>an <em>emphasised</em> word</p>\n" +
+        "<!-- /wp:paragraph -->\n\n",
+    );
   });
 });

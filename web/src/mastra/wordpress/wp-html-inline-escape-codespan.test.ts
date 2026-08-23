@@ -113,10 +113,7 @@ describe("hand written controls", () => {
   });
 
   it("still stops on the inline rules that are not ported yet", () => {
-    for (const [markdown, rule] of [
-      ["*a*\n", "emphasis"],
-      ["[a](/b)\n", "link"],
-    ] as const) {
+    for (const [markdown, rule] of [["[a](/b)\n", "link"]] as const) {
       let thrown: unknown;
       try {
         markdownToWpHtml(markdown);

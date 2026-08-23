@@ -541,3 +541,11 @@
   The fix is a two-line `inline_html` method returning `token["raw"]`, but it changes the
   output of a currently-crashing path and belongs with the Phase 3 images/ready work rather
   than with the tokenizer port.
+- [confirmed] 2026-08-23 The TypeScript port of mistune's `linebreak` and `softbreak`
+  inline patterns in `web/src/mastra/wordpress/wp-html.ts` still spells Python's `\s` as
+  JavaScript's `\s`. The two sets differ: Python's holds `\x1c`-`\x1f` and `\x85` and not
+  `﻿`, JavaScript's is the other way round, so a paragraph whose line ends in one of
+  those characters folds differently from the Python original. Found while porting ledger
+  item 5.3c-iii-b-1-b-iii-c, which fixed the same mistake in the `emphasis` pattern; the
+  file already has `PY_SPACE` for exactly this, so the fix is a two-line swap plus corpus
+  cases, but `linebreak` and `softbreak` are outside that item's scope.

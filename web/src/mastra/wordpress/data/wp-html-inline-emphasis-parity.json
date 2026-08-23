@@ -1,0 +1,795 @@
+{
+  "generated_by": "api/scripts/export_wp_html_inline_emphasis_parity.py",
+  "source": "api/src/services/wp_html.py::markdown_to_wp_html",
+  "token_source": "mistune.InlineParser.__call__",
+  "mistune_version": "3.2.0",
+  "scope": "the inline emphasis rule, the emphasis and strong renderer methods and precedence_scan",
+  "html_cases": [
+    {
+      "name": "single star emphasis",
+      "markdown": "*em*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>em</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "single underscore emphasis",
+      "markdown": "_em_\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>em</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "double star strong",
+      "markdown": "**strong**\n",
+      "html": "<!-- wp:paragraph -->\n<p><strong>strong</strong></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "double underscore strong",
+      "markdown": "__strong__\n",
+      "html": "<!-- wp:paragraph -->\n<p><strong>strong</strong></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "triple star is strong inside emphasis",
+      "markdown": "***both***\n",
+      "html": "<!-- wp:paragraph -->\n<p><em><strong>both</strong></em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "triple underscore is strong inside emphasis",
+      "markdown": "___both___\n",
+      "html": "<!-- wp:paragraph -->\n<p><em><strong>both</strong></em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "emphasis with surrounding text",
+      "markdown": "a *em* b\n",
+      "html": "<!-- wp:paragraph -->\n<p>a <em>em</em> b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "two emphasis runs in one paragraph",
+      "markdown": "*a* and *b*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a</em> and <em>b</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "emphasis at the very end",
+      "markdown": "a *em*\n",
+      "html": "<!-- wp:paragraph -->\n<p>a <em>em</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "star followed by a space does not open",
+      "markdown": "* a*\n",
+      "html": "<!-- wp:list -->\n<ul><li>a*</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "double star followed by a space does not open",
+      "markdown": "** a**\n",
+      "html": "<!-- wp:paragraph -->\n<p>** a**</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "underscore followed by a space does not open",
+      "markdown": "_ a_\n",
+      "html": "<!-- wp:paragraph -->\n<p>_ a_</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "four stars are not a marker",
+      "markdown": "****a****\n",
+      "html": "<!-- wp:paragraph -->\n<p>****a****</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "underscore inside a word does not open",
+      "markdown": "a_b_c\n",
+      "html": "<!-- wp:paragraph -->\n<p>a_b_c</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "snake case identifier",
+      "markdown": "snake_case_word here\n",
+      "html": "<!-- wp:paragraph -->\n<p>snake_case_word here</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "underscore after punctuation does open",
+      "markdown": "(_a_)\n",
+      "html": "<!-- wp:paragraph -->\n<p>(<em>a</em>)</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "underscore after a digit does not open",
+      "markdown": "1_a_\n",
+      "html": "<!-- wp:paragraph -->\n<p>1_a_</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "underscore after a non ascii letter does not open",
+      "markdown": "caf\u00e9_a_\n",
+      "html": "<!-- wp:paragraph -->\n<p>caf\u00e9_a_</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "underscore after a non ascii digit does not open",
+      "markdown": "\u0661_a_\n",
+      "html": "<!-- wp:paragraph -->\n<p>\u0661_a_</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "underscore after a combining mark does open",
+      "markdown": "a\u0301_b_\n",
+      "html": "<!-- wp:paragraph -->\n<p>a\u0301<em>b</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "star after a word does open",
+      "markdown": "a*b*\n",
+      "html": "<!-- wp:paragraph -->\n<p>a<em>b</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a file separator counts as whitespace after the marker",
+      "markdown": "a *\u001cb* c\n",
+      "html": "<!-- wp:paragraph -->\n<p>a *\u001cb* c</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a byte order mark does not count as whitespace after the marker",
+      "markdown": "a *\ufeffb* c\n",
+      "html": "<!-- wp:paragraph -->\n<p>a <em>\ufeffb</em> c</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a file separator counts as whitespace before the closer",
+      "markdown": "*a\u001c*\n",
+      "html": "<!-- wp:paragraph -->\n<p>*a\u001c*</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a byte order mark does not count as whitespace before the closer",
+      "markdown": "*a\ufeff*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a\ufeff</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "no closing marker at all",
+      "markdown": "*a\n",
+      "html": "<!-- wp:paragraph -->\n<p>*a</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "closing marker preceded by a space does not close",
+      "markdown": "*a *\n",
+      "html": "<!-- wp:paragraph -->\n<p>*a *</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "closing star followed by another star does not close",
+      "markdown": "*a**\n",
+      "html": "<!-- wp:paragraph -->\n<p>*a**</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "double star closed by three",
+      "markdown": "**a***\n",
+      "html": "<!-- wp:paragraph -->\n<p>**a***</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "closing underscore followed by a word character",
+      "markdown": "_a_b\n",
+      "html": "<!-- wp:paragraph -->\n<p>_a_b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "closing underscore followed by punctuation closes",
+      "markdown": "_a_.\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a</em>.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "closing underscore followed by a non ascii letter",
+      "markdown": "_a_\u00e9\n",
+      "html": "<!-- wp:paragraph -->\n<p>_a_\u00e9</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped closing star does not close",
+      "markdown": "*a\\*b*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a\\</em>b*</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an even backslash run leaves the star closing",
+      "markdown": "*a\\\\* b\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a\\</em> b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped closing underscore does not close",
+      "markdown": "_a\\_b_\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a_b</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "emphasis holding an escaped star only",
+      "markdown": "*\\**\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>*</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "strong inside emphasis",
+      "markdown": "*a **b** c*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a <strong>b</strong> c</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "emphasis inside strong",
+      "markdown": "**a *b* c**\n",
+      "html": "<!-- wp:paragraph -->\n<p><strong>a <em>b</em> c</strong></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "single marker inside an emphasis is text",
+      "markdown": "*a *b* c*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a *b</em> c*</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "double marker inside a strong is text",
+      "markdown": "**a **b** c**\n",
+      "html": "<!-- wp:paragraph -->\n<p><strong>a **b</strong> c**</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "double marker inside an emphasis still opens",
+      "markdown": "*a **b** c*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a <strong>b</strong> c</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "single marker inside a strong still opens",
+      "markdown": "**a *b* c**\n",
+      "html": "<!-- wp:paragraph -->\n<p><strong>a <em>b</em> c</strong></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "triple opens both flags",
+      "markdown": "***a *b* c***\n",
+      "html": "<!-- wp:paragraph -->\n<p><em><strong>a *b* c</strong></em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "triple then a double inside",
+      "markdown": "***a **b** c***\n",
+      "html": "<!-- wp:paragraph -->\n<p><em><strong>a **b** c</strong></em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "underscore emphasis inside star strong",
+      "markdown": "**a _b_ c**\n",
+      "html": "<!-- wp:paragraph -->\n<p><strong>a <em>b</em> c</strong></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "star emphasis inside underscore strong",
+      "markdown": "__a *b* c__\n",
+      "html": "<!-- wp:paragraph -->\n<p><strong>a <em>b</em> c</strong></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "emphasis inside emphasis by mixing markers",
+      "markdown": "*a _b_ c*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a _b_ c</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "emphasis in an atx heading",
+      "markdown": "# a *em* b\n",
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>a <em>em</em> b</h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "emphasis in a setext heading",
+      "markdown": "a *em* b\n===\n",
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>a <em>em</em> b</h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "emphasis in a list item",
+      "markdown": "- a *em* b\n",
+      "html": "<!-- wp:list -->\n<ul><li>a <em>em</em> b</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "emphasis in a block quote",
+      "markdown": "> a *em* b\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>a <em>em</em> b</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "emphasis spanning a soft break",
+      "markdown": "*a\nb*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a\nb</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "emphasis spanning a hard break",
+      "markdown": "*a  \nb*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a<br />\nb</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "emphasis is not looked for inside a fenced code block",
+      "markdown": "```\n*a*\n```\n",
+      "html": "<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>*a*\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "emphasis around an escape",
+      "markdown": "*a \\* b*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a \\</em> b*</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped stars are not emphasis",
+      "markdown": "\\*a\\*\n",
+      "html": "<!-- wp:paragraph -->\n<p>*a*</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "emphasis around an autolink",
+      "markdown": "*a <https://example.com> b*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a <a href=\"https://example.com\">https://example.com</a> b</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "emphasis around an email autolink",
+      "markdown": "*a <user@example.com> b*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a <a href=\"mailto:user@example.com\">user@example.com</a> b</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "emphasis around a codespan",
+      "markdown": "*a `b` c*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a <code>b</code> c</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "emphasis whose text is only a codespan",
+      "markdown": "*`a`*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em><code>a</code></em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan outruns the emphasis",
+      "markdown": "*a `b* c` d*\n",
+      "html": "<!-- wp:paragraph -->\n<p>*a <code>b* c</code> d*</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan ends exactly at the closer",
+      "markdown": "*a `b*`\n",
+      "html": "<!-- wp:paragraph -->\n<p>*a <code>b*</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan ends before the closer so the emphasis wins",
+      "markdown": "*a `b` c*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a <code>b</code> c</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "unclosed codespan inside an emphasis loses",
+      "markdown": "*a `b* c\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a `b</em> c</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan outruns a strong",
+      "markdown": "**a `b** c` d**\n",
+      "html": "<!-- wp:paragraph -->\n<p>**a <code>b** c</code> d**</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan outruns a triple",
+      "markdown": "***a `b*** c` d***\n",
+      "html": "<!-- wp:paragraph -->\n<p>***a <code>b*** c</code> d***</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink outruns the emphasis",
+      "markdown": "*a <https://example.com/*b> c*\n",
+      "html": "<!-- wp:paragraph -->\n<p>*a <a href=\"https://example.com/*b\">https://example.com/*b</a> c*</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "autolink ends before the closer so the emphasis wins",
+      "markdown": "*a <https://x.co> b*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a <a href=\"https://x.co\">https://x.co</a> b</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a failed autolink start leaves the emphasis alone",
+      "markdown": "*a <https:b* c*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a <https:b</em> c*</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan outruns an underscore emphasis",
+      "markdown": "_a `b_ c` d_\n",
+      "html": "<!-- wp:paragraph -->\n<p>_a <code>b_ c</code> d_</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "tag outruns the emphasis",
+      "markdown": "*a <span x=\"*\"> b*\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "closing tag outruns the emphasis",
+      "markdown": "*a </span* b> c*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a </span</em> b> c*</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "comment outruns the emphasis",
+      "markdown": "*a <!-- b* --> c*\n",
+      "error": {
+        "type": "AttributeError",
+        "message": "No renderer \"'inline_html'\""
+      }
+    },
+    {
+      "name": "a lone left angle bracket is not a tag start",
+      "markdown": "*a < b*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a < b</em></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "a bare question mark tag start that never ends",
+      "markdown": "*a <? b*\n",
+      "html": "<!-- wp:paragraph -->\n<p><em>a <? b</em></p>\n<!-- /wp:paragraph -->\n\n"
+    }
+  ],
+  "token_cases": [
+    {
+      "name": "triple star token shape",
+      "src": "***a***",
+      "tokens": [
+        {
+          "type": "emphasis",
+          "children": [
+            {
+              "type": "strong",
+              "children": [
+                {
+                  "type": "text",
+                  "raw": "a"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "triple underscore token shape",
+      "src": "___a___",
+      "tokens": [
+        {
+          "type": "emphasis",
+          "children": [
+            {
+              "type": "strong",
+              "children": [
+                {
+                  "type": "text",
+                  "raw": "a"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "nested strong inside emphasis token shape",
+      "src": "*a **b** c*",
+      "tokens": [
+        {
+          "type": "emphasis",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a "
+            },
+            {
+              "type": "strong",
+              "children": [
+                {
+                  "type": "text",
+                  "raw": "b"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "raw": " c"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "single marker inside an emphasis is a text token",
+      "src": "*a *b* c*",
+      "tokens": [
+        {
+          "type": "emphasis",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a "
+            },
+            {
+              "type": "text",
+              "raw": "*"
+            },
+            {
+              "type": "text",
+              "raw": "b"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "raw": " c*"
+        }
+      ]
+    },
+    {
+      "name": "double marker inside a strong is a text token",
+      "src": "**a **b** c**",
+      "tokens": [
+        {
+          "type": "strong",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a "
+            },
+            {
+              "type": "text",
+              "raw": "**"
+            },
+            {
+              "type": "text",
+              "raw": "b"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "raw": " c**"
+        }
+      ]
+    },
+    {
+      "name": "emphasis children are parsed, not raw",
+      "src": "*a `b` c*",
+      "tokens": [
+        {
+          "type": "emphasis",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a "
+            },
+            {
+              "type": "codespan",
+              "raw": "b"
+            },
+            {
+              "type": "text",
+              "raw": " c"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "precedence scan emits the scanned text then the winner",
+      "src": "*a `b* c` d*",
+      "tokens": [
+        {
+          "type": "text",
+          "raw": "*a "
+        },
+        {
+          "type": "codespan",
+          "raw": "b* c"
+        },
+        {
+          "type": "text",
+          "raw": " d*"
+        }
+      ]
+    },
+    {
+      "name": "precedence scan with a tag winner",
+      "src": "*a <span x=\"*\"> b*",
+      "tokens": [
+        {
+          "type": "text",
+          "raw": "*a "
+        },
+        {
+          "type": "inline_html",
+          "raw": "<span x=\"*\">"
+        },
+        {
+          "type": "text",
+          "raw": " b*"
+        }
+      ]
+    },
+    {
+      "name": "precedence scan with an autolink winner",
+      "src": "*a <https://example.com/*b> c*",
+      "tokens": [
+        {
+          "type": "text",
+          "raw": "*a "
+        },
+        {
+          "type": "link",
+          "children": [
+            {
+              "type": "text",
+              "raw": "https://example.com/*b"
+            }
+          ],
+          "attrs": {
+            "url": "https://example.com/*b"
+          }
+        },
+        {
+          "type": "text",
+          "raw": " c*"
+        }
+      ]
+    },
+    {
+      "name": "precedence scan that loses leaves an emphasis",
+      "src": "*a `b` c*",
+      "tokens": [
+        {
+          "type": "emphasis",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a "
+            },
+            {
+              "type": "codespan",
+              "raw": "b"
+            },
+            {
+              "type": "text",
+              "raw": " c"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "unclosed emphasis is a text token",
+      "src": "*a",
+      "tokens": [
+        {
+          "type": "text",
+          "raw": "*"
+        },
+        {
+          "type": "text",
+          "raw": "a"
+        }
+      ]
+    },
+    {
+      "name": "emphasis over a soft break",
+      "src": "*a\nb*",
+      "tokens": [
+        {
+          "type": "emphasis",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a"
+            },
+            {
+              "type": "softbreak"
+            },
+            {
+              "type": "text",
+              "raw": "b"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "emphasis inside an anchor still nests",
+      "src": "<a href=\"/x\">*a*</a>",
+      "tokens": [
+        {
+          "type": "inline_html",
+          "raw": "<a href=\"/x\">"
+        },
+        {
+          "type": "emphasis",
+          "children": [
+            {
+              "type": "text",
+              "raw": "a"
+            }
+          ]
+        },
+        {
+          "type": "inline_html",
+          "raw": "</a>"
+        }
+      ]
+    },
+    {
+      "name": "triple marker sets both flags for the children",
+      "src": "***a *b* **c** d***",
+      "tokens": [
+        {
+          "type": "emphasis",
+          "children": [
+            {
+              "type": "strong",
+              "children": [
+                {
+                  "type": "text",
+                  "raw": "a "
+                },
+                {
+                  "type": "text",
+                  "raw": "*"
+                },
+                {
+                  "type": "text",
+                  "raw": "b* "
+                },
+                {
+                  "type": "text",
+                  "raw": "**"
+                },
+                {
+                  "type": "text",
+                  "raw": "c** d"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "render_cases": [
+    {
+      "name": "emphasis with one text child",
+      "method": "emphasis",
+      "token": {
+        "type": "emphasis",
+        "children": [
+          {
+            "type": "text",
+            "raw": "a"
+          }
+        ]
+      },
+      "html": "<em>a</em>"
+    },
+    {
+      "name": "emphasis with no children",
+      "method": "emphasis",
+      "token": {
+        "type": "emphasis",
+        "children": []
+      },
+      "html": "<em></em>"
+    },
+    {
+      "name": "emphasis with a missing children key",
+      "method": "emphasis",
+      "token": {
+        "type": "emphasis"
+      },
+      "html": "<em></em>"
+    },
+    {
+      "name": "strong with one text child",
+      "method": "strong",
+      "token": {
+        "type": "strong",
+        "children": [
+          {
+            "type": "text",
+            "raw": "a"
+          }
+        ]
+      },
+      "html": "<strong>a</strong>"
+    },
+    {
+      "name": "strong with no children",
+      "method": "strong",
+      "token": {
+        "type": "strong",
+        "children": []
+      },
+      "html": "<strong></strong>"
+    },
+    {
+      "name": "strong with a missing children key",
+      "method": "strong",
+      "token": {
+        "type": "strong"
+      },
+      "html": "<strong></strong>"
+    },
+    {
+      "name": "emphasis text is interpolated raw",
+      "method": "emphasis",
+      "token": {
+        "type": "emphasis",
+        "children": [
+          {
+            "type": "text",
+            "raw": "a < b & c"
+          }
+        ]
+      },
+      "html": "<em>a < b & c</em>"
+    }
+  ]
+}

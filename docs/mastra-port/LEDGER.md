@@ -10866,8 +10866,164 @@ three pieces are separately verifiable, so they are separate items.
               $ cd api && uv run ruff format --check scripts/export_wp_html_inline_autolink_parity.py
               1 file already formatted
               ```
-            - [ ] 5.3c-iii-b-1-b-iii-c `emphasis` and `strong`, their renderer methods
+            - [x] 5.3c-iii-b-1-b-iii-c `emphasis` and `strong`, their renderer methods
               and `precedence_scan`.
+
+              `web/src/mastra/wordpress/wp-html.ts` gains `parse_emphasis`,
+              `EMPHASIS_END_RE`'s six patterns, `precedence_scan`, the
+              `prec_auto_link` and `prec_inline_html` specification entries, the
+              `emphasis` and `strong` renderer cases, and an `applyInlineRule`
+              split out of `parse_method` because `precedence_scan` reaches the
+              same table by rule name rather than by group participation.
+
+              **One rule, two token types.** `parse_emphasis` reads the marker
+              length: one `*` inside an emphasis and two inside a strong are
+              literal text rather than a second nesting, and three open both
+              flags at once and emit a `strong` wrapped in an `emphasis`. The
+              span reaches to whatever `EMPHASIS_END_RE` finds first and the text
+              between is re-parsed with the matching flag set, so the guard binds
+              to the children and not to the rest of the paragraph. `*a *b* c*`
+              is therefore `<em>a *b</em> c*` and not `<em>a *b* c</em>`.
+
+              **`precedence_scan` is what stops an emphasis run from cutting a
+              codespan, an autolink or a tag in half.** It looks inside the span
+              for one of those openers, runs that rule from where it starts
+              against the whole source, and if the rule ends at or past the
+              emphasis closer the emphasis never happens: the scanned characters
+              become one text token and the winner's tokens follow. A rule that
+              ends short of the closer changes nothing. Python's
+              `sc.search(src, pos, endpos)` truncates the subject, so the port
+              searches `state.src.slice(0, endPos)`, while the second, anchored
+              match runs against the untruncated source; swapping either one is
+              caught by the corpus.
+
+              **Two Python regex escapes had to be spelled out, and the file was
+              already wrong about one of them.** `INLINE_SPECIFICATION.emphasis`
+              read `\b_{1,3}(?=[^\s_])`, which is Python source, not JavaScript:
+              Python's `\b` is Unicode aware and Python's `\s` is `str.isspace()`'s
+              set. `\w` was verified exhaustively against CPython over every code
+              point and is exactly `[\p{L}\p{N}_]`, so `\b` before or after an
+              underscore becomes a lookaround on that class, and every inline
+              pattern is now compiled with the `u` flag. Without the fix
+              `café_a_` renders an emphasis in TypeScript and does not in Python.
+              `prec_auto_link`'s `\d` is `[Nd]`, spelled `\p{Nd}`.
+
+              `linebreak` and `softbreak` still spell `\s` the JavaScript way.
+              That is out of this item's scope and is logged in `todo.md`.
+
+              **Oracle.** `api/scripts/export_wp_html_inline_emphasis_parity.py`
+              writes three corpora to
+              `web/src/mastra/wordpress/data/wp-html-inline-emphasis-parity.json`:
+              75 whole-document `html_cases` of which 2 pin the `AttributeError`
+              a precedence scan won by a tag produces, 14 `token_cases` through
+              mistune's own `InlineParser.__call__` for the nesting the rendered
+              HTML flattens, and 7 `render_cases` for the two renderer methods'
+              empty-children branch. The guard against pinning an unported rule
+              changed shape this iteration: instead of replaying the scan loop by
+              hand it wraps mistune's `_methods` table, which both `parse_method`
+              and `precedence_scan` dispatch through, so a case whose *precedence
+              scan* reaches the unported `link` rule is refused too.
+
+              ```
+              $ cd api && PYTHONPATH=. uv run python scripts/export_wp_html_inline_emphasis_parity.py
+              wrote 75 html cases (2 of them raising) and 14 token cases and 7 render cases to
+              .../web/src/mastra/wordpress/data/wp-html-inline-emphasis-parity.json
+
+              $ pnpm -C web vitest run src/mastra/wordpress/wp-html-inline-emphasis.test.ts
+               Test Files  1 passed (1)
+                    Tests  110 passed (110)
+
+              $ pnpm -C web vitest run src/mastra/wordpress/
+               Test Files  11 passed (11)
+                    Tests  1179 passed (1179)
+              ```
+
+              **Four existing tests changed, because the behaviour they pinned is
+              what this item implements.** `wp-html-blocks.test.ts` no longer
+              lists `emphasis` as throwing and asserts the real Python HTML for
+              `an *emphasised* word` instead; the unported-rule loops in
+              `wp-html-inline-escape-codespan.test.ts` and
+              `wp-html-inline-autolink.test.ts` drop the `emphasis` row, leaving
+              `link`; and the "still refuses" controls in `wp-html-lists.test.ts`
+              and `wp-html-quotes.test.ts` swap their `*emphasised*` input for a
+              `[link](/b)` one.
+
+              **Mutations.** Twenty-four applied one at a time against
+              `pnpm -C web vitest run src/mastra/wordpress/`; twenty-two failed
+              the suite.
+
+              | Mutation | Result |
+              | --- | --- |
+              | drop the `in_emphasis` guard | caught |
+              | drop the `in_strong` guard | caught |
+              | triple marker sets only `in_emphasis` | caught |
+              | triple marker nests `emphasis` inside `strong` | caught |
+              | word boundary uses JavaScript's ASCII `\w` | caught |
+              | closing underscore uses a bare `\b` | caught |
+              | opening lookahead uses JavaScript's `\s` | caught |
+              | closing head uses JavaScript's `\s` | caught |
+              | closing star run drops the one-more-star lookahead | caught |
+              | closing head drops the escaped-marker alternative | caught |
+              | closing head allows whitespace before the marker | caught |
+              | precedence scan never runs | caught |
+              | precedence scan searches past the closer | caught |
+              | precedence scan accepts a winner that stops at the closer | caught |
+              | precedence scan text token starts at the marker end | caught |
+              | precedence scan runs the winner against the truncated source | caught |
+              | precedence scan winner parses an empty source | caught |
+              | precedence rules put the tag scan before the codespan | caught |
+              | emphasis text keeps the whole closing run | caught |
+              | emphasis renderer emits `<i>` | caught |
+              | strong renderer emits `<b>` | caught |
+              | `prec_auto_link` uses ASCII digits | **survived, unobservable** |
+              | emphasis end pattern searched from the marker start | **survived, unobservable** |
+
+              Both survivors are genuinely unobservable rather than untested.
+              `prec_auto_link`'s `\p{Nd}`: the only strings where it and its ASCII
+              spelling disagree contain a non-ASCII digit inside the scheme, and
+              `auto_link`'s own pattern is ASCII-only, so `parse_auto_link` can
+              never succeed there; `prec_inline_html` matches at the same offset
+              whenever `prec_auto_link` does, and its rule cannot succeed there
+              either, because the character that broke the scheme also breaks the
+              tag. Searching the end pattern from `m.start()` instead of `m.end()`:
+              the closing head is `[^\s*]` or `[^\s_]`, which cannot match a
+              marker character, and every position between the two is a marker
+              character, so the first candidate is `m.end()` either way.
+
+              Gates, both stacks:
+
+              ```
+              $ pnpm -C web tsc --noEmit
+              TSC EXIT=0
+
+              $ pnpm -C web lint
+              LINT EXIT=0
+
+              $ pnpm -C web test
+               Test Files  3 failed | 111 passed (114)
+                    Tests  10 failed | 3370 passed | 7 skipped (3387)
+              (the Phase 0 baseline of 9: 6 in image-preview.test.tsx and 3 in
+              PostDetail.test.tsx, plus the known scaffold-check.test.ts flake already
+              logged in todo.md. That file passes 5/5 in isolation:
+                $ pnpm -C web vitest run src/mastra/workflows/scaffold-check.test.ts
+                 Test Files  1 passed (1)
+                      Tests  5 passed (5))
+
+              $ pnpm -C web build
+              BUILD EXIT=0
+
+              $ cd api && uv run pytest -q          # with the repo .env sourced
+              120 failed, 241 passed, 25 errors in 15.13s
+
+              $ cd api && uv run ruff check .
+              Found 32 errors.
+              $ cd api && uv run ruff format --check .
+              9 files would be reformatted, 144 files already formatted
+              $ cd api && uv run ruff check scripts/export_wp_html_inline_emphasis_parity.py
+              All checks passed!
+              $ cd api && uv run ruff format --check scripts/export_wp_html_inline_emphasis_parity.py
+              1 file already formatted
+              ```
             - [ ] 5.3c-iii-b-1-b-iii-d `link` and `image`, `parse_link_label`,
               `parse_link_text`, `parse_link`, the `in_link` / `in_image` guards, the
               `state.env['ref_links']` lookup, and the `link` and `image` renderer

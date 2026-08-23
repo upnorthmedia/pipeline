@@ -127,8 +127,9 @@ describe("the quote oracle has teeth", () => {
     // `raw_html` and `> [label]: https://example.com` until -ii-3-b-2 ported
     // `ref_link`, which finished the block layer; all three are now replay cases
     // in `wp-html-lists.test.ts`, `wp-html-raw-html.test.ts` and
-    // `wp-html-ref-link.test.ts`, and only the inline rules are left to refuse.
-    expect(() => markdownToWpHtml("> an *emphasised* word\n")).toThrowError(
+    // `wp-html-ref-link.test.ts`. `> an *emphasised* word` read here until
+    // -iii-c ported `emphasis`; `link` is the last inline rule left to refuse.
+    expect(() => markdownToWpHtml("> a [link](/b) here\n")).toThrowError(
       UnportedMarkdownError,
     );
   });
