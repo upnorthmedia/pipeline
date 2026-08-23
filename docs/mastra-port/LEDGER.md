@@ -16358,7 +16358,296 @@ three pieces are separately verifiable, so they are separate items.
     end to end, because `web/src/lib/api.ts`'s `analytics.costs()` is called
     with no arguments from the dashboard, so only `?days=30` is ever requested
     in practice.
-  - [ ] 5.8c `GET /api/analytics/models`
+  - [x] 5.8c `GET /api/analytics/models`.
+
+    Ported to `web/src/app/api/analytics/models/route.ts`. Three independent
+    queries (a `stage_logs` unroll grouped by model, the same unroll grouped by
+    stage key, a `stage_status` unroll pivoted in the handler), assembled into
+    the `ModelAnalytics` shape `web/src/lib/api.ts` already declares. `api.ts`
+    needed no change: every field and type already matched what the handler
+    returns.
+
+    **The FROM clause was probed before porting, because 5.8b's was broken.**
+    `/costs` put its `website_profiles` join inside the second `FROM` item and
+    answered 500 on every call. `/models` looks the same at a glance but is not:
+    its join sits *ahead* of the comma, so `posts JOIN website_profiles` is the
+    first item and `jsonb_each(p.stage_logs)` is an implicitly `LATERAL` second
+    one. Executed against the live database rather than assumed:
+
+    ```
+    $ cd web && PROBE_URL="<DATABASE_URL_SYNC from .env>" node probe_models_sql.mjs
+    OK rowCount= 0
+    FIELDS model:25 call_count:20 avg:701 avg:701 avg:701 sum:701
+    ```
+
+    (`probe_models_sql.mjs` ran the endpoint's first query verbatim, with a
+    `user_id` nobody owns. It parses, plans and executes, so no correction is
+    needed here and none was made.)
+
+    That output also settled the wire types. `call_count` is OID 20, `bigint`,
+    and `pg` decodes `bigint` to a **string** rather than risk a lossy `Number`.
+    Python's asyncpg decoded it to an `int`. Confirmed through the same drizzle
+    client the handler uses, because drizzle installs its own type-parser
+    overrides:
+
+    ```
+    $ cd web && npx vitest run src/probe_types.test.ts
+    stdout | src/probe_types.test.ts > probe > types
+    [{"call_count":"2","a":1.5,"s":5}] [ [ 'call_count=string', 'a=number', 's=number' ] ]
+     ✓ src/probe_types.test.ts (1 test) 18ms
+    ```
+
+    So every count on this endpoint is converted with `Number()` or it goes out
+    quoted; `AVG`/`SUM` over the `::float` casts are OID 701 `double precision`
+    and arrive as numbers already. (This is the opposite of 5.8a, where the
+    average came back as `numeric` and took FastAPI's `decimal_encoder` int
+    path.)
+
+    **Failing first.** The handler was replaced by a stub returning
+    `{models: [], stage_performance: [], stage_success_rates: []}` and the suite
+    run against it:
+
+    ```
+    $ cd web && npx vitest run src/app/api/analytics/models.test.ts
+     Test Files  1 failed (1)
+          Tests  26 failed | 2 passed (28)
+    ```
+
+    The two that passed are the 401 (no database work) and the empty
+    `stage_logs` case (an empty `models` array is what the stub returns).
+
+    **Passing.**
+
+    ```
+    $ cd web && npx vitest run src/app/api/analytics/models.test.ts --reporter=verbose
+     + GET /api/analytics/models > rejects an unauthenticated request 3ms
+     + GET /api/analytics/models > answers an empty history with no models, no stages and six zeroed rates 19ms
+     + models > averages tokens and duration and sums cost across every call of a model 6ms
+     + models > reports call_count as a number, not the string pg decodes bigint to 5ms
+     + models > groups by model and orders by call count descending 8ms
+     + models > excludes a call that recorded no model, while stage_performance keeps it 5ms
+     + models > treats a missing numeric key as zero rather than dropping the call 4ms
+     + models > rounds the token averages half to even, where Math.round would round up 4ms
+     + models > rounds avg_duration_s half to even at one place, where toFixed rounds away 4ms
+     + models > rounds total_cost half to even at six places 4ms
+     + models > filters both rollups by model, leaving the success rates alone 4ms
+     + models > treats an empty model parameter as no filter at all 4ms
+     + models > takes the last value of a repeated model parameter, as Starlette does 4ms
+     + models > answers no rows for a model nobody used 4ms
+     + stage_performance > groups by stage key and orders by that key, not by pipeline order 4ms
+     + stage_performance > averages duration and sums cost across every post that ran the stage 4ms
+     + stage_performance > reports runs as a number, not the string pg decodes bigint to 4ms
+     + excluded rows > excludes keys beginning with an underscore from both rollups 4ms
+     + excluded rows > keeps a stage whose name merely contains an underscore 4ms
+     + excluded rows > excludes a post with an empty stage_logs object 4ms
+     + excluded rows > excludes another user's posts from every rollup 7ms
+     + excluded rows > excludes a post with no profile, which has no owner to scope by 4ms
+     + stage_success_rates > counts complete and failed separately and totals every status 5ms
+     + stage_success_rates > reports every stage in pipeline order, zeroed when it never ran 3ms
+     + stage_success_rates > rounds the success rate half to even, where toFixed rounds away 12ms
+     + stage_success_rates > ignores a stage_status key that is not a pipeline stage 3ms
+     + stage_success_rates > excludes a post with an empty stage_status object 3ms
+     + stage_success_rates > counts a stage_status entry even when the post logged no stages 3ms
+
+     Test Files  1 passed (1)
+          Tests  28 passed (28)
+    ```
+
+    (vitest's pass glyph is a check mark; transcribed as `+` here. The full
+    test names are prefixed with the file path in the real output and are
+    trimmed to the describe path above.)
+
+    **Cross-stack parity against the running Python endpoint.** Unlike 5.8b,
+    this endpoint executes, so parity was measured rather than argued. A probe
+    wrote one profile and seventeen posts with deliberately awkward fixtures (an
+    exact `0.25` duration, a `0.0078125` cost, a stage with no `model`, a stage
+    with only `model` and `cost_usd` set, an `_error` key, an empty
+    `stage_logs`, a `stage_status` key outside `STAGES`, and enough `research`
+    rows for an exact `6.25` success rate), then called the TypeScript handler.
+    The Python router was then mounted on a bare `FastAPI()` under `TestClient`
+    with `get_current_user` overridden to the same user id and `get_session`
+    bound to the real dev database, and called on the same rows:
+
+    ```
+    $ cd api && PYTHONPATH=. uv run python /tmp/probe_models_py.py
+    STATUS 200
+    {"models":[{"model":"claude-opus-4-6","call_count":2,"avg_tokens_in":8.0,...
+    ```
+
+    ```
+    $ diff <(python3 -c "import json;print(json.dumps(json.load(open('/tmp/models-py.json')),sort_keys=True,indent=1))") \
+           <(python3 -c "import json;print(json.dumps(json.load(open('/tmp/models-ts.json')),sort_keys=True,indent=1))")
+    5,6c5,6
+    <    "avg_tokens_in": 8.0,
+    <    "avg_tokens_out": 4.0,
+    ---
+    >    "avg_tokens_in": 8,
+    >    "avg_tokens_out": 4,
+    ... (11 hunks, every one of this form)
+    86c86
+    <    "success_rate": 100.0,
+    ---
+    >    "success_rate": 100,
+    ```
+
+    ```
+    $ python3 -c "
+    import json
+    py=json.load(open('/tmp/models-py.json')); ts=json.load(open('/tmp/models-ts.json'))
+    print('deep equal after parse:', py==ts)
+    for r in py['stage_success_rates']:
+        print(r['stage'], repr(r['success_rate']), type(r['success_rate']).__name__)
+    "
+    deep equal after parse: True
+    research 13.3 float
+    outline 0.0 float
+    write 0.0 float
+    edit 0 int
+    images 0.0 float
+    ready 100.0 float
+    ```
+
+    Every number agrees exactly, including the two half-to-even ties Python's
+    `round()` decides differently from `Math.round` and `toFixed`. The only
+    textual difference is trailing-zero rendering.
+
+    **Deviation 1, recorded: whole-number floats render without `.0`.** Python
+    `round(float, n)` returns a `float`, so `8.0`, `3.0`, `0.0` and `100.0` go
+    out with a decimal point. JavaScript has one number type, so the same values
+    render `8`, `3`, `0`, `100`. `JSON.parse` produces the identical `number`
+    from both, `web/src/lib/api.ts` types every one of these fields as `number`,
+    and the diff above is the complete extent of it. Notice Python is not even
+    self-consistent here: `success_rate` is a `float` for a stage that ran and
+    an `int` (`0`) for one that did not, because the `else 0` branch returns an
+    `int` literal. Nothing can depend on the distinction.
+
+    **Deviation 2, recorded: the repeated-parameter rule.** Starlette's
+    `QueryParams.get()` returns the *last* value of a repeated key where
+    `URLSearchParams.get()` returns the first, so `model` is read off
+    `getAll("model").at(-1)`. This matches Python; it is the ported `/costs`
+    handler from 5.8b that does not, and that is logged in `todo.md` rather than
+    fixed here so this iteration stays one ledger item.
+
+    **What is preserved deliberately, each with its own test:**
+
+    - `sl.key NOT LIKE '\_%'` excludes keys starting with a literal underscore
+      (`_error` from the dead-letter path) from both `stage_logs` rollups, and
+      applies to neither `stage_status` nor a key that merely contains an
+      underscore.
+    - `sl.value->>'model' IS NOT NULL` drops unmodelled calls from `models`
+      while `stage_performance` keeps them, so the two rollups need not agree on
+      their call totals.
+    - The `model` filter applies to `models` and `stage_performance` and *not*
+      to `stage_success_rates`, which reads `stage_status` where no model is
+      recorded.
+    - Python's guard is `if model:`, so `?model=` is not a filter at all.
+    - `ss.value::text` renders a jsonb string with its quotes; Python stripped
+      them with `str.strip('"')`, which removes every leading and trailing quote
+      rather than one from each end, and *assigns* rather than accumulates, so
+      two jsonb values stripping to the same key keep only the last.
+    - `stage_success_rates` is projected over `STAGES` in pipeline order, so all
+      six rows are always present and a `stage_status` key outside `STAGES` is
+      dropped, whereas `stage_performance` is ordered by the key Postgres sorted
+      on.
+    - `round(completed / total_runs * 100, 1) if total_runs > 0 else 0` reports
+      an unrun stage as `0` rather than dividing by zero.
+
+    **Negative controls.** Each was applied to the handler, the suite run, then
+    reverted.
+
+    | # | Control | Result |
+    | --- | --- | --- |
+    | 1 | `call_count` left as the string `pg` decodes `bigint` to | 6 failed, 22 passed |
+    | 2 | `Math.round` for the token averages | 1 failed, 27 passed |
+    | 3 | `toFixed(1)` for `avg_duration_s` | 1 failed, 27 passed |
+    | 4 | `toFixed(6)` for `total_cost` | 1 failed, 27 passed |
+    | 5 | `sl.key not like '\_%'` dropped from the models query | 1 failed, 27 passed |
+    | 6 | `sl.value->>'model' is not null` dropped | 1 failed, 27 passed |
+    | 7 | first repeated `model` value instead of last | 1 failed, 27 passed |
+    | 8 | `model !== undefined` instead of truthiness | 1 failed, 27 passed |
+    | 9 | `model` filter also applied to the `stage_status` query | 3 failed, 25 passed |
+    | 10 | jsonb quotes not stripped off the status | 5 failed, 23 passed |
+    | 11 | `wp.user_id = <caller>` replaced with `wp.user_id is not null` | 1 failed, 27 passed |
+    | 12 | rates projected over the seen keys instead of `STAGES` | 7 failed, 21 passed |
+    | 13 | `totalRuns > 0` guard dropped from `success_rate` | 5 failed, 23 passed |
+    | 14 | `order by call_count desc` replaced with `order by model` | **28 passed, no teeth** |
+
+    Control 14 exposed a weak test rather than confirming a strong one. The
+    ordering test used `claude-opus-4-6` (3 calls) and `sonar-pro` (1 call), and
+    those two happen to sort the same way by count descending and by name
+    ascending, so the assertion could not tell the orderings apart. The test now
+    adds a second round in which `sonar-pro` reaches 4 calls, making the count
+    order the reverse of the alphabet, and the control was re-run:
+
+    ```
+    CONTROL 14 (retry) order by call_count desc dropped =>       Tests  1 failed | 27 passed (28)
+    ```
+
+    **Gates.**
+
+    ```
+    $ cd web && npx tsc --noEmit
+    (no output)
+    tsc exit=0
+
+    $ cd web && npx eslint
+    (no output)
+    eslint exit=0
+
+    $ cd web && npx next build
+    exit=0
+    ✓ Compiled successfully in 4.1s
+    ├ ƒ /api/analytics/models
+    ```
+
+    The build also prints 15 `[Error [BetterAuthError]: You are using the
+    default secret ...]` lines while collecting page data for the 15 prerendered
+    `/auth/[path]` routes. This is pre-existing and environmental, not a
+    regression: `BETTER_AUTH_SECRET` is absent from the repo `.env`
+    (`grep -c BETTER_AUTH_SECRET ../.env` answers `0`), and a build with this
+    item's route directory moved aside prints the same 15 lines and also exits
+    0. Logged in `todo.md`.
+
+    ```
+    $ cd web && npx vitest run          # whole suite, three runs
+     Test Files  3 failed | 96 passed (99)
+          Tests  10 failed | 1870 passed | 7 skipped (1887)
+     Tests  9 failed | 1871 passed | 7 skipped (1887)
+     Tests  9 failed | 1871 passed | 7 skipped (1887)
+
+    $ cd web && npx vitest run          # same, with this item's two files moved aside
+     Test Files  2 failed | 96 passed (98)
+          Tests  9 failed | 1843 passed | 7 skipped (1859)
+    ```
+
+    Both sides measured, as the standing `todo.md` entry requires. The floor is
+    the 9 known failures (6 in `image-preview.test.tsx`, 3 in
+    `PostDetail.test.tsx`). The tenth, `scaffold-check.test.ts > emits the
+    workflow lifecycle events the trace view will read`, is the recorded
+    load-sensitive flake: it fired on 1 of the 3 runs with this item's files
+    present and on 0 of 1 without them, which is the same 1-in-3 rate recorded
+    at HEAD under 5.6 and is not attributable to this change.
+
+    ```
+    $ cd api && uv run pytest -q
+    120 failed, 241 passed, 25 errors in 14.99s
+
+    $ cd api && uv run ruff check .
+    Found 32 errors.
+    [*] 17 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).
+
+    $ cd api && uv run ruff format --check .
+    9 files would be reformatted, 131 files already formatted
+    ```
+
+    Unchanged from the counts recorded under 5.8a and 5.8b. No Python changed in
+    this iteration.
+
+    **Not covered.** No browser drives `/monitor`'s models tab against this
+    handler, so nothing here proves the charts render the payload; that check
+    belongs to Phase 8 item 8.8. The `model` filter is never exercised end to
+    end either, because `web/src/lib/api.ts`'s `analytics.models()` is called
+    with no arguments from the dashboard.
   - [ ] 5.8d `GET /api/analytics/logs`
 - [ ] 5.9 `wordpress`
 - [ ] 5.10 `nextjs` (HMAC signing from `hmac_signing.py` and the webhook contract with

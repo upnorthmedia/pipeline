@@ -449,3 +449,20 @@
   is still serving until Phase 7 deletes it. No fix applied to `api/` for the same reason.
   Worth checking whether `/models` and `/logs` share the shape before porting them (items
   5.8c and 5.8d).
+- [confirmed] 2026-08-23 `web/src/app/api/analytics/costs/route.ts` (ledger item 5.8b) reads
+  its two optional query parameters with `url.searchParams.get("profile_id")` and
+  `url.searchParams.get("model")`, which return the *first* value of a repeated key.
+  Starlette's `QueryParams.get()` returns the *last*, so `?model=a&model=b` filters on `a` in
+  the port and on `b` in the Python endpoint. Found while porting `/models` (item 5.8c),
+  which reads `getAll("model").at(-1)` and has a test for it. Two one-line changes plus two
+  tests; left out of 5.8c to keep that iteration to one ledger item. `/dashboard` is already
+  correct (`parseDays()` in `web/src/app/api/analytics/days.ts` uses `getAll().at(-1)`).
+- [confirmed] 2026-08-23 `npx next build` in `web/` prints 15 `[Error [BetterAuthError]: You
+  are using the default secret. Please set BETTER_AUTH_SECRET ...]` lines while collecting
+  page data for the 15 prerendered `/auth/[path]` routes. The build still exits 0. Cause is
+  environmental, not code: the repo `.env` has no `BETTER_AUTH_SECRET`
+  (`grep -c BETTER_AUTH_SECRET .env` answers `0`), so BetterAuth falls back to its default
+  secret at build time. It has to be gone before item 9.1 can claim a build with no errors in
+  its output, and Phase 7's `.env` documentation (item 7.4) is where the variable should be
+  written down. Note this contradicts the iteration 95 note that the build *fails* without it;
+  measured at HEAD on 2026-08-23 it exits 0 either way.
