@@ -36,6 +36,7 @@ import {
 import { ImagePreview } from "@/components/image-preview";
 import { ExportButton } from "@/components/export-button";
 import { DebugLogPanel, type DebugLog } from "@/components/debug-log-panel";
+import { RunTrace } from "@/components/run-trace";
 import {
   posts,
   type Post,
@@ -86,6 +87,11 @@ export default function PostDetailPage() {
   const [editorContent, setEditorContent] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [debugLogs, setDebugLogs] = useState<DebugLog[]>([]);
+  // The stage of the most recent `stage_start` frame. The row entry that frame
+  // announces is not on the client until the next refetch, and refetches only
+  // happen on terminal stage events, so without this the trace's elapsed clock
+  // would sit blank for the whole of the stage it is timing.
+  const [liveStart, setLiveStart] = useState<{ stage: PipelineStage; at: string } | null>(null);
   const lastSavedRef = useRef<string>("");
 
   const fetchPost = useCallback(async () => {
@@ -175,6 +181,7 @@ export default function PostDetailPage() {
       }
 
       if (event.event === "stage_start" && event.stage) {
+        setLiveStart({ stage: event.stage as PipelineStage, at: new Date().toISOString() });
         // Optimistically show this stage as "running" in the progress UI
         setPost((prev) => {
           if (!prev) return prev;
@@ -455,6 +462,13 @@ export default function PostDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Run Trace */}
+      <RunTrace
+        executionLogs={post.execution_logs}
+        stageStatus={post.stage_status}
+        liveStart={liveStart}
+      />
 
       {/* Stage Content Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>

@@ -1441,9 +1441,16 @@ screenshots via `npx -y chrome-devtools-axi` into
 `docs/mastra-port/ui/<iteration>-<screen>-{before,after}.png`, plus a clean
 `chrome-devtools-axi console`. Stop the bridge at the end of every iteration.
 
-- [ ] 8.1 Run trace view on `posts/[id]`: live per-step status, elapsed time, token counts and
+- [x] 8.1 Run trace view on `posts/[id]`: live per-step status, elapsed time, token counts and
   estimated cost from Mastra stream events and `stream.usage`; retries, suspensions and failures
   shown with their error text.
+  `buildRunTrace()` folds `execution_logs` (where the steps record Mastra's own `usage`) and
+  `stage_status` into one row per step; the SSE feed drives the refetch and starts the elapsed
+  clock. Proven against a real worker run: the completed trace reads 72,037 tokens / $2.62 /
+  6m 24s per stage, and a live `ready` rerun showed the clock counting with no numbers beside
+  it. Caught and fixed a defect where a rerun stage kept the superseded attempt's tokens and
+  cost, which also double-counted them into the run total.
+  Evidence: [`evidence/phase-8.md` #8.1](../mastra-port/evidence/phase-8.md)
 - [ ] 8.2 `/` (dashboard home): loading, empty, error, success states.
 - [ ] 8.3 `/posts/[id]`: four states, plus visual hierarchy and spacing pass.
 - [ ] 8.4 posts list: four states, plus visual hierarchy and spacing pass.

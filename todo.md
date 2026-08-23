@@ -707,3 +707,20 @@
   `9 failed | 4510 passed` state of `pnpm -C web test`, which had only ever been recorded as
   an aggregate. Item 9.1 needs both files audited against the current components, the same
   way the Playwright suite does.
+
+- [confirmed] 2026-08-23 The app has no theme switch: `web/src/app/layout.tsx:28` hardcodes
+  `<html lang="en" className="dark">` and no `ThemeProvider` is mounted anywhere
+  (`next-themes` is imported only by `web/src/components/ui/sonner.tsx`, whose `useTheme()`
+  therefore always reads the default). Removing the class by hand shows the light token set
+  renders legibly, so the tokens are there and only the provider and a control are missing.
+  Ledger item 8.10 ("dark mode correct on every screen touched") cannot be demonstrated as a
+  user-reachable state until this is decided: either mount the provider or record that the
+  product is dark-only.
+
+- [investigate] 2026-08-23 `pnpm -C web dev` serves the repo's own `media/` directory, but the
+  item 7.6 end-to-end run executed in the compose stack and wrote its five generated images to
+  the compose `media` volume. So the post detail page for that run shows four broken images
+  and four console 404s under a local dev server. Harmless for that post, but it means the
+  compose volume and the repo directory are two different stores of the same namespace, and
+  a run started in one is only fully viewable in the other's absence. Related to the already
+  recorded Railway gap where `web` and `worker` cannot share `/media` at all.

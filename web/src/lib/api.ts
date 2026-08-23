@@ -1,7 +1,11 @@
 // --- Types ---
 
 export type StageMode = "auto";
-export type StageStatus = "pending" | "running" | "complete" | "failed";
+// `review` is what `markStageForReview()` writes to `stage_status` when a step
+// suspends at its gate. It was missing here while the value was only ever read
+// through `Record<string, ...>` lookups with a fallback; the run trace tells a
+// suspension apart from a stage that has not started, so it needs the name.
+export type StageStatus = "pending" | "running" | "review" | "complete" | "failed";
 export type PipelineStage = "research" | "outline" | "write" | "edit" | "images" | "ready";
 export type PostStage = PipelineStage | "pending" | "complete" | "failed" | "paused";
 
