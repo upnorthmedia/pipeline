@@ -34,12 +34,19 @@
  * decided from the tokens the child parse produced. A tight list renders its
  * item bodies as `block_text`, which emits no wrapper at all.
  *
- * Not ported yet: `ref_link` and
- * `raw_html`/`block_html` (5.3c-iii-b-1-b-ii-3), and the inline rules `escape`,
- * `codespan`, `emphasis`, `link`, `auto_link`, `auto_email` and `inline_html`
- * (5.3c-iii-b-1-b-iii). Their *patterns* are registered here in mistune's rule
- * order, because rule order is what decides whether `- - -` is a thematic
- * break or a list, and their handlers throw `UnportedMarkdownError`. A
+ * Ported here too (ledger 5.3c-iii-b-1-b-ii-3-a): `raw_html` and `block_html`,
+ * which are CommonMark's seven kinds of HTML block behind one handler. Which
+ * one fires is decided by the few characters after the `<`. Rules 1 to 5 scan
+ * for a literal end marker and swallow to the end of the line that marker sits
+ * on, so they cross blank lines; rules 6 and 7 stop at the next blank line
+ * instead. Rule 7 is the only one that cannot interrupt a paragraph and the
+ * only one that can decline, leaving its line to the paragraph fallback.
+ *
+ * Not ported yet: `ref_link` (5.3c-iii-b-1-b-ii-3-b) and the inline rules
+ * `escape`, `codespan`, `emphasis`, `link`, `auto_link`, `auto_email` and
+ * `inline_html` (5.3c-iii-b-1-b-iii). Their *patterns* are registered here in
+ * mistune's rule order, because rule order is what decides whether `- - -` is a
+ * thematic break or a list, and their handlers throw `UnportedMarkdownError`. A
  * half-ported converter that silently dropped a link would be worse than one
  * that stops.
  *
@@ -391,10 +398,12 @@ function parseBlockMethod(
       return parseBlockQuote(m, state);
     case "list":
       return parseList(m, state);
-    case "ref_link":
     case "raw_html":
+    // `parse_block_html` is a one-line delegation to `parse_raw_html`.
     case "block_html":
-      throw new UnportedMarkdownError(rule, "5.3c-iii-b-1-b-ii-3");
+      return parseRawHtml(m, state);
+    case "ref_link":
+      throw new UnportedMarkdownError(rule, "5.3c-iii-b-1-b-ii-3-b");
     /* istanbul ignore next: BLOCK_RULES is exhaustive above */
     default:
       throw new Error(`markdownToWpHtml: unknown block rule "${rule}"`);
@@ -916,6 +925,129 @@ function parseList(m: RegExpExecArray, state: BlockState): number | undefined {
   return state.cursor;
 }
 
+/** `BlockParser.BLANK_LINE`, as a searchable pattern. */
+const BLANK_LINE_SEARCH = new RegExp(BLOCK_SPECIFICATION.blank_line, "g");
+
+/**
+ * `_OPEN_TAG_END` and `_CLOSE_TAG_END`. Both are compiled without `re.M`, so
+ * their `$` is `EOS`, and both are used through `re.match(src, pos, endpos)`,
+ * where `endpos` truncates the subject and so moves where `$` can match.
+ */
+const OPEN_TAG_END = new RegExp(
+  `${HTML_ATTRIBUTES}[ \\t]*>[ \\t]*(?:\\n|${EOS})`,
+  "y",
+);
+const CLOSE_TAG_END = new RegExp(`[ \\t]*>[ \\t]*(?:\\n|${EOS})`, "y");
+
+/** `re.match(src, pos, endpos)`: `endpos` is the end of the subject, not a limit. */
+function boundedMatch(
+  re: RegExp,
+  src: string,
+  pos: number,
+  endPos: number,
+): RegExpExecArray | null {
+  re.lastIndex = pos;
+  return re.exec(src.slice(0, endPos));
+}
+
+/**
+ * `_parse_html_to_end`: rules 1 to 5. The block reaches to the end of the line
+ * the end marker lands on, which is why a comment or a `<script>` can contain a
+ * blank line without ending. An absent marker runs to the end of the document.
+ */
+function parseHtmlToEnd(
+  state: BlockState,
+  endMarker: string,
+  startPos: number,
+): number {
+  const markerPos = state.src.indexOf(endMarker, startPos);
+  let text: string;
+  let endPos: number;
+  if (markerPos === -1) {
+    text = state.src.slice(state.cursor);
+    endPos = state.cursorMax;
+  } else {
+    text = state.getText(markerPos);
+    state.cursor = markerPos;
+    endPos = state.findLineEnd();
+    text += state.getText(endPos);
+  }
+  state.tokens.push({ type: "block_html", raw: text });
+  return endPos;
+}
+
+/** `_parse_html_to_newline`: rules 6 and 7, which stop at the next blank line. */
+function parseHtmlToNewline(state: BlockState): number {
+  const m = search(BLANK_LINE_SEARCH, state.src, state.cursor);
+  let text: string;
+  let endPos: number;
+  if (m) {
+    endPos = m.index;
+    text = state.getText(endPos);
+  } else {
+    text = state.src.slice(state.cursor);
+    endPos = state.cursorMax;
+  }
+  state.tokens.push({ type: "block_html", raw: text });
+  return endPos;
+}
+
+/**
+ * `BlockParser.parse_raw_html`, which `parse_block_html` also delegates to.
+ *
+ * `marker` is the whole match stripped of whitespace, so it is the `<` plus the
+ * tag name (or the declaration opener) and nothing else. Note that mistune
+ * decides rule 1 and rule 6 off the *tag name only*, before it has established
+ * that the tag is even closed; only rule 7 checks for a `>`.
+ */
+function parseRawHtml(
+  m: RegExpExecArray,
+  state: BlockState,
+): number | undefined {
+  const marker = stripChars(m[0], PY_WHITESPACE);
+  const matchEnd = m.index + m[0].length;
+
+  // rule 2
+  if (marker === "<!--") return parseHtmlToEnd(state, "-->", matchEnd);
+  // rule 3
+  if (marker === "<?") return parseHtmlToEnd(state, "?>", matchEnd);
+  // rule 5
+  if (marker === "<![CDATA[") return parseHtmlToEnd(state, "]]>", matchEnd);
+  // rule 4
+  if (marker.startsWith("<!")) return parseHtmlToEnd(state, ">", matchEnd);
+
+  let closeTag: string | undefined;
+  let openTag: string | undefined;
+  if (marker.startsWith("</")) {
+    closeTag = marker.slice(2).toLowerCase();
+    // rule 6
+    if (BLOCK_TAGS.includes(closeTag)) return parseHtmlToNewline(state);
+  } else {
+    openTag = marker.slice(1).toLowerCase();
+    // rule 1
+    if (PRE_TAGS.includes(openTag)) {
+      return parseHtmlToEnd(state, `</${openTag}>`, matchEnd);
+    }
+    // rule 6
+    if (BLOCK_TAGS.includes(openTag)) return parseHtmlToNewline(state);
+  }
+
+  // Blocks of type 7 may not interrupt a paragraph.
+  const appended = state.appendParagraph();
+  if (appended) return appended;
+
+  // rule 7
+  const lineEnd = state.findLineEnd();
+  if (
+    (openTag && boundedMatch(OPEN_TAG_END, state.src, matchEnd, lineEnd)) ||
+    (closeTag && boundedMatch(CLOSE_TAG_END, state.src, matchEnd, lineEnd))
+  ) {
+    return parseHtmlToNewline(state);
+  }
+
+  return undefined;
+}
+
 /** `BlockParser.parse`. */
 function parseBlocks(
   state: BlockState,
@@ -1049,6 +1181,8 @@ function renderToken(token: Token): string {
         `<blockquote class="wp-block-quote">${renderChildren(token)}</blockquote>\n` +
         "<!-- /wp:quote -->\n\n"
       );
+    case "block_html":
+      return `<!-- wp:html -->\n${token.raw ?? ""}\n<!-- /wp:html -->\n\n`;
     case "thematic_break":
       return (
         "<!-- wp:separator -->\n" +

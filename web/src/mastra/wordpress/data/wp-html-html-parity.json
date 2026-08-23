@@ -1,0 +1,470 @@
+{
+  "generated_by": "api/scripts/export_wp_html_html_parity.py",
+  "source": "api/src/services/wp_html.py::markdown_to_wp_html",
+  "mistune_version": "3.2.0",
+  "scope": "raw HTML blocks: the seven CommonMark HTML block rules, the end-marker and blank-line scans, and rule 7's decline path",
+  "cases": [
+    {
+      "name": "rule 1 script block",
+      "markdown": "<script>\nvar x = 1;\n</script>\n",
+      "html": "<!-- wp:html -->\n<script>\nvar x = 1;\n</script>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 1 script with attributes",
+      "markdown": "<script type=\"text/javascript\">\nx();\n</script>\n",
+      "html": "<!-- wp:html -->\n<script type=\"text/javascript\">\nx();\n</script>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 1 script spanning a blank line",
+      "markdown": "<script>\nvar x = 1;\n\nvar y = 2;\n</script>\n",
+      "html": "<!-- wp:html -->\n<script>\nvar x = 1;\n\nvar y = 2;\n</script>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 1 unclosed script runs to the end",
+      "markdown": "<script>\nvar x = 1;\n",
+      "html": "<!-- wp:html -->\n<script>\nvar x = 1;\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 1 pre block",
+      "markdown": "<pre>\n  literal\n</pre>\n",
+      "html": "<!-- wp:html -->\n<pre>\n  literal\n</pre>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 1 style block",
+      "markdown": "<style>\np { color: red; }\n</style>\n",
+      "html": "<!-- wp:html -->\n<style>\np { color: red; }\n</style>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 1 textarea block",
+      "markdown": "<textarea>\ntyped\n</textarea>\n",
+      "html": "<!-- wp:html -->\n<textarea>\ntyped\n</textarea>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 1 uppercase script tag",
+      "markdown": "<SCRIPT>\nx();\n</SCRIPT>\n",
+      "html": "<!-- wp:html -->\n<SCRIPT>\nx();\n</SCRIPT>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 1 uppercase script spanning a blank line",
+      "markdown": "<SCRIPT>\nx();\n\nmore\n</SCRIPT>\n",
+      "html": "<!-- wp:html -->\n<SCRIPT>\nx();\n\nmore\n</SCRIPT>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 1 text after the close tag on the same line",
+      "markdown": "<script>x()</script> tail\n",
+      "html": "<!-- wp:html -->\n<script>x()</script> tail\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 1 paragraph after the block",
+      "markdown": "<script>\nx();\n</script>\n\nAfter.\n",
+      "html": "<!-- wp:html -->\n<script>\nx();\n</script>\n\n<!-- /wp:html -->\n\n<!-- wp:paragraph -->\n<p>After.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "rule 1 interrupts a paragraph",
+      "markdown": "Before.\n<script>\nx();\n</script>\n",
+      "html": "<!-- wp:paragraph -->\n<p>Before.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:html -->\n<script>\nx();\n</script>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 2 comment",
+      "markdown": "<!-- a comment -->\n",
+      "html": "<!-- wp:html -->\n<!-- a comment -->\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 2 multi line comment",
+      "markdown": "<!-- one\ntwo -->\n",
+      "html": "<!-- wp:html -->\n<!-- one\ntwo -->\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 2 comment across a blank line",
+      "markdown": "<!-- one\n\ntwo -->\n",
+      "html": "<!-- wp:html -->\n<!-- one\n\ntwo -->\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 2 unclosed comment runs to the end",
+      "markdown": "<!-- one\ntwo\n",
+      "html": "<!-- wp:html -->\n<!-- one\ntwo\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 2 comment then text on the same line",
+      "markdown": "<!-- c --> tail\n",
+      "html": "<!-- wp:html -->\n<!-- c --> tail\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 2 comment interrupts a paragraph",
+      "markdown": "Before.\n<!-- c -->\n",
+      "html": "<!-- wp:paragraph -->\n<p>Before.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:html -->\n<!-- c -->\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 2 comment indented three spaces",
+      "markdown": "   <!-- c -->\n",
+      "html": "<!-- wp:html -->\n<!-- c -->\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 2 comment indented four spaces",
+      "markdown": "    <!-- c -->\n",
+      "html": "<!-- wp:html -->\n<!-- c -->\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 3 processing instruction",
+      "markdown": "<?php echo 1; ?>\n",
+      "html": "<!-- wp:html -->\n<?php echo 1; ?>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 3 multi line processing instruction",
+      "markdown": "<?php\necho 1;\n?>\n",
+      "html": "<!-- wp:html -->\n<?php\necho 1;\n?>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 3 unclosed processing instruction",
+      "markdown": "<?php echo 1;\n",
+      "html": "<!-- wp:html -->\n<?php echo 1;\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 4 doctype",
+      "markdown": "<!DOCTYPE html>\n",
+      "html": "<!-- wp:html -->\n<!DOCTYPE html>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 4 multi line declaration",
+      "markdown": "<!DOCTYPE\nhtml>\n",
+      "html": "<!-- wp:html -->\n<!DOCTYPE\nhtml>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 4 unclosed declaration",
+      "markdown": "<!DOCTYPE html\n",
+      "html": "<!-- wp:html -->\n<!DOCTYPE html\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 5 cdata",
+      "markdown": "<![CDATA[ raw ]]>\n",
+      "html": "<!-- wp:html -->\n<![CDATA[ raw ]]>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 5 cdata holding a bare closing angle",
+      "markdown": "<![CDATA[ a > b ]]>\n",
+      "html": "<!-- wp:html -->\n<![CDATA[ a > b ]]>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 5 multi line cdata",
+      "markdown": "<![CDATA[\none\ntwo\n]]>\n",
+      "html": "<!-- wp:html -->\n<![CDATA[\none\ntwo\n]]>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 5 multi line cdata with a bare angle on an earlier line",
+      "markdown": "<![CDATA[\na > b\nc ]]>\n",
+      "html": "<!-- wp:html -->\n<![CDATA[\na > b\nc ]]>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 5 unclosed cdata",
+      "markdown": "<![CDATA[ raw\n",
+      "html": "<!-- wp:html -->\n<![CDATA[ raw\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 div open tag alone",
+      "markdown": "<div>\ncontent\n</div>\n",
+      "html": "<!-- wp:html -->\n<div>\ncontent\n</div>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 div stops at a blank line",
+      "markdown": "<div>\ncontent\n</div>\n\nAfter.\n",
+      "html": "<!-- wp:html -->\n<div>\ncontent\n</div>\n\n<!-- /wp:html -->\n\n<!-- wp:paragraph -->\n<p>After.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "rule 6 close tag first",
+      "markdown": "</div>\n",
+      "html": "<!-- wp:html -->\n</div>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 close tag interrupting a paragraph",
+      "markdown": "Before.\n</div>\ncontent\n",
+      "html": "<!-- wp:paragraph -->\n<p>Before.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:html -->\n</div>\ncontent\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 close tag with no closing angle",
+      "markdown": "</div\ncontent\n",
+      "html": "<!-- wp:html -->\n</div\ncontent\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 table",
+      "markdown": "<table>\n<tr><td>a</td></tr>\n</table>\n",
+      "html": "<!-- wp:html -->\n<table>\n<tr><td>a</td></tr>\n</table>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 open tag with attributes",
+      "markdown": "<div class=\"x\" id=\"y\">\ncontent\n</div>\n",
+      "html": "<!-- wp:html -->\n<div class=\"x\" id=\"y\">\ncontent\n</div>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 open tag with no closing angle",
+      "markdown": "<div\ncontent\n",
+      "html": "<!-- wp:html -->\n<div\ncontent\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 uppercase block tag",
+      "markdown": "<DIV>\ncontent\n</DIV>\n",
+      "html": "<!-- wp:html -->\n<DIV>\ncontent\n</DIV>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 uppercase block tag interrupting a paragraph",
+      "markdown": "Before.\n<DIV>\ncontent\n",
+      "html": "<!-- wp:paragraph -->\n<p>Before.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:html -->\n<DIV>\ncontent\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 uppercase block tag with no closing angle",
+      "markdown": "<DIV\ncontent\n",
+      "html": "<!-- wp:html -->\n<DIV\ncontent\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 interrupts a paragraph",
+      "markdown": "Before.\n<div>\ncontent\n</div>\n",
+      "html": "<!-- wp:paragraph -->\n<p>Before.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:html -->\n<div>\ncontent\n</div>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 indented three spaces",
+      "markdown": "   <div>\ncontent\n</div>\n",
+      "html": "<!-- wp:html -->\n<div>\ncontent\n</div>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 indented four spaces",
+      "markdown": "    <div>\ncontent\n</div>\n",
+      "html": "<!-- wp:html -->\n<div>\ncontent\n</div>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 hr tag",
+      "markdown": "<hr>\n",
+      "html": "<!-- wp:html -->\n<hr>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 hr self closing",
+      "markdown": "<hr />\n",
+      "html": "<!-- wp:html -->\n<hr />\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 markdown inside a block tag is not parsed",
+      "markdown": "<div>\n## Not a heading\n</div>\n",
+      "html": "<!-- wp:html -->\n<div>\n## Not a heading\n</div>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 blank line inside splits the block",
+      "markdown": "<div>\n\n## Heading\n\n</div>\n",
+      "html": "<!-- wp:html -->\n<div>\n\n<!-- /wp:html -->\n\n<!-- wp:heading -->\n<h2>Heading</h2>\n<!-- /wp:heading -->\n\n<!-- wp:html -->\n</div>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 block tag prefix that is not a block tag",
+      "markdown": "<divx>\ncontent\n",
+      "html": "<!-- wp:html -->\n<divx>\ncontent\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 6 li tag",
+      "markdown": "<li>item</li>\n",
+      "html": "<!-- wp:html -->\n<li>item</li>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 7 unknown open tag alone",
+      "markdown": "<custom-tag>\ncontent\n",
+      "html": "<!-- wp:html -->\n<custom-tag>\ncontent\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 7 unknown open tag with attributes",
+      "markdown": "<custom-tag data-x=\"1\">\ncontent\n",
+      "html": "<!-- wp:html -->\n<custom-tag data-x=\"1\">\ncontent\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 7 unknown close tag alone",
+      "markdown": "</custom-tag>\n",
+      "html": "<!-- wp:html -->\n</custom-tag>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 7 declines when the tag is unclosed",
+      "markdown": "<custom-tag\ncontent\n",
+      "html": "<!-- wp:paragraph -->\n<p><custom-tag\ncontent</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "rule 7 trailing spaces after the tag still count",
+      "markdown": "<custom-tag>   \ncontent\n",
+      "html": "<!-- wp:html -->\n<custom-tag>   \ncontent\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 7 stops at a blank line",
+      "markdown": "<custom-tag>\ncontent\n\nAfter.\n",
+      "html": "<!-- wp:html -->\n<custom-tag>\ncontent\n\n<!-- /wp:html -->\n\n<!-- wp:paragraph -->\n<p>After.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "rule 7 at the very end with no newline",
+      "markdown": "<custom-tag>",
+      "html": "<!-- wp:html -->\n<custom-tag>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 7 close tag with trailing spaces",
+      "markdown": "</custom-tag>  \n",
+      "html": "<!-- wp:html -->\n</custom-tag>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 7 hyphenated tag name",
+      "markdown": "<my-widget>\n",
+      "html": "<!-- wp:html -->\n<my-widget>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "rule 7 digit in the tag name",
+      "markdown": "<x1>\n",
+      "html": "<!-- wp:html -->\n<x1>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "a lone angle bracket",
+      "markdown": "< not a tag\n",
+      "html": "<!-- wp:paragraph -->\n<p>< not a tag</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "an angle bracket mid paragraph",
+      "markdown": "a < b\n",
+      "html": "<!-- wp:paragraph -->\n<p>a < b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "tag inside a fenced code block",
+      "markdown": "```\n<div>\n```\n",
+      "html": "<!-- wp:code -->\n<pre class=\"wp-block-code\"><code><div>\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "tag inside indented code",
+      "markdown": "    <div>\n",
+      "html": "<!-- wp:html -->\n<div>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "tag inside indented code after a paragraph",
+      "markdown": "Para.\n\n    <div>\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:code -->\n<pre class=\"wp-block-code\"><code><div></code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "block html then heading",
+      "markdown": "<div>\nx\n</div>\n\n## Title\n",
+      "html": "<!-- wp:html -->\n<div>\nx\n</div>\n\n<!-- /wp:html -->\n\n<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "heading then block html",
+      "markdown": "## Title\n\n<div>\nx\n</div>\n",
+      "html": "<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n<!-- wp:html -->\n<div>\nx\n</div>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "block html inside a block quote",
+      "markdown": "> <div>\n> x\n> </div>\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:html -->\n<div>\nx\n</div>\n\n<!-- /wp:html -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "comment inside a block quote",
+      "markdown": "> <!-- c -->\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:html -->\n<!-- c -->\n\n<!-- /wp:html -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "closed block tag does not break a lazy quote continuation",
+      "markdown": "> quoted\n<div>\nx\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:html -->\n<div>\nx\n\n<!-- /wp:html -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "script does not break a lazy quote continuation",
+      "markdown": "> quoted\n<script>\nx();\n</script>\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:html -->\n<script>\nx();\n</script>\n\n<!-- /wp:html -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "block tag then a space breaks a lazy quote continuation",
+      "markdown": "> quoted\n<div class=\"x\">\nx\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:html -->\n<div class=\"x\">\nx\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "block tag then a newline breaks a lazy quote continuation",
+      "markdown": "> quoted\n<div\nx\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:html -->\n<div\nx\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "comment breaks a lazy quote continuation",
+      "markdown": "> quoted\n<!-- c -->\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:html -->\n<!-- c -->\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "block html inside a list item",
+      "markdown": "- <div>\n  x\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:html -->\n<div>\nx\n\n<!-- /wp:html -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "block html after a list",
+      "markdown": "- one\n\n<div>\nx\n</div>\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:html -->\n<div>\nx\n</div>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "comment between two list items",
+      "markdown": "- one\n\n<!-- c -->\n\n- two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:html -->\n<!-- c -->\n\n<!-- /wp:html -->\n\n<!-- wp:list -->\n<ul><li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "block html between two paragraphs",
+      "markdown": "One.\n\n<div>\nx\n</div>\n\nTwo.\n",
+      "html": "<!-- wp:paragraph -->\n<p>One.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:html -->\n<div>\nx\n</div>\n\n<!-- /wp:html -->\n\n<!-- wp:paragraph -->\n<p>Two.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "two block html blocks in a row",
+      "markdown": "<div>\na\n</div>\n\n<div>\nb\n</div>\n",
+      "html": "<!-- wp:html -->\n<div>\na\n</div>\n\n<!-- /wp:html -->\n\n<!-- wp:html -->\n<div>\nb\n</div>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "block html holding an ampersand",
+      "markdown": "<div>\nTom & Jerry\n</div>\n",
+      "html": "<!-- wp:html -->\n<div>\nTom & Jerry\n</div>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "block html holding a quote character",
+      "markdown": "<div title=\"a\">\nx\n</div>\n",
+      "html": "<!-- wp:html -->\n<div title=\"a\">\nx\n</div>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "block html as the whole document, crlf",
+      "markdown": "<div>\r\nx\r\n</div>\r\n",
+      "html": "<!-- wp:html -->\n<div>\nx\n</div>\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "comment as the whole document with no trailing newline",
+      "markdown": "<!-- c -->",
+      "html": "<!-- wp:html -->\n<!-- c -->\n\n<!-- /wp:html -->\n\n"
+    },
+    {
+      "name": "thematic break after block html",
+      "markdown": "<div>\nx\n</div>\n\n***\n",
+      "html": "<!-- wp:html -->\n<div>\nx\n</div>\n\n<!-- /wp:html -->\n\n<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n"
+    },
+    {
+      "name": "setext underline inside block html",
+      "markdown": "<div>\nPara.\n--\n</div>\n",
+      "html": "<!-- wp:html -->\n<div>\nPara.\n--\n</div>\n\n<!-- /wp:html -->\n\n"
+    }
+  ],
+  "declines": [
+    {
+      "name": "rule 7 self closing unknown tag",
+      "markdown": "<custom-tag />\n",
+      "raises": "AttributeError",
+      "message": "No renderer \"'inline_html'\""
+    },
+    {
+      "name": "rule 7 cannot interrupt a paragraph",
+      "markdown": "Before.\n<custom-tag>\ncontent\n",
+      "raises": "AttributeError",
+      "message": "No renderer \"'inline_html'\""
+    },
+    {
+      "name": "rule 7 declines when text follows on the line",
+      "markdown": "<custom-tag> tail\n",
+      "raises": "AttributeError",
+      "message": "No renderer \"'inline_html'\""
+    },
+    {
+      "name": "rule 7 closing angle on the next line",
+      "markdown": "<custom-tag\nfoo>\n",
+      "raises": "AttributeError",
+      "message": "No renderer \"'inline_html'\""
+    },
+    {
+      "name": "unknown tag does not break a lazy quote continuation",
+      "markdown": "> quoted\n<custom-tag>\n",
+      "raises": "AttributeError",
+      "message": "No renderer \"'inline_html'\""
+    }
+  ]
+}

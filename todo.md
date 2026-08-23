@@ -531,3 +531,13 @@
   Suspected cross-file contention on the shared Mastra instance or the Redis Streams topic
   rather than a defect in the workflow; it inflates the frontend baseline and needs pinning
   down before Phase 9 treats 9 as an exact number.
+- [confirmed] 2026-08-23 `markdown_to_wp_html` raises `AttributeError: No renderer
+  "'inline_html'"` for any article whose markdown contains an HTML tag mistune's block
+  layer declines. `_GutenbergRenderer` in `api/src/services/wp_html.py` implements
+  `block_html` but not `inline_html`, so `<custom-tag />`, `<span>x</span>` mid paragraph,
+  or a block tag on the line after a paragraph all crash the WordPress publish path rather
+  than rendering. Found while porting ledger item 5.3c-iii-b-1-b-ii-3-a, which records five
+  such inputs in `web/src/mastra/wordpress/data/wp-html-html-parity.json` under `declines`.
+  The fix is a two-line `inline_html` method returning `token["raw"]`, but it changes the
+  output of a currently-crashing path and belongs with the Phase 3 images/ready work rather
+  than with the tokenizer port.
