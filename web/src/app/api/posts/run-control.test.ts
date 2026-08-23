@@ -92,6 +92,30 @@ vi.mock("@/mastra/start-wordpress-publish", async (importOriginal) => {
   }
 })
 
+/** The Next.js half of the same recorder, reading its own status column. */
+const njStart = vi.hoisted(() => ({
+  mode: "skip" as "real" | "skip",
+  calls: [] as { postId: string; statusAtStart: string | null }[],
+}))
+
+vi.mock("@/mastra/start-nextjs-publish", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/mastra/start-nextjs-publish")>()
+  const { getDb, posts } = await import("@/db")
+  const { eq } = await import("drizzle-orm")
+  return {
+    startNextjsPublish: async (postId: string) => {
+      const [row] = await getDb()
+        .select({ status: posts.nextjsPublishStatus })
+        .from(posts)
+        .where(eq(posts.id, postId))
+        .limit(1)
+      njStart.calls.push({ postId, statusAtStart: row?.status ?? null })
+      if (njStart.mode === "skip") return "not-started"
+      return actual.startNextjsPublish(postId)
+    },
+  }
+})
+
 const PREFIX = "posts-runctl-test-"
 const URL_BASE = "http://test/api/posts"
 const MISSING_ID = "00000000-0000-4000-8000-000000000000"
@@ -232,6 +256,8 @@ afterEach(async () => {
   start.calls.length = 0
   wpStart.mode = "skip"
   wpStart.calls.length = 0
+  njStart.mode = "skip"
+  njStart.calls.length = 0
   started.length = 0
   await clearFixtures()
 })
@@ -1057,18 +1083,18 @@ describe("POST /api/posts/{post_id}/publish", () => {
     })
   })
 
-  it("takes that same 400 for nextjs, which is this item's one divergence", async () => {
-    // Python enqueued `publish_to_nextjs` here. The workflow behind it is
-    // ledger item 5.3c-iii-b-2 and does not exist yet, so the format falls
-    // through to the trailing 400 until it lands.
-    const post = await wordpressPost(user.userId, { outputFormat: "nextjs" })
+  it("answers `both` with the 400 too, because Python compared for equality", async () => {
+    // `output_format == "wordpress"` then `== "nextjs"`: `both` matches neither,
+    // so a post asking for both formats could not be published by hand at all.
+    const post = await wordpressPost(user.userId, { outputFormat: "both" })
     const response = await publish(post.id, user.cookie)
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({
-      detail: "Publishing not supported for output_format 'nextjs'",
+      detail: "Publishing not supported for output_format 'both'",
     })
-    expect((await readPost(post.id)).nextjsPublishStatus).toBeNull()
+    expect(wpStart.calls).toEqual([])
+    expect(njStart.calls).toEqual([])
   })
 
   it("echoes the stored id, not the path casing, as `str(post_id)` did", async () => {
@@ -1092,6 +1118,84 @@ describe("POST /api/posts/{post_id}/publish", () => {
     expect((await publish(post.id, user.cookie)).status).toBe(202)
 
     const event = await waitForStart(post.id, 15_000, "wordpress-publish")
+    expect(event.type).toBe("workflow.start")
+    expect(event.data?.prevResult?.output).toEqual({ postId: post.id })
+  })
+
+  // --- the `output_format == "nextjs"` branch (5.3c-iii-b-2-e) --------------
+
+  /** The Next.js twin of `wordpressPost`. */
+  function nextjsPost(userId: string, values: Partial<typeof posts.$inferInsert> = {}) {
+    return insertPost(userId, {
+      outputFormat: "nextjs",
+      finalMdContent: "# Draft\n\nBody.",
+      ...values,
+    })
+  }
+
+  it("writes nextjs_publish_status = pending and answers 202", async () => {
+    const post = await nextjsPost(user.userId)
+    const response = await publish(post.id, user.cookie)
+
+    expect(response.status).toBe(202)
+    expect(await response.json()).toEqual({ status: "queued", post_id: post.id })
+    expect((await readPost(post.id)).nextjsPublishStatus).toBe("pending")
+    expect(wpStart.calls).toEqual([])
+  })
+
+  it("commits pending before it starts the Next.js run", async () => {
+    // Same reason as the WordPress case: `nextjsPublishStep` overwrites
+    // `pending` with `publishing` as soon as the worker picks the event up, so
+    // only a read taken from inside the start can see the committed value.
+    const post = await nextjsPost(user.userId)
+    await publish(post.id, user.cookie)
+
+    expect(njStart.calls).toEqual([{ postId: post.id, statusAtStart: "pending" }])
+  })
+
+  it("leaves the WordPress publish column alone", async () => {
+    const post = await nextjsPost(user.userId, { wpPublishStatus: "published" })
+    await publish(post.id, user.cookie)
+
+    const row = await readPost(post.id)
+    expect(row.nextjsPublishStatus).toBe("pending")
+    expect(row.wpPublishStatus).toBe("published")
+  })
+
+  it("re-publishes a Next.js post that already failed", async () => {
+    const post = await nextjsPost(user.userId, { nextjsPublishStatus: "failed" })
+
+    expect((await publish(post.id, user.cookie)).status).toBe(202)
+    expect((await readPost(post.id)).nextjsPublishStatus).toBe("pending")
+  })
+
+  it("refuses a Next.js post with no content before it reaches the branch", async () => {
+    const post = await nextjsPost(user.userId, { finalMdContent: null })
+    const response = await publish(post.id, user.cookie)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ detail: "No content to publish" })
+    expect(njStart.calls).toEqual([])
+    expect((await readPost(post.id)).nextjsPublishStatus).toBeNull()
+  })
+
+  it("answers another user's Next.js post with a 404, starting nothing", async () => {
+    const post = await nextjsPost(other.userId)
+
+    expect((await publish(post.id, user.cookie)).status).toBe(404)
+    expect(njStart.calls).toEqual([])
+    expect((await readPost(post.id)).nextjsPublishStatus).toBeNull()
+  })
+
+  it("publishes a real workflow.start for nextjs-publish", async () => {
+    // The profile has no `nextjs_webhook_url`, so a worker that picks this
+    // event up stops at the not-configured guard: no webhook request goes out.
+    njStart.mode = "real"
+    const post = await nextjsPost(user.userId)
+
+    expect((await publish(post.id, user.cookie)).status).toBe(202)
+
+    const event = await waitForStart(post.id, 15_000, "nextjs-publish")
     expect(event.type).toBe("workflow.start")
     expect(event.data?.prevResult?.output).toEqual({ postId: post.id })
   })

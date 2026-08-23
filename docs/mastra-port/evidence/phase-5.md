@@ -14408,3 +14408,145 @@ $ pnpm -C web build
 
 No Python file is touched by this item (`git status --porcelain` lists only files under
 `web/`), so the pytest and ruff baselines recorded under 5.3c-iii-b-2-c stand unchanged.
+
+## 5.3c-iii-b-2-e
+
+`web/src/app/api/posts/[id]/publish/route.ts` gains the second branch Python had, and
+`web/src/mastra/start-nextjs-publish.ts` is the
+`enqueue_job("publish_to_nextjs", post_id)` it made. The temporary fall-through recorded
+under 5.3c-iii-b-1-d is gone: the handler now matches `publish_post()` branch for branch.
+
+The start helper is the sibling of `start-wordpress-publish.ts` and exists for the same
+reason: starting a run is the boundary between `web` and `worker`, so `startAsync()`
+publishes `workflow.start` onto Redis Streams and returns the run id, and reading every
+image off disk, base64-encoding it and posting the signed webhook all happen in the
+worker process. The retry policy Python's placement of the payload build implies lives on
+the workflow (5.3c-iii-b-2-d), not here.
+
+Four behaviours preserved, each with its own test:
+
+- the status written is `pending`, not `publishing`. `publishing` is what
+  `nextjsPublishStep` sets from inside the run, so the row says `pending` for the window
+  between this response and the worker picking the event up. Asserting it needs a read
+  taken from *inside* the start, which is what the recorder mock does.
+- the column write is committed before the start, the same ordering the WordPress branch
+  needed.
+- each branch touches only its own column: a post carrying a `wp_publish_status` from an
+  earlier WordPress run publishes to Next.js without disturbing it, and the reverse.
+- the content check still runs before the format check, so a `nextjs` post with nothing
+  written is the "No content to publish" 400 rather than a queued run.
+
+**One behaviour worth naming, because it looks like a bug and is not.** Python compared
+`post.output_format == "wordpress"` and then `== "nextjs"`, twice by equality rather than
+once by membership, so `both` matched neither branch and fell through to the trailing 400.
+`both` is the column's *default*, which makes it the common value, and it means a post
+asking for both formats could never be published by hand. That is preserved, with its own
+test, rather than quietly widened to a membership test: widening it would start two
+publish runs from one request, which is a behaviour change and not this port's call to
+make. Logged in `todo.md` instead.
+
+The write carries `ownedByCaller()` as well as the id even though the preceding `SELECT`
+already proved ownership, matching `/run`, `/pause` and the WordPress branch.
+
+The 80 tests are in `web/src/app/api/posts/run-control.test.ts`; the 27 covering this
+endpoint:
+
+```
+$ pnpm -C web vitest run src/app/api/posts/run-control.test.ts --reporter=verbose
+ ✓ POST /api/posts/{post_id}/publish > rejects an unauthenticated request 1ms
+ ✓ POST /api/posts/{post_id}/publish > answers a malformed path uuid with FastAPI's 422 1ms
+ ✓ POST /api/posts/{post_id}/publish > answers a post that does not exist with a 404 2ms
+ ✓ POST /api/posts/{post_id}/publish > answers another user's post with the same 404, starting nothing 4ms
+ ✓ POST /api/posts/{post_id}/publish > answers a post whose profile_id is null with a 404 2ms
+ ✓ POST /api/posts/{post_id}/publish > refuses a post with neither ready_content nor final_md_content 4ms
+ ✓ POST /api/posts/{post_id}/publish > treats empty content as absent, the way a falsy Python string was 3ms
+ ✓ POST /api/posts/{post_id}/publish > publishes a post whose only content is ready_content 4ms
+ ✓ POST /api/posts/{post_id}/publish > publishes a post whose ready_content is empty but has a draft to fall back on 4ms
+ ✓ POST /api/posts/{post_id}/publish > checks for content before it looks at output_format 3ms
+ ✓ POST /api/posts/{post_id}/publish > writes wp_publish_status = pending and answers 202 4ms
+ ✓ POST /api/posts/{post_id}/publish > commits pending before it starts the run, so the worker never races the write 3ms
+ ✓ POST /api/posts/{post_id}/publish > leaves the Next.js publish column alone 4ms
+ ✓ POST /api/posts/{post_id}/publish > re-publishes a post that already failed, clearing the status back to pending 4ms
+ ✓ POST /api/posts/{post_id}/publish > starts nothing for a pipeline run: publishing is its own workflow 4ms
+ ✓ POST /api/posts/{post_id}/publish > answers an output_format Python had no branch for with a 400 naming it 3ms
+ ✓ POST /api/posts/{post_id}/publish > renders a null output_format the way Python interpolated None 3ms
+ ✓ POST /api/posts/{post_id}/publish > answers `both` with the 400 too, because Python compared for equality 3ms
+ ✓ POST /api/posts/{post_id}/publish > echoes the stored id, not the path casing, as `str(post_id)` did 4ms
+ ✓ POST /api/posts/{post_id}/publish > publishes a real workflow.start for wordpress-publish 32ms
+ ✓ POST /api/posts/{post_id}/publish > writes nextjs_publish_status = pending and answers 202 5ms
+ ✓ POST /api/posts/{post_id}/publish > commits pending before it starts the Next.js run 4ms
+ ✓ POST /api/posts/{post_id}/publish > leaves the WordPress publish column alone 5ms
+ ✓ POST /api/posts/{post_id}/publish > re-publishes a Next.js post that already failed 5ms
+ ✓ POST /api/posts/{post_id}/publish > refuses a Next.js post with no content before it reaches the branch 4ms
+ ✓ POST /api/posts/{post_id}/publish > answers another user's Next.js post with a 404, starting nothing 4ms
+ ✓ POST /api/posts/{post_id}/publish > publishes a real workflow.start for nextjs-publish 6ms
+ Test Files  1 passed (1)
+      Tests  80 passed (80)
+   Start at  10:48:00
+   Duration  2.62s (transform 213ms, setup 77ms, import 776ms, tests 1.68s, environment 0ms)
+```
+
+The last of those is a real start over the bus, not a recorded one: the fixture profile
+carries no `nextjs_webhook_url`, so a worker started by another test file that picks the
+event up stops at the not-configured guard without a webhook request going out.
+
+### Mutations
+
+Nine mutations across the two changed files, run against
+`src/app/api/posts/run-control.test.ts`. The harness runs the unmutated files first as a
+control, because a broken vitest invocation otherwise scores every mutation as killed
+(the lesson from 5.3c-iii-b-2-c).
+
+```
+control (unmutated): PASS
+M1 delete the nextjs branch entirely: KILLED
+M2 write publishing instead of pending: KILLED
+M3 write the wordpress column instead: KILLED
+M4 start before the status write: KILLED
+M5 start the wordpress workflow from the nextjs branch: KILLED
+M6 nextjs branch above the content check: KILLED
+M7 drop the ownership scope on the status write: SURVIVED
+M8 start helper names the wordpress workflow: KILLED
+M9 start helper passes no postId: KILLED
+```
+
+M7 is equivalent under any single-request test and is kept as defence in depth. The
+`SELECT` that precedes it is the owner-scoped join, and the handler returns 404 before
+reaching the `UPDATE` when it finds nothing, so the `EXISTS` over `website_profiles` can
+only change the outcome if the post's profile is reassigned to another user between the
+two statements. That window is not reachable from a test that issues one request, and the
+WordPress branch carries the same clause for the same reason, so removing it here would
+also make the two branches disagree.
+
+### Gates
+
+```
+$ pnpm -C web tsc --noEmit ; echo EXIT=$?
+EXIT=0
+
+$ pnpm -C web lint ; echo EXIT=$?
+EXIT=0
+
+$ pnpm -C web test
+ Test Files  2 failed | 122 passed (124)
+      Tests  9 failed | 4364 passed | 7 skipped (4380)
+   Start at  10:44:17
+   Duration  78.82s
+
+$ pnpm -C web build ; echo EXIT=$?
+EXIT=0
+```
+
+The 9 failures are the recorded baseline: 6 in `image-preview.test.tsx` and 3 in
+`PostDetail.test.tsx`. No Python was touched, so pytest is unaffected.
+
+### What this closes
+
+5.3c-iii-b-2, 5.3c-iii-b, 5.3c-iii, 5.3c and 5.3 all close on this item. Every one of the
+`posts` router's 17 endpoints is now served from `web/src/app/api/posts/`.
+
+### What it does not close
+
+`_post_completion_hook`'s auto-publish half (`api/src/worker.py:439-463`) is still
+unported. 4.7b deferred it to Phase 5 because it needed these two workflows; they exist
+now, so it is newly unblocked and recorded as ledger item 5.11.

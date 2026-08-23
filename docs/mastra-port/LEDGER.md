@@ -455,7 +455,9 @@ pages that use it work with the Python API stopped.
 
   Evidence: [`evidence/phase-5.md` #5.2c-iii](../mastra-port/evidence/phase-5.md)
 
-- [ ] 5.3 `posts` (split: this router is 665 lines over 17 endpoints, far more than one
+- [x] 5.3 `posts`. Closed by 5.3c-iii-b-2-e: all four sub-items are checked, and every
+  one of the router's 17 endpoints is served from `web/src/app/api/posts/`.
+  (split: this router is 665 lines over 17 endpoints, far more than one
   iteration. Split into 5.3a reads, 5.3b writes, 5.3c pipeline control, 5.3d exports,
   logs and analytics.)
   - [x] 5.3a `GET /api/posts` and `GET /api/posts/{post_id}`, plus the shared `PostRead`
@@ -485,7 +487,10 @@ pages that use it work with the Python API stopped.
 
       Evidence: [`evidence/phase-5.md` #5.3b-iii](../mastra-port/evidence/phase-5.md)
 
-  - [ ] 5.3c Pipeline control (split: six endpoints, three of which rewrite the whole
+  - [x] 5.3c Pipeline control. Closed by 5.3c-iii-b-2-e: all three sub-items are
+    checked, and the six endpoints `/run`, `/run-all`, `/rerun`, `/restart`, `/pause`
+    and `/publish` are all served from `web/src/app/api/posts/[id]/`.
+    (split: six endpoints, three of which rewrite the whole
     stage map. Split into 5.3c-i `/run` and `/run-all`, 5.3c-ii `/rerun` and `/restart`,
     5.3c-iii `/pause` and `/publish`.)
     - [x] 5.3c-i `POST /{post_id}/run` and `POST /{post_id}/run-all`, started as Mastra
@@ -497,14 +502,16 @@ pages that use it work with the Python API stopped.
 
       Evidence: [`evidence/phase-5.md` #5.3c-ii](../mastra-port/evidence/phase-5.md)
 
-    - [ ] 5.3c-iii `POST /{post_id}/pause` and `POST /{post_id}/publish` (split: `/pause`
+    - [x] 5.3c-iii `POST /{post_id}/pause` and `POST /{post_id}/publish` (split: `/pause`
       writes one column, `/publish` enqueues two ARQ jobs whose Mastra equivalents do not
       exist yet. Split into 5.3c-iii-a pause, 5.3c-iii-b publish.)
       - [x] 5.3c-iii-a `POST /{post_id}/pause`.
 
         Evidence: [`evidence/phase-5.md` #5.3c-iii-a](../mastra-port/evidence/phase-5.md)
 
-      - [ ] 5.3c-iii-b `POST /{post_id}/publish`.
+      - [x] 5.3c-iii-b `POST /{post_id}/publish`. Closed by 5.3c-iii-b-2-e: both
+        publish paths are ported, registered as the `wordpressPublish` and
+        `nextjsPublish` workflows, and both branches of the endpoint start them.
 
         Blocked on work Phase 5's later items own, and deliberately left for after them:
         `publish_post()` is a two-line status write around
@@ -708,7 +715,7 @@ pages that use it work with the Python API stopped.
 
           Evidence: [`evidence/phase-5.md` #5.3c-iii-b-1-d](../mastra-port/evidence/phase-5.md)
 
-        - [ ] 5.3c-iii-b-2 The Next.js publish workflow (`publish_to_nextjs` in
+        - [x] 5.3c-iii-b-2 The Next.js publish workflow (`publish_to_nextjs` in
           `api/src/pipeline/publish.py` plus `api/src/services/nextjs_publish.py`, 188
           lines, with `hmac_signing.py` preserved exactly), the
           `output_format == "nextjs"` branch of `POST /{post_id}/publish` that starts it,
@@ -738,6 +745,10 @@ pages that use it work with the Python API stopped.
             the three SSE events with `_fail`.
           - 5.3c-iii-b-2-e The `output_format == "nextjs"` branch of
             `POST /{post_id}/publish`, which removes the temporary fall-through.
+
+          Closed by 5.3c-iii-b-2-e: all five sub-items are checked with their own
+          evidence, the `nextjsPublish` workflow is registered on the Mastra instance,
+          and `POST /{post_id}/publish` starts it for an `output_format` of `nextjs`.
 
           - [x] 5.3c-iii-b-2-a `apply_frontmatter_mapping` from
             `api/src/services/frontmatter_mapping.py`, the transform a user's saved
@@ -784,10 +795,15 @@ pages that use it work with the Python API stopped.
 
             Evidence: [`evidence/phase-5.md` #5.3c-iii-b-2-d](../mastra-port/evidence/phase-5.md)
 
-          - [ ] 5.3c-iii-b-2-e The `output_format == "nextjs"` branch of
+          - [x] 5.3c-iii-b-2-e The `output_format == "nextjs"` branch of
             `POST /{post_id}/publish`: `nextjs_publish_status = "pending"`, the start of
-            the new workflow, and the removal of the temporary fall-through recorded under
-            5.3c-iii-b-1-d.
+            the new workflow through `web/src/mastra/start-nextjs-publish.ts`, and the
+            removal of the temporary fall-through recorded under 5.3c-iii-b-1-d. The
+            handler now matches Python branch for branch, including the `both` case,
+            which Python could not publish by hand because it compared `output_format`
+            for equality twice rather than testing membership.
+
+            Evidence: [`evidence/phase-5.md` #5.3c-iii-b-2-e](../mastra-port/evidence/phase-5.md)
   - [x] 5.3d Exports, logs and analytics (split: five endpoints, and `/export/all`
     needs a zip writer this repo does not have while `/analytics` needs the analytics
     service wired to the route. Split into 5.3d-i the two plain exports, 5.3d-ii
@@ -1128,6 +1144,20 @@ pages that use it work with the Python API stopped.
   `packages/create-mdx-blog` preserved exactly)
 
   Evidence: [`evidence/phase-5.md` #5.10](../mastra-port/evidence/phase-5.md)
+
+- [ ] 5.11 The auto-publish half of `_post_completion_hook` (`api/src/worker.py:439-463`),
+  which 4.7b deferred to Phase 5 because it needed the two publish workflows. Both now
+  exist (5.3c-iii-b-1-c-iii and 5.3c-iii-b-2-d), so nothing blocks it. A full run that
+  ends with `output_format == "wordpress"` and a profile carrying `wp_url`,
+  `wp_username` and `wp_app_password` writes `wp_publish_status = "pending"` and starts
+  `wordpressPublish`; the same for `nextjs` with `nextjs_webhook_url` and
+  `nextjs_webhook_secret` starting `nextjsPublish`. Three details Python's shape hides
+  and a translation would lose: it fires only for a full pipeline
+  (`is_full_pipeline`), never for a single stage; the hook writes the column but the
+  *caller* enqueues, and the caller re-reads the row and enqueues on
+  `status == "pending"`, so a post left `pending` by an earlier failed publish is
+  re-enqueued even when the configuration check just declined; and `both` matches
+  neither branch, exactly as in `POST /{post_id}/publish`.
 
 ## Phase 6: Runtime model configuration
 

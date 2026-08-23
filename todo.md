@@ -611,3 +611,11 @@
   writes, only from model output. The fix, if it is ever needed, is a custom `pg` type
   parser for JSONB that produces the `PyFloat`/`bigint` markers
   `web/src/mastra/nextjs/pyyaml/values.ts` already defines.
+- [confirmed] 2026-08-23 `POST /api/posts/{post_id}/publish` cannot publish a post whose
+  `output_format` is `both`, which is the column's default value. `publish_post()` in
+  `api/src/api/posts.py` compares `output_format == "wordpress"` and then `== "nextjs"`,
+  by equality twice rather than once by membership, so `both` reaches the trailing
+  `Publishing not supported for output_format 'both'` 400. Ported as-is under ledger item
+  5.3c-iii-b-2-e with its own test, because widening it would start two publish runs from
+  one request and that is a behaviour change, not a port. `_post_completion_hook`'s
+  auto-publish half has the same shape, so a `both` post is not auto-published either.
