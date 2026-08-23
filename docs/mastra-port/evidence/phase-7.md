@@ -2038,3 +2038,143 @@ $ pnpm -C web exec vitest run src/mastra/workflows/scaffold-check.test.ts
 It also passed in one of the three full runs made during this item (9 failures, the exact
 baseline), and no worker process was running for any of them, which rules out the stray-worker
 explanation logged in 7.2a for this particular failure. Logged in `todo.md` for item 9.1.
+
+## 7.7
+
+The definition-of-done command, run over tracked files with `docs/mastra-port/` excluded. Run
+as `git grep` rather than `grep -rn` so the untracked working tree (`node_modules`, `.next`,
+`media/`, the orchestrator's own `.gnhf/` scratch files) is out of scope and the "and git
+history" carve-out is exact: what `git grep` sees is what the repo carries.
+
+```
+$ git grep -nI "alembic\|arq\|fastapi\|uvicorn" -- . ':(exclude)docs/mastra-port'
+web/drizzle/0000_baseline.sql:1:CREATE TABLE "alembic_version" (
+web/drizzle/0000_baseline.sql:3:	CONSTRAINT "alembic_version_pkc" PRIMARY KEY("version_num")
+web/drizzle/README.md:39:## The `alembic_version` table
+web/drizzle/README.md:45:`alembic_version_pkc` rather than Postgres' default `_pkey`, which is why
+web/drizzle/meta/0000_snapshot.json:7:    "public.alembic_version": {
+web/drizzle/meta/0000_snapshot.json:8:      "name": "alembic_version",
+web/drizzle/meta/0000_snapshot.json:21:        "alembic_version_pkc": {
+web/drizzle/meta/0000_snapshot.json:22:          "name": "alembic_version_pkc",
+web/pnpm-lock.yaml:4672:    resolution: {integrity: sha512-AJDdYOdnyRDV5b6ArilzCPPwc1ejkHcoyFarqlPqT7zRYjhavcT3uSrqcMvsgh2CgoPbK3RCwyHaVyxYcP2Arg==}
+web/src/db/schema-parity.test.ts:24: * `alembic_version`. That chain is gone; the row it left behind is what marks
+web/src/db/schema-parity.test.ts:98:    expect(isPipelineTable("alembic_version")).toBe(true)
+web/src/db/schema-parity.test.ts:108:      "SELECT version_num FROM alembic_version",
+web/src/db/schema-parity.test.ts:118:      "alembic_version",
+web/src/db/schema.ts:49:export const alembicVersion = pgTable(
+web/src/db/schema.ts:50:  "alembic_version",
+web/src/db/schema.ts:54:  (table) => [primaryKey({ columns: [table.versionNum], name: "alembic_version_pkc" })],
+exit=0
+```
+
+Every surviving line is one of two things, and neither is a reference to the deleted stack:
+
+- **`alembic_version` / `alembic_version_pkc` / `alembicVersion`**: the name of a live Postgres
+  table. Decision: **keep the table.** Every existing database has it, `schema.ts` and the
+  Drizzle baseline describe the databases that exist rather than an idealised one, and the row
+  it holds (`012`) is the marker of which schema version a database is at. Dropping it would be
+  a schema change made for tidiness, which section 8 of the objective forbids. The reasoning is
+  now in `web/drizzle/README.md` under "The `alembic_version` table" so the next reader does not
+  have to rediscover it.
+- **`web/pnpm-lock.yaml:4672`**: the substring `arq` inside a base64 `sha512-` integrity hash
+  (`...FarqlPqT7zRYjhavcT3...`). Not a word, not a reference.
+
+Both fall out of the same grep run with word boundaries, which is the form that actually asks
+the intended question. It is empty:
+
+```
+$ git grep -nIw -e alembic -e arq -e fastapi -e uvicorn -- . ':(exclude)docs/mastra-port'
+exit=1
+```
+
+(`_` is a word character to `git grep -w`, so `alembic_version` is correctly not a match for
+the word `alembic`; the base64 hash is not a match either.)
+
+### What was changed to get there
+
+| File | Was | Now |
+| --- | --- | --- |
+| `src/db/schema-parity.test.ts`, `src/db/baseline-parity.test.ts`, `src/db/post-roundtrip.test.ts`, `src/mastra/post-state.test.ts` | setup comments said "migrated with `alembic upgrade head`" | `pnpm -C web db:migrate`, the command that exists |
+| `src/db/schema-parity.ts` + test | `isAlembicOwned()`, `diffSchemas(alembic, drizzle)` | `isPipelineTable()`, `diffSchemas(database, drizzle)`; the exclusion list is about `auth_*`/`mastra_*`/`subscription`, not about a migration tool |
+| `src/db/baseline-parity.test.ts` | `diffCatalogLines(..., "alembic", "baseline")` | `"dev"`; expected order in the unit test updated because the function sorts its output and `"only in dev: a"` sorts after `"only in baseline: b"` where `"only in alembic: a"` sorted before it |
+| `src/db/schema-parity.test.ts` | `ALEMBIC_HEAD = "012"`, "the newest revision under `api/alembic/versions/`" | `SCHEMA_VERSION = "012"`, described as what the deleted chain left in the table |
+| `src/mastra/worker-health.ts` + test, `src/app/api/queue/worker-status/route.ts` | named the dead Redis keys `arq:worker:*`, `arq:queue`, `arq:worker:last_completed` | the same facts stated as "the job runner's heartbeat keys", "the job queue's sorted set", "a plain key the job runner wrote". No rationale lost: the reason the Python `worker_alive` was always `false` (heartbeat written under a prefix the scan did not cover) is still there |
+| `src/app/api/settings/api-keys/[provider]/reveal/route.ts` | "the raw TCP peer address uvicorn saw" | "the raw TCP peer address the ASGI server saw" |
+| `web/drizzle.config.ts`, `web/drizzle/README.md`, `web/scripts/auth-migrate.mts` | described a repo where `api/` still exists ("While `api/` still exists...", "Phase 7 removes the table along with the tool that owns it") | describe the repo as it is; the `alembic_version` decision above replaces the promise to remove it |
+| `docs/plans/saas.md`, `docs/superpowers/plans/2026-04-09-jena-nextjs-publishing.md`, `docs/superpowers/specs/2026-04-09-nextjs-blog-integration-design.md` | pre-port design documents carrying `alembic upgrade head`, `uvicorn src.main:app`, `from fastapi import ...` | `git mv`d verbatim into `docs/mastra-port/pre-port/` with a README mapping old path to new. They are the record of the architecture the port replaced, which is exactly what `docs/mastra-port/` is for. Nothing deleted |
+| `todo.md` | the `[confirmed] 2026-08-23` entry asking this item to decide the `alembic_version` question | removed, decided above |
+
+### What was deliberately kept
+
+`git grep -nIiw` (case-insensitive) still returns **140 lines in 81 files**. Every one is the
+capitalised proper noun `FastAPI`, `ARQ` or `Alembic` in a comment or a test title, recording
+why a behaviour exists: `it("answers a malformed path uuid with FastAPI's 422")`,
+`// FastAPI validated every declared parameter before the endpoint body ran`,
+`it("detaches internal links rather than deleting them, per Alembic 006's SET NULL")`.
+
+These are historical attribution, not live references. The definition-of-done command is
+lowercase, and lowercase is how the dead stack appears when it is *invoked* (`alembic upgrade
+head`, `arq:` keys, `from fastapi import`, `uvicorn src.main:app`) rather than *cited*. Every
+invocation form is gone; the citations were kept because they are the only remaining
+explanation for a set of otherwise arbitrary 422 bodies, sort orders and null-handling rules
+that the dashboard still depends on. Stating the count here rather than silently relying on
+case sensitivity.
+
+The substantive claim behind the item, checked directly rather than through a word search:
+
+```
+$ git ls-files | grep -E "\.py$|pyproject|requirements|uv\.lock|alembic\.ini|\.python-version|conftest"
+exit=1
+
+$ ls api
+ls: api: No such file or directory
+
+$ grep -n "^  [a-z-]*:" docker-compose.yml docker-compose.prod.yml
+docker-compose.yml:2:  db:
+docker-compose.yml:18:  redis:
+docker-compose.yml:33:  web:
+docker-compose.yml:68:  worker:
+docker-compose.yml:103:  pgdata:
+docker-compose.yml:104:  redisdata:
+docker-compose.yml:105:  mediadata:
+docker-compose.prod.yml:2:  db:
+docker-compose.prod.yml:16:  redis:
+docker-compose.prod.yml:29:  web:
+docker-compose.prod.yml:59:  worker:
+docker-compose.prod.yml:91:  pgdata:
+docker-compose.prod.yml:92:  redisdata:
+docker-compose.prod.yml:93:  mediadata:
+```
+
+No Python file, no Python dependency manifest, no `api/` directory, no Python service in either
+compose file.
+
+### Gates
+
+```
+$ pnpm -C web exec tsc --noEmit
+TSC_EXIT=0
+
+$ pnpm -C web lint
+LINT_EXIT=0
+
+$ pnpm -C web test
+ Test Files  2 failed | 134 passed (136)
+      Tests  9 failed | 4514 passed | 7 skipped (4530)
+   Duration  78.76s
+
+$ pnpm -C web build
+BUILD_EXIT=0
+```
+
+The 9 failures are exactly the standing baseline (6 in `image-preview.test.tsx`, 3 in
+`PostDetail.test.tsx`), both tracked for item 9.1.
+
+The five test files touched by the rename, run on their own first:
+
+```
+$ pnpm -C web exec vitest run src/db/schema-parity.test.ts src/db/baseline-parity.test.ts \
+    src/db/post-roundtrip.test.ts src/mastra/post-state.test.ts src/mastra/worker-health.test.ts
+ Test Files  5 passed (5)
+      Tests  46 passed (46)
+```

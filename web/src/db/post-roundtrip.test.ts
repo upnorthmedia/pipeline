@@ -8,7 +8,7 @@
  * not strings, `timestamptz` comes back as a `Date`, and the defaults the
  * database applies (which Python relies on) land on rows TypeScript inserts.
  *
- * Requires `docker compose up -d db redis` plus `alembic upgrade head`. The
+ * Requires `docker compose up -d db redis` plus `pnpm -C web db:migrate`. The
  * connection string comes from the repo-root `.env`, loaded by `vitest.config.ts`.
  */
 import { eq, sql } from "drizzle-orm"

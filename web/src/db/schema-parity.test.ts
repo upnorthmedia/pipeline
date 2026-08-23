@@ -1,9 +1,9 @@
 // @vitest-environment node
 /**
- * Proves `src/db/schema.ts` still describes exactly what Alembic produces.
+ * Proves `src/db/schema.ts` still describes exactly what the database holds.
  *
  * Requires the dev database from `docker compose up -d db redis`, migrated with
- * `alembic upgrade head`. The connection string comes from the repo-root `.env`
+ * `pnpm -C web db:migrate`. The connection string comes from the repo-root `.env`
  * (`DATABASE_URL_SYNC`), loaded by `vitest.config.ts`.
  */
 import { Pool } from "pg"
@@ -14,13 +14,17 @@ import {
   describeDatabase,
   describeDrizzleSchema,
   diffSchemas,
-  isAlembicOwned,
+  isPipelineTable,
   toPostgresType,
   type SchemaShape,
 } from "./schema-parity"
 
-/** The newest revision under `api/alembic/versions/`. */
-const ALEMBIC_HEAD = "012"
+/**
+ * The last revision the pre-port Python migration chain stamped into
+ * `alembic_version`. That chain is gone; the row it left behind is what marks
+ * the schema this file describes, and `drizzle/0000_baseline.sql` recreates it.
+ */
+const SCHEMA_VERSION = "012"
 
 const connectionString =
   process.env.DATABASE_URL_SYNC?.replace("postgresql+asyncpg://", "postgresql://") ??
@@ -45,13 +49,13 @@ describe("diffSchemas", () => {
     expect(diffSchemas(base, structuredClone(base))).toEqual([])
   })
 
-  it("reports a column Alembic has and schema.ts lacks", () => {
+  it("reports a column the database has and schema.ts lacks", () => {
     const drizzle = structuredClone(base)
     delete drizzle.posts.slug
     expect(diffSchemas(base, drizzle)).toEqual(["posts.slug: in database, missing from schema.ts"])
   })
 
-  it("reports a column schema.ts has and Alembic lacks", () => {
+  it("reports a column schema.ts has and the database lacks", () => {
     const drizzle = structuredClone(base)
     drizzle.posts.invented = { type: "text", notNull: false, hasDefault: false }
     expect(diffSchemas(base, drizzle)).toEqual([
@@ -89,27 +93,27 @@ describe("type and ownership normalisation", () => {
     expect(toPostgresType("json")).toBe("json")
   })
 
-  it("excludes tables Alembic does not own", () => {
-    expect(isAlembicOwned("posts")).toBe(true)
-    expect(isAlembicOwned("alembic_version")).toBe(true)
-    expect(isAlembicOwned("auth_users")).toBe(false)
-    expect(isAlembicOwned("subscription")).toBe(false)
-    expect(isAlembicOwned("mastra_workflow_snapshot")).toBe(false)
+  it("excludes tables the pipeline schema does not own", () => {
+    expect(isPipelineTable("posts")).toBe(true)
+    expect(isPipelineTable("alembic_version")).toBe(true)
+    expect(isPipelineTable("auth_users")).toBe(false)
+    expect(isPipelineTable("subscription")).toBe(false)
+    expect(isPipelineTable("mastra_workflow_snapshot")).toBe(false)
   })
 })
 
-describe("schema.ts against the live Alembic database", () => {
-  it("is comparing against a database at Alembic head", async () => {
+describe("schema.ts against the live database", () => {
+  it("is comparing against a database at the recorded schema version", async () => {
     const { rows } = await pool.query<{ version_num: string }>(
       "SELECT version_num FROM alembic_version",
     )
-    expect(rows.map((r) => r.version_num)).toEqual([ALEMBIC_HEAD])
+    expect(rows.map((r) => r.version_num)).toEqual([SCHEMA_VERSION])
   })
 
-  it("describes every Alembic table and column, and no others", async () => {
-    const alembic = await describeDatabase(pool)
+  it("describes every pipeline table and column, and no others", async () => {
+    const database = await describeDatabase(pool)
     const drizzle = describeDrizzleSchema(schema)
-    expect(diffSchemas(alembic, drizzle)).toEqual([])
+    expect(diffSchemas(database, drizzle)).toEqual([])
     expect(Object.keys(drizzle).sort()).toEqual([
       "alembic_version",
       "internal_links",

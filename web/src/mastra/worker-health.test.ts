@@ -233,8 +233,8 @@ describe("against a real Mastra worker", () => {
 })
 
 /**
- * Item 5.4c-ii: the replacement for ARQ's `arq:worker:last_completed`, written
- * by `pipelineCompleteStep` at the end of every run that reaches it.
+ * Item 5.4c-ii: the replacement for the job runner's last-completed key,
+ * written by `pipelineCompleteStep` at the end of every run that reaches it.
  *
  * Driven against an isolated key rather than the one the worker writes, so
  * "nothing has finished yet" is a state this suite can create. A real run

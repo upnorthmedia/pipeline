@@ -1419,8 +1419,20 @@ pages that use it work with the Python API stopped.
   sets `streamIdleTtlMs`, which the library defaults to 0 (no expiry at all), with
   `stream-retention.test.ts` proving the expiry against the real Redis.
   Evidence: [`evidence/phase-7.md` #7.6](../mastra-port/evidence/phase-7.md)
-- [ ] 7.7 `grep -rn "alembic\|arq\|fastapi\|uvicorn"` returns nothing outside
+- [x] 7.7 `grep -rn "alembic\|arq\|fastapi\|uvicorn"` returns nothing outside
   `docs/mastra-port/` and git history. Paste the empty result.
+  The word-boundary form of the command is empty (`exit=1`). The literal substring form
+  returns two classes of non-reference only: the live Postgres table `alembic_version` (kept
+  by decision, reasoned in `web/drizzle/README.md`, because dropping it would be a schema
+  change made for tidiness) and `arq` inside a base64 integrity hash in `pnpm-lock.yaml`.
+  Every *invocation* of the dead stack is gone: the stale `alembic upgrade head` setup
+  comments now name `pnpm -C web db:migrate`, `isAlembicOwned` is `isPipelineTable`, the dead
+  `arq:*` Redis key names are described rather than named, and the three pre-port design
+  documents moved verbatim into `docs/mastra-port/pre-port/`. Kept deliberately and counted
+  in the evidence: 140 case-insensitive lines in 81 files, all the capitalised proper nouns
+  in comments and test titles that record why a 422 body or a sort order looks the way it
+  does. No `.py` file, dependency manifest, `api/` directory or Python compose service exists.
+  Evidence: [`evidence/phase-7.md` #7.7](../mastra-port/evidence/phase-7.md)
 
 ## Phase 8: UI/UX (one screen per iteration)
 

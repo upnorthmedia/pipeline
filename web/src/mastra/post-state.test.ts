@@ -10,7 +10,7 @@
  * cover the drizzle column mappings and the database's own defaults, not a
  * hand-built object.
  *
- * Requires `docker compose up -d db redis` plus `alembic upgrade head`.
+ * Requires `docker compose up -d db redis` plus `pnpm -C web db:migrate`.
  */
 import { readFileSync } from "node:fs"
 import path from "node:path"

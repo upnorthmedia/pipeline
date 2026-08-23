@@ -1,11 +1,11 @@
 /**
  * Worker liveness and backlog, read off the Redis Streams transport.
  *
- * This is the Mastra replacement for the two ARQ Redis reads in
- * `api/src/api/queue.py`'s `worker_status()`: a scan for `arq:worker:*`
- * heartbeat keys, and `ZCARD arq:queue` for the depth of the job queue.
- * Neither key exists once ARQ is gone, so both signals are re-derived from the
- * bookkeeping the transport already keeps.
+ * This is the Mastra replacement for the two Redis reads in
+ * `api/src/api/queue.py`'s `worker_status()`: a scan for the job runner's
+ * heartbeat keys, and the cardinality of its queue's sorted set. Neither key
+ * exists once the Python job runner is gone, so both signals are re-derived
+ * from the bookkeeping the transport already keeps.
  *
  * There is no heartbeat writer here on purpose. A worker process that is
  * consuming the orchestration topic is, by construction, registered as a
@@ -66,7 +66,7 @@ export type WorkerHealth = {
    * rather than defaulted to 0, because "no backlog" and "backlog unknown" are
    * different answers and only one of them is reassuring.
    *
-   * Not the same unit as ARQ's `ZCARD arq:queue`: that counted whole jobs
+   * Not the same unit as the old job queue's depth: that counted whole jobs
    * waiting, this counts orchestration events (a run start, each step's run
    * and end), so one pipeline run contributes many entries over its life.
    */
@@ -162,11 +162,10 @@ export async function readWorkerHealth(
 /**
  * Where the worker records the finish time of its last run.
  *
- * Python kept the same fact at `arq:worker:last_completed`
- * (`WORKER_LAST_COMPLETED_KEY` in `api/src/worker.py`), written by
- * `_record_job_completed()` at the end of `_run_pipeline`'s `try`. The name
- * changes because nothing named `arq:` survives the port; the semantics do
- * not.
+ * Python kept the same fact under `WORKER_LAST_COMPLETED_KEY` in
+ * `api/src/worker.py`, written by `_record_job_completed()` at the end of
+ * `_run_pipeline`'s `try`. The name changes because the key was namespaced to
+ * the job runner, which does not survive the port; the semantics do not.
  *
  * Deliberately still a written timestamp rather than a value derived from the
  * run rows Mastra already stores. `listWorkflowRuns({ status: "success" })`

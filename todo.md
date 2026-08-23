@@ -636,15 +636,6 @@
   there is nothing to compare against; item 9.1 needs it green, which means auditing every
   spec against the current UI and giving the ones that need data a real session.
 
-- [confirmed] 2026-08-23 Ledger item 7.7 requires `grep -rn "alembic\|arq\|fastapi\|uvicorn"`
-  to return nothing outside `docs/mastra-port/`, and two live sources still match now that
-  `api/` is gone. `web/src/db/schema.ts` and `web/drizzle/0000_baseline.sql` both declare the
-  `alembic_version` table on purpose, because it exists in the database Alembic built and the
-  baseline-parity check compares against it; and `todo.md` itself quotes the word in entries
-  that document Python-era defects. Neither is a leftover to delete blindly, so 7.7 has to
-  decide each: keep the table and narrow the grep with a stated exclusion, or drop the table
-  from the TS schema and its parity check. Deciding it silently either way loses information.
-
 - [confirmed] 2026-08-23 `src/mastra/workflows/scaffold-check.test.ts` fails intermittently
   under a full `pnpm -C web test` run with `Error: Hook timed out in 60000ms` in its
   `beforeAll`, taking its five tests to skipped. Observed once in three full runs during

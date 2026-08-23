@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Node.js, `prompts`, `chalk`, `ora`, `gray-matter`, `glob`, `vitest`
 
-**Spec:** `docs/superpowers/specs/2026-04-09-nextjs-blog-integration-design.md`
+**Spec:** `docs/mastra-port/pre-port/nextjs-blog-integration-design.md`
 
 ---
 

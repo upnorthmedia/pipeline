@@ -4,7 +4,7 @@
  * plaintext provider key. The settings page calls it behind the eye toggle.
  *
  * Python gated it on `request.client.host in ("127.0.0.1", "::1",
- * "localhost")`, the raw TCP peer address uvicorn saw. A Next.js route handler
+ * "localhost")`, the raw TCP peer address the ASGI server saw. A Next.js handler
  * has no access to the socket (`NextRequest.ip` was removed in Next 15), so
  * the peer address is not recoverable and the check has to be rebuilt from
  * headers. Deriving it from `x-forwarded-for` would be strictly weaker than

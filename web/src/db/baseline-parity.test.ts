@@ -1,15 +1,14 @@
 // @vitest-environment node
 /**
- * Proves the Drizzle baseline migration builds the database Alembic builds.
+ * Proves the Drizzle baseline migration builds the database the dev one is.
  *
- * After Phase 7 deletes `api/`, `drizzle/` is the only thing in the repo that
- * can create an empty database. This test applies it to a scratch database and
- * diffs the result against the live Alembic-migrated dev database, column by
- * column, index by index and constraint by constraint. A drift in either
- * direction fails.
+ * `drizzle/` is the only thing in the repo that can create an empty database.
+ * This test applies it to a scratch database and diffs the result against the
+ * live dev database, column by column, index by index and constraint by
+ * constraint. A drift in either direction fails.
  *
  * Requires the dev database from `docker compose up -d db redis`, migrated with
- * `alembic upgrade head`. The connection string comes from the repo-root `.env`
+ * `pnpm -C web db:migrate`. The connection string comes from the repo-root `.env`
  * (`DATABASE_URL_SYNC`), loaded by `vitest.config.ts`.
  */
 import path from "node:path"
@@ -98,11 +97,11 @@ describe("drizzle baseline migration", () => {
   })
 
   it("creates the same indexes under the same names", () => {
-    expect(diffCatalogLines(devIndexes, scratchIndexes, "alembic", "baseline")).toEqual([])
+    expect(diffCatalogLines(devIndexes, scratchIndexes, "dev", "baseline")).toEqual([])
   })
 
   it("creates the same constraints under the same names", () => {
-    expect(diffCatalogLines(devConstraints, scratchConstraints, "alembic", "baseline")).toEqual([])
+    expect(diffCatalogLines(devConstraints, scratchConstraints, "dev", "baseline")).toEqual([])
   })
 
   it("carries the settings key from item 6.0", () => {
@@ -120,13 +119,13 @@ describe("drizzle baseline migration", () => {
 
 describe("diffCatalogLines", () => {
   it("passes when both sides agree", () => {
-    expect(diffCatalogLines(["a", "b"], ["b", "a"], "alembic", "baseline")).toEqual([])
+    expect(diffCatalogLines(["a", "b"], ["b", "a"], "dev", "baseline")).toEqual([])
   })
 
-  it("reports a line only the baseline has and one only Alembic has", () => {
-    expect(diffCatalogLines(["a"], ["b"], "alembic", "baseline")).toEqual([
-      "only in alembic: a",
+  it("reports a line only the baseline has and one only the dev database has", () => {
+    expect(diffCatalogLines(["a"], ["b"], "dev", "baseline")).toEqual([
       "only in baseline: b",
+      "only in dev: a",
     ])
   })
 })

@@ -1,16 +1,15 @@
 # Drizzle migrations
 
 `0000_baseline.sql` is the whole schema in one migration, generated from
-`src/db/schema.ts`. It is the replacement for the Alembic chain
-(`api/alembic/versions/001` through `012`), which Phase 7 deletes along with
-`api/`: after that point nothing else in this repo can build an empty database.
+`src/db/schema.ts`. It replaced the twelve-revision Python migration chain the
+port deleted, and it is now the only thing in this repo that can build an empty
+database.
 
-The baseline is a snapshot, not a translation. It does not replay the eleven
-Alembic revisions step by step, it creates the shape they end at. That shape is
+The baseline is a snapshot, not a translation. It does not replay those twelve
+revisions step by step, it creates the shape they end at. That shape is
 verified rather than asserted: `src/db/baseline-parity.test.ts` builds a scratch
-database from this folder and diffs it against the live Alembic-migrated
-database column by column, index by index and constraint by constraint, in both
-directions.
+database from this folder and diffs it against the live dev database column by
+column, index by index and constraint by constraint, in both directions.
 
 ## Creating a fresh database
 
@@ -34,13 +33,15 @@ Three owners, applied in this order. Only the first is in this folder.
 pnpm exec drizzle-kit generate --name <change>
 ```
 
-While `api/` still exists the same change also needs an Alembic revision, or
-`baseline-parity.test.ts` fails: the two sides must agree until the cutover.
+`baseline-parity.test.ts` then proves the regenerated baseline still builds
+the database the dev one is.
 
 ## The `alembic_version` table
 
-The baseline still creates it, because the live database has it and parity is
-measured against the live database. Its primary key is named
+This one-column table is the only thing the deleted migration chain left
+behind. It is kept, not dropped: every existing database has it, parity is
+measured against those databases, and the row it holds (`012`) is the marker
+that says which schema version they are at. Its primary key is named
 `alembic_version_pkc` rather than Postgres' default `_pkey`, which is why
-`schema.ts` states the constraint name explicitly. Phase 7 removes the table
-along with the tool that owns it.
+`schema.ts` states the constraint name explicitly. Dropping it would be a
+schema change made for tidiness, which the port does not do.

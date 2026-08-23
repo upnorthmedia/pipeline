@@ -2,8 +2,8 @@
  * Creates or updates the BetterAuth tables (`auth_users`, `auth_sessions`,
  * `auth_accounts`, `auth_verifications`).
  *
- * Alembic deliberately does not own these: revision 010 adds the `user_id`
- * columns but leaves a comment saying BetterAuth creates its own tables
+ * The pipeline schema deliberately does not own these: the revision that added
+ * the `user_id` columns left a comment saying BetterAuth creates its own tables
  * separately. Nothing in this repo ever ran that step, so a fresh database has
  * the multi-tenancy columns and no table to scope them against, and every
  * authenticated route handler 401s.

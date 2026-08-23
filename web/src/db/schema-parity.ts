@@ -1,8 +1,8 @@
 /**
- * Schema parity between Alembic and the TypeScript schema.
+ * Schema parity between the live database and the TypeScript schema.
  *
- * The database that `alembic upgrade head` produces is the source of truth for
- * this port: `src/db/schema.ts` mirrors it and must never drift from it. The
+ * The database is the source of truth for this port: `src/db/schema.ts`
+ * mirrors it and must never drift from it. The
  * helpers here describe both sides in the same shape so a diff can prove, in
  * both directions, that no table or column exists on one side only.
  */
@@ -22,12 +22,12 @@ export interface ColumnShape {
 export type SchemaShape = Record<string, Record<string, ColumnShape>>
 
 /**
- * Tables in the `public` schema that Alembic does not own, so the parity check
- * must not report them as unexpected. BetterAuth creates `auth_*` (see
- * `src/lib/auth.ts`) plus `subscription` from its Stripe plugin, and Mastra's
+ * Tables in the `public` schema that the pipeline schema does not own, so the
+ * parity check must not report them as unexpected. BetterAuth creates `auth_*`
+ * (see `src/lib/auth.ts`) plus `subscription` from its Stripe plugin, and Mastra's
  * Postgres storage adapter creates `mastra_*` for workflow run state.
  */
-export function isAlembicOwned(table: string): boolean {
+export function isPipelineTable(table: string): boolean {
   if (table.startsWith("auth_")) return false
   if (table.startsWith("mastra_")) return false
   if (table === "subscription") return false
@@ -90,7 +90,7 @@ export async function describeDatabase(pool: Pool): Promise<SchemaShape> {
   )
   const shape: SchemaShape = {}
   for (const row of rows) {
-    if (!isAlembicOwned(row.table_name)) continue
+    if (!isPipelineTable(row.table_name)) continue
     shape[row.table_name] ??= {}
     shape[row.table_name][row.column_name] = {
       type: row.type,
@@ -105,16 +105,16 @@ export async function describeDatabase(pool: Pool): Promise<SchemaShape> {
 export type ParityDiff = string
 
 /**
- * Compare the database ("alembic") against the TypeScript schema ("drizzle")
+ * Compare the database against the TypeScript schema ("drizzle")
  * in both directions. An empty result means the two describe the same tables
  * and columns with the same types, nullability and default presence.
  */
-export function diffSchemas(alembic: SchemaShape, drizzle: SchemaShape): ParityDiff[] {
+export function diffSchemas(database: SchemaShape, drizzle: SchemaShape): ParityDiff[] {
   const diffs: ParityDiff[] = []
-  const tables = [...new Set([...Object.keys(alembic), ...Object.keys(drizzle)])].sort()
+  const tables = [...new Set([...Object.keys(database), ...Object.keys(drizzle)])].sort()
 
   for (const table of tables) {
-    const inDb = alembic[table]
+    const inDb = database[table]
     const inTs = drizzle[table]
     if (!inTs) {
       diffs.push(`table ${table}: in database, missing from schema.ts`)
@@ -172,7 +172,7 @@ export async function describeIndexes(pool: Pool): Promise<CatalogLines> {
       WHERE schemaname = 'public'`,
   )
   return rows
-    .filter((row) => isAlembicOwned(row.table_name))
+    .filter((row) => isPipelineTable(row.table_name))
     .map((row) => row.line)
     .sort()
 }
@@ -187,7 +187,7 @@ export async function describeConstraints(pool: Pool): Promise<CatalogLines> {
       WHERE connamespace = 'public'::regnamespace`,
   )
   return rows
-    .filter((row) => isAlembicOwned(row.table_name))
+    .filter((row) => isPipelineTable(row.table_name))
     .map((row) => row.line)
     .sort()
 }

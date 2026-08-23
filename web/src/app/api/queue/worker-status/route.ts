@@ -1,21 +1,21 @@
 /**
  * Port of `GET /api/queue/worker-status` in `api/src/api/queue.py`.
  *
- * The Python handler answered four questions off three ARQ artefacts and one
- * database count. None of the three artefacts survives the port, so each
+ * The Python handler answered four questions off three job-queue artefacts and
+ * one database count. None of the three artefacts survives the port, so each
  * answer is re-derived rather than transcribed:
  *
- * - `worker_alive`: was a `SCAN arq:worker:*`, now the orchestration consumer
- *   group's live consumers (`readWorkerHealth`, ledger 5.4c-i). Note that the
- *   Python answer was always `false`: it scanned `arq:worker:*` while ARQ
- *   wrote its heartbeat to `arq:queue:health-check`. Reproducing a constant
- *   `false` would be transcribing a bug, so this reports the truth.
- * - `queued_jobs`: was `ZCARD arq:queue`, now the group's undelivered `lag`.
- *   Different unit: ARQ counted whole jobs waiting, this counts orchestration
- *   events, of which one run contributes several over its life. `null` when
- *   Redis cannot determine the lag, because "no backlog" and "backlog unknown"
- *   are different answers.
- * - `last_completed`: was `GET arq:worker:last_completed`, now
+ * - `worker_alive`: was a scan for the job runner's heartbeat keys, now the
+ *   orchestration consumer group's live consumers (`readWorkerHealth`, ledger
+ *   5.4c-i). Note that the Python answer was always `false`: it scanned a key
+ *   prefix the job runner never wrote its heartbeat under. Reproducing a
+ *   constant `false` would be transcribing a bug, so this reports the truth.
+ * - `queued_jobs`: was the cardinality of the job queue's sorted set, now the
+ *   group's undelivered `lag`. Different unit: the queue counted whole jobs
+ *   waiting, this counts orchestration events, of which one run contributes
+ *   several over its life. `null` when Redis cannot determine the lag, because
+ *   "no backlog" and "backlog unknown" are different answers.
+ * - `last_completed`: was a plain key the job runner wrote, now
  *   `mastra:worker:last_completed`, written by `pipelineCompleteStep` at the
  *   end of every run that reaches it.
  * - `active_jobs`: unchanged in meaning, a `current_stage IN (STAGES)` count.
