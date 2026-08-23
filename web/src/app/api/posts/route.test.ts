@@ -17,7 +17,8 @@ import { apiRequest, createTestSession, deleteTestSessions, type TestSession } f
 
 import { GET as getPost } from "./[id]/route"
 import { GET as listPosts } from "./route"
-import { serializePost, toPydanticIso } from "./serialize"
+import { toPydanticIso } from "../pydantic"
+import { serializePost } from "./serialize"
 
 const PREFIX = "posts-route-test-"
 const URL_BASE = "http://test/api/posts"

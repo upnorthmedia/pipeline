@@ -15508,7 +15508,307 @@ three pieces are separately verifiable, so they are separate items.
   bodies and what lands on disk, but it does not prove the rule editor's tab list
   and save button work end to end against them. That check belongs to Phase 8 item
   8.7, where `/settings` gets its four states and screenshots.
-- [ ] 5.7 `links`
+- [x] 5.7 `links`
+
+  Ported to `web/src/app/api/profiles/[id]/links/route.ts` (`GET` and `POST`) and
+  `web/src/app/api/profiles/[id]/links/[link_id]/route.ts` (`DELETE`), with
+  `serialize.ts` (the `LinkRead` wire shape), `validation.ts` (`LinkCreate`) and
+  `params.ts` (the two path uuids, the list query string and their 422s).
+  `web/src/lib/api.ts` needed no change: `PaginatedLinks` and `InternalLink`
+  already match what the two read endpoints return.
+
+  **Deviation 1: `DELETE` is scoped to the caller.** `delete_link()` was the one
+  endpoint in `api/src/api/links.py` that never called `_get_profile_or_404()`.
+  It matched on `link_id` and `profile_id` alone, so any authenticated user who
+  knew both ids could delete another tenant's link. Porting that verbatim would
+  have shipped a cross-tenant write, so the delete carries the same
+  `website_profiles.user_id` predicate the other two endpoints use, as a
+  correlated `EXISTS`. Another user's link answers the same
+  `404 {"detail": "Link not found"}` as one that does not exist, so the boundary
+  leaks nothing. Logged in `todo.md` as a live defect in the Python stack until
+  Phase 7 deletes it.
+
+  **Deviation 2: a null `source` or `keywords` returns the pydantic default
+  instead of a 500.** Same narrow divergence already recorded for `PostRead` in
+  5.3a: pydantic raises rather than substituting a default for an attribute that
+  is present and `None`, and FastAPI turned that into a 500. `serializeLink()`
+  returns `"sitemap"` and `[]`. Both columns carry a server default, so only a
+  row written with an explicit null reaches the branch. `created_at` is the
+  exception, as it was for posts: pydantic required it with no default to
+  invent, so the null carries through.
+
+  **Deviation 3: `?page=` and `?per_page=` accept two more strings than they
+  did.** `parseInt422` (moved from `posts/query.ts` into `pydantic.ts` in this
+  iteration, since both routers declare the same `Query(..., ge=, le=)`) tested
+  `/^\s*[+-]?\d+\s*$/`, which is narrower than pydantic's lax int parse.
+  Probed against the installed pydantic 2.12:
+
+  ```
+  $ cd api && PYTHONPATH=. uv run python -c "
+  from pydantic import TypeAdapter
+  ta = TypeAdapter(int)
+  for v in ['2.0','2.00','2.5','1e3','  2  ','0x10','2_0','1_0_0','_2','2_','1__0','+2','2.','.0','2.01','2.0_0','1_0.0']:
+      try:
+          print(repr(v), '->', ta.validate_python(v))
+      except Exception as e:
+          print(repr(v), '-> ERR', e.errors()[0]['type'])
+  "
+  '2.0' -> 2
+  '2.00' -> 2
+  '2.5' -> ERR int_parsing
+  '1e3' -> ERR int_parsing
+  '  2  ' -> 2
+  '0x10' -> ERR int_parsing
+  '2_0' -> 20
+  '1_0_0' -> 100
+  '_2' -> ERR int_parsing
+  '2_' -> ERR int_parsing
+  '1__0' -> ERR int_parsing
+  '+2' -> 2
+  '2.' -> ERR int_parsing
+  '.0' -> ERR int_parsing
+  '2.01' -> ERR int_parsing
+  '2.0_0' -> ERR int_parsing
+  '1_0.0' -> 10
+  ```
+
+  The grammar is therefore optional whitespace, an optional sign, digits with
+  single `_` separators between digits, an optional `.` followed by nothing but
+  zeros, optional whitespace, and `PYDANTIC_INT` is now
+  `/^\s*[+-]?\d+(?:_\d+)*(?:\.0+)?\s*$/`. This widens `GET /api/posts` too,
+  which is a move toward parity, not away from it: nothing in `posts/route.test.ts`
+  asserted that `"2.0"` was rejected. The residual gap is that Python's `\s` and
+  JavaScript's `\s` cover slightly different character sets, the same difference
+  already recorded under 5.3d-i.
+
+  **FastAPI reports path, query and body errors in one 422, path first.** This
+  router is the first ported one with more than one validated parameter, so the
+  ordering had to be settled rather than assumed. Probed by mounting the real
+  router on a bare `FastAPI()` with `get_current_user` and `get_session`
+  overridden:
+
+  ```
+  $ cd api && PYTHONPATH=. uv run python /tmp/probe_links_5_7.py
+  === LinkRead field order ===
+  ['url', 'title', 'slug', 'keywords', 'id', 'profile_id', 'source', 'post_id', 'created_at']
+
+  === LinkCreate extras and coercions ===
+  {"url": "u", "source": "sitemap", "post_id": "4468d733-...", "id": "x"} -> {'url': 'u', 'title': None, 'slug': None, 'keywords': []}
+  {"url": "u", "keywords": ["a", 1]} -> ERR [{"type": "string_type", "loc": ["keywords", 1], "msg": "Input should be a valid string", "input": 1, ...}]
+  {"url": "u", "keywords": "a"} -> ERR [{"type": "list_type", "loc": ["keywords"], "msg": "Input should be a valid list", "input": "a", ...}]
+  {"url": 5} -> ERR [{"type": "string_type", "loc": ["url"], "msg": "Input should be a valid string", "input": 5, ...}]
+  {"title": "t"} -> ERR [{"type": "missing", "loc": ["url"], "msg": "Field required", "input": {"title": "t"}, ...}]
+
+  === path/query 422s ===
+  GET /api/profiles/not-a-uuid/links?page=0&per_page=999 -> 422
+    [{"type": "uuid_parsing", "loc": ["path", "profile_id"], ...},
+     {"type": "greater_than_equal", "loc": ["query", "page"], ...},
+     {"type": "less_than_equal", "loc": ["query", "per_page"], ...}]
+  GET /api/profiles/<uuid>/links?page=abc -> 422
+    [{"type": "int_parsing", "loc": ["query", "page"], "msg": "Input should be a valid integer, unable to parse string as an integer", "input": "abc"}]
+  GET /api/profiles/<uuid>/links?page=1&page=3 -> 404 {"detail": "Profile not found"}
+  DELETE /api/profiles/bad/links/nope -> 422
+    [{"type": "uuid_parsing", "loc": ["path", "profile_id"], ...},
+     {"type": "uuid_parsing", "loc": ["path", "link_id"], ...}]
+  POST /api/profiles/bad/links {'url': 5} -> 422
+    [{"type": "uuid_parsing", "loc": ["path", "profile_id"], ...},
+     {"type": "string_type", "loc": ["body", "url"], "msg": "Input should be a valid string", "input": 5}]
+  ```
+
+  A body FastAPI could not decode is the exception and short-circuits the rest:
+
+  ```
+  $ cd api && PYTHONPATH=. uv run python /tmp/probe_links_5_7b.py
+  bad path + malformed json:
+  422 {"detail": [{"type": "json_invalid", "loc": ["body", 1], "msg": "JSON decode error", "input": {}, "ctx": {"error": "Expecting property name enclosed in double quotes"}}]}
+  body is a list:
+  422 {"detail": [{"type": "model_attributes_type", "loc": ["body"], "msg": "Input should be a valid dictionary or object to extract fields from", "input": [1]}]}
+  ```
+
+  The path error is dropped there because the body is read before the parameters
+  are solved. The handler reproduces that by parsing the body first and returning
+  `invalidJsonBody()` on its own. That helper's existing `loc: ["body", 0]` is
+  kept rather than made position-accurate: the real value is the character offset
+  of the JSON error and nothing in `web/src/lib/api.ts` reads it.
+
+  **Not deviations, deliberately preserved.** The `q` pattern is still
+  `%{q}%` with no escaping, so a `%` or `_` in a search term is a wildcard; the
+  duplicate check is still a read before the insert, so the ordinary duplicate is
+  a 409 while a concurrent one still hits `uq_internal_links_profile_url` and
+  surfaces as a 500; `source` is always `"manual"`, because `LinkCreate` has no
+  field a client could use to claim otherwise; and `pages` is
+  `(total + per_page - 1) // per_page if total > 0 else 0`, so an empty result
+  reports 0 pages rather than 1.
+
+  The tests are the TypeScript replacement for
+  `api/tests/phase2/test_internal_links.py` (13 tests), against the real database
+  and real BetterAuth sessions. Before the handlers existed:
+
+  ```
+  $ cd web && npx vitest run "src/app/api/profiles/[id]/links/links.test.ts"
+   FAIL  src/app/api/profiles/[id]/links/links.test.ts [ src/app/api/profiles/[id]/links/links.test.ts ]
+  Error: Cannot find module './[link_id]/route' imported from '.../links/links.test.ts'
+   Test Files  1 failed (1)
+        Tests  no tests
+  ```
+
+  And after (transcribed with `+` for vitest's check glyph):
+
+  ```
+  $ cd web && npx vitest run "src/app/api/profiles/[id]/links/links.test.ts" --reporter=verbose
+   + GET /api/profiles/{profile_id}/links > 401s without a session 4ms
+   + GET /api/profiles/{profile_id}/links > answers a malformed path uuid with FastAPI's 422 12ms
+   + GET /api/profiles/{profile_id}/links > 404s for a profile that does not exist 4ms
+   + GET /api/profiles/{profile_id}/links > 404s for another user's profile rather than listing its links 4ms
+   + GET /api/profiles/{profile_id}/links > returns the empty page shape for a profile with no links 4ms
+   + GET /api/profiles/{profile_id}/links > emits exactly LinkRead's field set, in its order 5ms
+   + GET /api/profiles/{profile_id}/links > orders newest first and counts every match 5ms
+   + GET /api/profiles/{profile_id}/links > excludes another profile's links from the count and the page 4ms
+   + GET /api/profiles/{profile_id}/links > paginates with per_page and page, reporting the page count 7ms
+   + GET /api/profiles/{profile_id}/links > searches url and title case-insensitively, the way ilike did 8ms
+   + GET /api/profiles/{profile_id}/links > matches a link with a null title on the url alone 3ms
+   + GET /api/profiles/{profile_id}/links > treats an empty ?q= as absent, the way a falsy Python string was 3ms
+   + GET /api/profiles/{profile_id}/links > answers ?page=0 with FastAPI's Query() 422 2ms
+   + GET /api/profiles/{profile_id}/links > answers ?per_page=201 with FastAPI's Query() 422 2ms
+   + GET /api/profiles/{profile_id}/links > answers ?page=abc with FastAPI's Query() 422 1ms
+   + GET /api/profiles/{profile_id}/links > answers ?per_page= with FastAPI's Query() 422 1ms
+   + GET /api/profiles/{profile_id}/links > reports the path uuid and both bad query parameters in one 422, path first 2ms
+   + GET /api/profiles/{profile_id}/links > accepts ?per_page=2.0, which pydantic's lax int parse accepts 3ms
+   + GET /api/profiles/{profile_id}/links > accepts ?per_page=+2, which pydantic's lax int parse accepts 3ms
+   + GET /api/profiles/{profile_id}/links > accepts ?per_page=%202%20, which pydantic's lax int parse accepts 3ms
+   + GET /api/profiles/{profile_id}/links > accepts ?per_page=1_0, which pydantic's lax int parse accepts 3ms
+   + GET /api/profiles/{profile_id}/links > keeps the last value of a repeated ?page=, as Starlette's QueryParams does 3ms
+   + POST /api/profiles/{profile_id}/links > 401s without a session 1ms
+   + POST /api/profiles/{profile_id}/links > creates a link with source manual and echoes LinkRead 4ms
+   + POST /api/profiles/{profile_id}/links > fills LinkCreate's defaults for a url-only body 3ms
+   + POST /api/profiles/{profile_id}/links > ignores extra keys, so source and post_id cannot be claimed by a client 3ms
+   + POST /api/profiles/{profile_id}/links > 409s on a duplicate url for the same profile 5ms
+   + POST /api/profiles/{profile_id}/links > allows the same url under a different profile 3ms
+   + POST /api/profiles/{profile_id}/links > 404s for a profile that does not exist 1ms
+   + POST /api/profiles/{profile_id}/links > 404s for another user's profile, writing nothing 2ms
+   + POST /api/profiles/{profile_id}/links > answers a missing url with pydantic's missing error 1ms
+   + POST /api/profiles/{profile_id}/links > reports a bad keyword by its index, as pydantic did 1ms
+   + POST /api/profiles/{profile_id}/links > reports the path uuid and the body error in one 422, path first 1ms
+   + POST /api/profiles/{profile_id}/links > answers a body it cannot decode with json_invalid alone, even on a bad path 1ms
+   + DELETE /api/profiles/{profile_id}/links/{link_id} > 401s without a session, leaving the row 1ms
+   + DELETE /api/profiles/{profile_id}/links/{link_id} > deletes the link and answers 204 with no body 2ms
+   + DELETE /api/profiles/{profile_id}/links/{link_id} > 404s for a link that does not exist 1ms
+   + DELETE /api/profiles/{profile_id}/links/{link_id} > 404s when the link belongs to another profile of the same user 3ms
+   + DELETE /api/profiles/{profile_id}/links/{link_id} > 404s for another user's link and leaves it in place 2ms
+   + DELETE /api/profiles/{profile_id}/links/{link_id} > reports both malformed path uuids in one 422 1ms
+   Test Files  1 passed (1)
+        Tests  40 passed (40)
+  ```
+
+  **Negative controls**, each applied alone against the passing suite and then
+  reverted:
+
+  | # | Break | Result |
+  | --- | --- | --- |
+  | 1 | Drop the `EXISTS` ownership predicate from the `DELETE` | 1 failed, 39 passed: `404s for another user's link and leaves it in place` |
+  | 2 | `Math.floor` instead of `Math.ceil` for `pages` | 1 failed, 39 passed: `paginates with per_page and page, reporting the page count` |
+  | 3 | `if (query.q !== null)` instead of the Python truthiness test | **40 passed, no failure** |
+  | 4 | `params.get("page")` instead of `getAll("page").at(-1)` | 1 failed, 39 passed: `keeps the last value of a repeated ?page=` |
+  | 5 | Push the path uuid issue after the query issues | 1 failed, 39 passed: `reports the path uuid and both bad query parameters in one 422, path first` |
+  | 6 | Drop `source: "manual"` from the insert, leaving the column default | 3 failed, 37 passed: the three `POST` success-path tests |
+  | 7 | Revert `PYDANTIC_INT` to `/^\s*[+-]?\d+\s*$/` | 2 failed, 38 passed: `accepts ?per_page=2.0` and `accepts ?per_page=1_0` |
+  | 8 | Drop the `ownedProfile()` check from `POST` | 2 failed, 38 passed: `404s for a profile that does not exist` and `404s for another user's profile, writing nothing` |
+
+  **Control 3 is the honest gap in this item.** The empty-`q` test has no teeth,
+  and it cannot be given any: `url ilike '%%'` matches every row, `url` is
+  `NOT NULL`, so the filtered and unfiltered queries return the same set for
+  `q=""` no matter what is in the table. Python's `if q:` and a `q !== null` test
+  are indistinguishable through the wire. The test is kept as a statement of
+  intent, and the branch is recorded here as unverifiable rather than verified.
+
+  Gates. `pnpm -C web <cmd>` does not work in this worktree, so these run from
+  inside `web/` with the repo `.env` sourced:
+
+  ```
+  $ cd web && npx tsc --noEmit ; echo $?
+  0
+
+  $ cd web && npx eslint ; echo $?
+  0
+
+  $ cd web && npx vitest run
+   Test Files  2 failed | 94 passed (96)
+        Tests  9 failed | 1790 passed | 7 skipped (1806)
+
+  $ cd web && npx vitest run          # second run, after the fixture-scoping fix below
+   Test Files  3 failed | 93 passed (96)
+        Tests  10 failed | 1789 passed | 7 skipped (1806)
+  ```
+
+  Both runs are pasted because they disagree. Nine of the failures are the
+  recorded baseline in either case: 6 in `image-preview.test.tsx` and 3 in
+  `PostDetail.test.tsx`, all pre-existing. The tenth on the second run is
+  `scaffold-check.test.ts > emits the workflow lifecycle events the trace view
+  will read`, the load-sensitive discrepancy recorded under 5.5e-ii and 5.6 that
+  also fires at HEAD.
+
+  **The fixture-scoping fix, worth recording because the first version of this
+  item's test file was wrong.** `clearLinks()` originally deleted every
+  `internal_links` row whose url started with `http://127.0.0.1:9/`, the loopback
+  host every route-handler suite uses for fixtures. That made
+  `posts/update-delete.test.ts > detaches internal links rather than deleting
+  them, per Alembic 006's SET NULL` fail when the two files ran concurrently,
+  while both passed alone:
+
+  ```
+  $ cd web && npx vitest run src/app/api/posts src/app/api/profiles
+       x detaches internal links rather than deleting them, per Alembic 006's SET NULL 12ms
+   Test Files  1 failed | 10 passed (11)
+        Tests  1 failed | 376 passed (377)
+
+  $ cd web && npx vitest run src/app/api/posts/update-delete.test.ts
+   Test Files  1 passed (1)
+        Tests  28 passed (28)
+  ```
+
+  Fixture urls now live under a `links-route-test/` path segment of their own and
+  the cleanup matches that prefix, so it can only reach rows this file wrote:
+
+  ```
+  $ cd web && npx vitest run src/app/api/posts src/app/api/profiles
+   Test Files  11 passed (11)
+        Tests  377 passed (377)
+  ```
+
+  ```
+  $ cd web && npx next build
+   Compiled successfully in 4.1s
+  Route (app)
+  ├ ƒ /api/profiles/[id]/links
+  ├ ƒ /api/profiles/[id]/links/[link_id]
+  $ echo $?
+  0
+  ```
+
+  `api/` is untouched by this item (`git status --short` lists only files under
+  `web/`), and its gates are unchanged:
+
+  ```
+  $ cd api && uv run pytest -q     # .env sourced
+  120 failed, 241 passed, 25 errors in 15.09s
+
+  $ cd api && uv run ruff check .
+  Found 32 errors.
+
+  $ cd api && uv run ruff format --check .
+  9 files would be reformatted, 131 files already formatted
+  ```
+
+  The pytest split moved from the `125 failed, 236 passed` recorded under 5.2c to
+  `120 failed, 241 passed` on the same 25 errors without any Python changing in
+  between, so that suite's failure count is state-dependent and is not a
+  trustworthy delta on its own.
+
+  **Not covered.** No browser drives `/profiles/[id]` against these handlers.
+  The proof is direct handler calls, which is the right level for status codes,
+  error bodies and row-level ownership, but it does not prove the internal-links
+  panel's search box, its infinite scroll (`page < data.pages`) or its delete
+  button work end to end against them. That check belongs to Phase 8 item 8.6.
 - [ ] 5.8 `analytics`
 - [ ] 5.9 `wordpress`
 - [ ] 5.10 `nextjs` (HMAC signing from `hmac_signing.py` and the webhook contract with

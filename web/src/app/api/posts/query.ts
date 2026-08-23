@@ -10,6 +10,8 @@
 import { posts } from "@/db"
 import type { PgColumn } from "drizzle-orm/pg-core"
 
+import { parseInt422, unprocessableRequest, type ValidationErrorDetail } from "../pydantic"
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export interface ListPostsQuery {
@@ -21,14 +23,6 @@ export interface ListPostsQuery {
   order: string
   page: number
   perPage: number
-}
-
-interface QueryIssue {
-  type: string
-  loc: [string, string]
-  msg: string
-  input: string
-  ctx?: Record<string, number>
 }
 
 /**
@@ -87,62 +81,12 @@ const SORT_COLUMNS = new Map<string, PgColumn>([
 ])
 
 /**
- * Pydantic's lax int parsing for a query string: a bare integer, optionally
- * surrounded by whitespace and optionally signed. A float literal such as
- * `1.5` is `int_parsing`, not a truncation.
- */
-function parseInt422(
-  raw: string,
-  name: string,
-  fallback: number,
-  ge: number,
-  le: number | null,
-  issues: QueryIssue[],
-): number {
-  if (!/^\s*[+-]?\d+\s*$/.test(raw)) {
-    issues.push({
-      type: "int_parsing",
-      loc: ["query", name],
-      msg: "Input should be a valid integer, unable to parse string as an integer",
-      input: raw,
-    })
-    return fallback
-  }
-  const value = Number(raw.trim())
-  if (value < ge) {
-    issues.push({
-      type: "greater_than_equal",
-      loc: ["query", name],
-      msg: `Input should be greater than or equal to ${ge}`,
-      input: raw,
-      ctx: { ge },
-    })
-    return fallback
-  }
-  if (le !== null && value > le) {
-    issues.push({
-      type: "less_than_equal",
-      loc: ["query", name],
-      msg: `Input should be less than or equal to ${le}`,
-      input: raw,
-      ctx: { le },
-    })
-    return fallback
-  }
-  return value
-}
-
-export function unprocessableQuery(issues: QueryIssue[]): Response {
-  return Response.json({ detail: issues }, { status: 422 })
-}
-
-/**
  * Returns the parsed query, or a 422 `Response` when any parameter fails the
  * way FastAPI's would have.
  */
 export function parseListPostsQuery(url: URL): ListPostsQuery | Response {
   const params = url.searchParams
-  const issues: QueryIssue[] = []
+  const issues: ValidationErrorDetail[] = []
 
   const profileId = params.get("profile_id")
   if (profileId !== null && !UUID_PATTERN.test(profileId)) {
@@ -160,7 +104,7 @@ export function parseListPostsQuery(url: URL): ListPostsQuery | Response {
   const perPage =
     rawPerPage === null ? 50 : parseInt422(rawPerPage, "per_page", 50, 1, 200, issues)
 
-  if (issues.length > 0) return unprocessableQuery(issues)
+  if (issues.length > 0) return unprocessableRequest(issues)
 
   const sort = params.get("sort") ?? "created_at"
   return {

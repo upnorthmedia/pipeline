@@ -427,3 +427,11 @@
   it must stay ungrouped so two `web` replicas each see every event rather than splitting
   them. Not done now because nothing has hit the limit and the teardown path
   (`request.signal` -> `unsubscribe()`) already prevents the leak, proven by a test.
+- [confirmed] 2026-08-23 `delete_link()` in `api/src/api/links.py` has no ownership check:
+  unlike the other two endpoints in that router it never calls `_get_profile_or_404()`, so
+  it matches on `link_id` and `profile_id` alone and any authenticated user who knows both
+  ids can delete another tenant's internal link. The TypeScript port
+  (`web/src/app/api/profiles/[id]/links/[link_id]/route.ts`, ledger item 5.7) scopes the
+  delete to the caller and has a test for it, so the new stack is not affected; this entry
+  exists because the Python router is still serving until Phase 7 deletes it. No fix
+  applied to `api/` because Phase 7 removes the file and the port already closes the hole.

@@ -9,6 +9,8 @@
  */
 import type { StageSettingsJson, StageStatusJson, posts } from "@/db"
 
+import { toPydanticIso } from "../pydantic"
+
 type PostRow = typeof posts.$inferSelect
 
 export interface PostResponse {
@@ -70,26 +72,6 @@ const DEFAULT_STAGE_SETTINGS: StageSettingsJson = {
   edit: "auto",
   images: "auto",
   ready: "auto",
-}
-
-/**
- * Pydantic 2.12 renders an aware datetime with a `Z` suffix and trims trailing
- * zeros off the fractional second, dropping the fraction entirely when it is
- * zero: `2026-08-22T12:34:56.789012Z` and `2026-08-22T12:34:56Z`. JavaScript's
- * `toISOString()` instead always writes exactly three fractional digits, so it
- * is reformatted here.
- *
- * Sub-millisecond precision is lost regardless: `pg` parses a Postgres
- * timestamp into a `Date`, which has no microseconds. A value stored as
- * `...789012` therefore reads back as `...789`. Nothing in the dashboard does
- * more than hand these strings to `new Date()`, which parses both.
- */
-export function toPydanticIso(value: Date | null): string | null {
-  if (value === null) return null
-  const iso = value.toISOString()
-  return iso.replace(/\.(\d*[1-9])?0*Z$/, (_match, kept: string | undefined) =>
-    kept ? `.${kept}Z` : "Z",
-  )
 }
 
 /**

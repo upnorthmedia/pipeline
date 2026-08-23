@@ -68,6 +68,8 @@ export interface ValidationErrorDetail {
   loc: (string | number)[]
   msg: string
   input: unknown
+  /** pydantic's bound for a `greater_than_equal` / `less_than_equal` error. */
+  ctx?: Record<string, number>
 }
 
 /** pydantic's error type and message for each type zod reports as `expected`. */
@@ -125,9 +127,20 @@ function detailFor(issue: z.core.$ZodIssue, body: unknown): ValidationErrorDetai
   return { type: "value_error", loc, msg: issue.message, input: valueAt(body, issue.path) }
 }
 
+/**
+ * The `detail` entries for a set of zod issues, for a handler that has to
+ * report path errors in the same 422 rather than answering the body alone.
+ */
+export function bodyDetails(
+  issues: readonly z.core.$ZodIssue[],
+  body: unknown,
+): ValidationErrorDetail[] {
+  return issues.map((issue) => detailFor(issue, body))
+}
+
 /** FastAPI's `RequestValidationError` response for a set of zod issues. */
 export function unprocessableBody(issues: readonly z.core.$ZodIssue[], body: unknown): Response {
-  return Response.json({ detail: issues.map((issue) => detailFor(issue, body)) }, { status: 422 })
+  return Response.json({ detail: bodyDetails(issues, body) }, { status: 422 })
 }
 
 /**
@@ -139,5 +152,102 @@ export function invalidJsonBody(): Response {
   return Response.json(
     { detail: [{ type: "json_invalid", loc: ["body", 0], msg: "JSON decode error", input: {} }] },
     { status: 422 },
+  )
+}
+
+/**
+ * A `uuid.UUID` path parameter. FastAPI validated these before the endpoint
+ * ran and reported every bad one in the same 422 as the query and body errors,
+ * path parameters first, in declaration order.
+ *
+ * The message drops pydantic's `ctx.error` tail for the same reason
+ * `posts/params.ts` does: it comes from the Rust uuid crate's parser and
+ * cannot be reproduced faithfully.
+ */
+export function pathUuidIssue(name: string, input: string): ValidationErrorDetail {
+  return {
+    type: "uuid_parsing",
+    loc: ["path", name],
+    msg: "Input should be a valid UUID",
+    input,
+  }
+}
+
+/**
+ * Pydantic's lax parse of an `int` out of a query string, pinned against the
+ * installed pydantic 2.12 rather than assumed. It accepts surrounding
+ * whitespace, an optional sign, `_` separators between digits, and a trailing
+ * `.` followed by nothing but zeros: `"2.0"`, `"1_0_0"` and `" 2 "` are all
+ * integers to it, while `"2."`, `".0"`, `"1e3"`, `"1__0"` and `"2_"` are
+ * `int_parsing` errors.
+ *
+ * `ge` and `le` come from `Query(..., ge=, le=)` and carry pydantic's `ctx`,
+ * which the dashboard does not read but which is part of the wire shape.
+ */
+const PYDANTIC_INT = /^\s*[+-]?\d+(?:_\d+)*(?:\.0+)?\s*$/
+
+export function parseInt422(
+  raw: string,
+  name: string,
+  fallback: number,
+  ge: number,
+  le: number | null,
+  issues: ValidationErrorDetail[],
+): number {
+  if (!PYDANTIC_INT.test(raw)) {
+    issues.push({
+      type: "int_parsing",
+      loc: ["query", name],
+      msg: "Input should be a valid integer, unable to parse string as an integer",
+      input: raw,
+    })
+    return fallback
+  }
+  const value = Math.trunc(Number(raw.replace(/_/g, "")))
+  if (value < ge) {
+    issues.push({
+      type: "greater_than_equal",
+      loc: ["query", name],
+      msg: `Input should be greater than or equal to ${ge}`,
+      input: raw,
+      ctx: { ge },
+    })
+    return fallback
+  }
+  if (le !== null && value > le) {
+    issues.push({
+      type: "less_than_equal",
+      loc: ["query", name],
+      msg: `Input should be less than or equal to ${le}`,
+      input: raw,
+      ctx: { le },
+    })
+    return fallback
+  }
+  return value
+}
+
+/** FastAPI's `RequestValidationError` response for a set of collected issues. */
+export function unprocessableRequest(issues: ValidationErrorDetail[]): Response {
+  return Response.json({ detail: issues }, { status: 422 })
+}
+
+/**
+ * Pydantic 2.12 renders an aware datetime with a `Z` suffix and trims trailing
+ * zeros off the fractional second, dropping the fraction entirely when it is
+ * zero: `2026-08-22T12:34:56.789012Z` and `2026-08-22T12:34:56Z`. JavaScript's
+ * `toISOString()` instead always writes exactly three fractional digits, so it
+ * is reformatted here.
+ *
+ * Sub-millisecond precision is lost regardless: `pg` parses a Postgres
+ * timestamp into a `Date`, which has no microseconds. A value stored as
+ * `...789012` therefore reads back as `...789`. Nothing in the dashboard does
+ * more than hand these strings to `new Date()`, which parses both.
+ */
+export function toPydanticIso(value: Date | null): string | null {
+  if (value === null) return null
+  const iso = value.toISOString()
+  return iso.replace(/\.(\d*[1-9])?0*Z$/, (_match, kept: string | undefined) =>
+    kept ? `.${kept}Z` : "Z",
   )
 }
