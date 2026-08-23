@@ -16090,7 +16090,274 @@ three pieces are separately verifiable, so they are separate items.
     belongs to Phase 8 item 8.8. The `days` selector on that tab is also never exercised
     end to end: `analytics.dashboard()` is called with no argument, so the dashboard only
     ever requests `?days=30`.
-  - [ ] 5.8b `GET /api/analytics/costs`
+  - [x] 5.8b `GET /api/analytics/costs`.
+
+    Ported to `web/src/app/api/analytics/costs/route.ts`. One row per
+    `(post, stage_logs key)` pair out of a `jsonb_each` unroll, aggregated in
+    the handler into the `CostAnalytics` shape `web/src/lib/api.ts` already
+    declares. `api.ts` needed no change.
+
+    **The Python endpoint being ported has never run.** Its SQL puts the
+    `website_profiles` join inside the second `FROM` item, where the `posts`
+    alias is not in scope, and `JOIN` binds tighter than the comma:
+
+    ```
+    $ cd api && PYTHONPATH=. uv run python - <<'PY'
+    <the exact sql_str from cost_analytics(), executed through
+     src.database.async_session against the real dev database>
+    PY
+    RAISED ProgrammingError
+    (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedTableError'>: invalid reference to FROM-clause entry for table "p"
+    ```
+
+    ```
+    $ docker exec ...-db-1 psql -U pipeline -d content_pipeline -c "<the same SELECT>"
+    ERROR:  invalid reference to FROM-clause entry for table "p"
+    LINE 14:         JOIN website_profiles wp ON p.profile_id = wp.id
+                                                 ^
+    DETAIL:  There is an entry for table "p", but it cannot be referenced from this part of the query.
+    ```
+
+    Postgres rejects the statement before a parameter is bound, so every call
+    answers 500 on every input. `git log` shows the file was added already in
+    this state:
+
+    ```
+    $ git log --oneline -- api/src/api/analytics.py
+    5f31ca4 saas updates
+    $ git show --name-status 5f31ca4 -- api/src/api/analytics.py
+    A	api/src/api/analytics.py
+    ```
+
+    The ten pytest cases in `api/tests/phase12/test_analytics.py::TestCosts`
+    never caught it because they all fail earlier, on authentication, and have
+    done since the multi-tenancy change:
+
+    ```
+    $ cd api && uv run pytest tests/phase12/test_analytics.py -q -k TestCosts
+    E       AssertionError: assert 'model_costs_reference' in {'detail': 'Not authenticated'}
+    10 failed, 22 deselected in 0.70s
+    ```
+
+    **Deviation 1, the join.** The join is moved onto `posts` so the endpoint
+    does what it was written to do. Porting the 500 faithfully would ship a
+    monitor page tab that cannot work, and there is no observable behaviour to
+    preserve. Logged in `todo.md` as `[confirmed]`, because the Python route is
+    still the one serving until Phase 7.
+
+    ```
+    $ docker exec ...-db-1 psql -U pipeline -d content_pipeline -c "<SELECT with
+      the join moved onto posts>"
+     stage_name | model | coalesce | post_id | profile_id | completed_at
+    ------------+-------+----------+---------+------------+--------------
+    (0 rows)
+    ```
+
+    **Deviation 2, `profile_id`.** Python declared it `str | None`, so pydantic
+    passed anything through and a non-uuid reached the `uuid` column raw, which
+    would surface as a 500. Validated here instead, with the same `uuid_parsing`
+    422 body `GET /api/posts` answers for its own `profile_id`. An *empty* value
+    is still not a filter at all: Python's guard is `if profile_id:`.
+
+    **Deviation 3, wire types.** Python's per-bucket `tokens_in` starts as an
+    `int` and accumulates a `float`, so a whole count serialises as `100.0`
+    where JavaScript writes `100`. Both parse to the same number and
+    `web/src/lib/api.ts` types the field as `number`, so no caller can tell.
+
+    The arithmetic is done in the handler rather than pushed into SQL because
+    Python's is order and type sensitive in ways Postgres aggregates are not,
+    and each of the five behaviours has its own test:
+
+    - `total_tokens_in` / `total_tokens_out` are float sums truncated by
+      `int()`, not rounded, so 1000.9 reports as 1000;
+    - `total_cost`, each `by_model` and `by_stage` bucket, each `cost_over_time`
+      point and each `by_profile` row are rounded to six places with Python's
+      half-to-even `round()`, via the existing `pythonRound` helper;
+    - `avg_cost_per_post` rounds to *four* places and divides the *unrounded*
+      total, by the count of distinct posts rather than the number of stage
+      rows, and reports the integer `0` when there are none;
+    - a stage row with no `model` is counted in `by_stage` and in the totals but
+      gets no `by_model` bucket, so the two breakdowns need not sum alike;
+    - `by_profile` is sorted by cost descending with a stable sort, so equal
+      profiles keep first-seen order, exactly as Python's
+      `sorted(..., reverse=True)` does.
+
+    `sl.key NOT LIKE '\_%'` excludes keys beginning with a literal underscore,
+    which is how the dead-letter path's `_error` key stays out of the totals.
+    The backslash is `LIKE`'s default escape character, so it is the underscore
+    that is escaped and not a wildcard:
+
+    ```
+    $ docker exec ...-db-1 psql -U pipeline -d content_pipeline -c \
+      "select k, k not like '\_%' as kept from (values ('_error'),('research'),('xerror'),('a_b')) t(k)"
+        k     | kept
+    ----------+------
+     _error   | f
+     research | t
+     xerror   | t
+     a_b      | t
+    ```
+
+    `completed_at` is a `timestamptz` and Python called `.date()` on the
+    UTC-aware datetime asyncpg returned, so the `cost_over_time` key is the UTC
+    date whatever the session time zone is. Rendered as
+    `to_char(p.completed_at at time zone 'UTC', 'YYYY-MM-DD')` so that stays
+    true and so the value does not depend on which `pg` type parser is
+    installed for OID 1184. This server's sessions are in UTC
+    (`show TimeZone` -> `UTC`, `show server_version` -> `17.8`), which is why
+    negative control 5 below has no teeth.
+
+    `MODEL_COSTS` is ported to `web/src/mastra/model-costs.ts` value for value.
+    It is deliberately *not* the two rates `web/src/mastra/execution-log.ts`
+    carries: Python had the same split, one table used by
+    `log_stage_execution()` and the analytics reference, one pair of Opus rates
+    hardcoded in `worker.py`'s `stage_complete` entry, and both halves are
+    served through the API.
+
+    `parseDays()` and `DAY_MS` moved out of the dashboard handler into
+    `web/src/app/api/analytics/days.ts`, since three of this router's four
+    endpoints declare `days: int = Query(30, ge=1, le=365)` identically.
+
+    Pre-implementation, with `costs/route.ts` moved aside:
+
+    ```
+    $ npx vitest run src/app/api/analytics/costs.test.ts
+     FAIL  src/app/api/analytics/costs.test.ts [ src/app/api/analytics/costs.test.ts ]
+    Error: Cannot find module './costs/route' imported from '.../web/src/app/api/analytics/costs.test.ts'
+     Test Files  1 failed (1)
+          Tests  no tests
+    ```
+
+    The 30 tests are in `web/src/app/api/analytics/costs.test.ts`, against the
+    real database and real BetterAuth sessions. Pass and fail glyphs transcribed
+    as `+` and `x`:
+
+    ```
+    $ npx vitest run src/app/api/analytics/costs.test.ts --reporter=verbose
+     + GET /api/analytics/costs > rejects an unauthenticated request
+     + GET /api/analytics/costs > answers an empty history with zeros and empty breakdowns
+     + GET /api/analytics/costs > serves the model price table as the cost reference
+     + aggregation > sums tokens and cost across every stage of every post
+     + aggregation > breaks the totals down by model with a call count
+     + aggregation > breaks the totals down by stage name
+     + aggregation > rounds each breakdown's cost to six places after summing, as Python does
+     + aggregation > counts a stage with no model in by_stage but not in by_model
+     + aggregation > treats a missing token or cost field as zero rather than dropping the row
+     + aggregation > truncates a fractional token total the way Python's int() does
+     + aggregation > excludes keys that begin with an underscore, which is how _error stays out
+     + aggregation > keeps a stage whose name merely contains an underscore
+     + aggregation > ignores a post with no stage logs at all
+     + avg_cost_per_post > divides the total by the number of distinct posts, not the number of stages
+     + avg_cost_per_post > rounds to four places the way Python's round() does, half to even
+     + cost_over_time > buckets by the UTC date the post completed, ascending and rounded
+     + cost_over_time > uses UTC rather than the session time zone for the date boundary
+     + cost_over_time > omits a post that has not completed, while still counting its cost
+     + by_profile > resolves profile names and orders them by cost, most expensive first
+     + by_profile > keeps two profiles with the same cost as separate rows
+     + scoping > never reports another user's costs
+     + scoping > is blind to a post whose profile_id is null
+     + filters > windows on created_at with days
+     + filters > restricts to one profile with profile_id
+     + filters > restricts to one model with model
+     + filters > treats an empty profile_id or model as no filter, matching Python's `if value:`
+     + filters > answers a profile_id that is not a uuid with pydantic's uuid_parsing 422
+     + filters > answers a non-numeric days with pydantic's int_parsing 422
+     + filters > answers days=0 with pydantic's greater_than_equal 422
+     + filters > answers days=366 with pydantic's less_than_equal 422
+     Test Files  1 passed (1)
+          Tests  30 passed (30)
+    ```
+
+    Negative controls, each applied to a pristine copy of the handler, measured,
+    and reverted. Three rounds: the first found three controls with no teeth,
+    two of which were fixed by strengthening the fixtures and re-measured.
+
+    | # | Control | Result |
+    | --- | --- | --- |
+    | 1 | drop the `sl.key not like '\_%'` filter | 1 failed: `excludes keys that begin with an underscore` |
+    | 2 | round `avg_cost_per_post` with `toFixed(4)` | 1 failed: `rounds to four places ... half to even` |
+    | 3 | drop the `wp.user_id` predicate | 1 failed: `never reports another user's costs` |
+    | 4 | make the `website_profiles` join a `left join` | 30 passed, **no teeth** (see below) |
+    | 5 | bucket `cost_over_time` in the session time zone | 30 passed, **no teeth** (see below) |
+    | 6 | divide by the row count instead of distinct posts | 1 failed: `divides the total by the number of distinct posts` |
+    | 7 | drop the six-place rounding of `by_model` / `by_stage` | first round 30 passed; after the fixture fix, 1 failed: `rounds each breakdown's cost to six places` |
+    | 8 | leave `cost_over_time` in first-seen order | 1 failed: `buckets by the UTC date ... ascending` |
+    | 9 | drop `Math.trunc` from the token totals | 1 failed: `truncates a fractional token total` |
+    | 10 | sort `by_profile` ascending | 1 failed: `resolves profile names and orders them by cost` |
+    | 11 | bucket a null model under `""` instead of skipping it | 1 failed: `counts a stage with no model in by_stage but not in by_model` |
+    | 12 | treat an empty `profile_id` as a filter (`!== null`) | 1 failed: `treats an empty profile_id or model as no filter` |
+    | 13 | drop the six-place rounding of `cost_over_time` | first round 30 passed; after the fixture fix, 1 failed: `buckets by the UTC date ... and rounded` |
+
+    Controls 7 and 13 passed on the first round because the fixtures happened to
+    use costs whose sums are exact doubles: `0.01 + 0.02` *is* the double
+    nearest 0.03 (`node -e '0.01+0.02===0.03'` prints `true`), so nothing needed
+    rounding. Both fixtures were changed to `0.1 + 0.2`, which is
+    `0.30000000000000004`, and both controls then fail. The half-to-even control
+    needed the same treatment: an exact tie at four places requires a value of
+    the form `odd / 2**k`, so the fixture is two posts at `0.03125` each rather
+    than a decimal that merely looks like a tie.
+
+    Control 4 has no teeth and cannot: `wp.user_id = <id>` is NULL for an
+    unmatched row under a `left join` too, so the `WHERE` clause drops it either
+    way. Python's inner join is reproduced because the statement is a port, but
+    the behaviour under test belongs to the predicate, and the test is named for
+    the predicate now rather than the join.
+
+    Control 5 has no teeth on this server because its sessions run in UTC, so
+    the handler cannot be made to disagree with itself through a request. The
+    test instead runs both expressions side by side on a dedicated pooled
+    connection set to `Pacific/Kiritimati` (UTC+14) and asserts they differ,
+    which is what makes the `at time zone 'UTC'` load bearing rather than
+    decorative.
+
+    Gates:
+
+    ```
+    $ npx tsc --noEmit
+    TSC EXIT=0
+    (no output)
+
+    $ npx eslint
+    LINT EXIT=0
+    (no output)
+
+    $ npx vitest run          # run 1
+     Test Files  3 failed | 95 passed (98)
+          Tests  10 failed | 1842 passed | 7 skipped (1859)
+
+    $ npx vitest run          # run 2
+     Test Files  2 failed | 96 passed (98)
+          Tests  9 failed | 1843 passed | 7 skipped (1859)
+    # 9 failed is the recorded baseline: 6 in image-preview.test.tsx and 3 in
+    # PostDetail.test.tsx. The tenth on run 1 is scaffold-check.test.ts >
+    # "emits the workflow lifecycle events the trace view will read", the
+    # load-sensitive discrepancy recorded under 5.6 and 5.5e-ii; it fired on one
+    # of the two runs. Passing count 1813 -> 1843 (+30), total 1829 -> 1859.
+
+    $ npx next build
+    BUILD EXIT=0
+    v Compiled successfully in 4.1s
+    |- f /api/analytics/costs
+    # The 15 BetterAuth "default secret" lines are the pre-existing,
+    # environment-driven warning recorded under item 1.2.
+
+    $ cd api && uv run pytest -q
+    120 failed, 241 passed, 25 errors in 15.07s
+    # Unchanged from the count recorded under 5.8a.
+
+    $ cd api && uv run ruff check .
+    Found 32 errors.
+
+    $ cd api && uv run ruff format --check .
+    9 files would be reformatted, 131 files already formatted
+    ```
+
+    **Not covered.** No browser drives `/monitor`'s costs tab against this
+    handler, so nothing here proves the charts render the payload; that check
+    belongs to Phase 8 item 8.8. The `model` filter is also never exercised
+    end to end, because `web/src/lib/api.ts`'s `analytics.costs()` is called
+    with no arguments from the dashboard, so only `?days=30` is ever requested
+    in practice.
   - [ ] 5.8c `GET /api/analytics/models`
   - [ ] 5.8d `GET /api/analytics/logs`
 - [ ] 5.9 `wordpress`

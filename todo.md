@@ -435,3 +435,17 @@
   delete to the caller and has a test for it, so the new stack is not affected; this entry
   exists because the Python router is still serving until Phase 7 deletes it. No fix
   applied to `api/` because Phase 7 removes the file and the port already closes the hole.
+- [confirmed] 2026-08-23 `cost_analytics()` in `api/src/api/analytics.py` has never run.
+  Its raw SQL puts the `website_profiles` join inside the second `FROM` item
+  (`FROM posts p, jsonb_each(...) AS sl(...) JOIN website_profiles wp ON p.profile_id = wp.id`),
+  and `JOIN` binds tighter than the comma, so `p` is referenced from a part of the query it
+  is not visible in. Postgres rejects the statement before any parameter is bound
+  (`asyncpg.exceptions.UndefinedTableError: invalid reference to FROM-clause entry for table "p"`),
+  so `GET /api/analytics/costs` answers 500 on every input, and has since the file was added
+  in `5f31ca4`. The ten `TestCosts` cases in `api/tests/phase12/test_analytics.py` never
+  caught it because they all fail earlier on authentication. The TypeScript port
+  (`web/src/app/api/analytics/costs/route.ts`, ledger item 5.8b) moves the join onto `posts`
+  and has 30 tests, so the new stack is correct; this entry exists because the Python router
+  is still serving until Phase 7 deletes it. No fix applied to `api/` for the same reason.
+  Worth checking whether `/models` and `/logs` share the shape before porting them (items
+  5.8c and 5.8d).
