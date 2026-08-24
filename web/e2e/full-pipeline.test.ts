@@ -110,12 +110,13 @@ test.describe("Full pipeline journey", () => {
     await expect(page.getByRole("heading", { name: "Observability" })).toBeVisible();
 
     // Queue Controls is outside the has-posts branch, so it is the one part of
-    // the overview an account with no posts still sees. Its four counters come
-    // from `GET /api/queue`, which is the surface the deleted `/queue` page
-    // test was reaching for.
+    // the overview an account with no posts still sees. Its counters come from
+    // `GET /api/queue`, which is the surface the deleted `/queue` page test was
+    // reaching for. They are named in the badge column's words rather than the
+    // column's, so this list is `QUEUE_LINES` minus the one that hides at zero.
     const queue = page.locator("[data-slot='card']").filter({ hasText: "Queue Controls" });
     await expect(queue).toBeVisible();
-    for (const counter of ["Running:", "Pending:", "Paused:", "Failed:"]) {
+    for (const counter of ["Running:", "Waiting for you:", "Not started:", "Paused:", "Failed:"]) {
       await expect(queue.getByText(counter, { exact: false }).first()).toBeVisible();
     }
     await expect(queue.getByRole("button", { name: "Pause All" })).toBeVisible();

@@ -457,6 +457,21 @@ explicitly out of scope.
         `current_stage` grouping and is renamed `Posts by Stage` to say which question it
         answers. `ui/p35b-*.png`. [evidence](evidence/p3.md#p35b)
 
+  - [x] **P3.5c** `/auth/sign-in` and `/auth/sign-up`, the only screens a visitor without an
+        account can be on, which P3.5a's sweep could not open because every capture in it
+        carried a session. The root layout drew the sidebar and the mobile header around them,
+        so the first screen of the product held four nav links that the middleware bounces
+        straight back, in the tab order and ahead of the email field. The auth layout hid them
+        under `fixed inset-0 z-50`, an opaque sheet, which is also why the sign-up form could
+        not be finished under about a 480px viewport: a fixed sheet does not scroll, the card
+        is 466px tall, and `Sign In` sat 62px past a page that would not move. The frame moves
+        into `AppChrome`, a client component that reads `usePathname()` and gives `/auth` and
+        `/auth/*` the page alone, SSR included; `src/app/auth/layout.tsx` is deleted, having
+        nothing left to do, and the page now names the product itself, which the sidebar was
+        the only thing doing. Fixed `full-pipeline.test.ts` on the way, stale since P3.5b
+        renamed the queue counters: `pnpm test:e2e` is 39 green. `ui/p35c-*.png`.
+        [evidence](evidence/p3.md#p35c)
+
 ## P2. Clear the backlog in `todo.md`
 
 Worked top to bottom against `todo.md`, one numbered entry per finding in that file's order.

@@ -381,12 +381,6 @@
   to run `db:migrate`. Compounds the entry above about nothing running migrations on deploy.
   Found at polish ledger P3.5a.
 
-- [confirmed] 2026-08-24 `/auth/sign-in` and `/auth/sign-up` render the whole app sidebar,
-  including the four navigation links, to a visitor with no session. Every one of them
-  bounces straight back to the sign-in page, so the first thing the app shows a new user is
-  four controls that do nothing. `web/src/app/layout.tsx` mounts the sidebar around every
-  route including `/auth/[path]`. Found at polish ledger P3.5a.
-
 - [confirmed] 2026-08-24 `GET /api/analytics/dashboard` still counts the way
   `GET /api/queue` did before polish ledger P3.5b: `by_status` groups on `current_stage` and
   `completion_rate` is the share of rows whose column reads `complete`. On `/monitor` that
@@ -402,3 +396,14 @@
   said it was dead. Scope the bulk pause to the run states it claims to act on. Distinct from
   the entry above about pausing being a label rather than a control signal. Found at polish
   ledger P3.5b.
+
+- [investigate 2026-08-24] The `/auth` prefix is written in two places that must agree:
+  `src/middleware.ts`'s matcher excludes it, and `AppChrome` in
+  `web/src/components/app-chrome.tsx` gates the app frame off it. `src/app/brand-mark.test.ts`
+  pins the matcher; nothing pins the pair. If one moves, the other silently draws dead
+  navigation on a signed-out page again. Found at polish ledger P3.5c.
+
+- [investigate 2026-08-24] Only `sign-in` and `sign-up` of `better-auth-ui`'s `authViewPaths`
+  have ever been opened in a browser in this run. `generateStaticParams` builds all of them,
+  so `forgot-password`, `reset-password`, `sign-out` and the rest are live routes nobody has
+  looked at. Found at polish ledger P3.5c.
