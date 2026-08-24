@@ -302,7 +302,11 @@ export interface PostAnalytics {
   avg_sentence_length: number;
   flesch_reading_ease: number;
   keyword_density: Record<string, number>;
-  seo_checklist: Record<string, boolean>;
+  /**
+   * Mixed on purpose: `_seo_checklist` returns seven pass/fail booleans plus
+   * `internal_link_count` and `external_link_count` as integers.
+   */
+  seo_checklist: Record<string, boolean | number>;
 }
 
 // --- Analytics Types ---

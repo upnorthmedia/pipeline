@@ -92,15 +92,27 @@ function Stat({
 }
 
 interface SeoChecklistProps {
-  checklist: Record<string, boolean>;
+  /**
+   * The endpoint's mixed map. `_seo_checklist` returns seven pass/fail booleans
+   * plus `internal_link_count` and `external_link_count` as integers, so a
+   * count is not a check and must not land in the pass fraction.
+   */
+  checklist: Record<string, boolean | number>;
   className?: string;
 }
 
 export function SeoChecklist({ checklist, className }: SeoChecklistProps) {
   if (!checklist || Object.keys(checklist).length === 0) return null;
 
-  const passed = Object.values(checklist).filter(Boolean).length;
-  const total = Object.keys(checklist).length;
+  const entries = Object.entries(checklist);
+  const checks = entries.filter(
+    (entry): entry is [string, boolean] => typeof entry[1] === "boolean"
+  );
+  const counts = entries.filter(
+    (entry): entry is [string, number] => typeof entry[1] === "number"
+  );
+
+  const passed = checks.filter(([, ok]) => ok).length;
 
   return (
     <div className={cn("space-y-2", className)} data-testid="seo-checklist">
@@ -108,20 +120,36 @@ export function SeoChecklist({ checklist, className }: SeoChecklistProps) {
         <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           SEO Checklist
         </h4>
-        <span className="text-xs text-muted-foreground font-mono">
-          {passed}/{total}
-        </span>
+        {checks.length > 0 && (
+          <span className="text-xs text-muted-foreground font-mono">
+            {passed}/{checks.length}
+          </span>
+        )}
       </div>
-      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-        {Object.entries(checklist).map(([check, ok]) => (
-          <div key={check} className="flex items-center gap-2 text-xs">
-            <div className={cn("h-1.5 w-1.5 rounded-full shrink-0", dotColor(ok))} />
-            <span className={ok ? "text-muted-foreground" : "text-muted-foreground/70"}>
-              {formatCheckLabel(check)}
+      {checks.length > 0 && (
+        <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+          {checks.map(([check, ok]) => (
+            <div key={check} className="flex items-center gap-2 text-xs">
+              <div className={cn("h-1.5 w-1.5 rounded-full shrink-0", dotColor(ok))} />
+              <span className={ok ? "text-muted-foreground" : "text-muted-foreground/70"}>
+                {formatCheckLabel(check)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {counts.length > 0 && (
+        <div className="flex flex-wrap gap-2" data-testid="seo-checklist-counts">
+          {counts.map(([key, value]) => (
+            <span
+              key={key}
+              className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-mono text-muted-foreground"
+            >
+              {formatCountLabel(key)}: {value}
             </span>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -161,6 +189,11 @@ export function KeywordDensity({ density, className }: KeywordDensityProps) {
       </div>
     </div>
   );
+}
+
+/** `internal_link_count` reads as "Internal Links", not as a check that passed. */
+function formatCountLabel(key: string): string {
+  return formatCheckLabel(key.replace(/_count$/, "")) + "s";
 }
 
 function formatCheckLabel(key: string): string {

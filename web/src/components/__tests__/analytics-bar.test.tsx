@@ -136,6 +136,51 @@ describe("SeoChecklist", () => {
     const { container } = renderWithProviders(<SeoChecklist checklist={{}} />);
     expect(container.querySelector("[data-testid='seo-checklist']")).toBeNull();
   });
+
+  // The real payload is the mixed map `_seo_checklist` has always produced: seven
+  // booleans and two integer counts. Taken verbatim from case 1 of the parity oracle
+  // at src/app/api/posts/data/logs-analytics-parity.json.
+  const REAL_CHECKLIST = {
+    keyword_in_title: false,
+    keyword_in_first_100_words: false,
+    keyword_in_h2: false,
+    has_h2_headings: true,
+    has_internal_links: true,
+    has_external_links: true,
+    internal_link_count: 2,
+    external_link_count: 1,
+    has_meta_description: true,
+  };
+
+  it("counts only the boolean checks in the pass fraction", () => {
+    renderWithProviders(<SeoChecklist checklist={REAL_CHECKLIST} />);
+    expect(screen.getByText("4/7")).toBeInTheDocument();
+  });
+
+  it("renders the link counts as counts, not as checks", () => {
+    renderWithProviders(<SeoChecklist checklist={REAL_CHECKLIST} />);
+    expect(screen.queryByText("Internal Link Count")).toBeNull();
+    expect(screen.queryByText("External Link Count")).toBeNull();
+    expect(screen.getByText("Internal Links: 2")).toBeInTheDocument();
+    expect(screen.getByText("External Links: 1")).toBeInTheDocument();
+  });
+
+  it("does not render a zero count as a failed check", () => {
+    const { container } = renderWithProviders(
+      <SeoChecklist
+        checklist={{ has_meta_description: true, internal_link_count: 0 }}
+      />
+    );
+    expect(container.querySelectorAll(".bg-red-500")).toHaveLength(0);
+    expect(screen.getByText("1/1")).toBeInTheDocument();
+    expect(screen.getByText("Internal Links: 0")).toBeInTheDocument();
+  });
+
+  it("omits the fraction when the payload carries no boolean checks", () => {
+    renderWithProviders(<SeoChecklist checklist={{ internal_link_count: 3 }} />);
+    expect(screen.queryByText("0/0")).toBeNull();
+    expect(screen.getByText("Internal Links: 3")).toBeInTheDocument();
+  });
 });
 
 describe("KeywordDensity", () => {

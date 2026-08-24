@@ -248,7 +248,12 @@ describe("PostDetailPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("SEO Checklist")).toBeInTheDocument();
-      expect(screen.getByText("Title Contains Keyword")).toBeInTheDocument();
+      // A real key from `_seo_checklist`. The two integer counts in the same
+      // payload are counts, not checks, so they stay out of the fraction.
+      expect(screen.getByText("Keyword In Title")).toBeInTheDocument();
+      expect(screen.queryByText("Internal Link Count")).toBeNull();
+      expect(screen.getByText("Internal Links: 0")).toBeInTheDocument();
+      expect(screen.getByText("6/7")).toBeInTheDocument();
     });
   });
 

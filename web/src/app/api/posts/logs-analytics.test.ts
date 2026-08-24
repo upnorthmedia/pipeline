@@ -241,6 +241,27 @@ describe("GET /api/posts/{post_id}/analytics", () => {
     ])
   })
 
+  it("answers seo_checklist as a mixed map: seven booleans and two integer counts", async () => {
+    // What PostAnalytics.seo_checklist is typed against. The counts are integers,
+    // not checks, and the dashboard must not fold them into the pass fraction.
+    const post = await insertPost(user.userId, {
+      draftContent: [
+        "## A heading",
+        "",
+        "Read [our other post](/other) and [the source](https://example.org/x).",
+        "",
+        "**Meta Description:** A description.",
+      ].join("\n"),
+    })
+    const response = await analytics(post.id, user.cookie)
+    expect(response.status).toBe(200)
+    const checklist = (await response.json()).seo_checklist as Record<string, unknown>
+    expect(checklist.internal_link_count).toBe(1)
+    expect(checklist.external_link_count).toBe(1)
+    expect(Object.entries(checklist).filter(([, v]) => typeof v === "number")).toHaveLength(2)
+    expect(Object.entries(checklist).filter(([, v]) => typeof v === "boolean")).toHaveLength(7)
+  })
+
   describe("matches the Python wiring", () => {
     for (const entry of parity.analytics) {
       it(entry.name, async () => {

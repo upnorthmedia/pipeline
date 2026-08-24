@@ -17,18 +17,6 @@
   plus up to one 30s tick, and the reclaiming worker re-runs the stage from the beginning.
   The fix has to drain in-flight steps before exiting, which means owning the worker entry
   rather than using the one `mastra worker build` generates. Ledger item P2.91.
-- [confirmed] 2026-08-22 `PostAnalytics.seo_checklist` in `web/src/lib/api.ts` is typed
-  `Record<string, boolean>` but the endpoint has always returned a mixed map: `_seo_checklist`
-  in `api/src/services/analytics.py` puts `internal_link_count` and `external_link_count` in
-  alongside the seven booleans, so the real shape is `Record<string, boolean | number>`. Proven
-  by the oracle at `web/src/app/api/posts/data/logs-analytics-parity.json`, whose
-  `seo_checklist` values include `"internal_link_count": 2`. The consequence is visible, not
-  just typed: `SeoChecklist` in `web/src/components/analytics-bar.tsx` maps over every entry, so
-  the two counts render as SEO checks and inflate the `passed/total` fraction. Found while
-  porting `/analytics` for item 5.3d-iii, which reproduces the shape exactly because the item is
-  a port. Fixing it means widening the type in `api.ts` and in `SeoChecklistProps`, then
-  deciding in the UI whether to filter the counts out or render them as counts; that is Phase 8
-  work, not a route-handler change.
 - [confirmed] 2026-08-22 `retry_dead_letter()` in `api/src/api/queue.py` looks the post up with
   an unscoped `session.get(Post, post_id)`, so any authenticated user can reset another user's
   post to `pending`, strip its `_error` log and re-enqueue it. The other two dead-letter

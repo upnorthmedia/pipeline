@@ -146,13 +146,19 @@ export function makeAnalytics(overrides?: Partial<PostAnalytics>): PostAnalytics
     avg_sentence_length: 19.9,
     flesch_reading_ease: 64.2,
     keyword_density: { "primary keyword": 1.5, "secondary keyword": 0.8 },
+    // The nine keys `_seo_checklist` actually produces, seven booleans and two
+    // integer counts. Shape taken from the parity oracle at
+    // src/app/api/posts/data/logs-analytics-parity.json.
     seo_checklist: {
-      title_contains_keyword: true,
-      meta_description: true,
-      h1_keyword: true,
-      keyword_density_ok: true,
-      internal_links: false,
-      external_links: true,
+      keyword_in_title: true,
+      keyword_in_first_100_words: true,
+      keyword_in_h2: true,
+      has_h2_headings: true,
+      has_internal_links: false,
+      has_external_links: true,
+      internal_link_count: 0,
+      external_link_count: 3,
+      has_meta_description: true,
     },
     ...overrides,
   };
