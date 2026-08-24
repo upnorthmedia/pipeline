@@ -1064,35 +1064,50 @@ describe("POST /api/posts/{post_id}/publish", () => {
     expect(start.calls).toEqual([])
   })
 
-  it("answers an output_format Python had no branch for with a 400 naming it", async () => {
+  it("tells a Markdown post where its content actually goes", async () => {
     const post = await wordpressPost(user.userId, { outputFormat: "markdown" })
     const response = await publish(post.id, user.cookie)
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({
-      detail: "Publishing not supported for output_format 'markdown'",
+      detail:
+        "This post's output format is Markdown, which is exported rather than published. " +
+        "Use Export to download it.",
     })
     expect(wpStart.calls).toEqual([])
   })
 
-  it("renders a null output_format the way Python interpolated None", async () => {
+  it("says a null output_format has no destination, without naming the column", async () => {
     const post = await wordpressPost(user.userId, { outputFormat: null })
     const response = await publish(post.id, user.cookie)
 
+    expect(response.status).toBe(400)
     expect(await response.json()).toEqual({
-      detail: "Publishing not supported for output_format 'None'",
+      detail: "This post has no output format, so there is nowhere to publish it.",
     })
   })
 
-  it("answers `both` with the 400 too, because Python compared for equality", async () => {
-    // `output_format == "wordpress"` then `== "nextjs"`: `both` matches neither,
-    // so a post asking for both formats could not be published by hand at all.
+  it("reads an empty output_format as unset, the way every other reader does", async () => {
+    const post = await wordpressPost(user.userId, { outputFormat: "" })
+    const response = await publish(post.id, user.cookie)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      detail: "This post has no output format, so there is nowhere to publish it.",
+    })
+  })
+
+  it("quotes a value the app cannot produce back, without naming the column", async () => {
+    // `both` was the column default before `drizzle/0003`, so a row predating
+    // that migration on a database it never ran against still holds it. The
+    // write endpoints refuse it now, which is why this row is inserted
+    // directly rather than created through the API.
     const post = await wordpressPost(user.userId, { outputFormat: "both" })
     const response = await publish(post.id, user.cookie)
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({
-      detail: "Publishing not supported for output_format 'both'",
+      detail: `This post's output format, "both", is not one this app can publish.`,
     })
     expect(wpStart.calls).toEqual([])
     expect(njStart.calls).toEqual([])

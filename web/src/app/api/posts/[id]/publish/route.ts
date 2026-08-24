@@ -20,11 +20,15 @@
  *
  * Both branches write their own column and leave the other one alone, which is
  * what Python did: a post can carry a `wp_publish_status` from an earlier
- * WordPress run and still publish to Next.js without disturbing it. Neither
- * branch is reachable for `output_format == "both"`, because Python compared
- * for equality rather than testing membership, so `both` took the trailing 400
- * along with every other value. That is Python's behaviour, not an oversight
- * here.
+ * WordPress run and still publish to Next.js without disturbing it.
+ *
+ * The trailing refusal answers three different situations and says which one
+ * it is, because the person reading it has to decide something different in
+ * each. Python interpolated the raw column value into one sentence naming the
+ * column, which told a user nothing they could act on. The `both` case it was
+ * written for is no longer storable: `../../../output-format.ts` closed the
+ * vocabulary at the write boundaries, so the only rows that reach the last
+ * branch are ones written before `drizzle/0003` ran (ledger item P2.68).
  *
  * Deviation shared with `/pause` and the other control endpoints: `updated_at`
  * is hand-stamped, where SQLAlchemy's `onupdate` emitted no `UPDATE` at all
@@ -96,10 +100,24 @@ async function postHandler(
     return Response.json({ status: "queued", post_id: post.id }, { status: 202 })
   }
 
-  // The column is nullable, and Python interpolated the value straight into
-  // the message, so a row with a null `output_format` said `'None'`.
-  const format = post.outputFormat === null ? "None" : post.outputFormat
-  return badRequest(`Publishing not supported for output_format '${format}'`)
+  if (post.outputFormat === "markdown") {
+    // Not a misconfiguration: the format does what it says, and the post page
+    // has the button that does it.
+    return badRequest(
+      "This post's output format is Markdown, which is exported rather than published. " +
+        "Use Export to download it.",
+    )
+  }
+
+  // The column is nullable, and an empty string reads as unset everywhere else
+  // in the app, so both take the same sentence.
+  if (!post.outputFormat) {
+    return badRequest("This post has no output format, so there is nowhere to publish it.")
+  }
+
+  return badRequest(
+    `This post's output format, "${post.outputFormat}", is not one this app can publish.`,
+  )
 }
 
 export const POST = withServerError(postHandler)

@@ -38,16 +38,6 @@
   `retry_delay = 10` was a `WorkerSettings` key and spaced every job function's retries
   equally. Ledger item P2.95.
 
-- [confirmed] 2026-08-23 `POST /api/posts/{post_id}/publish` cannot publish a post whose
-  `output_format` is `both`, which is the column's default value. `publish_post()` in
-  `api/src/api/posts.py` compares `output_format == "wordpress"` and then `== "nextjs"`,
-  by equality twice rather than once by membership, so `both` reaches the trailing
-  `Publishing not supported for output_format 'both'` 400. Ported as-is under ledger item
-  5.3c-iii-b-2-e with its own test, because widening it would start two publish runs from
-  one request and that is a behaviour change, not a port. `_post_completion_hook`'s
-  auto-publish half has the same shape, so a `both` post is not auto-published either.
-  Ledger item P2.68.
-
 - [confirmed] 2026-08-23 Perplexity's Sonar Chat Completions endpoint is deprecated with
   support ending 2026-09-27, per `docs.perplexity.ai/getting-started/models`. The
   `research` stage reaches `sonar-pro` through Mastra's model router, which uses the
@@ -249,14 +239,6 @@
   needs type-aware linting, which `web/eslint.config.mjs` does not turn on (it composes
   `eslint-config-next` only). Measure the cost of type-aware linting on this repo before
   deciding. Found at polish ledger P3.3c-i.
-
-- [confirmed] 2026-08-24 `POST /api/posts/{id}/publish` answers
-  `Publishing not supported for output_format '<value>'`, which puts a database column name
-  and a raw enum value into a string `apiErrorMessage()` shows the user. It is reachable only
-  through a race today (the one call site, `/posts/[id]`'s publish button, renders only for
-  `wordpress` and `nextjs`), so the copy was left alone rather than written twice: polish
-  ledger **P2.68** is the item that changes what that branch does for `both`, and the wording
-  should be written against whatever it decides. Found at polish ledger P3.3c-ii.
 
 - [investigate] 2026-08-24 `POST /api/posts/{id}/restart` clears `stage_logs`, which is where
   the per-stage model, token and cost record lives, so starting a post over erases what its

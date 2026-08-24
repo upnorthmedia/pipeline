@@ -18,6 +18,7 @@ import { apiRequest, createTestSession, deleteTestSessions, type TestSession } f
 
 import { DELETE as deleteProfile, GET as getProfile, PATCH as patchProfile } from "./[id]/route"
 import { GET as listProfiles, POST as createProfile } from "./route"
+import { OUTPUT_FORMAT_INVALID } from "../output-format"
 import type { ValidationErrorDetail } from "../pydantic"
 import {
   WEBSITE_URL_INVALID,
@@ -967,5 +968,62 @@ describe("profile URL validation", () => {
 
     expect(response.status).toBe(422)
     expect((await issueFor(response, "website_url"))?.msg).toBe(WEBSITE_URL_INVALID)
+  })
+})
+
+/**
+ * `output_format` is the third column validated at this boundary, for the same
+ * reason as the two URLs: it is read by a publish step that cannot report a
+ * reason to anyone. A value outside the three the app produces reaches the
+ * post's Output Format picker as "Unrecognised format" and the publish
+ * endpoint as a refusal, both of them after the six stages have been paid for.
+ */
+describe("profile output_format validation", () => {
+  async function issueFor(response: Response, field: string) {
+    const { detail } = (await response.json()) as { detail: ValidationErrorDetail[] }
+    return detail.find((entry) => entry.loc[1] === field)
+  }
+
+  it("rejects the retired `both` on create", async () => {
+    const response = await post(
+      { name: "Both", website_url: "https://example.com", output_format: "both" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect(await issueFor(response, "output_format")).toEqual({
+      type: "value_error",
+      loc: ["body", "output_format"],
+      msg: OUTPUT_FORMAT_INVALID,
+      input: "both",
+    })
+  })
+
+  it("rejects it on PATCH and leaves the stored value alone", async () => {
+    const id = await insertProfile(user.userId, { outputFormat: "wordpress" })
+
+    const response = await patch(id, { output_format: "nonsense" }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "output_format"))?.msg).toBe(OUTPUT_FORMAT_INVALID)
+    expect((await readRow(id)).outputFormat).toBe("wordpress")
+  })
+
+  it("still clears output_format when PATCH sends it as null", async () => {
+    const id = await insertProfile(user.userId, { outputFormat: "wordpress" })
+
+    const response = await patch(id, { output_format: null }, user.cookie)
+
+    expect(response.status).toBe(200)
+    expect((await readRow(id)).outputFormat).toBeNull()
+  })
+
+  it.each(["markdown", "wordpress", "nextjs"])("takes %s", async (format) => {
+    const id = await insertProfile(user.userId)
+
+    const response = await patch(id, { output_format: format }, user.cookie)
+
+    expect(response.status).toBe(200)
+    expect((await readRow(id)).outputFormat).toBe(format)
   })
 })

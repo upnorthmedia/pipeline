@@ -21,11 +21,14 @@
 import { RedisStreamsPubSub } from "@mastra/redis-streams"
 import { eq, like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+import { z } from "zod"
 
 import { closeDb, getDb, posts, websiteProfiles } from "@/db"
 import { logger } from "@/mastra"
 import { STAGES, STATUS_RUNNING } from "@/mastra/state"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
+
+import { OUTPUT_FORMAT_INVALID } from "../output-format"
 
 import parity from "./data/create-parity.json"
 import { applyProfilePrefill } from "./prefill"
@@ -193,9 +196,34 @@ describe("create_post parity", () => {
     )
   })
 
+  /**
+   * The corpus is a recording of Python, and Python took `output_format` as a
+   * bare `str`. Two of the ten bodies carry `both`, which `../output-format.ts`
+   * now refuses at this boundary (ledger item P2.68). The recording is not
+   * edited to agree: the refusal is asserted on its own below, and the prefill
+   * each case was recorded to prove is replayed through the same schema with
+   * only that one check lifted, so nothing else about the parse is relaxed.
+   */
+  const corpusSchema = postCreateSchema.extend({ output_format: z.string().default("markdown") })
+
+  it("refuses the two recorded bodies whose output_format left the vocabulary", () => {
+    const refused = parity.cases
+      .map((testCase, index) => ({ index, parsed: postCreateSchema.safeParse(testCase.body) }))
+      .filter(({ parsed }) => !parsed.success)
+
+    expect(refused.map(({ index }) => index + 1)).toEqual([2, 4])
+    for (const { parsed } of refused) {
+      expect(parsed.success).toBe(false)
+      if (parsed.success) continue
+      expect(parsed.error.issues).toEqual([
+        expect.objectContaining({ path: ["output_format"], message: OUTPUT_FORMAT_INVALID }),
+      ])
+    }
+  })
+
   for (const [index, testCase] of parity.cases.entries()) {
     it(`case ${index + 1}: ${testCase.name}`, () => {
-      const parsed = postCreateSchema.safeParse(testCase.body)
+      const parsed = corpusSchema.safeParse(testCase.body)
       expect(parsed.success).toBe(true)
       if (!parsed.success) return
 
@@ -290,6 +318,39 @@ describe("POST /api/posts", () => {
         },
       ],
     })
+  })
+
+  it("refuses an output_format no publish step and no picker knows", async () => {
+    // `both` was the column default until `drizzle/0003`, and it is the value
+    // the ledger item is about: it named two destinations and reached neither.
+    // The vocabulary is closed here rather than widened at the publish
+    // endpoint, so no new row can carry a format the app cannot produce.
+    const response = await create(
+      { slug: `${PREFIX}both`, topic: "T", output_format: "both" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    await expect(response.json()).resolves.toEqual({
+      detail: [
+        {
+          type: "value_error",
+          loc: ["body", "output_format"],
+          msg: OUTPUT_FORMAT_INVALID,
+          input: "both",
+        },
+      ],
+    })
+  })
+
+  it.each(["markdown", "wordpress", "nextjs"])("still takes output_format %s", async (format) => {
+    const response = await create(
+      { slug: `${PREFIX}fmt-${format}`, topic: "T", output_format: format },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(201)
+    expect((await response.json()).output_format).toBe(format)
   })
 
   it("coerces an integral string to an int the way pydantic's lax mode does", async () => {

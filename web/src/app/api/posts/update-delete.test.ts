@@ -33,6 +33,8 @@ import { closeDb, getDb, internalLinks, postMedia, posts, websiteProfiles } from
 import { ABSENT_POST_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
+import { OUTPUT_FORMAT_INVALID } from "../output-format"
+
 import { DELETE as deletePost, PATCH as patchPost } from "./[id]/route"
 
 const PREFIX = "posts-write-test-"
@@ -339,6 +341,30 @@ describe("PATCH /api/posts/{post_id}", () => {
     const body = (await response.json()) as Record<string, unknown>
     expect(body.draft_content).toBe("# Edited\n\nBody.")
     expect((await reload(post.id)).draftContent).toBe("# Edited\n\nBody.")
+  })
+
+  it("refuses an output_format nothing can publish and leaves the stored one alone", async () => {
+    const mine = await insertProfile(user.userId)
+    const post = await insertPost({ slug: `${PREFIX}fmt`, profileId: mine })
+
+    const response = await patch(post.id, { output_format: "both" }, user.cookie)
+
+    expect(response.status).toBe(422)
+    const { detail } = (await response.json()) as { detail: { loc: string[]; msg: string }[] }
+    expect(detail.find((entry) => entry.loc[1] === "output_format")?.msg).toBe(
+      OUTPUT_FORMAT_INVALID,
+    )
+    expect((await reload(post.id)).outputFormat).toBe("markdown")
+  })
+
+  it("still clears output_format when PATCH sends it as null", async () => {
+    const mine = await insertProfile(user.userId)
+    const post = await insertPost({ slug: `${PREFIX}fmt-null`, profileId: mine })
+
+    const response = await patch(post.id, { output_format: null }, user.cookie)
+
+    expect(response.status).toBe(200)
+    expect((await reload(post.id)).outputFormat).toBeNull()
   })
 
   it("answers with the full PostRead shape, not just the changed columns", async () => {

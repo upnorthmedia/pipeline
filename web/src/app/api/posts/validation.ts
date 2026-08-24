@@ -12,6 +12,7 @@ import { z } from "zod"
 
 import type { StageSettingsJson, posts } from "@/db"
 
+import { outputFormatField } from "../output-format"
 import { jsonObject, pydanticInt, pydanticUuid } from "../pydantic"
 
 /** `PostBase.stage_settings`, spelled exactly as pydantic spelled it. */
@@ -38,7 +39,7 @@ export const postCreateSchema = z.object({
   intent: z.string().nullable().default(null),
   word_count: pydanticInt.default(2000),
   tone: z.string().default("Conversational and friendly"),
-  output_format: z.string().default("markdown"),
+  output_format: outputFormatField.default("markdown"),
   website_url: z.string().nullable().default(null),
   related_keywords: z.array(z.string()).default([]),
   competitor_urls: z.array(z.string()).default([]),
@@ -130,7 +131,7 @@ export const postUpdateSchema = z
     intent: z.string().nullable(),
     word_count: pydanticInt.nullable(),
     tone: z.string().nullable(),
-    output_format: z.string().nullable(),
+    output_format: outputFormatField.nullable(),
     website_url: z.string().nullable(),
     related_keywords: z.array(z.string()).nullable(),
     competitor_urls: z.array(z.string()).nullable(),

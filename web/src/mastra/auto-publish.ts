@@ -22,9 +22,12 @@
  * * **The two columns are read independently of `output_format`.** A
  *   `wordpress` post carrying a stale `nextjs_publish_status = "pending"`
  *   starts the Next.js publish too.
- * * **`both` matches neither branch.** Python compared for equality rather
- *   than testing membership, exactly as `POST /{post_id}/publish` does, so the
- *   default `output_format` publishes nowhere on its own.
+ * * **A format outside the vocabulary matches neither branch.** Both checks
+ *   are equality against the two formats that name a destination, so anything
+ *   else auto-publishes nowhere. That was Python's `both`, the column default
+ *   until `drizzle/0003`; `../app/api/output-format.ts` has since closed the
+ *   vocabulary at the write boundaries, so only rows predating that migration
+ *   still land here (ledger item P2.68).
  *
  * The configuration checks are Python truthiness on nullable `text` columns, so
  * an empty string counts as unconfigured the same way a null does.

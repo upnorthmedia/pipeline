@@ -19,6 +19,7 @@ import { z } from "zod"
 
 import type { StageSettingsJson, websiteProfiles } from "@/db"
 
+import { outputFormatField } from "../output-format"
 import { jsonObject, pydanticInt } from "../pydantic"
 
 /**
@@ -115,7 +116,7 @@ const FIELDS = {
   tone: z.string(),
   brand_voice: z.string().nullable(),
   word_count: pydanticInt,
-  output_format: z.string(),
+  output_format: outputFormatField,
   image_style: z.string().nullable(),
   image_brand_colors: z.array(z.string()),
   image_exclude: z.array(z.string()),

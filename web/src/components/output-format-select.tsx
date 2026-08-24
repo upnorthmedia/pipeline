@@ -27,11 +27,13 @@ import {
  * sentence.
  *
  * The same holds for a stored value that is not one of the three at all.
- * `output_format` is a bare `varchar(20)` and both route validators take it as
- * `z.string()`, and Radix renders no trigger text for a value that matches no
- * item, so the row that has one would read as a row that has none. It is named
- * on the trigger and explained under it instead, and it is still not rewritten
- * until the user picks.
+ * `output_format` is a bare `varchar(20)`, and the write endpoints have
+ * refused anything outside the vocabulary since ledger item P2.68, but rows
+ * written before that still hold values like the retired `both`. Radix renders
+ * no trigger text for a value that matches no item, so the row that has one
+ * would read as a row that has none. It is named on the trigger and explained
+ * under it instead, and it is still not rewritten until the user picks, which
+ * is also what makes the save that follows succeed.
  */
 export function OutputFormatSelect({
   value,

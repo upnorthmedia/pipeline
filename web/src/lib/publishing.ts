@@ -29,15 +29,23 @@ export const OUTPUT_FORMATS: OutputFormatOption[] = [
   { value: "nextjs", label: "Next.js (Webhook)" },
 ];
 
+/**
+ * The wire values, in the picker's order. The three of them are the whole
+ * vocabulary of the `output_format` column: `src/app/api/output-format.ts`
+ * refuses anything else at the write boundaries, and every reader treats a
+ * value outside this list as configuration the user still has to fix.
+ */
+export const OUTPUT_FORMAT_VALUES: readonly string[] = OUTPUT_FORMATS.map((f) => f.value);
+
 export function outputFormatLabel(value: string): string {
   return OUTPUT_FORMATS.find((f) => f.value === value)?.label ?? value;
 }
 
 /**
  * The two formats that name a destination outside this app, and so the two a
- * publish step can run against. `markdown` is an export and `both` is the
- * column default that no publish step handles (`todo.md` P2.113), so neither
- * is a target.
+ * publish step can run against. `markdown` is an export, and a value outside
+ * the vocabulary altogether (the retired `both`, on a row written before
+ * `drizzle/0003`) names nothing, so neither is a target.
  */
 export type PublishTarget = "wordpress" | "nextjs";
 
