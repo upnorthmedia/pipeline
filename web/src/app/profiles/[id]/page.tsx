@@ -56,6 +56,11 @@ import {
   type WPAuthor,
   STAGES,
 } from "@/lib/api";
+import {
+  useDebouncedValue,
+  SEARCH_DEBOUNCE_MS,
+} from "@/hooks/use-debounced-value";
+import { useLatestRequest } from "@/hooks/use-latest-request";
 import { STAGE_LABELS, STAGE_MODE_LABELS } from "@/lib/stages";
 import { plainMessage } from "@/lib/plain-message";
 import { OutputFormatSelect } from "@/components/output-format-select";
@@ -279,6 +284,11 @@ export default function ProfileDetailPage() {
   const [linksPage, setLinksPage] = useState(1);
   const [linksHasMore, setLinksHasMore] = useState(false);
   const [linksSearch, setLinksSearch] = useState("");
+  // What the typist sees is `linksSearch`; what the server is asked for is
+  // `linksQuery`, and what the rows on screen came from is `shownLinksSearch`.
+  const linksQuery = useDebouncedValue(linksSearch, SEARCH_DEBOUNCE_MS);
+  const [shownLinksSearch, setShownLinksSearch] = useState("");
+  const beginLinksFetch = useLatestRequest();
   const [showAddLink, setShowAddLink] = useState(false);
   const [newLinkUrl, setNewLinkUrl] = useState("");
   const [newLinkTitle, setNewLinkTitle] = useState("");
@@ -346,36 +356,42 @@ export default function ProfileDetailPage() {
   const fetchLinks = useCallback(
     async (page: number, search: string, append = false) => {
       setLinksLoading(true);
+      // A search and the page it replaces can be in flight together, and the
+      // older one answering last would write its rows over the newer ones.
+      const isCurrent = beginLinksFetch();
       try {
         const data = await profiles.links(profileId, {
           page,
           per_page: LINKS_PER_PAGE,
           q: search || undefined,
         });
+        if (!isCurrent()) return;
         if (append) {
           setLinks((prev) => [...prev, ...data.items]);
         } else {
           setLinks(data.items);
         }
         setLinksHasMore(page < data.pages);
+        setShownLinksSearch(search);
         setLinksError(null);
       } catch (e) {
+        if (!isCurrent()) return;
         setLinksError(
           apiErrorMessage(e, "The request failed and the server gave no reason.")
         );
       } finally {
-        setLinksLoading(false);
+        if (isCurrent()) setLinksLoading(false);
       }
     },
-    [profileId]
+    [profileId, beginLinksFetch]
   );
 
   useEffect(() => {
     if (!loading) {
       setLinksPage(1);
-      fetchLinks(1, linksSearch);
+      fetchLinks(1, linksQuery);
     }
-  }, [loading, linksSearch, fetchLinks]);
+  }, [loading, linksQuery, fetchLinks]);
 
   // Crawl polling
   useEffect(() => {
@@ -387,7 +403,7 @@ export default function ProfileDetailPage() {
           crawlPollRef.current = null;
           if (updated.crawl_status === "complete") {
             toast.success("Sitemap crawl complete");
-            fetchLinks(1, linksSearch);
+            fetchLinks(1, linksQuery);
             setLinksPage(1);
           } else {
             toast.error("Sitemap crawl failed");
@@ -401,7 +417,7 @@ export default function ProfileDetailPage() {
         crawlPollRef.current = null;
       }
     };
-  }, [profile?.crawl_status, fetchProfile, fetchLinks, linksSearch]);
+  }, [profile?.crawl_status, fetchProfile, fetchLinks, linksQuery]);
 
   /**
    * Read off the live form rather than off the loaded profile: the
@@ -662,7 +678,7 @@ export default function ProfileDetailPage() {
       setNewLinkTitle("");
       setShowAddLink(false);
       setLinksPage(1);
-      fetchLinks(1, linksSearch);
+      fetchLinks(1, linksQuery);
     } catch {
       toast.error("Failed to add link");
     } finally {
@@ -683,7 +699,7 @@ export default function ProfileDetailPage() {
   const handleLoadMore = () => {
     const nextPage = linksPage + 1;
     setLinksPage(nextPage);
-    fetchLinks(nextPage, linksSearch, true);
+    fetchLinks(nextPage, linksQuery, true);
   };
 
   if (loading) return <ProfileDetailSkeleton />;
@@ -1478,7 +1494,7 @@ export default function ProfileDetailPage() {
                             variant="outline"
                             size="sm"
                             className="mt-3"
-                            onClick={() => fetchLinks(1, linksSearch)}
+                            onClick={() => fetchLinks(1, linksQuery)}
                           >
                             <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
                             Retry links
@@ -1488,7 +1504,7 @@ export default function ProfileDetailPage() {
                     ) : links.length === 0 ? (
                       <TableRow className="hover:bg-transparent">
                         <TableCell colSpan={5} className="h-32 text-center">
-                          {linksSearch ? (
+                          {shownLinksSearch ? (
                             <>
                               <p className="text-sm font-medium">
                                 No links match your search

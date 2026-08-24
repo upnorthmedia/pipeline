@@ -357,3 +357,25 @@
   the confirm button for "permanently delete the post and its generated images" renders in the
   ordinary primary colour. `AlertDialogAction` takes a `variant` prop; both sites should pass
   `variant="destructive"`. Found at polish ledger P3.3c-ii.
+
+- [confirmed] 2026-08-24 `/monitor`'s overview tab refetches its entire dashboard on every SSE
+  frame: `useSSE(undefined, ...)` in `web/src/app/monitor/_components/overview-tab.tsx` calls
+  `fetchData()`, which is `queue.status()` plus `analytics.dashboard()`, for every `log`,
+  `stage_*`, `image_generated` and `image_failed` frame the queue-wide feed publishes. A single
+  running post publishes those at stage granularity and, since polish ledger P3.2c, twice per
+  generated image, so an open monitor page turns one pipeline run into dozens of aggregate
+  queries against `posts`. The 10s interval beside it already covers freshness. Filed for
+  polish ledger P3.4b. Found at polish ledger P3.4a.
+
+- [confirmed] 2026-08-24 The logs tab does not reset its page when a filter changes.
+  `web/src/app/monitor/_components/logs-tab.tsx` holds `page` in state and only `handleSearch`
+  (the form submit) and `resetFilters` set it back to 1, so a search typed while on page 3 asks
+  for page 3 of a result set that may have one page and answers with an empty table over a
+  filter that does match rows. Found at polish ledger P3.4a.
+
+- [investigate] 2026-08-24 A superseded list request is dropped, not cancelled. Polish ledger
+  P3.4a added `useLatestRequest` so a stale answer cannot overwrite fresher rows, but the
+  request itself still runs to completion server side: the search a typist has already moved
+  past still costs a query. `request()` in `web/src/lib/api.ts` takes no `signal`, so wiring an
+  `AbortController` through it would fix the class in one place. Check whether the added
+  complexity is worth it for the three lists that would use it. Found at polish ledger P3.4a.

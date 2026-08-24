@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   Search,
   ChevronLeft,
@@ -34,6 +34,11 @@ import {
   type Profile,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import {
+  useDebouncedValue,
+  SEARCH_DEBOUNCE_MS,
+} from "@/hooks/use-debounced-value";
+import { useLatestRequest } from "@/hooks/use-latest-request";
 import Link from "next/link";
 import { TabError, TabEmpty } from "./tab-states";
 
@@ -75,30 +80,49 @@ export function LogsTab() {
   const [stage, setStage] = useState<string>("");
   const [profileId, setProfileId] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  // What the typist sees is `searchQuery`; what the server is asked for is
+  // this, so a typed word is one query rather than one per keystroke.
+  const search = useDebouncedValue(searchQuery, SEARCH_DEBOUNCE_MS);
+  const beginFetch = useLatestRequest();
+  // Whether there are rows on screen worth keeping. A filter change replaces
+  // them in place; only a load with nothing to show falls back to skeletons.
+  const loadedRef = useRef(false);
   const [timePreset, setTimePreset] = useState<number>(24 * 7);
   const [page, setPage] = useState(1);
 
   const fetchLogs = useCallback(async () => {
+    // Two filter changes can be in flight together, and the older one
+    // answering last would write its rows over the newer ones.
+    const isCurrent = beginFetch();
+    if (loadedRef.current) setRefreshing(true);
+    else setLoading(true);
     try {
       const since = new Date(Date.now() - timePreset * 60 * 60 * 1000).toISOString();
       const result = await analytics.logs({
         level: level || undefined,
         stage: stage || undefined,
         profile_id: profileId || undefined,
-        q: searchQuery || undefined,
+        q: search || undefined,
         since,
         page,
         per_page: 50,
       });
+      if (!isCurrent()) return;
       setData(result);
+      loadedRef.current = true;
       setError(null);
     } catch (err) {
+      if (!isCurrent()) return;
       setData(null);
+      loadedRef.current = false;
       setError(apiErrorMessage(err, "Could not load logs."));
     } finally {
-      setLoading(false);
+      if (isCurrent()) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [level, stage, profileId, searchQuery, timePreset, page]);
+  }, [level, stage, profileId, search, timePreset, page, beginFetch]);
 
   useEffect(() => {
     // A failed profile list is not a failed page, but hiding the filter with no
@@ -115,15 +139,10 @@ export function LogsTab() {
   }, []);
 
   useEffect(() => {
-    setLoading(true);
     fetchLogs();
   }, [fetchLogs]);
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await fetchLogs();
-    setRefreshing(false);
-  };
+  const handleRefresh = () => fetchLogs();
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();

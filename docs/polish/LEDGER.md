@@ -405,6 +405,20 @@ explicitly out of scope.
         `/profiles/[id]`. `ui/p33cii-*.png`. [evidence](evidence/p3.md#p33c-ii)
 - [ ] **P3.4** Speed where it is felt: layout shift, avoidable spinners on cached data, lists
       that refetch everything on a single-row change.
+  - [x] **P3.4a** A keystroke was a server round trip. All three server-backed search boxes
+        (`/`, `/profiles/[id]?tab=links`, `/monitor` logs) read their filter straight into the
+        effect that fetches, so a five-letter word was five requests, and the posts list sent
+        five more because its mount effect refetches the profile filter's options beside the
+        rows: ten requests for one word, measured in Chrome. None of the three checked that an
+        answer was still the one being waited for either, so of two searches in flight the one
+        that answered last won. `useDebouncedValue` (300ms, first value not held back) and
+        `useLatestRequest` are the two hooks; each page now records the query its rows came
+        from (`shownQuery`, `shownLinksSearch`) so a cleared search does not read as an empty
+        account while its replacement is in flight, and the logs tab keeps its rows instead of
+        flashing skeletons on every character. One request per word in the browser, on all
+        three. `ui/p34a-*.png`. [evidence](evidence/p3.md#p34a)
+  - [ ] **P3.4b** The rest of P3.4: `/monitor`'s overview refetches its whole dashboard on
+        every SSE frame (two per generated image since P3.2c), and layout shift is unmeasured.
 - [ ] **P3.5** One screen per iteration, verified with `npx -y chrome-devtools-axi`, before and
       after PNGs committed under `docs/polish/ui/`, no new console errors.
 

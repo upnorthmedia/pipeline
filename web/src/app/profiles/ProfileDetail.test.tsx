@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor, fireEvent } from "@testing-library/react";
+import { act, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ProfileDetailPage from "./[id]/page";
 import { renderWithProviders } from "@/test/render";
@@ -236,6 +236,143 @@ describe("ProfileDetailPage", () => {
         screen.getByPlaceholderText("Search links by URL or title...")
       ).toBeInTheDocument();
     });
+  });
+
+  it("sends one links request for a typed word, not one per keystroke", async () => {
+    const user = userEvent.setup({ delay: null });
+    await renderOnTab("Internal links");
+    await waitFor(() =>
+      expect(screen.getByText("https://example.com/page-1")).toBeInTheDocument()
+    );
+    mockLinks.mockClear();
+
+    await user.type(
+      screen.getByPlaceholderText("Search links by URL or title..."),
+      "pricing"
+    );
+
+    await waitFor(() =>
+      expect(mockLinks).toHaveBeenLastCalledWith("prof-1", {
+        page: 1,
+        per_page: 20,
+        q: "pricing",
+      })
+    );
+    expect(mockLinks).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let a slow links answer overwrite a newer search", async () => {
+    const user = userEvent.setup({ delay: null });
+    await renderOnTab("Internal links");
+    await waitFor(() =>
+      expect(screen.getByText("https://example.com/page-1")).toBeInTheDocument()
+    );
+
+    type LinkPage = Awaited<ReturnType<typeof profiles.links>>;
+    const page = (url: string): LinkPage => ({
+      items: [{ ...testLinks[0], id: url, url }],
+      total: 1,
+      page: 1,
+      per_page: 20,
+      pages: 1,
+    });
+    let resolveSlow!: (value: LinkPage) => void;
+    let resolveFast!: (value: LinkPage) => void;
+    mockLinks.mockReturnValueOnce(
+      new Promise<LinkPage>((r) => {
+        resolveSlow = r;
+      })
+    );
+    mockLinks.mockReturnValueOnce(
+      new Promise<LinkPage>((r) => {
+        resolveFast = r;
+      })
+    );
+
+    const box = screen.getByPlaceholderText("Search links by URL or title...");
+    await user.type(box, "pr");
+    await waitFor(() => expect(mockLinks).toHaveBeenCalledTimes(2));
+    await user.type(box, "ice");
+    await waitFor(() => expect(mockLinks).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      resolveFast(page("https://example.com/price"));
+    });
+    await waitFor(() =>
+      expect(screen.getByText("https://example.com/price")).toBeInTheDocument()
+    );
+
+    await act(async () => {
+      resolveSlow(page("https://example.com/stale"));
+    });
+
+    expect(screen.queryByText("https://example.com/stale")).not.toBeInTheDocument();
+    expect(screen.getByText("https://example.com/price")).toBeInTheDocument();
+  });
+
+  it("keeps the links spinner up until the newest request answers", async () => {
+    const user = userEvent.setup({ delay: null });
+    const { container } = await renderOnTab("Internal links");
+    await waitFor(() =>
+      expect(screen.getByText("https://example.com/page-1")).toBeInTheDocument()
+    );
+
+    type LinkPage = Awaited<ReturnType<typeof profiles.links>>;
+    let resolveSlow!: (value: LinkPage) => void;
+    mockLinks.mockReturnValueOnce(
+      new Promise<LinkPage>((r) => {
+        resolveSlow = r;
+      })
+    );
+    mockLinks.mockReturnValueOnce(new Promise(() => {}));
+
+    const box = screen.getByPlaceholderText("Search links by URL or title...");
+    await user.type(box, "pr");
+    await waitFor(() => expect(mockLinks).toHaveBeenCalledTimes(2));
+    await user.type(box, "ice");
+    await waitFor(() => expect(mockLinks).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      resolveSlow({
+        items: testLinks,
+        total: testLinks.length,
+        page: 1,
+        per_page: 20,
+        pages: 1,
+      });
+    });
+
+    // The superseded answer neither draws rows nor takes the spinner down.
+    expect(container.querySelectorAll(".animate-spin").length).toBeGreaterThan(0);
+  });
+
+  it("keeps the searched empty state while a cleared links search is in flight", async () => {
+    const user = userEvent.setup({ delay: null });
+    await renderOnTab("Internal links");
+    await waitFor(() =>
+      expect(screen.getByText("https://example.com/page-1")).toBeInTheDocument()
+    );
+
+    mockLinks.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      per_page: 20,
+      pages: 0,
+    });
+    const box = screen.getByPlaceholderText("Search links by URL or title...");
+    await user.type(box, "zzz");
+    await waitFor(() =>
+      expect(screen.getByText("No links match your search")).toBeInTheDocument()
+    );
+
+    mockLinks.mockReturnValue(new Promise(() => {}));
+    await user.clear(box);
+
+    // The empty table on screen is still the search's, so it must not read as
+    // a profile that has no links at all.
+    expect(screen.getByText("No links match your search")).toBeInTheDocument();
+    expect(screen.queryByText("No internal links yet")).not.toBeInTheDocument();
   });
 
   it("add link button toggles form", async () => {

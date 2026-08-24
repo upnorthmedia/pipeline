@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/render";
 import { OverviewTab } from "./_components/overview-tab";
@@ -326,6 +326,153 @@ describe("LogsTab async states", () => {
 
     expect(await screen.findByText(/no logs recorded yet/i)).toBeInTheDocument();
     expect(screen.queryByText(/no logs match your filters/i)).not.toBeInTheDocument();
+  });
+
+  it("sends one request for a typed word, not one per keystroke", async () => {
+    const user = userEvent.setup({ delay: null });
+
+    renderWithProviders(<LogsTab />);
+    expect(await screen.findByText("wrote 1200 words")).toBeInTheDocument();
+    mockLogs.mockClear();
+
+    await user.type(screen.getByPlaceholderText("Search messages..."), "quota");
+
+    await waitFor(() =>
+      expect(mockLogs).toHaveBeenLastCalledWith(
+        expect.objectContaining({ q: "quota" })
+      )
+    );
+    expect(mockLogs).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the rows on screen while a filter change is in flight", async () => {
+    const user = userEvent.setup({ delay: null });
+
+    renderWithProviders(<LogsTab />);
+    expect(await screen.findByText("wrote 1200 words")).toBeInTheDocument();
+
+    mockLogs.mockReturnValue(new Promise(() => {}));
+    await user.type(screen.getByPlaceholderText("Search messages..."), "q");
+
+    await waitFor(() => expect(mockLogs).toHaveBeenCalledTimes(2));
+    // The rows the reader was looking at stay until their replacement lands,
+    // rather than being swapped for skeletons on the way.
+    expect(screen.getByText("wrote 1200 words")).toBeInTheDocument();
+    // The refresh control is what says a request is in flight instead.
+    expect(screen.getByRole("button", { name: /refresh logs/i })).toBeDisabled();
+  });
+
+  it("keeps the refresh control busy until the newest request answers", async () => {
+    const user = userEvent.setup({ delay: null });
+
+    renderWithProviders(<LogsTab />);
+    expect(await screen.findByText("wrote 1200 words")).toBeInTheDocument();
+
+    type LogPage = typeof testLogs;
+    let resolveSlow!: (value: LogPage) => void;
+    mockLogs.mockReturnValueOnce(
+      new Promise<LogPage>((r) => {
+        resolveSlow = r;
+      })
+    );
+    mockLogs.mockReturnValueOnce(new Promise(() => {}));
+
+    const box = screen.getByPlaceholderText("Search messages...");
+    await user.type(box, "qu");
+    await waitFor(() => expect(mockLogs).toHaveBeenCalledTimes(2));
+    await user.type(box, "ota");
+    await waitFor(() => expect(mockLogs).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      resolveSlow(testLogs);
+    });
+
+    expect(screen.getByRole("button", { name: /refresh logs/i })).toBeDisabled();
+  });
+
+  it("does not let a slow answer overwrite the rows a newer search returned", async () => {
+    const user = userEvent.setup({ delay: null });
+
+    renderWithProviders(<LogsTab />);
+    expect(await screen.findByText("wrote 1200 words")).toBeInTheDocument();
+
+    type LogPage = typeof testLogs;
+    const page = (message: string): LogPage => ({
+      ...testLogs,
+      items: [{ ...testLogs.items[0], message }],
+    });
+    let resolveSlow!: (value: LogPage) => void;
+    let resolveFast!: (value: LogPage) => void;
+    mockLogs.mockReturnValueOnce(
+      new Promise<LogPage>((r) => {
+        resolveSlow = r;
+      })
+    );
+    mockLogs.mockReturnValueOnce(
+      new Promise<LogPage>((r) => {
+        resolveFast = r;
+      })
+    );
+
+    const box = screen.getByPlaceholderText("Search messages...");
+    await user.type(box, "qu");
+    await waitFor(() => expect(mockLogs).toHaveBeenCalledTimes(2));
+    await user.type(box, "ota");
+    await waitFor(() => expect(mockLogs).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      resolveFast(page("newest answer"));
+    });
+    expect(await screen.findByText("newest answer")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveSlow(page("stale answer"));
+    });
+
+    expect(screen.queryByText("stale answer")).not.toBeInTheDocument();
+    expect(screen.getByText("newest answer")).toBeInTheDocument();
+  });
+
+  it("does not let a slow failure replace the rows a newer search returned", async () => {
+    const user = userEvent.setup({ delay: null });
+
+    renderWithProviders(<LogsTab />);
+    expect(await screen.findByText("wrote 1200 words")).toBeInTheDocument();
+
+    type LogPage = typeof testLogs;
+    let rejectSlow!: (reason: Error) => void;
+    let resolveFast!: (value: LogPage) => void;
+    const slow = new Promise<LogPage>((_, reject) => {
+      rejectSlow = reject;
+    });
+    mockLogs.mockReturnValueOnce(slow);
+    mockLogs.mockReturnValueOnce(
+      new Promise<LogPage>((r) => {
+        resolveFast = r;
+      })
+    );
+
+    const box = screen.getByPlaceholderText("Search messages...");
+    await user.type(box, "qu");
+    await waitFor(() => expect(mockLogs).toHaveBeenCalledTimes(2));
+    await user.type(box, "ota");
+    await waitFor(() => expect(mockLogs).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      resolveFast({
+        ...testLogs,
+        items: [{ ...testLogs.items[0], message: "newest answer" }],
+      });
+    });
+    expect(await screen.findByText("newest answer")).toBeInTheDocument();
+
+    await act(async () => {
+      rejectSlow(detail("log query failed"));
+      await slow.catch(() => {});
+    });
+
+    expect(screen.queryByText("log query failed")).not.toBeInTheDocument();
+    expect(screen.getByText("newest answer")).toBeInTheDocument();
   });
 
   it("says so when the profile filter could not be loaded", async () => {

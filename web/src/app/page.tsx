@@ -50,6 +50,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  useDebouncedValue,
+  SEARCH_DEBOUNCE_MS,
+} from "@/hooks/use-debounced-value";
+import { useLatestRequest } from "@/hooks/use-latest-request";
 import { PipelineProgress } from "@/components/pipeline-progress";
 import { RunStateBadge } from "@/components/run-state-badge";
 import {
@@ -101,17 +106,25 @@ export default function PostsPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  /**
-   * The state filter the rows on screen were fetched under, which is not the
-   * one the control shows: a filter change leaves the previous list in place
-   * until its request answers, so the header and the empty state have to
-   * describe what was asked for, not what is about to be.
-   */
-  const [shownFilter, setShownFilter] = useState("all");
   const [profileFilter, setProfileFilter] = useState<string>("all");
+  /**
+   * The query the rows on screen were fetched under, which is not the one the
+   * controls show: a filter change leaves the previous list in place until its
+   * request answers, and the search box waits out `SEARCH_DEBOUNCE_MS` before
+   * it even asks. The header and the empty state describe what the rows came
+   * from, not what is about to be asked for.
+   */
+  const [shownQuery, setShownQuery] = useState({
+    status: "all",
+    profile: "all",
+    search: "",
+  });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
+  // What the typist sees is `search`; what the server is asked for is this.
+  const searchQuery = useDebouncedValue(search, SEARCH_DEBOUNCE_MS);
+  const beginFetch = useLatestRequest();
 
   /**
    * `skeletons` is opt-in because this runs on every keystroke in the search
@@ -121,36 +134,55 @@ export default function PostsPage() {
   const fetchPosts = useCallback(
     async ({ skeletons = false }: { skeletons?: boolean } = {}) => {
       if (skeletons) setLoading(true);
+      // Two searches can be in flight at once, and the older one answering
+      // last would otherwise write its rows over the newer ones.
+      const isCurrent = beginFetch();
       try {
         const params: Record<string, string> = {};
         if (statusFilter === REVIEW_FILTER) params.awaiting_review = "true";
         else if (statusFilter !== "all") params.status = statusFilter;
         if (profileFilter !== "all") params.profile_id = profileFilter;
-        if (search) params.q = search;
+        if (searchQuery) params.q = searchQuery;
         const data = await posts.list(params);
+        if (!isCurrent()) return;
         setPostList(data);
-        setShownFilter(statusFilter);
+        setShownQuery({
+          status: statusFilter,
+          profile: profileFilter,
+          search: searchQuery,
+        });
         setError(null);
       } catch (e) {
+        if (!isCurrent()) return;
         // A route handler that dies before it can answer sends an empty
         // 500 body, so there is often nothing of the server's own to show.
         setError(
           apiErrorMessage(e, "The request failed and the server gave no reason.")
         );
       } finally {
-        setLoading(false);
+        if (isCurrent()) setLoading(false);
       }
     },
-    [statusFilter, profileFilter, search]
+    [statusFilter, profileFilter, searchQuery, beginFetch]
   );
 
   useEffect(() => {
     fetchPosts();
-    profiles.list().then(setProfileList).catch(() => {});
   }, [fetchPosts]);
 
+  // The profile filter's options are a property of the account, not of the
+  // rows below them, so they are read once rather than with every list.
+  useEffect(() => {
+    profiles.list().then(setProfileList).catch(() => {});
+  }, []);
+
+  // The empty state explains rows that are not there, so it reads the query
+  // those rows came from: a cleared search must not read as an empty account
+  // while the list it emptied is still on screen.
   const filtersActive =
-    statusFilter !== "all" || profileFilter !== "all" || search.trim() !== "";
+    shownQuery.status !== "all" ||
+    shownQuery.profile !== "all" ||
+    shownQuery.search.trim() !== "";
 
   const clearFilters = () => {
     setStatusFilter("all");
@@ -223,7 +255,7 @@ export default function PostsPage() {
               ? "Loading posts..."
               : error
                 ? "Post list unavailable"
-                : shownFilter === REVIEW_FILTER
+                : shownQuery.status === REVIEW_FILTER
                   ? `${postList.length} post${postList.length === 1 ? "" : "s"} waiting for your review`
                   : `${postList.length} total post${postList.length === 1 ? "" : "s"}`}
           </p>
@@ -374,12 +406,12 @@ export default function PostsPage() {
                     {filtersActive ? (
                       <>
                         <p className="text-sm font-medium">
-                          {shownFilter === REVIEW_FILTER
+                          {shownQuery.status === REVIEW_FILTER
                             ? "Nothing is waiting for your review"
                             : "No posts match these filters"}
                         </p>
                         <p className="mt-1 text-sm text-muted-foreground">
-                          {shownFilter === REVIEW_FILTER
+                          {shownQuery.status === REVIEW_FILTER
                             ? "A run stops here when a stage is set to review. None are stopped right now."
                             : "Widen the search or the status and profile filters."}
                         </p>

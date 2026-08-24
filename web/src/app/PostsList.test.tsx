@@ -344,3 +344,175 @@ describe("PostsPage", () => {
     expect(screen.queryByText("Complete")).not.toBeInTheDocument();
   });
 });
+
+describe("PostsPage search", () => {
+  /**
+   * A promise plus the handle that settles it, so a test can hold one list
+   * request open while a second one answers.
+   */
+  function deferredList(): {
+    promise: Promise<Post[]>;
+    resolve: (value: Post[]) => void;
+  } {
+    let resolve!: (value: Post[]) => void;
+    const promise = new Promise<Post[]>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  async function typeSearch(user: ReturnType<typeof userEvent.setup>, text: string) {
+    await user.type(screen.getByPlaceholderText("Search posts..."), text);
+  }
+
+  it("sends one request for a typed word, not one per keystroke", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+    expect(mockPostsList).toHaveBeenCalledTimes(1);
+
+    await typeSearch(user, "bread");
+
+    await waitFor(() =>
+      expect(mockPostsList).toHaveBeenLastCalledWith({ q: "bread" })
+    );
+    expect(mockPostsList).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not refetch the profile filter's options with every list request", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+    expect(mockProfilesList).toHaveBeenCalledTimes(1);
+
+    await typeSearch(user, "bread");
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole("button", { name: "Refresh posts" }));
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalledTimes(3));
+
+    // The options in the profile filter do not change because the rows under
+    // it did, so they are read once for the page rather than once per list.
+    expect(mockProfilesList).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let a slow answer overwrite the rows a newer search returned", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+
+    const slow = deferredList();
+    const fast = deferredList();
+    mockPostsList.mockReturnValueOnce(slow.promise);
+    mockPostsList.mockReturnValueOnce(fast.promise);
+
+    await typeSearch(user, "so");
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalledTimes(2));
+    await typeSearch(user, "up");
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      fast.resolve([makePost({ id: "soup", topic: "Soup Post" })]);
+    });
+    await waitFor(() => expect(screen.getByText("Soup Post")).toBeInTheDocument());
+
+    await act(async () => {
+      slow.resolve([makePost({ id: "so", topic: "Stale Post" })]);
+    });
+
+    expect(screen.queryByText("Stale Post")).not.toBeInTheDocument();
+    expect(screen.getByText("Soup Post")).toBeInTheDocument();
+    expect(screen.getByText("1 total post")).toBeInTheDocument();
+  });
+
+  it("does not let a slow failure replace the rows a newer search returned", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+
+    let rejectSlow!: (reason: Error) => void;
+    const slow = new Promise<Post[]>((_, reject) => {
+      rejectSlow = reject;
+    });
+    const fast = deferredList();
+    mockPostsList.mockReturnValueOnce(slow);
+    mockPostsList.mockReturnValueOnce(fast.promise);
+
+    await typeSearch(user, "so");
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalledTimes(2));
+    await typeSearch(user, "up");
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      fast.resolve([makePost({ id: "soup", topic: "Soup Post" })]);
+    });
+    await waitFor(() => expect(screen.getByText("Soup Post")).toBeInTheDocument());
+
+    await act(async () => {
+      rejectSlow(new Error(JSON.stringify({ detail: "gone" })));
+      await slow.catch(() => {});
+    });
+
+    expect(screen.queryByText("Could not load posts")).not.toBeInTheDocument();
+    expect(screen.getByText("Soup Post")).toBeInTheDocument();
+  });
+
+  it("keeps the skeletons up until the newest request answers", async () => {
+    const user = userEvent.setup({ delay: null });
+    const { container } = renderWithProviders(<PostsPage />);
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+
+    const slow = deferredList();
+    const fast = deferredList();
+    mockPostsList.mockReturnValueOnce(slow.promise);
+    mockPostsList.mockReturnValueOnce(fast.promise);
+
+    await user.click(screen.getByRole("button", { name: "Refresh posts" }));
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalledTimes(2));
+    const skeletons = () =>
+      container.querySelectorAll("[class*='animate-pulse']").length;
+    const rowSkeletons = skeletons();
+    expect(rowSkeletons).toBeGreaterThan(1);
+
+    await typeSearch(user, "soup");
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalledTimes(3));
+
+    // The refresh is the superseded request now, so its answer neither draws
+    // rows nor takes the skeletons down.
+    await act(async () => {
+      slow.resolve(testPosts);
+    });
+    expect(skeletons()).toBe(rowSkeletons);
+
+    await act(async () => {
+      fast.resolve([makePost({ id: "soup", topic: "Soup Post" })]);
+    });
+    expect(screen.getByText("Soup Post")).toBeInTheDocument();
+    expect(skeletons()).toBeLessThan(rowSkeletons);
+  });
+
+  it("keeps the filtered empty state while a cleared search is still in flight", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+
+    mockPostsList.mockResolvedValue([]);
+    await typeSearch(user, "zzz");
+    await waitFor(() =>
+      expect(screen.getByText("No posts match these filters")).toBeInTheDocument()
+    );
+
+    const slow = deferredList();
+    mockPostsList.mockReturnValueOnce(slow.promise);
+    await user.clear(screen.getByPlaceholderText("Search posts..."));
+
+    // The rows on screen are still the ones the search returned, so the empty
+    // state has to keep describing that search until its replacement lands.
+    expect(screen.queryByText("Create your first post")).not.toBeInTheDocument();
+    expect(screen.getByText("No posts match these filters")).toBeInTheDocument();
+
+    await act(async () => {
+      slow.resolve(testPosts);
+    });
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+  });
+});
