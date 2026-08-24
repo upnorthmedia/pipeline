@@ -256,8 +256,9 @@ describe("imagesGenerateStep against a recorded Gemini success", () => {
       aspectRatio: "4:3",
       imageSize: "1K",
     })
-    // `placement` is an object, so the featured overrides never fire and the
-    // entry's own `16:9` / `2K` is what is sent (the 3.5e divergence).
+    // The featured entry, recognised by both `type` and the object `placement`
+    // the rule file asks for, so the forced `2K` and the entry's own `16:9`
+    // agree on what is sent (ledger P2.2).
     expect(requests[1].body.generationConfig.imageConfig).toEqual({
       aspectRatio: "16:9",
       imageSize: "2K",
@@ -283,9 +284,10 @@ describe("imagesGenerateStep against a recorded Gemini success", () => {
     expect(featured.spec.generated).toBe(true)
     expect(featured.spec.index).toBe(1)
     // `type: "featured"` picks the width and rewrites the filename; the model's
-    // own `hero.png` is discarded.
+    // own `hero.png` is discarded. The trailing `-1` is the entry's index,
+    // which is what keeps two featured entries off one filename (P2.10).
     expect(featured.spec.url).toMatch(
-      new RegExp(`^/media/${POST_ID}/featured-\\d{6}-\\d{2}\\.webp$`),
+      new RegExp(`^/media/${POST_ID}/featured-\\d{6}-\\d{2}-1\\.webp$`),
     )
 
     const bytes = await readFile(path.join(mediaDir, path.basename(String(featured.spec.url))))

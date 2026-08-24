@@ -11,27 +11,46 @@
  *
  * The oracle is `data/image-generation-parity.json`, captured by
  * `api/scripts/export_image_generation_parity.py` running the real Python
- * stage with both providers intercepted. Three behaviours it recorded are
- * reproduced here deliberately even though they read like bugs, because the
- * column they land in is the product's data:
+ * stage with both providers intercepted. One behaviour it recorded is
+ * reproduced here deliberately even though it reads like a bug, because the
+ * column it lands in is the product's data: a provider call that succeeded is
+ * billed even when the optimizer then rejects the bytes, so usage is reported
+ * separately from success.
  *
- * 1. the featured overrides key off `placement === "featured"` (a string),
- *    while `is_featured`, which picks the optimize width and the filename
- *    rewrite, also accepts `type === "featured"`. Real manifests write
- *    `placement` as an object, so the overrides never fire on them and the
- *    width and filename rules do;
- * 2. the overrides change what is *sent* without changing what is *stored*, so
- *    an entry can record `image_size: "1K"` for a call made at `2K`;
- * 3. a provider call that succeeded is billed even when the optimizer then
- *    rejects the bytes, so usage is reported separately from success.
+ * **Four deliberate divergences from Python**, each one a `todo.md` finding the
+ * polish run closed. Python's behaviour is stated first in every case, and the
+ * inverted parity assertions live in `generate-one.test.ts`:
  *
- * **Known divergence.** Python reads `aspect_ratio`, `image_size` and
- * `filename` with `dict.get(key, default)`, which returns an explicit JSON
- * `null` rather than the default, and then either forwards `None` to the SDK or
- * raises `TypeError` out of `Path(None)`. This port treats a non-string as
- * absent instead. No rule in `rules/blog-images.md` asks the model for a null
- * there and the corpus has no such case, so the exact `None` behaviour would
- * have to be invented rather than observed; see `todo.md`.
+ * 1. *(P2.2)* Python's featured overrides key off `placement === "featured"`, a
+ *    string, while the optimize width and the filename rewrite also accept
+ *    `type === "featured"`. `rules/blog-images.md` asks the model for
+ *    `type: "featured"` and an *object* `placement` of
+ *    `{location: "featured_image", after_section: null}`, and both golden
+ *    captures answer with exactly that, so on every real manifest Python's
+ *    overrides never fired and its width and filename rules did. `isFeatured`
+ *    below is the one predicate all four decisions now read, and it accepts the
+ *    shape the rule file asks for as well as the string Python looked for.
+ * 2. *(P2.11)* Python's overrides change what is *sent* without changing what
+ *    is *stored*, so an entry could record `image_size: "1K"` for a call made
+ *    at `2K`. The entry now records the request that was actually made, because
+ *    the manifest is what the dashboard and the publish steps report from.
+ * 3. *(P2.10)* Python drew one featured filename per *manifest* rather than per
+ *    *image*, from the clock and a single `randint(10, 99)`, so two featured
+ *    entries in one manifest overwrote each other's file and recorded the same
+ *    url. `featuredFilename` takes the entry's index, which is unique within a
+ *    manifest by construction.
+ * 4. *(P2.12)* A `filename` of `""` produced `<media_dir>/<post_id>/.webp`, a
+ *    dotfile hidden from directory listings and unservable by most static
+ *    handlers. A stem that is empty or begins with a dot now falls back to the
+ *    same `image-<index>` name a missing `filename` already got.
+ *
+ * *(P2.13)* Python reads `aspect_ratio`, `image_size` and `filename` with
+ * `dict.get(key, default)`, which returns an explicit JSON `null` rather than
+ * the default, and then either forwards `None` to the SDK or raises
+ * `TypeError` out of `Path(None)`. This port treats a non-string as absent, and
+ * that reading is now the intended behaviour rather than an unobserved
+ * divergence: a null is the model failing to answer the key, and the key's
+ * documented default is the answer to that.
  */
 import { writeFile } from "node:fs/promises"
 import path from "node:path"
@@ -45,11 +64,14 @@ export const DEFAULT_ASPECT_RATIO = "4:3"
 /** `image_spec.get("image_size", "1K")`. */
 export const DEFAULT_IMAGE_SIZE = "1K"
 
-/** The size forced onto an entry whose `placement` is the string `"featured"`. */
+/** The size forced onto a featured entry. */
 export const FEATURED_IMAGE_SIZE = "2K"
 
-/** The ratio forced onto such an entry when it declares none. */
+/** The ratio forced onto a featured entry that declares none. */
 export const FEATURED_ASPECT_RATIO = "16:9"
+
+/** The `placement.location` `rules/blog-images.md` gives the featured entry. */
+export const FEATURED_PLACEMENT_LOCATION = "featured_image"
 
 /** `optimize_image`'s `max_width` for a featured image and for everything else. */
 export const FEATURED_MAX_WIDTH = 1920
@@ -117,6 +139,37 @@ export interface GenerateOneImageOptions {
 }
 
 /**
+ * Whether one manifest entry is the post's featured image.
+ *
+ * The one predicate behind all four featured decisions: the 2K size, the 16:9
+ * fallback ratio, the 1920px optimize width and the filename rewrite. Python
+ * asked two different questions for those four and only one of them matched the
+ * shape its own rule file asks the model for, which is the whole of P2.2.
+ *
+ * Three shapes count, in the order a manifest is likely to carry them:
+ *
+ * * `type: "featured"`, which is what `rules/blog-images.md` documents and what
+ *   both golden captures answer with;
+ * * `placement.location: "featured_image"`, the object the same rule file
+ *   documents beside it, so an entry that carries the placement and drops the
+ *   type is still recognised;
+ * * `placement: "featured"`, the bare string. No rule asks for it and no real
+ *   manifest has one, but it is the only shape Python's overrides ever fired
+ *   on, so a hand-edited manifest written against the old behaviour keeps
+ *   working.
+ */
+export function isFeatured(spec: ImageSpec): boolean {
+  if (spec.type === "featured" || spec.placement === "featured") return true
+  const placement = spec.placement
+  return (
+    typeof placement === "object" &&
+    placement !== null &&
+    !Array.isArray(placement) &&
+    (placement as Record<string, unknown>).location === FEATURED_PLACEMENT_LOCATION
+  )
+}
+
+/**
  * `pathlib.PurePosixPath(name).stem`.
  *
  * Reimplemented rather than approximated with a regex because two of its edges
@@ -134,21 +187,29 @@ export function pathStem(value: string): string {
 }
 
 /**
- * `f"featured-{datetime.now(UTC):%m%d%y}-{random.randint(10, 99)}{ext}"`.
+ * `f"featured-{datetime.now(UTC):%m%d%y}-{random.randint(10, 99)}{ext}"`, plus
+ * the entry's index.
  *
- * Both sources are read at call time rather than injected: the clock and
- * `Math.random` are what a test fakes, and threading a clock through the step
- * for the sake of one filename would put a seam in production code that only
- * the test uses.
+ * Python's name was drawn from the clock and one random draw and nothing else,
+ * so every featured entry in a manifest computed the same one: the later write
+ * overwrote the earlier file and both entries recorded the same url (P2.10).
+ * The index is the only value in scope that is unique within a manifest by
+ * construction, so appending it makes the collision impossible rather than
+ * unlikely. The date and the draw stay because they are what makes a
+ * regenerated featured image a new url rather than a cached old one.
+ *
+ * The clock and `Math.random` are read at call time rather than injected: they
+ * are what a test fakes, and threading a clock through the step for the sake of
+ * one filename would put a seam in production code that only the test uses.
  */
-export function featuredFilename(extension: string): string {
+export function featuredFilename(extension: string, index: number): string {
   const now = new Date()
   const month = String(now.getUTCMonth() + 1).padStart(2, "0")
   const day = String(now.getUTCDate()).padStart(2, "0")
   const year = String(now.getUTCFullYear() % 100).padStart(2, "0")
   // `random.randint(10, 99)` is inclusive at both ends.
   const digits = Math.floor(Math.random() * 90) + 10
-  return `featured-${month}${day}${year}-${digits}${extension}`
+  return `featured-${month}${day}${year}-${digits}-${index}${extension}`
 }
 
 /** Python's `str(e)` for the exceptions this path can raise. */
@@ -179,14 +240,24 @@ export async function generateOneImage(
     }
   }
 
+  const featured = isFeatured(spec)
+
   let aspectRatio =
     typeof spec.aspect_ratio === "string" ? spec.aspect_ratio : DEFAULT_ASPECT_RATIO
   let imageSize = typeof spec.image_size === "string" ? spec.image_size : DEFAULT_IMAGE_SIZE
 
-  if (spec.placement === "featured") {
+  if (featured) {
     imageSize = FEATURED_IMAGE_SIZE
-    if (!("aspect_ratio" in spec)) aspectRatio = FEATURED_ASPECT_RATIO
+    if (typeof spec.aspect_ratio !== "string") aspectRatio = FEATURED_ASPECT_RATIO
   }
+
+  // The entry records the request that was actually made rather than the one
+  // the model wrote down (P2.11): the dashboard, the retry action and both
+  // publish steps read `image_manifest` to report what was generated, and an
+  // entry saying `1K` for a call made at `2K` is a lie told in the one place
+  // anybody looks. Applied to the failure path too, because a failed entry's
+  // settings are exactly what a retry needs.
+  const requested = { ...spec, aspect_ratio: aspectRatio, image_size: imageSize }
 
   let usage: ImageUsage | null = null
   try {
@@ -197,27 +268,32 @@ export async function generateOneImage(
       model: response.model,
     }
 
-    const isFeatured = spec.placement === "featured" || spec.type === "featured"
     const { bytes, ext } = await optimizeImage(
       response.imageBytes,
-      isFeatured ? FEATURED_MAX_WIDTH : CONTENT_MAX_WIDTH,
+      featured ? FEATURED_MAX_WIDTH : CONTENT_MAX_WIDTH,
     )
 
-    const declared = typeof spec.filename === "string" ? spec.filename : `image-${index}.png`
-    const filename = isFeatured ? featuredFilename(ext) : pathStem(declared) + ext
+    const stem = pathStem(typeof spec.filename === "string" ? spec.filename : "")
+    // An empty stem wrote `<media_dir>/<post_id>/.webp` and a leading dot wrote
+    // `.<name>.webp` (P2.12): both are hidden from a directory listing and both
+    // are refused by most static handlers, so the file existed and the url the
+    // manifest recorded served nothing. The fallback is the one a missing
+    // `filename` already used.
+    const named = stem === "" || stem.startsWith(".") ? `image-${index}` : stem
+    const filename = featured ? featuredFilename(ext, index) : named + ext
 
     await writeFile(path.join(mediaDir, filename), bytes)
     const url = `/media/${postId}/${filename}`
 
     return {
-      spec: { ...spec, generated: true, size_bytes: bytes.length, url, index },
+      spec: { ...requested, generated: true, size_bytes: bytes.length, url, index },
       usage,
       outcome: { kind: "generated", bytes: bytes.length, url },
     }
   } catch (error) {
     const message = errorText(error)
     return {
-      spec: { ...spec, generated: false, error: message, index },
+      spec: { ...requested, generated: false, error: message, index },
       usage,
       outcome: { kind: "failed", error: message },
     }

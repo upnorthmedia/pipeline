@@ -1,13 +1,5 @@
 # todo
 
-- [confirmed] 2026-08-21 The `images` stage's featured-image handling never fires on real
-  manifests. `images.py` tests `image_spec.get("placement") == "featured"`, but the manifest
-  Claude actually produces (live capture, `docs/mastra-port/golden/how-to-choose-a-crm-for-a-small-team/images.json`)
-  sets `placement` to an object (`{"location": "featured_image", "after_section": null}`) and
-  carries the featured marker on `type`. Result: the 2K/16:9 override and the 1920px optimise
-  width are skipped, and the `featured-<MMDDYY>-<NN>` rename only happens via the `type` branch.
-  Port must decide which shape is canonical rather than copying the mismatch (Phase 3.5).
-
 - [confirmed] 2026-08-21 The Gemini API key in the main checkout's `.env` has **zero** image
   quota: every `gemini-3.1-flash-image` call returns 429 `RESOURCE_EXHAUSTED` with
   `limit: 0, model: gemini-3.1-flash-image` on the free tier. No image can be generated in
@@ -37,26 +29,6 @@
   through `rulesDir()`. Both need to be resolved before the Phase 7 Railway deploy, either by
   copying them into the standalone output or by moving them somewhere the tracer follows.
 
-- [confirmed] 2026-08-22 `_generate_one` gives every featured image the same filename,
-  `featured-<MMDDYY>-<randint(10,99)>.webp`, so two featured entries in one manifest collide:
-  the later write overwrites the earlier file and both manifest entries record the same URL.
-  Proven by `api/scripts/export_image_generation_parity.py`, where four featured entries
-  produced one file. Real manifests carry a single featured image, so this is latent, but the
-  collision odds for a second one are 1 in 90. A per-image suffix would fix it.
-- [confirmed] 2026-08-22 The featured overrides in `_generate_one` rewrite the local
-  `aspect_ratio` / `image_size` without touching the manifest entry, so a stored entry can say
-  `image_size: "1K"` for a call that was actually made at `2K`, or omit `aspect_ratio`
-  entirely for a call made at `16:9`. Anything reading `image_manifest` to report what was
-  generated is reading the request that was not sent.
-- [confirmed] 2026-08-22 An image spec whose `filename` is the empty string writes a dotfile,
-  `<media_dir>/<post_id>/.webp`, and records `/media/<post_id>/.webp`. Hidden from directory
-  listings and unservable by most static handlers.
-- [investigate] 2026-08-22 Python reads `aspect_ratio`, `image_size` and `filename` out of the
-  manifest with `dict.get(key, default)`, which returns an explicit JSON `null` rather than
-  the default: `None` then reaches the Gemini SDK, or `Path(None)` raises `TypeError` and the
-  image is recorded as failed. `web/src/mastra/images/generate-one.ts` treats a non-string as
-  absent instead. No rule asks the model for a null there and no fixture contains one, so the
-  divergence is unobserved rather than tested; decide the intended behaviour before Phase 7.
 - [confirmed] 2026-08-22 The `posts.stage_settings` column default in the live database is
   `{"edit":"review","write":"review","images":"review","outline":"review","research":"review"}`,
   which predates the gate removal and does not mention `ready` at all. SQLAlchemy sent its own
