@@ -1470,3 +1470,239 @@ exit 0
 - `loading.tsx` is asserted by unit test, not screenshot: the settings route has no server-side
   await, so a full page load never renders it and a client transition to it is too brief to
   capture reliably.
+
+## 8.8
+
+`/monitor` is four tabs over four analytics endpoints, and all four read a failed request as an
+absence: the fetch was caught into a `toast.error()` and the tab then rendered the same markup
+an account with no data gets. The screenshots below prove it byte for byte.
+
+Dev server on :3000 against the compose `db`/`redis`, signed in through the real sign-in form.
+Two accounts: the one that owns the completed run (2 posts, 61 execution log entries) and a
+second that owns nothing, which is what makes the empty captures real rather than simulated.
+
+### The defect, measured
+
+Failure was driven in the browser by replacing `window.fetch` for `/api/analytics`,
+`/api/queue` and `/api/profiles` with a 503 carrying `{"detail": "analytics database is
+unavailable"}`, then switching Radix tabs so each tab remounts and its first load is the one
+that fails. The response body is synthetic; the rendering of it is not.
+
+Before, on the account that owns 2 posts and a completed run:
+
+```
+overview, first load failed:
+  "TOTAL POSTS 0 / COMPLETION RATE 0% / AVG DURATION -- / POSTS TODAY 0"
+  "Posts by Status ... No data yet"  "Posts Over Time ... No data yet"
+  toast: "Failed to load overview data"
+
+costs, first load failed:
+  "TOTAL SPEND $0.00 / TOTAL TOKENS 0 / AVG COST/POST $0.00 / MODELS USED 0"
+  "Cost by Model ... No cost data yet"  "Cost by Stage ... No cost data yet"
+  toast: "Failed to load cost analytics"
+
+models, first load failed:
+  "No model data yet"  "Run the pipeline to see model performance metrics"
+  toast: "Failed to load model analytics"
+
+logs, first load failed:
+  "Log Explorer"  "No logs match your filters"
+  "Try adjusting the time range or clearing filters"
+  toast: "Failed to load logs"          (the Profile filter silently disappeared)
+```
+
+Full-page md5s of the before captures (`docs/mastra-port/ui/8.8-monitor-*`):
+
+| capture | md5 |
+| --- | --- |
+| costs-success-before | `29a3b057e9a4725bb809be6ce6321939` |
+| costs-error-before | `29a3b057e9a4725bb809be6ce6321939` |
+| costs-empty-before | `29a3b057e9a4725bb809be6ce6321939` |
+| models-error-before | `1fa6936d73139b3ea34bfb3979ab3590` |
+| models-empty-before | `1fa6936d73139b3ea34bfb3979ab3590` |
+| overview-error-before | `ed4447ed8540fe198eba9df5dae85032` |
+| overview-empty-before | `cca855588a6f985d2589df218c2f40c1` |
+| logs-error-before | `9c851bafe240fd5292f940ebef55fe50` |
+| logs-empty-before | `e8cd957087e49d0889c3dc52098e0985` |
+
+On the Costs tab a successful load, a failed load and an account with nothing are one image.
+On Models a failed load and an empty account are one image. The overview and logs pairs differ
+only by the toast that is gone four seconds later.
+
+### After
+
+```
+overview, first load failed:
+  "Could not load the overview" / "analytics database is unavailable" / [Retry]
+
+costs, first load failed:
+  "Could not load cost analytics" / "analytics database is unavailable" / [Retry]
+  (the range and model filter rows stay on screen)
+
+models, first load failed:
+  "Could not load model analytics" / "analytics database is unavailable" / [Retry]
+
+logs, first load failed:
+  "Profile filter unavailable"
+  "Could not load logs" / "analytics database is unavailable" / [Retry]
+```
+
+A refresh that fails after a good render keeps the numbers instead of blanking them:
+
+```
+overview, refresh failed after a good load:
+  "Showing the last good data. analytics database is unavailable"
+  "TOTAL POSTS 2 / COMPLETION RATE 50% / AVG DURATION 1h 10m"
+```
+
+Retry recovers in place. With the patch removed, clicking `Retry logs` refetched and the tab
+moved to its real state without a reload:
+
+```
+before click: "Could not load logs / analytics database is unavailable / Retry"
+after click:  "No logs recorded yet"
+              "Nothing was logged in the last 7d. Every stage writes here as it runs,
+               so a wider range or a run fills it."  [New post]
+```
+
+Empty states now name what fills them, on the account that owns nothing:
+
+```
+overview: "No posts yet" + "Counts, completion rate and the status charts fill in once the
+          pipeline has a post to run." [New post -> /posts/new]
+costs:    "No spend recorded yet" + "No pipeline run in the last 30d has billed a provider.
+          Costs appear here as stages complete." [New post]
+models:   "No model data yet" + "Token counts, durations and per-model cost appear here once
+          a pipeline run has called a provider." [New post]
+logs:     "No logs recorded yet" (was "No logs match your filters" for an account with no
+          filters set at all)
+```
+
+A filter that empties a tab is a different state from an account with nothing, and says so.
+Clicking the `Perplexity sonar-pro` filter on Costs, on the account that has runs:
+
+```
+"No spend recorded for Perplexity sonar-pro"
+"Nothing ran on this model in the last 30d. Clear the filter or widen the range." [Clear filter]
+```
+
+### Byte-identical pairs, after
+
+```
+8.8-monitor-overview-success-before = 8.8-monitor-overview-success-after = 5a05942f7fce5240a6696ad13a822f99
+8.8-monitor-logs-success-before     = 8.8-monitor-logs-success-after     = 22224cdf9e9392092dd7d423281e07d4
+```
+
+Both are the intended result: nothing on either happy path changed. `costs-success-after` and
+`costs-empty-after` are also one image (`ed6d7813b37dbbe3f8b46d86ec930703`), and that is
+correct rather than a defect: the account with runs has no recorded provider cost, so its
+successful load genuinely is the empty state. What changed is that the error is no longer the
+same image as those two (`78c652b53328e68b98ba547b433a31fa`).
+
+### Loading
+
+The tab-level skeletons were captured by delaying the analytics and queue responses 20s in the
+page and remounting each tab: 10 skeleton elements on Overview, 9 on Costs. Neither skeleton
+changed in this item, so no before capture was taken.
+
+`loading.tsx` had drifted from the page it mirrors: it rendered a refresh button the page does
+not have and no tab strip at all, and stopped above the charts row. It now mirrors the header,
+the four-tab strip, the four stat cards and the two chart cards, pinned by a unit test rather
+than a screenshot because a client-only route with no server await never renders it on a full
+page load.
+
+### Console and accessibility
+
+```
+$ npx -y chrome-devtools-axi console                 (after, all four tabs visited)
+<no console messages found>
+
+$ npx -y chrome-devtools-axi console --type issue    (after)
+<no console messages found>
+
+DOM cross-check, after:  {"danglingLabels":0,"fieldsWithoutIdOrName":0}
+DOM cross-check, before: {"danglingLabels":0,"fieldsWithoutIdOrName":1}
+$ npx -y chrome-devtools-axi console --type issue    (before, Logs tab)
+msgid=71 [issue] A form field element should have an id or name attribute (count: 1)
+```
+
+The one finding was the log search input. It and the three filter Selects now carry `id`,
+`name` and an `aria-label`; the four refresh and retry controls carry per-tab labels
+(`Refresh overview`, `Retry costs`, ...) so a screen reader can tell four identical icon
+buttons apart.
+
+### Tests
+
+15 new cases in `web/src/app/monitor/MonitorTabStates.test.tsx`, all confirmed red before the
+implementation:
+
+```
+$ pnpm -C web test --run src/app/monitor/MonitorTabStates.test.tsx   (before implementation)
+ Test Files  1 failed (1)
+      Tests  15 failed (15)
+exit 1
+```
+
+Every one failed on the missing element, not on an import or setup error, for example
+`Unable to find an element with the text: queue backend unreachable`, `Unable to find
+role="button" and name /retry costs/i`, `Unable to find an element with the text: /no logs
+recorded yet/i`.
+
+Green, with a 16th case pinning the route skeleton:
+
+```
+$ pnpm -C web test --run src/app/monitor
+ Test Files  2 passed (2)
+      Tests  26 passed (26)
+exit 0
+```
+
+Two mutations, each killed:
+
+| mutation | result |
+| --- | --- |
+| `hasActiveFilters ?` -> `!hasActiveFilters ?` in the logs empty branch | 1 failed: `distinguishes an account with no logs from a filter that matched none` |
+| `if (error && !dashboard)` -> `if (false && ...)` in the overview | 2 failed: the first-load error case and its retry |
+
+### Gates
+
+```
+$ pnpm -C web exec tsc --noEmit
+exit 0
+
+$ pnpm -C web lint
+exit 0
+
+$ pnpm -C web build
+exit 0
+
+$ pnpm -C web test
+ Test Files  2 failed | 138 passed (140)
+      Tests  7 failed | 4602 passed | 7 skipped (4616)
+exit 1
+```
+
+6 of the 7 are the standing `image-preview.test.tsx` baseline. The 7th is a different
+database-backed test on each run and is not caused by this item: three consecutive full-suite
+runs failed `scaffold-check.test.ts`, then `settings/route.test.ts`, then
+`images-manifest.test.ts`, and a run with this item's new test file moved out of the tree
+failed `scaffold-check.test.ts` as well. Each of them passes on its own:
+
+```
+$ pnpm -C web test --run src/mastra/workflows/scaffold-check.test.ts
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+exit 0
+```
+
+Logged in `todo.md` as `[confirmed]` for 9.1.
+
+### Not covered
+
+- The four states were driven against two real accounts and a patched `window.fetch`, not
+  against a stopped database: a stopped database answers 500 with an empty body, which proves
+  the fallback wording rather than the server's own message.
+- Dark mode on `/monitor` is item 8.10 and was not captured here.
+- The Costs and Models success-with-data renders could not be captured: no account in the dev
+  database has a run with recorded provider cost, so both tabs' success state is their empty
+  state. The charts in those tabs are exercised by unit tests only.

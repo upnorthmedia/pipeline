@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Zap,
   XCircle,
+  Plus,
   TrendingUp,
   FileText,
   Timer,
@@ -26,15 +27,18 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
+import Link from "next/link";
 import {
   queue,
   analytics,
+  apiErrorMessage,
   type QueueStatus,
   type DashboardStats,
 } from "@/lib/api";
 import { useSSE, type SSEEvent } from "@/hooks/use-sse";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { TabError, TabEmpty, StaleBanner } from "./tab-states";
 
 const EVENT_COLORS: Record<string, string> = {
   stage_start: "bg-blue-500/15 text-blue-400",
@@ -92,6 +96,7 @@ export function OverviewTab() {
   const [dashboard, setDashboard] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [events, setEvents] = useState<(SSEEvent & { timestamp: string })[]>([]);
 
   const fetchData = useCallback(async () => {
@@ -102,8 +107,12 @@ export function OverviewTab() {
       ]);
       setStats(queueData);
       setDashboard(dashData);
-    } catch {
-      toast.error("Failed to load overview data");
+      setError(null);
+    } catch (err) {
+      // This runs on a 10s interval and on every SSE event, so a toast per
+      // failure would be a toast every ten seconds for as long as the backend
+      // is down. The state is what the render reads instead.
+      setError(apiErrorMessage(err, "Could not load overview data."));
     } finally {
       setLoading(false);
     }
@@ -131,6 +140,8 @@ export function OverviewTab() {
     await fetchData();
     setRefreshing(false);
   };
+
+  const hasPosts = (dashboard?.total ?? 0) > 0;
 
   const handlePauseAll = async () => {
     try {
@@ -192,192 +203,225 @@ export function OverviewTab() {
     );
   }
 
+  // Only a first load with nothing to show takes over the tab. Once there are
+  // numbers on screen a later failure keeps them and says they are stale.
+  if (error && !dashboard) {
+    return (
+      <TabError
+        title="Could not load the overview"
+        message={error}
+        retryLabel="Retry overview"
+        onRetry={handleRefresh}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {/* Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                  Total Posts
-                </p>
-                <p className="text-3xl font-bold mt-1 tracking-tight">
-                  {dashboard?.total ?? 0}
-                </p>
-              </div>
-              <div className="h-10 w-10 rounded-lg bg-muted/50 flex items-center justify-center">
-                <FileText className="h-5 w-5 text-muted-foreground" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      {error && <StaleBanner message={error} />}
 
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                  Completion Rate
-                </p>
-                <p className="text-3xl font-bold mt-1 tracking-tight text-emerald-500">
-                  {dashboard?.completion_rate ?? 0}%
-                </p>
+      {!hasPosts ? (
+        <TabEmpty
+          icon={FileText}
+          title="No posts yet"
+          description="Counts, completion rate and the status charts fill in once the pipeline has a post to run."
+        >
+          <Button asChild variant="outline" size="sm">
+            <Link href="/posts/new">
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
+              New post
+            </Link>
+          </Button>
+        </TabEmpty>
+      ) : (
+        <>
+        {/* Stat Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                    Total Posts
+                  </p>
+                  <p className="text-3xl font-bold mt-1 tracking-tight">
+                    {dashboard?.total ?? 0}
+                  </p>
+                </div>
+                <div className="h-10 w-10 rounded-lg bg-muted/50 flex items-center justify-center">
+                  <FileText className="h-5 w-5 text-muted-foreground" />
+                </div>
               </div>
-              <div className="h-10 w-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-                <TrendingUp className="h-5 w-5 text-emerald-500" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                  Avg Duration
-                </p>
-                <p className="text-3xl font-bold mt-1 tracking-tight">
-                  {formatDuration(dashboard?.avg_duration_s ?? null)}
-                </p>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                    Completion Rate
+                  </p>
+                  <p className="text-3xl font-bold mt-1 tracking-tight text-emerald-500">
+                    {dashboard?.completion_rate ?? 0}%
+                  </p>
+                </div>
+                <div className="h-10 w-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                  <TrendingUp className="h-5 w-5 text-emerald-500" />
+                </div>
               </div>
-              <div className="h-10 w-10 rounded-lg bg-muted/50 flex items-center justify-center">
-                <Timer className="h-5 w-5 text-muted-foreground" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                  Posts Today
-                </p>
-                <p className="text-3xl font-bold mt-1 tracking-tight text-blue-500">
-                  {dashboard?.posts_today ?? 0}
-                </p>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                    Avg Duration
+                  </p>
+                  <p className="text-3xl font-bold mt-1 tracking-tight">
+                    {formatDuration(dashboard?.avg_duration_s ?? null)}
+                  </p>
+                </div>
+                <div className="h-10 w-10 rounded-lg bg-muted/50 flex items-center justify-center">
+                  <Timer className="h-5 w-5 text-muted-foreground" />
+                </div>
               </div>
-              <div className="h-10 w-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                <Zap className="h-5 w-5 text-blue-500" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            </CardContent>
+          </Card>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Posts by Status */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Posts by Status</CardTitle>
-            <CardDescription className="text-xs">
-              Distribution across pipeline stages
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {statusData.length > 0 ? (
-              <ChartContainer config={statusChartConfig} className="h-[220px] w-full">
-                <BarChart data={statusData} layout="vertical" margin={{ left: 10 }}>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                    Posts Today
+                  </p>
+                  <p className="text-3xl font-bold mt-1 tracking-tight text-blue-500">
+                    {dashboard?.posts_today ?? 0}
+                  </p>
+                </div>
+                <div className="h-10 w-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                  <Zap className="h-5 w-5 text-blue-500" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Charts Row */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Posts by Status */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Posts by Status</CardTitle>
+              <CardDescription className="text-xs">
+                Distribution across pipeline stages
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {statusData.length > 0 ? (
+                <ChartContainer config={statusChartConfig} className="h-[220px] w-full">
+                  <BarChart data={statusData} layout="vertical" margin={{ left: 10 }}>
+                    <YAxis
+                      dataKey="status"
+                      type="category"
+                      tickLine={false}
+                      axisLine={false}
+                      width={70}
+                      tickFormatter={(v) => statusChartConfig[v as keyof typeof statusChartConfig]?.label ?? v}
+                      className="text-xs"
+                    />
+                    <XAxis type="number" hide />
+                    <ChartTooltip content={<ChartTooltipContent hideLabel />} />
+                    <Bar dataKey="count" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ChartContainer>
+              ) : (
+                <div className="flex items-center justify-center h-[220px] text-sm text-muted-foreground">
+                  No data yet
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Posts Over Time */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Posts Over Time</CardTitle>
+              <CardDescription className="text-xs">
+                New posts created per day (last 30 days)
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {dashboard?.over_time && dashboard.over_time.length > 0 ? (
+                <ChartContainer config={overTimeConfig} className="h-[220px] w-full">
+                  <AreaChart data={dashboard.over_time} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                    <defs>
+                      <linearGradient id="fillPosts" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="var(--color-count)" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="var(--color-count)" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-border/30" />
+                    <XAxis
+                      dataKey="date"
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={(v) => new Date(v).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                      className="text-xs"
+                    />
+                    <YAxis tickLine={false} axisLine={false} width={30} className="text-xs" />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Area
+                      dataKey="count"
+                      type="monotone"
+                      fill="url(#fillPosts)"
+                      stroke="var(--color-count)"
+                      strokeWidth={2}
+                    />
+                  </AreaChart>
+                </ChartContainer>
+              ) : (
+                <div className="flex items-center justify-center h-[220px] text-sm text-muted-foreground">
+                  No data yet
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Posts by Profile */}
+        {dashboard?.by_profile && dashboard.by_profile.length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Posts by Profile</CardTitle>
+              <CardDescription className="text-xs">
+                Top profiles by post count
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ChartContainer config={profileConfig} className="h-[200px] w-full">
+                <BarChart data={dashboard.by_profile} layout="vertical" margin={{ left: 10 }}>
                   <YAxis
-                    dataKey="status"
+                    dataKey="name"
                     type="category"
                     tickLine={false}
                     axisLine={false}
-                    width={70}
-                    tickFormatter={(v) => statusChartConfig[v as keyof typeof statusChartConfig]?.label ?? v}
+                    width={120}
                     className="text-xs"
                   />
                   <XAxis type="number" hide />
-                  <ChartTooltip content={<ChartTooltipContent hideLabel />} />
-                  <Bar dataKey="count" radius={[0, 4, 4, 0]} />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <Bar dataKey="count" fill="var(--color-count)" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ChartContainer>
-            ) : (
-              <div className="flex items-center justify-center h-[220px] text-sm text-muted-foreground">
-                No data yet
-              </div>
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* Posts Over Time */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Posts Over Time</CardTitle>
-            <CardDescription className="text-xs">
-              New posts created per day (last 30 days)
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {dashboard?.over_time && dashboard.over_time.length > 0 ? (
-              <ChartContainer config={overTimeConfig} className="h-[220px] w-full">
-                <AreaChart data={dashboard.over_time} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-                  <defs>
-                    <linearGradient id="fillPosts" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--color-count)" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="var(--color-count)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-border/30" />
-                  <XAxis
-                    dataKey="date"
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(v) => new Date(v).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                    className="text-xs"
-                  />
-                  <YAxis tickLine={false} axisLine={false} width={30} className="text-xs" />
-                  <ChartTooltip content={<ChartTooltipContent />} />
-                  <Area
-                    dataKey="count"
-                    type="monotone"
-                    fill="url(#fillPosts)"
-                    stroke="var(--color-count)"
-                    strokeWidth={2}
-                  />
-                </AreaChart>
-              </ChartContainer>
-            ) : (
-              <div className="flex items-center justify-center h-[220px] text-sm text-muted-foreground">
-                No data yet
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Posts by Profile */}
-      {dashboard?.by_profile && dashboard.by_profile.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Posts by Profile</CardTitle>
-            <CardDescription className="text-xs">
-              Top profiles by post count
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ChartContainer config={profileConfig} className="h-[200px] w-full">
-              <BarChart data={dashboard.by_profile} layout="vertical" margin={{ left: 10 }}>
-                <YAxis
-                  dataKey="name"
-                  type="category"
-                  tickLine={false}
-                  axisLine={false}
-                  width={120}
-                  className="text-xs"
-                />
-                <XAxis type="number" hide />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <Bar dataKey="count" fill="var(--color-count)" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ChartContainer>
-          </CardContent>
-        </Card>
+        </>
       )}
 
       {/* Queue Controls */}
@@ -391,6 +435,7 @@ export function OverviewTab() {
               className="h-7 w-7"
               onClick={handleRefresh}
               disabled={refreshing}
+              aria-label="Refresh overview"
             >
               <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
             </Button>

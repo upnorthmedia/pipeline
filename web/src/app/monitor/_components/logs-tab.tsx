@@ -9,6 +9,8 @@ import {
   FileText,
   ChevronDown,
   ChevronUp,
+  AlertCircle,
+  Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +26,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   analytics,
+  apiErrorMessage,
   profiles as profilesApi,
   STAGES,
   type PaginatedLogs,
@@ -31,8 +34,8 @@ import {
   type Profile,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
 import Link from "next/link";
+import { TabError, TabEmpty } from "./tab-states";
 
 const LEVEL_COLORS: Record<string, string> = {
   info: "bg-blue-500/10 text-blue-500",
@@ -63,6 +66,8 @@ export function LogsTab() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [profileList, setProfileList] = useState<Profile[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [profilesError, setProfilesError] = useState<string | null>(null);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
 
   // Filters
@@ -86,15 +91,27 @@ export function LogsTab() {
         per_page: 50,
       });
       setData(result);
-    } catch {
-      toast.error("Failed to load logs");
+      setError(null);
+    } catch (err) {
+      setData(null);
+      setError(apiErrorMessage(err, "Could not load logs."));
     } finally {
       setLoading(false);
     }
   }, [level, stage, profileId, searchQuery, timePreset, page]);
 
   useEffect(() => {
-    profilesApi.list().then(setProfileList).catch(() => {});
+    // A failed profile list is not a failed page, but hiding the filter with no
+    // explanation reads as an account with no profiles, so it says so instead.
+    profilesApi
+      .list()
+      .then((list) => {
+        setProfileList(list);
+        setProfilesError(null);
+      })
+      .catch((err) => {
+        setProfilesError(apiErrorMessage(err, "Could not load profiles."));
+      });
   }, []);
 
   useEffect(() => {
@@ -123,6 +140,8 @@ export function LogsTab() {
   };
 
   const hasActiveFilters = level || stage || profileId || searchQuery;
+  const presetLabel =
+    TIME_PRESETS.find((p) => p.hours === timePreset)?.label ?? `${timePreset}h`;
 
   return (
     <div className="space-y-4">
@@ -149,8 +168,8 @@ export function LogsTab() {
             </div>
 
             {/* Level Filter */}
-            <Select value={level} onValueChange={(v) => { setLevel(v === "all" ? "" : v); setPage(1); }}>
-              <SelectTrigger className="w-[100px] h-8 text-xs">
+            <Select name="level" value={level} onValueChange={(v) => { setLevel(v === "all" ? "" : v); setPage(1); }}>
+              <SelectTrigger id="logs-level-filter" aria-label="Filter by level" className="w-[100px] h-8 text-xs">
                 <SelectValue placeholder="Level" />
               </SelectTrigger>
               <SelectContent>
@@ -162,8 +181,8 @@ export function LogsTab() {
             </Select>
 
             {/* Stage Filter */}
-            <Select value={stage} onValueChange={(v) => { setStage(v === "all" ? "" : v); setPage(1); }}>
-              <SelectTrigger className="w-[110px] h-8 text-xs">
+            <Select name="stage" value={stage} onValueChange={(v) => { setStage(v === "all" ? "" : v); setPage(1); }}>
+              <SelectTrigger id="logs-stage-filter" aria-label="Filter by stage" className="w-[110px] h-8 text-xs">
                 <SelectValue placeholder="Stage" />
               </SelectTrigger>
               <SelectContent>
@@ -177,9 +196,18 @@ export function LogsTab() {
             </Select>
 
             {/* Profile Filter */}
+            {profilesError && (
+              <span
+                className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                title={profilesError}
+              >
+                <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+                Profile filter unavailable
+              </span>
+            )}
             {profileList.length > 0 && (
-              <Select value={profileId} onValueChange={(v) => { setProfileId(v === "all" ? "" : v); setPage(1); }}>
-                <SelectTrigger className="w-[140px] h-8 text-xs">
+              <Select name="profile" value={profileId} onValueChange={(v) => { setProfileId(v === "all" ? "" : v); setPage(1); }}>
+                <SelectTrigger id="logs-profile-filter" aria-label="Filter by profile" className="w-[140px] h-8 text-xs">
                   <SelectValue placeholder="Profile" />
                 </SelectTrigger>
                 <SelectContent>
@@ -198,6 +226,9 @@ export function LogsTab() {
               <div className="relative flex-1">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
+                  id="logs-search"
+                  name="q"
+                  aria-label="Search log messages"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search messages..."
@@ -219,6 +250,7 @@ export function LogsTab() {
                 className="h-8 w-8"
                 onClick={handleRefresh}
                 disabled={refreshing}
+                aria-label="Refresh logs"
               >
                 <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
               </Button>
@@ -228,6 +260,39 @@ export function LogsTab() {
       </Card>
 
       {/* Results */}
+      {error ? (
+        <TabError
+          title="Could not load logs"
+          message={error}
+          retryLabel="Retry logs"
+          onRetry={handleRefresh}
+        />
+      ) : !loading && (!data || data.items.length === 0) ? (
+        hasActiveFilters ? (
+          <TabEmpty
+            icon={FileText}
+            title="No logs match your filters"
+            description={`Nothing in the last ${presetLabel} matches. Widen the time range or clear the filters.`}
+          >
+            <Button variant="outline" size="sm" onClick={resetFilters}>
+              Clear filters
+            </Button>
+          </TabEmpty>
+        ) : (
+          <TabEmpty
+            icon={FileText}
+            title="No logs recorded yet"
+            description={`Nothing was logged in the last ${presetLabel}. Every stage writes here as it runs, so a wider range or a run fills it.`}
+          >
+            <Button asChild variant="outline" size="sm">
+              <Link href="/posts/new">
+                <Plus className="h-3.5 w-3.5 mr-1.5" />
+                New post
+              </Link>
+            </Button>
+          </TabEmpty>
+        )
+      ) : (
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
@@ -270,17 +335,9 @@ export function LogsTab() {
                 <Skeleton key={i} className="h-10 w-full" />
               ))}
             </div>
-          ) : !data || data.items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <FileText className="h-8 w-8 text-muted-foreground/40 mb-2" />
-              <p className="text-sm text-muted-foreground">No logs match your filters</p>
-              <p className="text-xs text-muted-foreground/60 mt-0.5">
-                Try adjusting the time range or clearing filters
-              </p>
-            </div>
           ) : (
             <div className="space-y-1">
-              {data.items.map((entry, i) => (
+              {data?.items.map((entry, i) => (
                 <LogRow
                   key={`${entry.post_id}-${entry.timestamp}-${i}`}
                   entry={entry}
@@ -292,6 +349,7 @@ export function LogsTab() {
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }

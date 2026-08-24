@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   DollarSign,
   Coins,
   TrendingDown,
   RefreshCw,
   ArrowUpRight,
+  Plus,
 } from "lucide-react";
 import {
   Bar,
@@ -26,9 +28,9 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import { analytics, type CostAnalytics } from "@/lib/api";
+import { analytics, apiErrorMessage, type CostAnalytics } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import { TabError, TabEmpty } from "./tab-states";
 
 const TIME_RANGES = [
   { label: "7d", days: 7 },
@@ -83,13 +85,16 @@ export function CostsTab() {
   const [days, setDays] = useState(30);
   const [modelFilter, setModelFilter] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = async (d: number, m: string) => {
     try {
       const result = await analytics.costs({ days: d, model: m || undefined });
       setData(result);
-    } catch {
-      toast.error("Failed to load cost analytics");
+      setError(null);
+    } catch (err) {
+      setData(null);
+      setError(apiErrorMessage(err, "Could not load cost analytics."));
     } finally {
       setLoading(false);
     }
@@ -128,6 +133,13 @@ export function CostsTab() {
         }))
     : [];
 
+  const hasCostData =
+    !!data && (Object.keys(data.by_model).length > 0 || data.total_cost > 0);
+  const activeModelLabel =
+    MODEL_FILTERS.find((m) => m.value === modelFilter)?.label ?? modelFilter;
+  const activeRangeLabel =
+    TIME_RANGES.find((r) => r.days === days)?.label ?? `${days}d`;
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -150,9 +162,7 @@ export function CostsTab() {
     );
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Time Range + Model Filter + Refresh */}
+  const controls = (
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1 rounded-lg bg-muted/50 p-0.5">
@@ -198,6 +208,67 @@ export function CostsTab() {
           <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
         </Button>
       </div>
+  );
+
+  // The controls stay on screen in every state: a failed or empty range is
+  // exactly when a user wants to change the range or drop the model filter.
+  if (error) {
+    return (
+      <div className="space-y-6">
+        {controls}
+        <TabError
+          title="Could not load cost analytics"
+          message={error}
+          retryLabel="Retry costs"
+          onRetry={() => {
+            setLoading(true);
+            fetchData(days, modelFilter);
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (!hasCostData) {
+    return (
+      <div className="space-y-6">
+        {controls}
+        {modelFilter ? (
+          <TabEmpty
+            icon={DollarSign}
+            title={`No spend recorded for ${activeModelLabel}`}
+            description={`Nothing ran on this model in the last ${activeRangeLabel}. Clear the filter or widen the range.`}
+          >
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setModelFilter("")}
+              aria-label="Clear model filter"
+            >
+              Clear filter
+            </Button>
+          </TabEmpty>
+        ) : (
+          <TabEmpty
+            icon={DollarSign}
+            title="No spend recorded yet"
+            description={`No pipeline run in the last ${activeRangeLabel} has billed a provider. Costs appear here as stages complete.`}
+          >
+            <Button asChild variant="outline" size="sm">
+              <Link href="/posts/new">
+                <Plus className="h-3.5 w-3.5 mr-1.5" />
+                New post
+              </Link>
+            </Button>
+          </TabEmpty>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {controls}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

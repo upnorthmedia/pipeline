@@ -1518,7 +1518,19 @@ screenshots via `npx -y chrome-devtools-axi` into
   that is 2754px on a 2839px page. Two accessibility findings cleared and the page is
   console-clean in all three states.
   Evidence: [`evidence/phase-8.md` #8.7](../mastra-port/evidence/phase-8.md)
-- [ ] 8.8 `/monitor`: four states.
+- [x] 8.8 `/monitor`: four states across all four tabs.
+  Every tab caught its failed request into a toast and then rendered the same markup an account
+  with no data gets: on Costs a successful load, a failed load and an empty account were one
+  byte-identical image, and on Models a failed load and an empty account were another. All four
+  now name what failed, carry the server's own reason and a per-tab Retry, and the Overview
+  keeps its last good numbers under a stale banner rather than blanking them when a background
+  refresh fails (it refetches every 10s, so the old toast fired every ten seconds). The four
+  empty states name the action that fills them and are told apart from a filter that matched
+  nothing, and the logs tab says when the profile filter itself failed instead of silently
+  hiding it. One accessibility finding cleared, the page is console-clean in every state, and
+  `loading.tsx`, which had drifted to a refresh button the page does not have and no tab strip,
+  mirrors the page again.
+  Evidence: [`evidence/phase-8.md` #8.8](../mastra-port/evidence/phase-8.md)
 - [ ] 8.9 Keyboard and a11y pass across the touched screens: focus-visible on all interactive
   elements, labelled form controls, no keyboard traps, dialogs return focus on close.
 - [ ] 8.10 Dark mode correct on every screen touched in Phase 8.

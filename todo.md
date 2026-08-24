@@ -760,3 +760,14 @@
   internal-link resolver both assume the field parses as a URL. Tightening it changes an API
   contract the dashboard and `packages/create-mdx-blog` both sit on, so it is a decision to
   take deliberately after the port rather than inside it.
+
+- [confirmed] 2026-08-23 `pnpm -C web test` is not deterministic above the known
+  `image-preview.test.tsx` baseline: one extra database-backed test fails per full-suite run
+  and it is a different one each time. Four consecutive runs during item 8.8 failed
+  `src/mastra/workflows/scaffold-check.test.ts`, then `src/app/api/settings/route.test.ts`,
+  then `src/mastra/steps/images-manifest.test.ts`, then `scaffold-check` again with this
+  item's new test file moved out of the tree, and every one of them passes when run alone. The
+  suites that flake are the ones that hit Postgres and the Redis Streams consumer group, so
+  the likely cause is contention between parallel vitest workers rather than any single test.
+  Item 9.1 cannot record a green `pnpm -C web test` until this is settled, so it needs either
+  a `poolOptions` concurrency cap for those files or per-file isolation of the consumer group.
