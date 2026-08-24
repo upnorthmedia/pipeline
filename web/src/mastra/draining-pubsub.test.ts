@@ -16,12 +16,15 @@
  *
  * Requires `docker compose up -d redis`.
  */
+import { readFileSync } from "node:fs"
 import { randomUUID } from "node:crypto"
+import { createRequire } from "node:module"
 
 import type { Event } from "@mastra/core/events"
-import { afterEach, describe, expect, it } from "vitest"
+import { createClient } from "redis"
+import { afterAll, afterEach, describe, expect, it } from "vitest"
 
-import { DRAIN_TIMEOUT_MS, DrainingPubSub, drainTimeoutMs } from "./draining-pubsub"
+import { DEFAULT_MAX_DELIVERY_ATTEMPTS, DRAIN_TIMEOUT_MS, DrainingPubSub, drainTimeoutMs } from "./draining-pubsub"
 
 const GROUP = "drain-probe"
 const TOPIC = "workflows"
@@ -39,7 +42,9 @@ const UNSUBSCRIBE_FLOOR_MS = 2_500
 const open: DrainingPubSub[] = []
 
 /** A transport of its own, on its own key prefix, closed after the test. */
-function transport(options: { drainTimeoutMs?: number } = {}): DrainingPubSub {
+function transport(
+  options: { drainTimeoutMs?: number; keyPrefix?: string; maxDeliveryAttempts?: number } = {},
+): DrainingPubSub {
   const pubsub = new DrainingPubSub({
     url: process.env.REDIS_URL!,
     keyPrefix: `drain-probe:${randomUUID()}`,
@@ -52,11 +57,61 @@ function transport(options: { drainTimeoutMs?: number } = {}): DrainingPubSub {
   return pubsub
 }
 
+/**
+ * A client of the suite's own, for the assertions that are about the stream
+ * rather than about the counter: whether an abandoned delivery was handed back
+ * (acked and republished) or left pending is only visible in Redis.
+ */
+const redis = createClient({ url: process.env.REDIS_URL! })
+let connected = false
+
+/** `RedisStreamsPubSub`'s own key derivation, which it keeps private. */
+function streamKey(keyPrefix: string): string {
+  return `${keyPrefix}:${TOPIC}`
+}
+
+type StreamState = {
+  pending: { id: string; consumer: string }[]
+  events: { id: string; deliveryAttempt?: number; type?: string }[]
+}
+
+async function client() {
+  if (!connected) {
+    await redis.connect()
+    connected = true
+  }
+  return redis
+}
+
+async function readEvents(keyPrefix: string): Promise<StreamState["events"]> {
+  const entries = await (await client()).xRange(streamKey(keyPrefix), "-", "+")
+  return entries.map((entry) => {
+    const event = JSON.parse(entry.message?.event ?? "{}")
+    return { id: String(entry.id), deliveryAttempt: event.deliveryAttempt, type: event.type }
+  })
+}
+
+async function groupsOn(keyPrefix: string) {
+  return (await client()).xInfoGroups(streamKey(keyPrefix))
+}
+
+async function readStream(keyPrefix: string, group: string): Promise<StreamState> {
+  const pending = (await (await client()).xPendingRange(streamKey(keyPrefix), group, "-", "+", 50)).map((entry) => ({
+    id: String(entry.id),
+    consumer: String(entry.consumer),
+  }))
+  return { pending, events: await readEvents(keyPrefix) }
+}
+
 afterEach(async () => {
   for (const pubsub of open.splice(0)) {
     await pubsub.clearTopic(TOPIC)
     await pubsub.close()
   }
+})
+
+afterAll(async () => {
+  if (connected) await redis.close()
 })
 
 /** Resolves once `predicate` holds, so a test never sleeps a fixed guess. */
@@ -147,6 +202,119 @@ describe("an unsubscribe with a delivery still in flight", () => {
     const startedAt = Date.now()
     await pubsub.unsubscribe(TOPIC, cb)
     expect(Date.now() - startedAt).toBeLessThan(UNSUBSCRIBE_FLOOR_MS)
+  })
+})
+
+describe("the deliveries the deadline abandons", () => {
+  /** A grouped subscriber that takes a delivery and never lets go of it. */
+  function held() {
+    return () => new Promise<void>(() => {})
+  }
+
+  it("hands them back to the group rather than leaving them pending for reclaim", async () => {
+    // P2.91b. A nack acks the entry this consumer owns and republishes the
+    // event, so the next consumer to read takes it. Left pending, it is owned
+    // by a consumer that will never read again and waits out `reclaimIdleMs`,
+    // which this app sets to fifteen minutes.
+    const keyPrefix = `drain-probe:${randomUUID()}`
+    const pubsub = transport({ drainTimeoutMs: 500, keyPrefix })
+    const cb = held()
+
+    await pubsub.subscribe(TOPIC, cb, { group: GROUP })
+    await pubsub.publish(TOPIC, { type: "probe", runId: randomUUID(), data: {} })
+    await waitFor(() => pubsub.inFlightCount() === 1, 10_000, "the event to be delivered")
+    const before = await readStream(keyPrefix, GROUP)
+    expect(before.pending).toHaveLength(1)
+
+    await pubsub.unsubscribe(TOPIC, cb)
+
+    const after = await readStream(keyPrefix, GROUP)
+    expect(after.pending).toEqual([])
+    expect(after.events).toHaveLength(before.events.length + 1)
+    expect(after.events.at(-1)).toMatchObject({ type: "probe", deliveryAttempt: 2 })
+    expect(pubsub.inFlightCount()).toBe(0)
+  })
+
+  it("leaves one already at the delivery cap pending, because a nack would drop it", async () => {
+    // `RedisStreamsPubSub#nack` acks and drops an event whose attempt has
+    // reached `maxDeliveryAttempts` instead of republishing it. Reclaim has no
+    // such cap, so the fifteen minute park is the recoverable option and the
+    // handback is not.
+    const keyPrefix = `drain-probe:${randomUUID()}`
+    const pubsub = transport({ drainTimeoutMs: 500, keyPrefix, maxDeliveryAttempts: 3 })
+    const cb = held()
+
+    await pubsub.subscribe(TOPIC, cb, { group: GROUP })
+    await pubsub.publish(TOPIC, { type: "probe", runId: randomUUID(), data: {}, deliveryAttempt: 3 })
+    await waitFor(() => pubsub.inFlightCount() === 1, 10_000, "the event to be delivered")
+    const before = await readStream(keyPrefix, GROUP)
+
+    await pubsub.unsubscribe(TOPIC, cb)
+
+    const after = await readStream(keyPrefix, GROUP)
+    expect(after.pending).toEqual(before.pending)
+    expect(after.events).toEqual(before.events)
+  })
+
+  it("does not republish a fan-out delivery, whose group has no other reader", async () => {
+    // A subscription with no named group gets a group of its own, and the base
+    // class destroys that group on unsubscribe, so a republished event would
+    // be read by nobody. All a handback could do here is leave an orphan entry
+    // in the stream for the idle TTL to collect.
+    const keyPrefix = `drain-probe:${randomUUID()}`
+    const pubsub = transport({ drainTimeoutMs: 500, keyPrefix })
+    const cb = held()
+
+    await pubsub.subscribe(TOPIC, cb)
+    await pubsub.publish(TOPIC, { type: "probe", runId: randomUUID(), data: {} })
+    await waitFor(() => pubsub.inFlightCount() === 1, 10_000, "the event to be delivered")
+    const fanout = String((await groupsOn(keyPrefix))[0].name)
+    const before = await readStream(keyPrefix, fanout)
+    expect(before.pending).toHaveLength(1)
+
+    await pubsub.unsubscribe(TOPIC, cb)
+
+    expect(await groupsOn(keyPrefix)).toEqual([])
+    expect((await readEvents(keyPrefix))).toEqual(before.events)
+  })
+
+  it("does not hand anything back when the drain is switched off", async () => {
+    // `0` is the pre-P2.91 configuration, and a handback is a write to the
+    // transport rather than a wait: a caller that asked this instance to stay
+    // out of the way gets that.
+    const keyPrefix = `drain-probe:${randomUUID()}`
+    const pubsub = transport({ drainTimeoutMs: 0, keyPrefix })
+    const cb = held()
+
+    await pubsub.subscribe(TOPIC, cb, { group: GROUP })
+    await pubsub.publish(TOPIC, { type: "probe", runId: randomUUID(), data: {} })
+    await waitFor(() => pubsub.inFlightCount() === 1, 10_000, "the event to be delivered")
+    const before = await readStream(keyPrefix, GROUP)
+
+    await pubsub.unsubscribe(TOPIC, cb)
+
+    const after = await readStream(keyPrefix, GROUP)
+    expect(after.pending).toEqual(before.pending)
+    expect(after.events).toEqual(before.events)
+  })
+})
+
+describe("the delivery cap this class keeps a copy of", () => {
+  it("matches the installed library's own default", () => {
+    // The base class keeps `maxDeliveryAttempts` private, so the handback has
+    // to carry its own copy of the default to know when a nack would drop an
+    // event instead of republishing it. A library that changes the number
+    // fails here rather than silently turning a late run into a lost one.
+    const require = createRequire(import.meta.url)
+    const source = readFileSync(require.resolve("@mastra/redis-streams"), "utf8")
+    const declared = source.match(/options\.maxDeliveryAttempts \?\? (\d+)/)
+    expect(declared?.[1]).toBe(String(DEFAULT_MAX_DELIVERY_ATTEMPTS))
+  })
+
+  it("reads the option, including the library's treatment of 0 as no cap", () => {
+    expect(transport().maxDeliveryAttempts).toBe(DEFAULT_MAX_DELIVERY_ATTEMPTS)
+    expect(transport({ maxDeliveryAttempts: 2 }).maxDeliveryAttempts).toBe(2)
+    expect(transport({ maxDeliveryAttempts: 0 }).maxDeliveryAttempts).toBe(Infinity)
   })
 })
 

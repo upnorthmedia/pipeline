@@ -30,14 +30,20 @@
  * `unsubscribe()`, so the generated entry drains without knowing that it does.
  *
  * Bounded, because an unbounded drain is a worse defect than the one it fixes:
- * a stage that outlives `WORKER_DRAIN_TIMEOUT_MS` is left exactly where it was
- * before this class existed, pending for reclaim, and the process exits. The
- * platform's own kill timer is the other bound and it is not ours to read: a
- * container runtime that follows `SIGTERM` with `SIGKILL` before the drain
- * finishes leaves the same pending entry, which is today's behaviour and not a
+ * a stage that outlives `WORKER_DRAIN_TIMEOUT_MS` is abandoned and the process
+ * exits. Abandoning it is not the same as dropping it, which is ledger item
+ * P2.91b: the delivery is nacked on the way out, so the transport acks the
+ * original entry and republishes the event for whichever consumer reads next,
+ * rather than leaving it pending under a consumer that will never read again
+ * and waiting out `reclaimIdleMs` (fifteen minutes in this app). The three
+ * cases where that handback is not the right answer are on `#handBack` below.
+ *
+ * The platform's own kill timer is the other bound and it is not ours to read:
+ * a container runtime that follows `SIGTERM` with `SIGKILL` before the drain
+ * finishes leaves the entry pending, which is the pre-P2.91 behaviour and not a
  * regression.
  */
-import type { EventCallback, SubscribeOptions } from "@mastra/core/events"
+import type { Event, EventCallback, SubscribeOptions } from "@mastra/core/events"
 import { RedisStreamsPubSub, type RedisStreamsPubSubConfig } from "@mastra/redis-streams"
 
 /**
@@ -68,16 +74,46 @@ export function drainTimeoutMs(env: Record<string, string | undefined> = process
   return parsed
 }
 
+/**
+ * `RedisStreamsPubSub`'s own default for `maxDeliveryAttempts`, which it keeps
+ * private. A nack is what hands an abandoned delivery back, and a nack on an
+ * event already at the cap drops it instead of republishing it, so the drain
+ * has to know the number to avoid turning a late run into a lost one.
+ *
+ * `draining-pubsub.test.ts` reads the number out of the installed library and
+ * fails if this copy drifts from it.
+ */
+export const DEFAULT_MAX_DELIVERY_ATTEMPTS = 5
+
 export type DrainingPubSubConfig = RedisStreamsPubSubConfig & {
   /** Overrides `WORKER_DRAIN_TIMEOUT_MS` for this instance. */
   drainTimeoutMs?: number
 }
 
+/** One delivery this pubsub has handed out and not seen settled. */
+type Delivery = {
+  /** The event as the subscriber saw it, read for its `deliveryAttempt`. */
+  event: Event
+  /** The settler that hands the delivery back, absent on a local publish. */
+  nack?: () => Promise<void>
+}
+
 /** What one subscription is holding, and the wrapper the base class knows it by. */
-type Registration = { wrapped: EventCallback; inFlight: Set<object> }
+type Registration = {
+  wrapped: EventCallback
+  inFlight: Map<object, Delivery>
+  /**
+   * Whether this subscription joined a named consumer group. A fan-out
+   * subscription has a group of its own that nothing else reads, so
+   * republishing its abandoned delivery hands it to nobody.
+   */
+  grouped: boolean
+}
 
 export class DrainingPubSub extends RedisStreamsPubSub {
   readonly drainTimeoutMs: number
+  /** This instance's copy of the base class's private delivery-attempt cap. */
+  readonly maxDeliveryAttempts: number
   #registrations = new Map<EventCallback, Map<string, Registration>>()
   #waiters = new Set<() => void>()
   /**
@@ -90,6 +126,11 @@ export class DrainingPubSub extends RedisStreamsPubSub {
   constructor(options: DrainingPubSubConfig = {}) {
     super(options)
     this.drainTimeoutMs = options.drainTimeoutMs ?? drainTimeoutMs()
+    // The base class's own reading of the same option, including its
+    // back-compat treatment of 0 as "no cap". It has already thrown on a value
+    // neither of us can use, because `super()` ran first.
+    const cap = options.maxDeliveryAttempts ?? DEFAULT_MAX_DELIVERY_ATTEMPTS
+    this.maxDeliveryAttempts = cap === 0 ? Infinity : cap
     this.#logger = options.logger
   }
 
@@ -103,7 +144,7 @@ export class DrainingPubSub extends RedisStreamsPubSub {
   }
 
   async subscribe(topic: string, cb: EventCallback, options?: SubscribeOptions): Promise<void> {
-    const registration = this.#register(topic, cb)
+    const registration = this.#register(topic, cb, !!options?.group)
     try {
       await super.subscribe(topic, registration.wrapped, options)
     } catch (err) {
@@ -121,10 +162,10 @@ export class DrainingPubSub extends RedisStreamsPubSub {
     // The base call is what stops the reader, so no new delivery can join the
     // set while the drain below is waiting on it.
     await super.unsubscribe(topic, registration.wrapped)
-    await this.#drain(topic, registration.inFlight)
+    await this.#drain(topic, registration)
   }
 
-  #register(topic: string, cb: EventCallback): Registration {
+  #register(topic: string, cb: EventCallback, grouped: boolean): Registration {
     let byTopic = this.#registrations.get(cb)
     if (!byTopic) {
       byTopic = new Map()
@@ -133,7 +174,7 @@ export class DrainingPubSub extends RedisStreamsPubSub {
     const existing = byTopic.get(topic)
     if (existing) return existing
 
-    const inFlight = new Set<object>()
+    const inFlight = new Map<object, Delivery>()
     const wrapped: EventCallback = (event, ack, nack) => {
       // A delivery with neither settler is not pending anywhere (the transport
       // hands both to every real subscriber; a local publish hands two no-ops).
@@ -141,7 +182,6 @@ export class DrainingPubSub extends RedisStreamsPubSub {
       if (!ack && !nack) return cb(event, ack, nack)
 
       const token = {}
-      inFlight.add(token)
       const settle = () => {
         if (inFlight.delete(token)) this.#notify()
       }
@@ -152,6 +192,10 @@ export class DrainingPubSub extends RedisStreamsPubSub {
           settle()
         }
       }
+      // The handback the drain uses is the same wrapped settler the subscriber
+      // was handed, so a delivery it nacks leaves the set the same way one the
+      // subscriber nacks does.
+      inFlight.set(token, { event, nack: nack && settling(nack) })
 
       let result: void | Promise<void>
       try {
@@ -171,7 +215,7 @@ export class DrainingPubSub extends RedisStreamsPubSub {
       return result
     }
 
-    const registration = { wrapped, inFlight }
+    const registration = { wrapped, inFlight, grouped }
     byTopic.set(topic, registration)
     return registration
   }
@@ -187,9 +231,14 @@ export class DrainingPubSub extends RedisStreamsPubSub {
     for (const waiter of [...this.#waiters]) waiter()
   }
 
-  async #drain(topic: string, inFlight: Set<object>): Promise<void> {
-    if (inFlight.size === 0 || this.drainTimeoutMs === 0) {
-      if (inFlight.size > 0) this.#warnAbandoned(topic, inFlight.size)
+  async #drain(topic: string, registration: Registration): Promise<void> {
+    const { inFlight } = registration
+    if (inFlight.size === 0) return
+    if (this.drainTimeoutMs === 0) {
+      // "Do not wait" is the pre-P2.91 configuration, and a handback is a
+      // write to the transport rather than a wait: a caller that asked this
+      // instance to stay out of the way gets exactly that.
+      this.#warnAbandoned(topic, inFlight.size)
       return
     }
     const held = inFlight.size
@@ -206,14 +255,63 @@ export class DrainingPubSub extends RedisStreamsPubSub {
       const timer = setTimeout(finish, this.drainTimeoutMs)
       this.#waiters.add(check)
     })
-    if (inFlight.size > 0) this.#warnAbandoned(topic, inFlight.size)
-    else {
+    if (inFlight.size === 0) {
       this.#logger?.debug?.("redis-streams: drained in-flight deliveries before unsubscribe", {
         topic,
         deliveries: held,
         waitedMs: Date.now() - startedAt,
       })
+      return
     }
+    await this.#handBack(topic, registration)
+  }
+
+  /**
+   * Give the deliveries the deadline abandoned back to the group.
+   *
+   * Ledger item P2.91b. `nack()` acks the entry the dying consumer owns and
+   * republishes the event, so the next consumer to read the stream takes it
+   * instead of waiting out `reclaimIdleMs`. Three cases keep the old
+   * leave-it-pending behaviour, because for them a nack is worse than a wait:
+   *
+   *   - A fan-out subscription (no named group). Its group is private to the
+   *     subscription that is going away, so a republished event is read by
+   *     nobody and the original entry would have been reclaimed by nobody
+   *     either. Neither path recovers it; the quieter one wins.
+   *   - A delivery with no `nack` to call, which is a local publish.
+   *   - A delivery already at `maxDeliveryAttempts`. `nack()` drops an event at
+   *     the cap rather than republishing it, and a redeploy turning a late run
+   *     into a lost one is the one outcome worse than the fifteen minute park.
+   *     Reclaim has no such cap, so leaving it pending still recovers it.
+   */
+  async #handBack(topic: string, registration: Registration): Promise<void> {
+    const abandoned = [...registration.inFlight.values()]
+    const handed: Promise<void>[] = []
+    let left = 0
+    for (const delivery of abandoned) {
+      const attempt = delivery.event.deliveryAttempt ?? 1
+      if (!registration.grouped || !delivery.nack || attempt >= this.maxDeliveryAttempts) {
+        left += 1
+        continue
+      }
+      handed.push(
+        delivery.nack().catch((err) => {
+          this.#logger?.warn?.("redis-streams: handing an abandoned delivery back failed", {
+            topic,
+            eventId: delivery.event.id,
+            err: err instanceof Error ? err.message : err,
+          })
+        }),
+      )
+    }
+    await Promise.all(handed)
+    if (handed.length > 0) {
+      this.#logger?.warn?.(
+        "redis-streams: drain deadline reached; handing the deliveries still in flight back to the group",
+        { topic, deliveries: handed.length, drainTimeoutMs: this.drainTimeoutMs },
+      )
+    }
+    if (left > 0) this.#warnAbandoned(topic, left)
   }
 
   #warnAbandoned(topic: string, deliveries: number): void {

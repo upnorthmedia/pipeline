@@ -36,7 +36,9 @@
  * Two scenarios, because a drain that is not bounded is a worse defect than the
  * one it fixes: the step that finishes inside the deadline (the redeploy costs
  * the run nothing but the gap between processes), and the step that does not
- * (the worker still exits, and recovery is the old reclaim path).
+ * (the worker still exits, and P2.91b hands that step's message back to the
+ * group on the way out so a replacement takes it at once rather than after the
+ * reclaim window).
  *
  * The probe workflow touches no provider, no post row and no media directory.
  * Redis database 7 isolates it from every other suite that starts a worker; all
@@ -107,7 +109,13 @@ type PendingEntry = {
   deliveriesCounter: number
   event: { type?: string; runId?: string }
 }
-type TransportState = { pending: PendingEntry[]; consumers: { name: string; pending: number }[]; streamLength: number }
+type StreamEvent = { id: string; event: { type?: string; runId?: string; deliveryAttempt?: number } }
+type TransportState = {
+  pending: PendingEntry[]
+  consumers: { name: string; pending: number }[]
+  streamLength: number
+  events: StreamEvent[]
+}
 
 const redis = createClient({ url: REDIS_URL })
 
@@ -127,10 +135,13 @@ let drained: {
 
 /** The scenario whose step outlives the drain deadline. */
 let expired: {
+  runId: string
+  workerPid: number
   inFlight: { transport: TransportState; records: ProbeRecord[] }
   exit: { code: number | null; signal: NodeJS.Signals | null }
   exitAfterMs: number
   afterExit: { transport: TransportState; records: ProbeRecord[]; state: RunState }
+  afterReplacement: { records: ProbeRecord[]; state: RunState; recoveredAfterMs: number }
 }
 
 function records(label: string): ProbeRecord[] {
@@ -163,7 +174,11 @@ async function readTransport(): Promise<TransportState> {
     name: String(consumer.name),
     pending: Number(consumer.pending),
   }))
-  return { pending, consumers, streamLength: await redis.xLen(STREAM_KEY) }
+  const events = (await redis.xRange(STREAM_KEY, "-", "+")).map((entry) => ({
+    id: String(entry.id),
+    event: JSON.parse(entry.message?.event ?? "{}"),
+  }))
+  return { pending, consumers, streamLength: await redis.xLen(STREAM_KEY), events }
 }
 
 /** Spawns the fixture as a worker process and resolves once it has subscribed. */
@@ -314,16 +329,42 @@ beforeAll(async () => {
   const expiredRunId = await runToSlowStep("drain-expires")
   const expiredInFlight = { transport: await readTransport(), records: records("drain-expires") }
   const expiredTermination = await terminate(workerC)
+  const expiredAfterExit = {
+    transport: await readTransport(),
+    records: records("drain-expires"),
+    state: await workflow.getWorkflowRunById(expiredRunId),
+  }
+
+  // The replacement's own `probe-slow` is short: the question this scenario
+  // asks is how long the run waits to be picked up again, not how long the
+  // step takes once it is.
+  const recoveryStartedAt = Date.now()
+  const workerD = await spawnWorker({
+    PROBE_SLEEP_MS: "500",
+    WORKER_DRAIN_TIMEOUT_MS: String(LONG_DRAIN_TIMEOUT_MS),
+  })
+  await waitFor(
+    async () => {
+      const state = await workflow.getWorkflowRunById(expiredRunId)
+      return state !== null && state.status !== "running" && state.status !== "pending"
+    },
+    60_000,
+    "the run to be picked up again after the abandoned step",
+  )
   expired = {
+    runId: expiredRunId,
+    workerPid: workerC.pid!,
     inFlight: expiredInFlight,
     exit: expiredTermination.exit,
     exitAfterMs: expiredTermination.exitAfterMs,
-    afterExit: {
-      transport: await readTransport(),
+    afterExit: expiredAfterExit,
+    afterReplacement: {
       records: records("drain-expires"),
       state: await workflow.getWorkflowRunById(expiredRunId),
+      recoveredAfterMs: Date.now() - recoveryStartedAt,
     },
   }
+  await stop(workerD)
 }, 240_000)
 
 afterAll(async () => {
@@ -394,24 +435,42 @@ describe("a step that outlives the drain deadline", () => {
     expect(expired.afterExit.state?.status).toBe("running")
   })
 
-  it("leaves that step's message pending, which is the old reclaim path", () => {
-    // Not acked (the entry is still in the list) and not nacked (a nack acks
-    // the original and republishes, so the list would be empty and the stream
-    // longer). Recovery is `XAUTOCLAIM` at `RECLAIM_IDLE_MS`, exactly as it was
-    // before the drain existed.
-    expect(expired.afterExit.transport.pending).toHaveLength(1)
-    expect(expired.afterExit.transport.pending).toEqual(expired.inFlight.transport.pending)
-    expect(expired.afterExit.transport.streamLength).toBe(expired.inFlight.transport.streamLength)
+  it("hands that step's message back instead of leaving it for the fifteen minute reclaim", () => {
+    // P2.91b. Abandoning a delivery on the deadline used to mean leaving it
+    // pending under a consumer that no longer exists, recoverable only by
+    // `XAUTOCLAIM` at `RECLAIM_IDLE_MS`. The drain nacks it on the way out
+    // instead, which is the transport's own handback: it acks the original
+    // (so the pending list empties) and republishes the event as a new entry
+    // (so the stream is one longer) carrying the next delivery attempt.
+    expect(expired.afterExit.transport.pending).toEqual([])
+    expect(expired.afterExit.transport.streamLength).toBe(expired.inFlight.transport.streamLength + 1)
+
+    const abandoned = expired.inFlight.transport.pending[0]
+    const requeued = expired.afterExit.transport.events.at(-1)!
+    expect(requeued.id).not.toBe(abandoned.id)
+    expect(requeued.event.type).toBe(abandoned.event.type)
+    expect(requeued.event.runId).toBe(expired.runId)
+    expect(requeued.event.deliveryAttempt).toBe(2)
   })
 
-  it("keeps the dead worker's consumer in the group, which is what XAUTOCLAIM claims from", () => {
-    // Nothing in the transport ever runs XGROUP DELCONSUMER, so the pending
-    // entry still has an owner to be claimed away from. Were the consumer
-    // dropped on unsubscribe, the entry would be unreachable and the run
-    // unrecoverable rather than merely late.
+  it("leaves the dead worker's consumer holding nothing, so nothing waits on the reclaim", () => {
+    // Nothing in the transport runs XGROUP DELCONSUMER, so the dead consumer
+    // is still listed. What matters is that it owns no entry: an entry owned
+    // by a consumer that will never read again is exactly the fifteen minute
+    // park this item is about.
     const owner = expired.afterExit.transport.consumers.find(
-      (consumer) => consumer.name === expired.afterExit.transport.pending[0].consumer,
+      (consumer) => consumer.name === expired.inFlight.transport.pending[0].consumer,
     )
-    expect(owner?.pending).toBe(1)
+    expect(owner?.pending).toBe(0)
+  })
+
+  it("lets a replacement finish the run in seconds rather than after the reclaim window", () => {
+    // The abandoned step does run a second time, which is unavoidable: it was
+    // truncated mid-body. The cost of the redeploy is that one re-run and the
+    // gap between processes, not fifteen minutes of nothing.
+    expect(expired.afterReplacement.state?.status).toBe("success")
+    expect(matching(expired.afterReplacement.records, "probe-slow", "start")).toHaveLength(2)
+    expect(matching(expired.afterReplacement.records, "probe-slow", "done")).toHaveLength(1)
+    expect(expired.afterReplacement.recoveredAfterMs).toBeLessThan(60_000)
   })
 })

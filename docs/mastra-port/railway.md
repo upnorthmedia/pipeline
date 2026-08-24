@@ -144,7 +144,9 @@ through the settings UI.
   platform lets the process live. Nobody has measured Railway's grace period
   against a deployed service, and a `SIGKILL` that lands first leaves the stage
   message pending exactly as it did before the drain existed, which is late but
-  never lost. Lower the variable if a redeploy is seen being killed mid-drain.
+  never lost: a drain that reaches its own deadline hands the message back to
+  the group (P2.91b), but a `SIGKILL` gives it no chance to. Lower the variable
+  if a redeploy is seen being killed mid-drain.
 - **Railway IaC is experimental** by Railway's own documentation, and the
   generated file formatting may change while the DSL is unstable.
 - **The worker has no Railway healthcheck.** It serves no HTTP.

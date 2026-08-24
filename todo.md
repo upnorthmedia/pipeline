@@ -1,19 +1,18 @@
 # todo
 
-- [confirmed] 2026-08-24 A stage that outlives the shutdown drain is still parked for the
-  fifteen-minute reclaim. P2.91a made `stopWorkers()` wait: `DrainingPubSub` counts each
-  delivery until its `ack`/`nack` and holds `unsubscribe()` open until the count is zero or
-  `WORKER_DRAIN_TIMEOUT_MS` (120s) expires, so a redeploy landing on a normal stage now
-  finishes it, acks it, and costs the run only the gap between the two processes. A stage
-  still running at the deadline (or a `SIGKILL` from the platform before it) is left pending
-  exactly as before, recovered by `XAUTOCLAIM` at `RECLAIM_IDLE_MS` (15 minutes) plus up to
-  one 30s tick, and re-run and re-billed from the beginning. The obvious handoff, a nack on
-  expiry, is not obviously right: a nack increments `deliveryAttempt` against a
-  `maxDeliveryAttempts` the app leaves at the library default of 5, so five redeploys landing
-  on one stage would drop its event rather than stall it, and `XCLAIM` with a zero idle time
-  has no replacement consumer to name at shutdown. Ledger item P2.91b. Now also owns the
-  console bridge the demoted engine-logger finding needed, whose mechanism is documented at
-  `web/src/test/engine-step-errors.ts`.
+- [optimization] 2026-08-24 Mastra's engine logs step failures to a logger the app cannot
+  configure, so in the `worker` service a step failure prints `Error executing step <id>:
+  <stack>` as plain text on stderr instead of as a line in the configured `PinoLogger`'s JSON
+  stream, and `logger.trackException` for it is a no-op. The failure itself is not lost:
+  `recordRunFailure` writes `_error` onto the post and announces `stage_error`, which is what
+  the dashboard and the dead-letter queue read, so this is log format and not correctness.
+  Mechanism, with the two construction sites that never call `__registerMastra`, is documented
+  at `web/src/test/engine-step-errors.ts`, which is also how a suite asserts on an expected
+  step failure. Demoted from `[confirmed]` at P2.35 and folded into P2.91 there, on the
+  assumption that P2.91 would end with a worker entry this repo owns and could install a
+  console bridge from. It did not: P2.91a and P2.91b are both a `RedisStreamsPubSub` subclass
+  and the generated entry is untouched, so this needs a seam of its own or a `mastra` release
+  that registers the processor's logger.
 
 - [confirmed] 2026-08-24 `MODEL_COSTS` prices `claude-opus-4-6` at 15.0 / 75.0 per million
   tokens, which is that model's launch price; Anthropic publishes 5.0 / 25.0 for it now.
@@ -183,10 +182,11 @@
   publish leaves the column there with nothing to reconcile it. The post header says
   `Publishing...` and, since polish ledger P3.2b-ii, the run trace shows a `Publish to
   <target>` row whose elapsed clock counts up from the `publish_start` entry indefinitely. It
-  is the same shape as the stage case in this file's shutdown-drain entry (a `SIGTERM`
-  truncates the running step), except that no `XAUTOCLAIM` recovers it, because the publish
-  workflows declare no `retryConfig` either. P2.91a's drain narrows it the same way: a publish
-  that finishes inside `WORKER_DRAIN_TIMEOUT_MS` now completes rather than being truncated. Found at polish ledger P3.2b-ii.
+  is the same shape as the stage case P2.91 fixed (a `SIGTERM` truncates the running step),
+  except that no `XAUTOCLAIM` recovers it, because the publish workflows declare no
+  `retryConfig` either. P2.91's drain narrows it the same way: a publish that finishes inside
+  `WORKER_DRAIN_TIMEOUT_MS` now completes rather than being truncated, and one that does not is
+  handed back to the group rather than parked. Found at polish ledger P3.2b-ii.
 
 - [investigate] 2026-08-24 The run trace does not update during a publish. `use-sse.ts`
   refetches the post on `stage_complete`, `stage_error` and `pipeline_complete`;
