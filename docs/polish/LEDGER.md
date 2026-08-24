@@ -599,7 +599,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [x] **P2.74** `[confirmed]` A worker process running outside the test suite breaks the suite. While a `jena-worker` container was up against the shared dev Redis, a full ... Contradicted: three worker-up runs are identical to three worker-down runs; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [x] **P2.75** `[investigate]` `next build` inside the web image prints seven `[Error [BetterAuthError]: You are using the default secret...]` lines plus a matching BetterAuth ... Fixed with P2.28: the builder stage carries build-only `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` placeholders beside the database and Redis ones, and no runtime stage inherits either. Image build verified clean. [evidence](evidence/p2.md#p228-p254-p275)
 - [x] **P2.76** `[confirmed]` Generated images are unreachable from the `web` service on Railway. The `/media` volume is mounted on `worker`, which writes them, but Railway ... Fixed by P1.2c-ii; entry removed from `todo.md`. [evidence](evidence/p1.md#p12c-ii)
-- [ ] **P2.77** `[confirmed]` Nothing runs database migrations on deploy. `deploy.preDeployCommand` is the documented Railway hook, but neither runtime image carries ... Split, because a pre-deploy hook pointed at a script nothing has ever executed fails the deploy rather than migrating anything.
+- [x] **P2.77** `[confirmed]` Nothing runs database migrations on deploy. `deploy.preDeployCommand` is the documented Railway hook, but neither runtime image carries ... Split, because a pre-deploy hook pointed at a script nothing has ever executed fails the deploy rather than migrating anything.
   - [x] **P2.77a** The commands have to run at all. `pnpm auth:migrate` had been dead since
         `c24f196` (P2.28) added a `@/`-aliased import to `src/lib/auth.ts`, which the script
         loads under bare node: `ERR_MODULE_NOT_FOUND: Cannot find package '@/lib'`. Fixed by
@@ -608,7 +608,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
         now runs both documented commands as commands against a scratch database, which is the
         thing `baseline-parity.test.ts` cannot do: it calls `migrate()` as a library and stayed
         green through the whole outage. [evidence](evidence/p2.md#p277a)
-  - [ ] **P2.77b** Ship them and run them. Split again, because the image change was the only
+  - [x] **P2.77b** Ship them and run them. Split again, because the image change was the only
         part the rest depends on and it had a wrong answer in it.
     - [x] **P2.77b-i** A migration command a runtime image can run. `pnpm db:migrate` was
           `drizzle-kit migrate`, a devDependency installed in no runtime stage, so it is now
@@ -619,12 +619,16 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
           `outputFileTracingIncludes`, which Next expands against all sixteen aliases of the
           package in pnpm's virtual store and takes `.next/standalone` from 151MB to 426MB.
           Run inside the built image against a real Postgres. [evidence](evidence/p2.md#p277b-i)
-    - [ ] **P2.77b-ii** Run it on deploy. `preDeployCommand` on the `web` service in
-          `.railway/railway.ts` (`IntentServiceConfig.preDeployCommand`, verified against
-          railway@3.10.0), the BetterAuth half (`scripts/auth-migrate.mts` reaches
-          `better-auth`, `@better-auth/stripe`, `stripe` and `resend`, none of them at the top
-          level of the standalone `node_modules`, and needs node's TypeScript stripping), and
-          P2.99's `ensureMastraStorage()` folded in, since that is the same hook.
+    - [x] **P2.77b-ii** Run it on deploy. `preDeployCommand` on **both** services runs
+          `node scripts/predeploy.mjs`, which applies the `drizzle/` migrations, the BetterAuth
+          tables and the `mastra_*` run-state tables under one lock, so P2.99 closes with it:
+          a hook on `web` alone leaves `worker` starting into the same first-init race. The
+          BetterAuth half is bundled rather than vendored, because `better-auth` sits under
+          `.pnpm/` with no top-level entry and `@better-auth/stripe`, `stripe`, `resend` and
+          `@mastra/pg` are compiled into the server chunks; `pnpm build` writes one 7.5MB
+          esbuild output into the standalone tree. The obvious `pg_advisory_lock` deadlocks
+          against `@mastra/pg`'s `CREATE INDEX CONCURRENTLY`, so the lock is polled with
+          `pg_try_advisory_lock`. [evidence](evidence/p2.md#p277b-ii)
 - [x] **P2.78** `[confirmed]` `scaffold-check.test.ts > emits the workflow lifecycle events the trace view will read` fails under a full parallel `pnpm -C web test` while ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.79** `[confirmed]` The objective's literal typecheck gate `pnpm -C web tsc --noEmit` does not run on the installed pnpm (10.26.2): it exits 254 with ...
 - [x] **P2.80** `[confirmed]` The 6 failing tests in `web/src/components/__tests__/image-preview.test.tsx`. The same finding as P0.1, removed from `todo.md`. [evidence](evidence/p0.md#p01)
@@ -659,11 +663,12 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       suspended post is discoverable only by opening its own detail page. Fixed at P3.2b-i:
       `GET /api/posts?awaiting_review=true` and the `Waiting for review` filter on `/`.
       [evidence](evidence/p3.md#p32b-i)
-- [ ] **P2.99** `[confirmed 2026-08-24]` A fresh deploy can lose a service to the `@mastra/pg`
+- [x] **P2.99** `[confirmed 2026-08-24]` A fresh deploy can lose a service to the `@mastra/pg`
       first-init race: `web` and `worker` both build the `mastra_*` schema on first init with
-      DDL that is not concurrency-safe, and Railway starts both together. The suite's fix is
-      `ensureMastraStorage()`; the deploy equivalent needs the same pre-deploy hook as P2.77,
-      so fix the two together.
+      DDL that is not concurrency-safe, and Railway starts both together. Closed with P2.77b-ii:
+      `ensureMastraStorage()` moved to `src/lib/` and runs inside the pre-deploy hook, which is
+      on both services precisely so no process opens a store against a database that has no
+      `mastra_*` tables. [evidence](evidence/p2.md#p277b-ii)
 - [ ] **P2.100** `[investigate 2026-08-24]` `pnpm auth:migrate --apply` against a fresh
       database creates no `subscription` table, though `src/lib/auth.ts` mounts the
       `@better-auth/stripe` plugin and `schema-parity.ts` names the table. Either the plugin

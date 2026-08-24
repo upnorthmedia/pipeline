@@ -4,6 +4,11 @@ import { PostgresStore } from "@mastra/pg"
  * Creates the `mastra_*` run-state tables once, before anything else opens a
  * store against the same database.
  *
+ * Lives under `src/lib/` rather than `src/test/` because the deploy has the
+ * same problem as the suite: `scripts/predeploy.ts` runs this from Railway's
+ * `preDeployCommand` on both services, so the tables exist before either
+ * process starts. Ledger item P2.99.
+ *
  * `@mastra/pg` builds its own schema the first time a `PostgresStore` starts,
  * and that DDL is not safe to run concurrently: two stores initialising at the
  * same moment against a database that has no `mastra_*` tables both issue the

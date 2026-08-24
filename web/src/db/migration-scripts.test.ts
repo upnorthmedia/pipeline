@@ -24,7 +24,7 @@ import { promisify } from "node:util"
 import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
-import { databaseUrl } from "../../scripts/migrate.mjs"
+import { databaseUrl } from "../../scripts/migrate-lib.mjs"
 
 import { toNodePostgresUrl } from "./index"
 
@@ -189,10 +189,10 @@ describe("the documented fresh-database commands", () => {
 })
 
 describe("the deploy script's connection string", () => {
-  // `scripts/migrate.mjs` cannot import `src/db/index.ts` (that module reaches
-  // `./schema` with no file extension, which bare node will not resolve), so it
-  // carries its own copy of the same two lines. These hold the copy to the
-  // original.
+  // `scripts/migrate-lib.mjs` cannot import `src/db/index.ts` (that module
+  // reaches `./schema` with no file extension, which bare node will not
+  // resolve), so it carries its own copy of the same two lines. These hold the
+  // copy to the original.
   const CASES = [
     "postgresql://pipeline:pipeline@localhost:5435/content_pipeline",
     "postgresql+asyncpg://pipeline:pipeline@db:5432/content_pipeline",

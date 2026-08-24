@@ -38,22 +38,24 @@
   `retry_delay = 10` was a `WorkerSettings` key and spaced every job function's retries
   equally. Ledger item P2.95.
 
-- [confirmed] 2026-08-23 Nothing runs database migrations on deploy. `deploy.preDeployCommand`
-  is the documented Railway hook, but neither runtime image can run either migration: the Next
-  standalone output carries `drizzle/` and `scripts/` but not `drizzle-orm`, which is bundled
-  into the server chunks rather than listed in `serverExternalPackages`, so
-  `drizzle-orm/node-postgres/migrator` is absent. A fresh Railway environment therefore needs
-  `pnpm -C web db:migrate` and `pnpm -C web auth:migrate --apply` run by hand against the
-  Postgres service's `DATABASE_PUBLIC_URL`. Two thirds done. Polish ledger P2.77a fixed
-  `pnpm auth:migrate`, which had been unrunnable since the `@/` import added by P2.28, and
-  `web/src/db/migration-scripts.test.ts` now executes both commands against a scratch database.
-  P2.77b-i made the pipeline half runnable in the image: `pnpm db:migrate` is
-  `scripts/migrate.mjs` over drizzle-orm's own migrator rather than drizzle-kit, and the
-  Dockerfile copies `drizzle-orm` into `/app/node_modules`, verified by running
-  `node scripts/migrate.mjs` inside the built image. What is left is `preDeployCommand` in
-  `.railway/railway.ts`, the BetterAuth half (which needs `better-auth`, `@better-auth/stripe`,
-  `stripe` and `resend` in the image plus node's TypeScript stripping), and the
-  `ensureMastraStorage()` entry below, which needs the same hook. Ledger item P2.77b-ii.
+- [investigate] 2026-08-24 One full `pnpm test` run in four reported
+  `1 failed | 5262 passed` in `src/app/api/posts/create.test.ts`, about thirty seconds after the
+  compose `redis` container was restarted from an `Exited (137)` OOM kill. The file passes on
+  its own and three full runs either side are identical at `5263 passed | 9 skipped`, so this is
+  either a real cold-Redis race in that file or a residue of the killed run before it. The
+  failure text was lost to a truncated capture; the file was identified from the two source
+  lines the reporter printed. Reproduce by restarting `redis` and immediately running the full
+  suite. Found at polish ledger P2.77b-ii.
+
+- [confirmed] 2026-08-24 The pre-deploy migration hook has never been watched running on
+  Railway. Polish ledger P2.77b-ii wired it: `preDeployCommand` on both services in
+  `.railway/railway.ts` runs `node scripts/predeploy.mjs`, a bundle `pnpm build` writes into
+  the Next standalone output, which applies the `drizzle/` migrations, the BetterAuth tables
+  and the `mastra_*` run-state tables under one advisory lock.
+  `web/src/db/predeploy.test.ts` runs that bundle against a real database from a directory
+  with no `node_modules`, and `pnpm standalone:check` proves the image carries it, but this
+  project has no deployed Railway environment, so nobody has seen Railway execute the hook or
+  abort a deployment on its exit code.
 
 - [confirmed] 2026-08-23 The objective's literal typecheck gate `pnpm -C web tsc --noEmit`
   does not run on the installed pnpm (10.26.2): it exits 254 with
@@ -85,18 +87,6 @@
   product decision: require a profile on the form, or make `profile_id` nullable in the read
   path. Found while repairing `full-pipeline.test.ts` for polish ledger P0.5c. Ledger item
   P2.97.
-
-- [confirmed] 2026-08-24 A fresh deploy can lose a service to the same `@mastra/pg` first-init
-  race the test suite hit at polish ledger P0.6a. `web` and `worker` both import
-  `web/src/mastra/index.ts`, both start Mastra, and the adapter builds its own `mastra_*` schema
-  on first init with DDL that is not concurrency-safe: two stores initialising at the same
-  moment against a database that has no `mastra_*` tables issue the same `CREATE INDEX` and the
-  loser dies with `duplicate key value violates unique constraint "pg_class_relname_nsp_index"`
-  (measured: four concurrent `PostgresStore.init()` calls against a virgin database, three
-  reject). Railway starts both services together, so a first deploy against an empty database is
-  a coin toss. The suite's fix is `ensureMastraStorage()` in `src/test/global-setup.ts`; the
-  deploy equivalent is a pre-deploy step that runs it once, which is the same hook P2.77 needs
-  for `pnpm db:migrate`. Fix the two together. Ledger item P2.99.
 
 - [investigate] 2026-08-24 `pnpm auth:migrate --apply` against a fresh database reports
   `tables to create: auth_users, auth_sessions, auth_accounts, auth_verifications` and no

@@ -64,6 +64,27 @@ export default defineRailway(() => {
   const source = github("upnorthmedia/pipeline", { branch: "master" })
 
   /**
+   * The database migration hook, run by both services before either of them
+   * takes traffic. `IntentServiceConfig.preDeployCommand` (railway@3.10.0) is
+   * the documented place for it; Railway aborts the deployment if the command
+   * exits non-zero, which is what makes a failed migration stop a release
+   * rather than start one against the wrong schema.
+   *
+   * `scripts/predeploy.mjs` is a bundle `pnpm build` writes into the Next
+   * standalone output, because the packages it reaches (`better-auth`,
+   * `@better-auth/stripe`, `stripe`, `resend`, `@mastra/pg`) are compiled into
+   * the server chunks and are not resolvable from a sibling script in the
+   * image. It applies the pipeline schema, the BetterAuth tables and the
+   * `mastra_*` run-state tables under one advisory lock.
+   *
+   * On both services, not just `web`: the `mastra_*` DDL is not concurrency
+   * safe, so the point is that every process that opens a store finds the
+   * tables already there. A hook on `web` alone leaves `worker` starting into
+   * the same race it always had. See `docs/polish/evidence/p2.md#p277b-ii`.
+   */
+  const preDeployCommand = "node scripts/predeploy.mjs"
+
+  /**
    * `preserve()` compiles to `{ type: "preserve" }` and is dropped from the
    * desired state rather than written, so a secret named here is documented
    * without its value ever entering git and without an apply overwriting what
@@ -84,6 +105,7 @@ export default defineRailway(() => {
     source,
     build,
     start: "node server.js",
+    preDeployCommand,
     // `/` redirects an unauthenticated request to `/auth/sign-in`, and Railway
     // waits for an HTTP 200 before switching traffic, so the probe needs a path
     // outside the middleware matcher.
@@ -112,6 +134,7 @@ export default defineRailway(() => {
     source,
     build,
     start: "node .mastra/worker/index.mjs",
+    preDeployCommand,
     // No healthcheck: the worker serves no HTTP. Its liveness question is
     // whether it is consuming the Mastra orchestration group, which
     // `scripts/worker-healthcheck.mjs` answers for compose and which Railway
@@ -126,6 +149,11 @@ export default defineRailway(() => {
     },
     env: {
       ...shared,
+      // Not for the worker itself, which never imports `src/lib/auth.ts`: for
+      // `preDeployCommand`, which does, and which refuses to start without a
+      // secret rather than signing anything with better-auth's published
+      // fallback. Same value as `web`.
+      BETTER_AUTH_SECRET: preserve(),
     },
   })
 

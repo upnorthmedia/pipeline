@@ -18,6 +18,7 @@
  *
  * Run it after `pnpm build`, through `pnpm standalone:check`.
  */
+import { isBuiltin } from "node:module"
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -62,10 +63,43 @@ function dockerfileVendored() {
   return [...source.matchAll(/^COPY\s+.*?\s\.\/node_modules\/(\S+)\s*$/gm)].map((match) => match[1])
 }
 
+/**
+ * Every package the command reaches, following its relative imports.
+ *
+ * One level is not enough: `scripts/migrate.mjs` is the command and
+ * `scripts/migrate-lib.mjs` is where `drizzle-orm` is actually imported, so a
+ * check that read only the entry point would report nothing to account for and
+ * pass.
+ */
+function packagesReachedFrom(entry) {
+  const seen = new Set()
+  const packages = new Set()
+  const queue = [entry]
+  while (queue.length) {
+    const file = queue.shift()
+    if (seen.has(file)) {
+      continue
+    }
+    seen.add(file)
+    if (!fs.existsSync(file)) {
+      fail(`${path.relative(standalone, file)} is imported but is not in the standalone output`)
+    }
+    for (const [, specifier] of fs.readFileSync(file, "utf8").matchAll(/^import .*? from "([^"]+)"/gm)) {
+      if (specifier.startsWith("node:")) {
+        continue
+      }
+      if (specifier.startsWith(".")) {
+        queue.push(path.resolve(path.dirname(file), specifier))
+      } else {
+        packages.add(specifier)
+      }
+    }
+  }
+  return [...packages]
+}
+
 const vendored = dockerfileVendored()
-const specifiers = [...fs.readFileSync(script, "utf8").matchAll(/^import .*? from "([^"]+)"/gm)]
-  .map((match) => match[1])
-  .filter((specifier) => !specifier.startsWith(".") && !specifier.startsWith("node:"))
+const specifiers = packagesReachedFrom(script)
 if (specifiers.length === 0) {
   fail("scripts/migrate.mjs imports no packages, so this check would pass vacuously")
 }
@@ -85,7 +119,35 @@ const sources = specifiers.map((specifier) => {
   )
 })
 
+/**
+ * The pre-deploy hook itself, which `pnpm build` bundles into the same tree.
+ *
+ * It is one self-contained file on purpose: `better-auth` lands under `.pnpm/`
+ * with no top-level entry, and `@better-auth/stripe`, `stripe`, `resend` and
+ * `@mastra/pg` are bundled into the server chunks rather than externalised, so
+ * none of them is a package a sibling script could import. A bare specifier
+ * surviving in the output would be a package the image does not have, and the
+ * failure would appear on a deploy rather than here.
+ */
+const predeploy = path.join(standalone, "scripts", "predeploy.mjs")
+if (!fs.existsSync(predeploy)) {
+  fail(
+    "scripts/predeploy.mjs is not in the standalone output; `pnpm build` should have bundled it",
+  )
+}
+const bundle = fs.readFileSync(predeploy, "utf8")
+const bare = [...bundle.matchAll(/^import\s[^;]*?\sfrom\s*"([^"]+)"/gm)]
+  .map((match) => match[1])
+  .filter((specifier) => !specifier.startsWith("node:") && !isBuiltin(specifier))
+if (bare.length) {
+  fail(
+    `scripts/predeploy.mjs still imports ${[...new Set(bare)].join(", ")}, which the image ` +
+      `cannot resolve from /app/scripts`,
+  )
+}
+
 console.log(
   `standalone migrate check: ok, ${journal.entries.length} migrations and ${specifiers.length} packages accounted for\n  ` +
-    sources.join("\n  "),
+    sources.join("\n  ") +
+    `\n  scripts/predeploy.mjs -> ${Math.round(fs.statSync(predeploy).size / 1024)} KB, no unresolvable imports`,
 )

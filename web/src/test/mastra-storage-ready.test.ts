@@ -13,7 +13,7 @@ import { PostgresStore } from "@mastra/pg"
 import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
-import { ensureMastraStorage } from "./mastra-storage"
+import { ensureMastraStorage } from "@/lib/mastra-storage"
 
 /** Rebuilt on every run, so its name must never collide with a real database. */
 const SCRATCH_DB = "content_pipeline_mastra_storage_check"

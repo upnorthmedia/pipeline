@@ -3,7 +3,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { applyRepoRootEnv } from "../../repo-env"
-import { ensureMastraStorage } from "./mastra-storage"
+import { ensureMastraStorage } from "../lib/mastra-storage"
 import { testMediaRoot } from "./test-media-root"
 
 // Global setup runs in Vitest's own process, which never sees `test.env`, so

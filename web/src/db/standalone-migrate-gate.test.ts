@@ -20,6 +20,11 @@
  * `pnpm test` builds an image, so that half is structural: the running proof is
  * in the evidence file.
  *
+ * Ledger item P2.77b-ii adds the hook that runs it: `preDeployCommand` on both
+ * Railway services, pointed at a bundle `pnpm build` writes into the same tree.
+ * The wiring is three separate files agreeing with each other, so it is pinned
+ * here; what the bundle actually does is `src/db/predeploy.test.ts`.
+ *
  * Parsing the workflow rather than running it keeps this in `pnpm test`, where
  * a full `next build` does not belong. `src/mastra/worker-bundle-gate.test.ts`
  * is the same shape for the worker bundle.
@@ -36,6 +41,8 @@ const WEB = path.resolve(__dirname, "../..")
 const WORKFLOW = path.resolve(WEB, "../.github/workflows/ci.yml")
 const CHECK_SCRIPT = "scripts/check-standalone-migrate.mjs"
 const MIGRATE_SCRIPT = "scripts/migrate.mjs"
+/** The bundle `pnpm build` writes into the standalone tree for the deploy hook. */
+const PREDEPLOY_SCRIPT = "scripts/predeploy.mjs"
 const DOCKERFILE = path.resolve(WEB, "Dockerfile")
 
 interface Step {
@@ -85,6 +92,35 @@ describe("standalone migration gate", () => {
         `stage ${stage.name} should carry drizzle-orm for ${MIGRATE_SCRIPT}`,
       ).toContain("/app/node_modules/drizzle-orm")
     }
+  })
+
+  it("bundles the pre-deploy hook as part of the build, not beside it", () => {
+    // The bundle has to be written into the same `.next/standalone` the
+    // Dockerfile copies. A separate script somebody has to remember to run is a
+    // script CI would skip and the image would ship without.
+    expect(packageScripts().build).toContain("scripts/build-predeploy.mjs")
+    expect(fs.existsSync(path.join(WEB, "scripts/build-predeploy.mjs"))).toBe(true)
+    expect(fs.existsSync(path.join(WEB, "scripts/predeploy.ts"))).toBe(true)
+    expect(fs.readFileSync(path.join(WEB, CHECK_SCRIPT), "utf8")).toContain("predeploy.mjs")
+  })
+
+  it("runs the hook on both Railway services, which is what closes the Mastra race", () => {
+    // Parsed rather than executed: the DSL is the `railway` npm package, which
+    // the CLI resolves for itself and which `web/` does not install.
+    const railway = fs.readFileSync(path.resolve(WEB, "../.railway/railway.ts"), "utf8")
+    expect(railway).toContain(`const preDeployCommand = "node ${PREDEPLOY_SCRIPT}"`)
+
+    for (const name of ["web", "worker"]) {
+      const block = railway.split(`service("${name}", {`)[1]?.split("\n  })")[0]
+      expect(block, `.railway/railway.ts should define a ${name} service`).toBeTruthy()
+      expect(block, `the ${name} service should migrate before it starts`).toContain(
+        "preDeployCommand,",
+      )
+    }
+
+    // `src/lib/auth.ts` throws at import without it, and the hook imports it.
+    const worker = railway.split('service("worker", {')[1].split("\n  })")[0]
+    expect(worker).toContain("BETTER_AUTH_SECRET: preserve()")
   })
 
   it("checks the standalone tree in CI, after the build that produces it", () => {

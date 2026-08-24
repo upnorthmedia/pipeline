@@ -103,12 +103,15 @@ through the settings UI.
    inlined at build time, so a build that runs before a domain exists produces
    a client pointing at localhost. Generate the domain, then redeploy.
 2. **Set the preserved secrets** before the first deploy of `web`.
-3. **Create the schema.** Nothing in the deployment runs migrations. Against
-   the Postgres service's `DATABASE_PUBLIC_URL`, from a checkout:
-   `pnpm -C web db:migrate` (pipeline tables) then
-   `pnpm -C web auth:migrate --apply` (BetterAuth tables; without `--apply` it only
-   prints the DDL). The `mastra_*` run-state tables are created by the
-   `@mastra/pg` adapter on first boot. See `web/drizzle/README.md`.
+3. **Nothing, for the schema.** Both services run
+   `node scripts/predeploy.mjs` as their `preDeployCommand`, which applies the
+   pipeline migrations in `drizzle/`, creates or updates the BetterAuth tables
+   and creates the `mastra_*` run-state tables, all under one advisory lock so
+   the two services can deploy together. A failure exits non-zero and Railway
+   aborts that deployment. To build a database by hand instead, from a
+   checkout against the Postgres service's `DATABASE_PUBLIC_URL`:
+   `pnpm -C web db:migrate` then `pnpm -C web auth:migrate --apply` (without
+   `--apply` it only prints the DDL). See `web/drizzle/README.md`.
 4. **Carry the data over.** `WP_ENCRYPTION_KEY` only means something with the
    `api_settings` rows it encrypted.
 
@@ -127,9 +130,12 @@ through the settings UI.
   Consequence for an existing deployment: images generated before this exist
   only on the worker's volume, so they keep answering 404 from `web` until
   their stage is re-run.
-- **No automated migrations.** `deploy.preDeployCommand` is the documented hook,
-  but neither runtime image carries `drizzle-kit` or the `drizzle/` folder, so
-  there is nothing to run there yet. Step 3 above is manual.
+- **The pre-deploy hook has never run on Railway.** It is proven in `pnpm test`
+  against a real database from a directory with no `node_modules`, which is the
+  shape the image gives it, and the image is proven to carry it by
+  `pnpm standalone:check`. Nobody has watched Railway execute it, because this
+  project has no deployed environment to watch. See
+  `docs/polish/evidence/p2.md#p277b-ii`.
 - **Railway IaC is experimental** by Railway's own documentation, and the
   generated file formatting may change while the DSL is unstable.
 - **The worker has no Railway healthcheck.** It serves no HTTP.
