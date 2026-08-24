@@ -48,6 +48,7 @@ import {
   type PostAnalytics,
   STAGES,
 } from "@/lib/api";
+import { STAGE_LABELS } from "@/lib/stages";
 import { lastPublishError } from "@/lib/publish-report";
 import { plainMessage } from "@/lib/plain-message";
 import { useSSE, type SSEEvent } from "@/hooks/use-sse";
@@ -69,15 +70,6 @@ const STAGE_UPDATE_FIELDS: Record<PipelineStage, string> = {
   edit: "final_md_content",
   images: "image_manifest",
   ready: "ready_content",
-};
-
-const STAGE_LABELS: Record<PipelineStage, string> = {
-  research: "Research",
-  outline: "Outline",
-  write: "Draft",
-  edit: "Editing",
-  images: "Images",
-  ready: "Ready",
 };
 
 export default function PostDetailPage() {

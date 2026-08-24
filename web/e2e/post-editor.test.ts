@@ -67,8 +67,8 @@ test.describe("Post Editor", () => {
 
     await expect(page.getByRole("heading", { name: post.topic })).toBeVisible()
 
-    // STAGE_LABELS in src/app/posts/[id]/page.tsx, one per entry of STAGES.
-    for (const label of ["Research", "Outline", "Draft", "Editing", "Images", "Ready"]) {
+    // STAGE_LABELS in src/lib/stages.ts, one per entry of STAGES.
+    for (const label of ["Research", "Outline", "Write", "Edit", "Images", "Ready"]) {
       await expect(page.getByRole("tab", { name: label })).toBeVisible()
     }
   })

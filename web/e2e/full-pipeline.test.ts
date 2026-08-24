@@ -24,11 +24,12 @@ const PROFILE_URL = "https://full-pipeline.jena.test";
 const POST_TOPIC = "Best AR-15 Optics for Every Budget";
 const POST_SLUG = "best-ar-15-optics-for-every-budget";
 
-/** The six stage dots `PipelineProgress` renders, in pipeline order. */
+/**
+ * The six stage names, in pipeline order. The dots `PipelineProgress` renders
+ * and the tabs `/posts/[id]` renders use the same ones: they used to disagree
+ * on `write` and `edit`, which is what `src/lib/stages.ts` now owns.
+ */
 const STAGE_LABELS = ["Research", "Outline", "Write", "Edit", "Images", "Ready"];
-
-/** The six tabs `/posts/[id]` renders, which name two stages differently. */
-const TAB_LABELS = ["Research", "Outline", "Draft", "Editing", "Images", "Ready"];
 
 let createdProfileId: string | null = null;
 let createdPostId: string | null = null;
@@ -99,7 +100,7 @@ test.describe("Full pipeline journey", () => {
     for (const label of STAGE_LABELS) {
       await expect(page.getByLabel(new RegExp(`^${label}: `))).toBeVisible();
     }
-    for (const label of TAB_LABELS) {
+    for (const label of STAGE_LABELS) {
       await expect(page.getByRole("tab", { name: label })).toBeVisible();
     }
   });

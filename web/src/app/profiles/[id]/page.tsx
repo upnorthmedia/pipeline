@@ -55,6 +55,7 @@ import {
   type WPAuthor,
   STAGES,
 } from "@/lib/api";
+import { STAGE_LABELS } from "@/lib/stages";
 import { plainMessage } from "@/lib/plain-message";
 import { OutputFormatSelect } from "@/components/output-format-select";
 import { publishTargets, type FormatAvailabilityMap } from "@/lib/publishing";
@@ -893,7 +894,7 @@ export default function ProfileDetailPage() {
                   key={stage}
                   className="flex items-center justify-between rounded-md border border-border px-3 py-2"
                 >
-                  <span className="text-sm font-medium capitalize">{stage}</span>
+                  <span className="text-sm font-medium">{STAGE_LABELS[stage]}</span>
                   <Select
                     name={`stage_${stage}`}
                     value={stageSettings[stage]}

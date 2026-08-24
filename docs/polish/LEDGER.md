@@ -191,7 +191,7 @@ move on. A split is not an iteration on its own: split and complete the first ch
         each now asserts both the record and the string that replaced it. Verified by a real
         publish to a real WordPress install, read back with `context=edit`.
         [evidence](evidence/p1.md#p13c)
-  - [ ] **P1.3d** The UI: one obvious place to configure and test a connection, a connection
+  - [x] **P1.3d** The UI: one obvious place to configure and test a connection, a connection
         status derived from a real test rather than from two fields being non-empty, output
         formats that disable themselves with an explanation, and a publish action that reports
         what happened.
@@ -333,7 +333,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [ ] **P2.81** `[confirmed]` The app has no theme switch: `web/src/app/layout.tsx:28` hardcodes `<html lang="en" className="dark">` and no `ThemeProvider` is mounted ...
 - [ ] **P2.82** `[investigate]` `pnpm -C web dev` serves the repo's own `media/` directory, but the item 7.6 end-to-end run executed in the compose stack and wrote its five ...
 - [x] **P2.83** `[investigate]` `GET /api/posts` answers `500` with an empty body when its database is unreachable (verified by stopping the compose `db` container under a live ... Reproduced without stopping anything (`?q=%00`, a NUL byte Postgres refuses) and fixed for every handler: App Router has no error boundary for route handlers, so `withServerError` in `src/lib/route-error.ts` wraps all 55 of them, answering Starlette's own `{"detail": "Internal Server Error"}` and putting the cause in the log rather than the body. A guard test asserts every `route.ts` is wrapped. [evidence](evidence/p2.md#p283)
-- [ ] **P2.84** `[confirmed]` `/posts/[id]` names two of the six stages twice: the tab strip in `web/src/app/posts/[id]/page.tsx` labels them "Draft" and "Editing" while the ...
+- [x] **P2.84** `[confirmed]` `/posts/[id]` names two of the six stages twice: the tab strip in `web/src/app/posts/[id]/page.tsx` labels them "Draft" and "Editing" while the ... Seven surfaces each arrived at a stage's name their own way, four through a private label map and three through a CSS `capitalize` on the enum, so two of them drifted. `src/lib/stages.ts` is the one owner and a guard test fails on a second map; the e2e suite had encoded the divergence as two lists. Entry removed from `todo.md`. [evidence](evidence/p2.md#p284)
 - [ ] **P2.85** `[confirmed]` The `posts.stage_logs` column is write-only dead weight in the ported stack: the only key anything writes is `_error` ...
 - [x] **P2.86** `[confirmed]` `web/e2e/navigation.test.ts:56` asserts a "Pipeline Settings" card on `/posts/new` and no such card exists in `web/src/app/posts/new/page.tsx` ... Fixed by P0.5a: the assertion is removed, and the real hole it was describing (no per-post stage-gate editor anywhere on `/posts/new`, while `/profiles/[id]` and `/posts/batch` both have one) is recorded for P3.1; entry replaced in `todo.md`. [evidence](evidence/p0.md#p05a)
 - [x] **P2.87** `[confirmed]` `POST /api/profiles` accepts any string as `website_url`: creating a profile with the literal value `not a url` succeeded during item 8.6's live ...

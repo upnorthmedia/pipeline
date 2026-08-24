@@ -35,6 +35,7 @@ import {
   type QueueStatus,
   type DashboardStats,
 } from "@/lib/api";
+import { STAGE_LABELS } from "@/lib/stages";
 import { useSSE, type SSEEvent } from "@/hooks/use-sse";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -50,12 +51,12 @@ const EVENT_COLORS: Record<string, string> = {
 const statusChartConfig = {
   count: { label: "Posts" },
   pending: { label: "Pending", color: "hsl(210, 70%, 55%)" },
-  research: { label: "Research", color: "hsl(200, 65%, 50%)" },
-  outline: { label: "Outline", color: "hsl(270, 55%, 55%)" },
-  write: { label: "Write", color: "hsl(35, 85%, 55%)" },
-  edit: { label: "Edit", color: "hsl(45, 90%, 50%)" },
-  images: { label: "Images", color: "hsl(330, 60%, 55%)" },
-  ready: { label: "Ready", color: "hsl(160, 60%, 45%)" },
+  research: { label: STAGE_LABELS.research, color: "hsl(200, 65%, 50%)" },
+  outline: { label: STAGE_LABELS.outline, color: "hsl(270, 55%, 55%)" },
+  write: { label: STAGE_LABELS.write, color: "hsl(35, 85%, 55%)" },
+  edit: { label: STAGE_LABELS.edit, color: "hsl(45, 90%, 50%)" },
+  images: { label: STAGE_LABELS.images, color: "hsl(330, 60%, 55%)" },
+  ready: { label: STAGE_LABELS.ready, color: "hsl(160, 60%, 45%)" },
   complete: { label: "Complete", color: "hsl(145, 65%, 42%)" },
   failed: { label: "Failed", color: "hsl(0, 70%, 55%)" },
   paused: { label: "Paused", color: "hsl(220, 10%, 55%)" },

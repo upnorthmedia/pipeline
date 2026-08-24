@@ -4,6 +4,8 @@ import userEvent from "@testing-library/user-event";
 import PostDetailPage from "./[id]/page";
 import { renderWithProviders } from "@/test/render";
 import { makePost, makeCompletedPost, makeAnalytics } from "@/test/fixtures";
+import { STAGES } from "@/lib/api";
+import { STAGE_LABELS } from "@/lib/stages";
 
 const mockPush = vi.fn();
 
@@ -140,12 +142,14 @@ describe("PostDetailPage", () => {
     renderWithProviders(<PostDetailPage />);
 
     await waitFor(() => {
-      // By role: the run trace names the same stages in its own table.
-      expect(screen.getByRole("tab", { name: "Research" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Outline" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Draft" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Editing" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Images" })).toBeInTheDocument();
+      // By role: the run trace names the same stages in its own table. The
+      // names come from the shared map because a tab that calls a stage
+      // something the progress bar above it does not is the defect here.
+      for (const stage of STAGES) {
+        expect(
+          screen.getByRole("tab", { name: STAGE_LABELS[stage] }),
+        ).toBeInTheDocument();
+      }
     });
   });
 

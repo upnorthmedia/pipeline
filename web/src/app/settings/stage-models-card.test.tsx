@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 
 import { StageModelsCard } from "./stage-models-card";
 import { renderWithProviders } from "@/test/render";
+import { STAGE_LABELS } from "@/lib/stages";
 import type { PipelineStage, StageModelRow, StageModels } from "@/lib/api";
 
 vi.mock("@/lib/api", async () => {
@@ -114,7 +115,9 @@ describe("StageModelsCard table", () => {
   it("lists every stage with its effective model and provider", async () => {
     renderWithProviders(<StageModelsCard />);
 
-    await waitFor(() => expect(screen.getByText("research")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText(STAGE_LABELS.research)).toBeInTheDocument(),
+    );
     expect(within(stageCard("research")).getByText("perplexity")).toBeInTheDocument();
     expect(screen.getByLabelText("research model")).toHaveTextContent("sonar-pro");
     expect(screen.getByLabelText("write model")).toHaveTextContent("claude-opus-5");

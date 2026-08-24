@@ -423,12 +423,6 @@
   before the mirror: those bytes exist on one disk and in no shared store, so re-running the
   images stage is the only thing that makes them viewable from the other.
 
-- [confirmed] 2026-08-23 `/posts/[id]` names two of the six stages twice: the tab strip in
-  `web/src/app/posts/[id]/page.tsx` labels them "Draft" and "Editing" while the pipeline
-  progress bar and the run trace both say "Write" and "Edit", so one screen shows two names
-  for one step. Not renamed under item 8.3 because `web/e2e/post-editor.test.ts:106` asserts
-  `getByRole("tab", { name: "Draft" })` and the rename would need that suite updated with it.
-
 - [confirmed] 2026-08-23 The `posts.stage_logs` column is write-only dead weight in the ported
   stack: the only key anything writes is `_error` (`web/src/mastra/post-state.ts`), the
   execution numbers all go to `execution_logs`, and the last UI that read it (the "Cost

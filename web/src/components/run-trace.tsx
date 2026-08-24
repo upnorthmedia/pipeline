@@ -41,15 +41,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { PipelineStage, StageStatusMap } from "@/lib/api";
 import { buildRunTrace, type StageTrace, type TraceStatus } from "@/lib/run-trace";
-
-const STAGE_LABELS: Record<PipelineStage, string> = {
-  research: "Research",
-  outline: "Outline",
-  write: "Write",
-  edit: "Edit",
-  images: "Images",
-  ready: "Ready",
-};
+import { STAGE_LABELS } from "@/lib/stages";
 
 const STATUS_META: Record<
   TraceStatus,

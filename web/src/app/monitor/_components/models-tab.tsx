@@ -15,6 +15,7 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { analytics, apiErrorMessage, type ModelAnalytics } from "@/lib/api";
+import { stageLabel } from "@/lib/stages";
 import { cn } from "@/lib/utils";
 import { TabError, TabEmpty } from "./tab-states";
 
@@ -320,8 +321,8 @@ export function ModelsTab() {
                 <tbody>
                   {data.stage_success_rates.map((stage) => (
                     <tr key={stage.stage} className="border-b border-border/30 last:border-0">
-                      <td className="py-2.5 pr-4 font-medium capitalize">
-                        {stage.stage}
+                      <td className="py-2.5 pr-4 font-medium">
+                        {stageLabel(stage.stage)}
                       </td>
                       <td className="py-2.5 px-4 text-right tabular-nums text-muted-foreground">
                         {stage.total}

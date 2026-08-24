@@ -15,17 +15,15 @@ import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { PipelineStage, StageStatusMap } from "@/lib/api";
 import { STAGES } from "@/lib/api";
+import { STAGE_LABELS } from "@/lib/stages";
 
-const STAGE_META: Record<
-  PipelineStage,
-  { label: string; icon: React.ComponentType<{ className?: string }> }
-> = {
-  research: { label: "Research", icon: Search },
-  outline: { label: "Outline", icon: List },
-  write: { label: "Write", icon: Pencil },
-  edit: { label: "Edit", icon: CheckCircle },
-  images: { label: "Images", icon: ImageIcon },
-  ready: { label: "Ready", icon: PackageCheck },
+const STAGE_ICONS: Record<PipelineStage, React.ComponentType<{ className?: string }>> = {
+  research: Search,
+  outline: List,
+  write: Pencil,
+  edit: CheckCircle,
+  images: ImageIcon,
+  ready: PackageCheck,
 };
 
 const STATUS_STYLES: Record<string, { ring: string; bg: string; icon: React.ComponentType<{ className?: string }> }> = {
@@ -83,7 +81,7 @@ export const PipelineProgress = ({
               </TooltipTrigger>
               <TooltipContent>
                 <span className="text-xs">
-                  {STAGE_META[stage].label}: {status}
+                  {STAGE_LABELS[stage]}: {status}
                 </span>
               </TooltipContent>
             </Tooltip>
@@ -101,7 +99,7 @@ export const PipelineProgress = ({
       {STAGES.map((stage, i) => {
         const status = stageStatus[stage] || "pending";
         const style = STATUS_STYLES[status] || STATUS_STYLES.pending;
-        const Icon = status === "pending" ? STAGE_META[stage].icon : style.icon;
+        const Icon = status === "pending" ? STAGE_ICONS[stage] : style.icon;
         const isActive = currentStage === stage;
 
         return (
@@ -120,7 +118,7 @@ export const PipelineProgress = ({
               {/* The label is otherwise only in the tooltip, which leaves six
                   unnamed buttons in the accessibility tree and nothing for a
                   keyboard user to read. */}
-              <TooltipTrigger aria-label={`${STAGE_META[stage].label}: ${status}`}>
+              <TooltipTrigger aria-label={`${STAGE_LABELS[stage]}: ${status}`}>
                 <div
                   className={cn(
                     "relative flex h-9 w-9 items-center justify-center rounded-full ring-2 transition-all",
@@ -153,7 +151,7 @@ export const PipelineProgress = ({
                 </div>
               </TooltipTrigger>
               <TooltipContent>
-                <p className="text-xs font-medium">{STAGE_META[stage].label}</p>
+                <p className="text-xs font-medium">{STAGE_LABELS[stage]}</p>
                 <p className="text-[10px] text-muted-foreground capitalize">{status}</p>
               </TooltipContent>
             </Tooltip>

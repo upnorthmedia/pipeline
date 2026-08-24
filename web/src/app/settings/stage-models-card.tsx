@@ -49,6 +49,7 @@ import {
   type StageModelRow,
   type StageModels,
 } from "@/lib/api";
+import { STAGE_LABELS } from "@/lib/stages";
 import { toast } from "sonner";
 
 /** A row's edited-but-unsaved model and effort, keyed by stage. */
@@ -218,8 +219,8 @@ export function StageModelsCard() {
                 <div key={row.stage} className="rounded-md border p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-baseline gap-2">
-                      <span className="text-sm font-medium capitalize">
-                        {row.stage}
+                      <span className="text-sm font-medium">
+                        {STAGE_LABELS[row.stage]}
                       </span>
                       <span className="text-xs text-muted-foreground">
                         {row.provider}
