@@ -28,6 +28,7 @@ import { eq, inArray } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, internalLinks, posts, websiteProfiles } from "../../db"
+import { ABSENT_POST_ID } from "../../test/absent-ids"
 import { stageStepOutputSchema } from "./stage-io"
 import { writeStep } from "./write"
 
@@ -295,7 +296,7 @@ describe("write step persistence and output", () => {
     const harness = replayMastra(replayOf(fixtures[0]))
     await expect(
       writeStep.execute({
-        inputData: { postId: "00000000-0000-4000-8000-0000000000ff" },
+        inputData: { postId: ABSENT_POST_ID },
         mastra: harness.mastra,
       } as unknown as ExecuteParams),
     ).rejects.toThrow("not found")

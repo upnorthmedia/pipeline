@@ -18,6 +18,7 @@ import { like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, posts, websiteProfiles } from "@/db"
+import { ABSENT_POST_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { GET as exportHtml } from "./[id]/export/html/route"
@@ -27,7 +28,7 @@ import { rewriteMediaUrls, stripLeadingH1 } from "./export-content"
 
 const PREFIX = "posts-export-test-"
 const URL_BASE = "http://test/api/posts"
-const MISSING_ID = "00000000-0000-4000-8000-000000000000"
+const MISSING_ID = ABSENT_POST_ID
 
 /** Discard port on loopback: nothing here should ever reach a real site. */
 const SITE = "http://127.0.0.1:9/site"

@@ -65,9 +65,9 @@ const RESEARCH = [
 /** What the `write` agent throws, and so what `_error.message` must carry. */
 const BOOM = "provider exploded mid-draft"
 
-const POST_ID = "00000000-0000-4000-8000-0000000005d1"
+const POST_ID = "00000000-0000-4000-8000-0000000005e7"
 /** The row the hand-built events in the second suite write to. */
-const UNIT_POST_ID = "00000000-0000-4000-8000-0000000005d2"
+const UNIT_POST_ID = "00000000-0000-4000-8000-0000000005e8"
 
 /** A `stage_logs` entry written before the failure, to prove the merge keeps it. */
 const EXISTING_LOG = { model: "stub-research", tokens_in: 100, tokens_out: 20 }

@@ -32,6 +32,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import { closeDb, getDb, websiteProfiles } from "@/db"
 import { signPayload } from "@/lib/hmac-signing"
+import { ABSENT_PROFILE_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { POST as postTest } from "./test/route"
@@ -299,7 +300,7 @@ describe("cases the oracle cannot reach", () => {
   })
 
   it("answers 404 for a uuid no profile carries", async () => {
-    const response = await call("11111111-1111-4111-8111-111111111111", user.cookie)
+    const response = await call(ABSENT_PROFILE_ID, user.cookie)
     expect(response.status).toBe(404)
     expect(await response.json()).toEqual({ detail: "Profile not found" })
   })

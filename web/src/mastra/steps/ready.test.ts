@@ -47,6 +47,7 @@ import { eq, inArray } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, posts } from "../../db"
+import { ABSENT_POST_ID } from "../../test/absent-ids"
 import generationCorpus from "../images/data/image-generation-parity.json"
 import promptCorpus from "./data/ready-prompt-parity.json"
 import { loadPipelineState } from "../post-state"
@@ -504,7 +505,7 @@ describe("ready step persistence and output", () => {
     const harness = replayMastra(replayOf(fixtures[0]))
     await expect(
       readyStep.execute({
-        inputData: { postId: "00000000-0000-4000-8000-0000000000ff" },
+        inputData: { postId: ABSENT_POST_ID },
         mastra: harness.mastra,
       } as unknown as ExecuteParams),
     ).rejects.toThrow("not found")

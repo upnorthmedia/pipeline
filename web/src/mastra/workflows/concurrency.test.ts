@@ -78,14 +78,14 @@ const AGENT_TEXT = {
 /** The one stage whose output is a manifest rather than prose, so it carries no marker. */
 const IMAGES_MANIFEST = JSON.stringify({ version: "1.0", images: [] })
 
-const SHARED_POST_ID = "00000000-0000-4000-8000-0000000005c1"
+const SHARED_POST_ID = "00000000-0000-4000-8000-0000000005e1"
 /** One post per concurrent full pipeline, each with its own marker. */
 const MARKERS = ["alpha", "bravo", "charlie", "delta"] as const
 const MARKED_POST_IDS = [
-  "00000000-0000-4000-8000-0000000005c2",
-  "00000000-0000-4000-8000-0000000005c3",
-  "00000000-0000-4000-8000-0000000005c4",
-  "00000000-0000-4000-8000-0000000005c5",
+  "00000000-0000-4000-8000-0000000005e2",
+  "00000000-0000-4000-8000-0000000005e3",
+  "00000000-0000-4000-8000-0000000005e4",
+  "00000000-0000-4000-8000-0000000005e5",
 ]
 const POST_IDS = [SHARED_POST_ID, ...MARKED_POST_IDS]
 

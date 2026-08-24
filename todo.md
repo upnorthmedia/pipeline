@@ -151,13 +151,6 @@
   artifacts behind. It never sets `MEDIA_DIR`, unlike the workflow suites, which point it at a
   temp directory in `beforeAll`. Harmless but it dirties the working tree and hides real
   untracked files in `git status`.
-- [confirmed] 2026-08-22 Test post ids have to be unique across the whole vitest suite, not just
-  within a file: files run in parallel, so two files seeding the same `posts` row delete and
-  re-insert it underneath each other. Found when `pipeline-completion.test.ts` reused
-  `review-gates.test.ts`'s `...04c1/04c2/04c3` and both files went intermittently red with
-  nonsense symptoms (runs reported `suspended` on gates they never configured, a
-  `duplicate key ... posts_pkey` two lines after the matching delete). Fixed there; Phase 5 adds
-  many more database-backed test files, so a shared id registry may be worth it.
 - [confirmed] 2026-08-22 `settings.key` is the entire primary key, so two users cannot both hold
   one settings key. `PATCH /api/settings` therefore 500s with a `23505` unique violation when a
   user patches a key another user already owns, in both stacks (Python raises the same
@@ -313,16 +306,6 @@
   Note the residual asymmetry, deliberate: the policy now applies per sub-step, so a
   failing `images-generate` re-runs only that fan-out entry where Python's job retry
   re-entered the stage from the manifest.
-- [confirmed, fixed 2026-08-23] Two test files shared post id
-  `00000000-0000-4000-8000-0000000055d1`: `web/src/mastra/steps/stage-log.test.ts` and
-  `web/src/mastra/steps/pipeline-start.test.ts`. vitest runs files in parallel, so each
-  file's `beforeEach` delete raced the other's insert and the loser failed on
-  `posts_pkey` with `duplicate key value`. Seen as 6 failures in a full-suite run under
-  ledger item 5.5c-iv-b; it did not fire on the previous run, so it is scheduling
-  dependent rather than deterministic. Fixed by moving `stage-log.test.ts` to
-  `...0055d3`. Worth a sweep: nothing in the suite enforces that post ids are unique
-  across files, and the convention of deriving them from the ledger item number makes a
-  collision likely again.
 - [confirmed, fixed 2026-08-23] `waitForFailure()` in
   `web/src/mastra/failure-recorder.test.ts` returned as soon as `current_stage` read
   `failed`, which is a snapshot that can predate the `stage_error` execution_logs entry:
@@ -739,3 +722,14 @@
   move to the same helper. Lower stakes than `api_keys`, since it holds model ids rather than
   credentials, which is why it was not done inline: `stage-models.test.ts` also restores the
   row's `updated_at`, which the shared helper does not carry yet.
+
+- [confirmed] 2026-08-23 `src/mastra/steps/images-manifest.test.ts > writes only the running
+  marker, leaving every content column to the assembling step` fails under parallel load with a
+  20ms timestamp drift (expected `...57.065+00:00`, received `...57.085+00:00`). The file calls
+  `vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true })`, so the frozen clock keeps
+  advancing with real time: the test computes its expected stamp from `fixture.captured_at` and
+  the step reads `new Date()` however many milliseconds later the run got round to it. Seen once
+  while running the P0.3d-affected suites together (34 files at once); did not fire in either
+  full `pnpm test` run afterwards, so it needs contention rather than the whole suite. Belongs to
+  polish item P0.3e. The fix is either dropping `shouldAdvanceTime` for the assertions that
+  compare an exact stamp, or asserting a bound rather than equality.

@@ -26,6 +26,7 @@ import { inArray } from "drizzle-orm"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, posts } from "../../db"
+import { ABSENT_POST_ID } from "../../test/absent-ids"
 import {
   imageManifestSchema,
   imagesManifestOutputSchema,
@@ -368,7 +369,7 @@ describe("images manifest step output", () => {
     const harness = replayMastra(replayOf(fixtures[0]))
     await expect(
       imagesManifestStep.execute({
-        inputData: { postId: "00000000-0000-4000-8000-0000000000ff" },
+        inputData: { postId: ABSENT_POST_ID },
         mastra: harness.mastra,
       } as unknown as ExecuteParams),
     ).rejects.toThrow("not found")

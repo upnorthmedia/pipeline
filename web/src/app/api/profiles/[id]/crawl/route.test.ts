@@ -20,6 +20,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 import { closeDb, getDb, websiteProfiles } from "@/db"
 import { logger } from "@/mastra"
+import { ABSENT_PROFILE_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { POST as createProfile } from "../../route"
@@ -151,7 +152,7 @@ describe("POST /api/profiles/{id}/crawl", () => {
   })
 
   it("404s for a profile that does not exist", async () => {
-    const response = await crawl("00000000-0000-4000-8000-000000000000", user.cookie)
+    const response = await crawl(ABSENT_PROFILE_ID, user.cookie)
 
     expect(response.status).toBe(404)
     expect(await response.json()).toEqual({ detail: "Profile not found" })

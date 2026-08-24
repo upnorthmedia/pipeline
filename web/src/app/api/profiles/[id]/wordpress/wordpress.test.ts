@@ -24,6 +24,7 @@ import { like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, websiteProfiles } from "@/db"
+import { ABSENT_PROFILE_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { GET as getAuthors } from "./authors/route"
@@ -281,7 +282,7 @@ describe("cases the oracle cannot reach", () => {
   it.each(["test", "categories", "authors"] as const)(
     "%s answers a profile that does not exist with a 404",
     async (endpoint) => {
-      const response = await call(endpoint, "33333333-3333-4333-8333-333333333333", user.cookie)
+      const response = await call(endpoint, ABSENT_PROFILE_ID, user.cookie)
       expect(response.status).toBe(404)
       expect(await response.json()).toEqual({ detail: "Profile not found" })
     },

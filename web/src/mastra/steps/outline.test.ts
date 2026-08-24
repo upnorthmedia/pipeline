@@ -28,6 +28,7 @@ import { eq, inArray } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, posts, websiteProfiles } from "../../db"
+import { ABSENT_POST_ID } from "../../test/absent-ids"
 import { stageRequestContextUserId } from "../stage-models"
 import { stageStepOutputSchema } from "./stage-io"
 import { outlineStep } from "./outline"
@@ -252,7 +253,7 @@ describe("outline step persistence and output", () => {
     const harness = replayMastra(replayOf(fixtures[0]))
     await expect(
       outlineStep.execute({
-        inputData: { postId: "00000000-0000-4000-8000-0000000000ff" },
+        inputData: { postId: ABSENT_POST_ID },
         mastra: harness.mastra,
       } as unknown as ExecuteParams),
     ).rejects.toThrow("not found")

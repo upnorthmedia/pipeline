@@ -30,13 +30,14 @@ import { eq, like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, internalLinks, posts, websiteProfiles } from "@/db"
+import { ABSENT_POST_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { DELETE as deletePost, PATCH as patchPost } from "./[id]/route"
 
 const PREFIX = "posts-write-test-"
 const URL_BASE = "http://test/api/posts"
-const MISSING_ID = "00000000-0000-4000-8000-000000000000"
+const MISSING_ID = ABSENT_POST_ID
 
 const db = getDb()
 

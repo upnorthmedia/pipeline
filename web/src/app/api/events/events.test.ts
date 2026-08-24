@@ -25,6 +25,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, posts, websiteProfiles } from "@/db"
 import { TOPIC_PIPELINE_EVENTS, publishPipelineEvent } from "@/mastra/pipeline-events"
+import { ABSENT_POST_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { GET as postEvents } from "./[post_id]/route"
@@ -34,7 +35,7 @@ import { SSE_SEPARATOR, encodeSseEvent, encodeSsePing } from "./sse"
 
 const PREFIX = "events-sse-test-"
 const URL_BASE = "http://test/api/events"
-const MISSING_ID = "00000000-0000-4000-8000-000000000000"
+const MISSING_ID = ABSENT_POST_ID
 
 /**
  * How long a replaying connection is given to produce its first frame.

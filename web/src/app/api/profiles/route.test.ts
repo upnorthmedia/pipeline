@@ -13,6 +13,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, internalLinks, posts, websiteProfiles } from "@/db"
 import { decryptWithKey } from "@/lib/crypto"
+import { ABSENT_PROFILE_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { DELETE as deleteProfile, GET as getProfile, PATCH as patchProfile } from "./[id]/route"
@@ -278,7 +279,7 @@ describe("GET /api/profiles/[id]", () => {
   })
 
   it("404s for an id that does not exist", async () => {
-    const response = await getById("00000000-0000-0000-0000-000000000000", user.cookie)
+    const response = await getById(ABSENT_PROFILE_ID, user.cookie)
 
     expect(response.status).toBe(404)
     expect(await response.json()).toEqual({ detail: "Profile not found" })
@@ -636,7 +637,7 @@ describe("PATCH /api/profiles/[id]", () => {
 
   it("404s for an id that does not exist", async () => {
     const response = await patch(
-      "00000000-0000-0000-0000-000000000000",
+      ABSENT_PROFILE_ID,
       { name: "Ghost" },
       user.cookie,
     )
@@ -698,7 +699,7 @@ describe("DELETE /api/profiles/[id]", () => {
   })
 
   it("404s for an id that does not exist", async () => {
-    const response = await del("00000000-0000-0000-0000-000000000000", user.cookie)
+    const response = await del(ABSENT_PROFILE_ID, user.cookie)
 
     expect(response.status).toBe(404)
     expect(await response.json()).toEqual({ detail: "Profile not found" })

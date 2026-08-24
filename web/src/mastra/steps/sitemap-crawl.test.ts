@@ -54,7 +54,7 @@ describe("the slug derivation", () => {
   })
 })
 
-const PROFILE = "00000000-0000-4000-8000-0000000005c2"
+const PROFILE = "00000000-0000-4000-8000-0000000005e6"
 
 describe("folding entries into rows", () => {
   it("keeps one row per URL", () => {

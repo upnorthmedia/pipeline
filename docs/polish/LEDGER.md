@@ -38,8 +38,11 @@ move on. A split is not an iteration on its own: split and complete the first ch
         `images-generate.test.ts` and `stage-models-to-provider.test.tsx`. All eleven now go
         through `src/test/swapped-fetch.ts`, and a guard in `setup.ts` fails any test that
         finds the transport left swapped. [evidence](evidence/p0.md#p03c)
-  - [ ] **P0.3d** Post ids colliding across files, which vitest runs in parallel against one
-        database (P2.53). One registry, or a per-file prefix that is enforced.
+  - [x] **P0.3d** Post ids colliding across files, which vitest runs in parallel against one
+        database (P2.25, P2.43). The registry is `src/test/unique-test-ids.test.ts`: a UUID
+        literal belongs to exactly one test file, and the three ids nothing ever inserts live in
+        `src/test/absent-ids.ts`. Ten duplicate groups found and cleared.
+        [evidence](evidence/p0.md#p03d)
   - [ ] **P0.3e** The proof: three `pnpm test` runs with identical summaries, worker running and
         worker not running, with all six summaries in the evidence.
 - [ ] **P0.4** The suite must not dirty the working tree: tests write to a temp dir, and the 39
@@ -107,7 +110,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [ ] **P2.22** `[confirmed]` The worker bundle resolves `rules/` from its own output directory, so it needs `RULES_DIR` set explicitly. `prompts.ts` falls back to ...
 - [ ] **P2.23** `[confirmed]` The worker bundle also needs `TEXTSTAT_DATA_DIR` set, and unlike the missing rules it is fatal. `textstatDataDir()` falls back to ...
 - [ ] **P2.24** `[confirmed]` `web/src/components/__tests__/export-button.test.tsx` writes real files into the repo's `media/test-123/` on every `pnpm -C web test` run, ...
-- [ ] **P2.25** `[confirmed]` Test post ids have to be unique across the whole vitest suite, not just within a file: files run in parallel, so two files seeding the same ...
+- [x] **P2.25** `[confirmed]` Test post ids have to be unique across the whole vitest suite, not just within a file: files run in parallel, so two files seeding the same ... Fixed by P0.3d, which adds the registry the entry asked for; entry removed from `todo.md`. [evidence](evidence/p0.md#p03d)
 - [ ] **P2.26** `[confirmed]` `settings.key` is the entire primary key, so two users cannot both hold one settings key. `PATCH /api/settings` therefore 500s with a `23505` ...
 - [x] **P2.27** `[fixed]` The six agent test files each rewrote and deleted the single global `api_keys` settings row (`writeAnthropicKey` / `clearKeys` in ...
 - [ ] **P2.28** `[investigate]` BetterAuth has no `BETTER_AUTH_SECRET` in `.env` or `.env.example`, so it falls back to its built-in default secret and every session cookie in ...
@@ -172,6 +175,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [ ] **P2.87** `[confirmed]` `POST /api/profiles` accepts any string as `website_url`: creating a profile with the literal value `not a url` succeeded during item 8.6's live ...
 - [ ] **P2.88** `[confirmed]` `pnpm -C web test` is not deterministic above the known `image-preview.test.tsx` baseline: one extra database-backed test fails per full-suite ...
 - [ ] **P2.89** `[confirmed]` The global `stage_models` row is borrowed the way `api_keys` used to be: three files hold the pre-borrow value in memory and write it back in `afterAll`, so a killed run loses it. Same shape P0.3a fixed for `api_keys`; move it onto `web/src/test/borrowed-rows.ts`, which first needs to carry `updated_at`.
+- [ ] **P2.90** `[confirmed]` `images-manifest.test.ts > writes only the running marker` drifts 20ms under parallel load: `vi.useFakeTimers({ shouldAdvanceTime: true })` lets real elapsed time move the frozen clock, so an exact-stamp assertion is a race. Found while running P0.3d's affected suites together; belongs to P0.3e.
 
 ## P3. UI and UX
 

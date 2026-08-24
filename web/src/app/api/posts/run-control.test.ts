@@ -35,6 +35,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 import { closeDb, getDb, posts, websiteProfiles } from "@/db"
 import { STAGE_CONTENT_MAP } from "@/mastra/state"
+import { ABSENT_POST_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { POST as pausePost } from "./[id]/pause/route"
@@ -118,7 +119,7 @@ vi.mock("@/mastra/start-nextjs-publish", async (importOriginal) => {
 
 const PREFIX = "posts-runctl-test-"
 const URL_BASE = "http://test/api/posts"
-const MISSING_ID = "00000000-0000-4000-8000-000000000000"
+const MISSING_ID = ABSENT_POST_ID
 
 /** Discard port on loopback: nothing here should ever reach a real site. */
 const SITE = "http://127.0.0.1:9/site"

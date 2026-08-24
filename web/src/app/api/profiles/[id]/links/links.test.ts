@@ -13,6 +13,7 @@ import { and, eq, like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, internalLinks, websiteProfiles } from "@/db"
+import { ABSENT_LINK_ID, ABSENT_POST_ID, ABSENT_PROFILE_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { DELETE as deleteLink } from "./[link_id]/route"
@@ -136,7 +137,7 @@ describe("GET /api/profiles/{profile_id}/links", () => {
   })
 
   it("404s for a profile that does not exist", async () => {
-    const response = await list("00000000-0000-0000-0000-000000000000", "", user.cookie)
+    const response = await list(ABSENT_PROFILE_ID, "", user.cookie)
 
     expect(response.status).toBe(404)
     expect(await response.json()).toEqual({ detail: "Profile not found" })
@@ -443,7 +444,7 @@ describe("POST /api/profiles/{profile_id}/links", () => {
   it("ignores extra keys, so source and post_id cannot be claimed by a client", async () => {
     const response = await post(
       profileId,
-      { ...payload, source: "sitemap", post_id: "00000000-0000-0000-0000-000000000000", id: "x" },
+      { ...payload, source: "sitemap", post_id: ABSENT_POST_ID, id: "x" },
       user.cookie,
     )
 
@@ -475,7 +476,7 @@ describe("POST /api/profiles/{profile_id}/links", () => {
   })
 
   it("404s for a profile that does not exist", async () => {
-    const response = await post("00000000-0000-0000-0000-000000000000", payload, user.cookie)
+    const response = await post(ABSENT_PROFILE_ID, payload, user.cookie)
 
     expect(response.status).toBe(404)
     expect(await response.json()).toEqual({ detail: "Profile not found" })
@@ -571,7 +572,7 @@ describe("DELETE /api/profiles/{profile_id}/links/{link_id}", () => {
   })
 
   it("404s for a link that does not exist", async () => {
-    const response = await del(profileId, "00000000-0000-0000-0000-000000000000", user.cookie)
+    const response = await del(profileId, ABSENT_LINK_ID, user.cookie)
 
     expect(response.status).toBe(404)
     expect(await response.json()).toEqual({ detail: "Link not found" })
