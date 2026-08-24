@@ -24,50 +24,67 @@
  *   the browser reconnects, which `useSSE()` does on any transport error and
  *   on every page load.
  *
- * The predicate is the same inner join `_get_user_post()` used, through
+ * The test is the same inner join `_get_user_post()` used, through
  * `ownedByCaller()`, so the three cases the per-post endpoint answers with a
  * 404 are the three cases this one silently drops: a post that does not exist,
  * a post owned by someone else, and a post whose `profile_id` is null.
  */
-import { sql } from "drizzle-orm"
-
 import { getDb, posts } from "@/db"
+import type { PipelineEventPayload } from "@/mastra/pipeline-events"
 
 import { ownedByCaller } from "../posts/params"
+import type { SelectPayload } from "./stream"
 
 /**
- * A `matches` predicate for `pipelineEventStream()` that accepts only events
- * about posts `userId` owns.
+ * A `select` function for `pipelineEventStream()` that sends only events about
+ * posts `userId` owns, each one carrying the post's `topic`.
+ *
+ * The topic rides along because this is the only layer that has it. A step
+ * publishes a post id and nothing else, and the browser that receives the frame
+ * has never loaded the post: `global-notifications.tsx` toasts off this feed
+ * from any route, so before item P3.3c-i it named the post by the first eight
+ * characters of its uuid. The lookup that answers "may this caller see it" is
+ * already reading the row, so naming it costs one more column.
+ *
+ * The payload is spread first and the column written over it, so a `topic` on
+ * the published payload cannot pass itself off as the stored one.
  *
  * The cache is per call, which means per connection: a long-lived dashboard
  * holds one entry per post id it has seen an event for, and the whole map is
- * dropped when the stream ends.
+ * dropped when the stream ends. A post renamed mid-connection therefore keeps
+ * announcing itself under the topic it had when the first event arrived, until
+ * the browser reconnects.
  */
-export function ownedByUser(userId: string): (payload: { post_id: string }) => Promise<boolean> {
-  const resolved = new Map<string, Promise<boolean>>()
+export function ownedByUser(userId: string): SelectPayload {
+  const resolved = new Map<string, Promise<string | null>>()
 
-  return (payload) => {
+  return async (payload): Promise<PipelineEventPayload | null> => {
     const cached = resolved.get(payload.post_id)
-    if (cached !== undefined) return cached
+    if (cached !== undefined) return withTopic(payload, await cached)
 
     // A failed lookup must not be remembered as a decision, so the memo is
     // dropped on rejection and the next event for that post tries again. The
-    // rejection itself propagates: `pipelineEventStream()` treats a predicate
+    // rejection itself propagates: `pipelineEventStream()` treats a `select`
     // that throws as "do not send".
-    const lookup = isOwned(payload.post_id, userId).catch((error) => {
+    const lookup = ownedTopic(payload.post_id, userId).catch((error) => {
       resolved.delete(payload.post_id)
       throw error
     })
     resolved.set(payload.post_id, lookup)
-    return lookup
+    return withTopic(payload, await lookup)
   }
 }
 
-async function isOwned(postId: string, userId: string): Promise<boolean> {
+function withTopic(payload: PipelineEventPayload, topic: string | null): PipelineEventPayload | null {
+  return topic === null ? null : { ...payload, topic }
+}
+
+/** The post's topic when `userId` owns it, `null` when they do not. */
+async function ownedTopic(postId: string, userId: string): Promise<string | null> {
   const rows = await getDb()
-    .select({ one: sql<number>`1` })
+    .select({ topic: posts.topic })
     .from(posts)
     .where(ownedByCaller(postId, userId))
     .limit(1)
-  return rows.length > 0
+  return rows.length > 0 ? rows[0].topic : null
 }

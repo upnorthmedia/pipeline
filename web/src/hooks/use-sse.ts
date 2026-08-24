@@ -7,6 +7,15 @@ import { LAST_EVENT_ID_PARAM } from "@/app/api/events/anchor";
 export interface SSEEvent {
   event: string;
   post_id?: string;
+  /**
+   * The post's topic, added by the endpoint rather than by the publisher.
+   *
+   * A step publishes a post id and no name for it, so a surface that receives
+   * a frame for a post it has not loaded has nothing to call it. Both event
+   * routes read the row to decide who may see the frame and put the topic on
+   * it from there (`src/app/api/events/scope.ts`).
+   */
+  topic?: string;
   stage?: string;
   status?: string;
   content?: string;

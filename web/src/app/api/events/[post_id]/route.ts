@@ -22,7 +22,7 @@
  * malformed id is rejected the same way every other `{post_id}` handler rejects
  * it instead of reaching Postgres.
  */
-import { and, eq, sql } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
@@ -44,14 +44,21 @@ async function getHandler(
   // The same inner join `_get_user_post()` used, so another user's post and a
   // post whose `profile_id` is null are both the 404 a missing post gets.
   const owned = await getDb()
-    .select({ one: sql<number>`1` })
+    .select({ topic: posts.topic })
     .from(posts)
     .innerJoin(websiteProfiles, eq(posts.profileId, websiteProfiles.id))
     .where(and(eq(posts.id, postId), eq(websiteProfiles.userId, user.id)))
     .limit(1)
   if (owned.length === 0) return postNotFound()
 
-  return pipelineEventStream(request, (payload) => payload.post_id === postId)
+  // The topic comes off the row the ownership check just read, so both feeds
+  // put the same fields on the wire and `use-sse.ts` has one shape to parse.
+  // The page that opens this stream already knows the topic; the queue-wide
+  // feed's readers do not, which is where it is load-bearing (item P3.3c-i).
+  const { topic } = owned[0]
+  return pipelineEventStream(request, (payload) =>
+    payload.post_id === postId ? { ...payload, topic } : null,
+  )
 }
 
 export const GET = withServerError(getHandler)

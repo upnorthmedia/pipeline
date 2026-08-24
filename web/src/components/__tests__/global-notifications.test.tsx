@@ -18,6 +18,12 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
+/** The route the toast is raised on, for the "already looking at it" case. */
+const pathname = vi.fn(() => "/");
+vi.mock("next/navigation", () => ({
+  usePathname: () => pathname(),
+}));
+
 const useSession = vi.fn();
 vi.mock("@/lib/auth-client", () => ({
   authClient: {
@@ -46,6 +52,7 @@ beforeEach(() => {
   opened = [];
   sources = [];
   vi.clearAllMocks();
+  pathname.mockReturnValue("/");
   const Real = globalThis.EventSource as unknown as new (u: string) => EventSource;
   vi.stubGlobal(
     "EventSource",
@@ -128,6 +135,191 @@ describe("GlobalNotifications", () => {
       await emit("stage_complete", { post_id: "abcdef1234" });
 
       expect(toast.success).toHaveBeenCalledWith("Stage complete", expect.anything());
+    });
+  });
+
+  /**
+   * Item P3.3c-i. The description named the post by the first eight characters
+   * of its uuid, which is a value no reader has ever seen, and read
+   * "Post undefined..." for a frame carrying no post id at all.
+   */
+  describe("which post the toast is about", () => {
+    it("names the post by its topic", async () => {
+      await renderSignedIn();
+
+      await emit("stage_complete", {
+        post_id: "3f2a1b0c-0000-4000-8000-000000000000",
+        topic: "Best espresso machines under $500",
+        stage: "research",
+      });
+
+      expect(toast.success).toHaveBeenCalledWith(
+        "Research complete",
+        expect.objectContaining({ description: "Best espresso machines under $500" }),
+      );
+    });
+
+    it("shows no id fragment for a frame carrying no topic", async () => {
+      await renderSignedIn();
+
+      await emit("stage_complete", {
+        post_id: "3f2a1b0c-0000-4000-8000-000000000000",
+        stage: "research",
+      });
+
+      const options = vi.mocked(toast.success).mock.calls[0][1] as {
+        description?: string;
+      };
+      expect(options.description).toBeUndefined();
+    });
+
+    it("says which post failed as well as why", async () => {
+      await renderSignedIn();
+
+      await emit("stage_error", {
+        post_id: "3f2a1b0c-0000-4000-8000-000000000000",
+        topic: "Espresso machines",
+        stage: "images",
+        error: "429 RESOURCE_EXHAUSTED",
+      });
+
+      expect(toast.error).toHaveBeenCalledWith(
+        "Images failed",
+        expect.objectContaining({
+          description: "Espresso machines: 429 RESOURCE_EXHAUSTED",
+        }),
+      );
+    });
+
+    it("still reports why a post it cannot name failed", async () => {
+      await renderSignedIn();
+
+      await emit("stage_error", {
+        post_id: "3f2a1b0c-0000-4000-8000-000000000000",
+        stage: "images",
+        error: "429 RESOURCE_EXHAUSTED",
+      });
+
+      expect(toast.error).toHaveBeenCalledWith(
+        "Images failed",
+        expect.objectContaining({ description: "429 RESOURCE_EXHAUSTED" }),
+      );
+    });
+
+    it("names the finished post in the export prompt", async () => {
+      await renderSignedIn();
+
+      await emit("pipeline_complete", {
+        post_id: "3f2a1b0c-0000-4000-8000-000000000000",
+        topic: "Espresso machines",
+      });
+
+      expect(toast.success).toHaveBeenCalledWith(
+        "Pipeline complete",
+        expect.objectContaining({
+          description: "Espresso machines is ready for export",
+        }),
+      );
+    });
+
+    it("still says what happened when the finished post has no topic", async () => {
+      await renderSignedIn();
+
+      await emit("pipeline_complete", { post_id: "3f2a1b0c-0000-4000-8000-000000000000" });
+
+      expect(toast.success).toHaveBeenCalledWith(
+        "Pipeline complete",
+        expect.objectContaining({ description: "Ready for export" }),
+      );
+    });
+
+    it("treats an empty topic as no topic rather than an empty line", async () => {
+      await renderSignedIn();
+
+      await emit("stage_complete", {
+        post_id: "3f2a1b0c-0000-4000-8000-000000000000",
+        topic: "",
+        stage: "research",
+      });
+
+      const options = vi.mocked(toast.success).mock.calls[0][1] as {
+        description?: string;
+      };
+      expect(options.description).toBeUndefined();
+    });
+
+    it("never prints the word undefined, whatever the frame is missing", async () => {
+      await renderSignedIn();
+
+      await emit("stage_complete", { post_id: "" });
+      await emit("stage_error", { post_id: "" });
+      await emit("pipeline_complete", { post_id: "" });
+
+      const descriptions = [
+        ...vi.mocked(toast.success).mock.calls,
+        ...vi.mocked(toast.error).mock.calls,
+      ].map(([, options]) => (options as { description?: string } | undefined)?.description);
+      for (const description of descriptions) {
+        expect(description ?? "").not.toContain("undefined");
+      }
+    });
+  });
+
+  describe("the View action", () => {
+    it("offers a way to the post from anywhere else", async () => {
+      pathname.mockReturnValue("/");
+      await renderSignedIn();
+
+      await emit("stage_complete", { post_id: "post-1", stage: "research" });
+
+      const options = vi.mocked(toast.success).mock.calls[0][1] as {
+        action?: { label: string };
+      };
+      expect(options.action?.label).toBe("View");
+    });
+
+    it("offers nothing for a frame that names no post", async () => {
+      await renderSignedIn();
+
+      await emit("stage_complete", { stage: "research" });
+
+      const options = vi.mocked(toast.success).mock.calls[0][1] as {
+        action?: { label: string };
+      };
+      expect(options.action).toBeUndefined();
+    });
+
+    it("keeps up with the route the reader moved to", async () => {
+      pathname.mockReturnValue("/posts/post-1");
+      useSession.mockReturnValue({
+        data: { user: { id: "u1", email: "a@b.test" } },
+        isPending: false,
+      });
+      const { rerender } = render(<GlobalNotifications />);
+      await waitFor(() => expect(sources).toHaveLength(1));
+
+      await emit("stage_complete", { post_id: "post-1", stage: "research" });
+      pathname.mockReturnValue("/");
+      rerender(<GlobalNotifications />);
+      await emit("stage_complete", { post_id: "post-1", stage: "outline" });
+
+      const [first, second] = vi.mocked(toast.success).mock.calls.map(
+        ([, options]) => options as { action?: { label: string } },
+      );
+      expect(first.action).toBeUndefined();
+      expect(second.action?.label).toBe("View");
+    });
+
+    it("offers nothing on the page the toast is about", async () => {
+      pathname.mockReturnValue("/posts/post-1");
+      await renderSignedIn();
+
+      await emit("stage_complete", { post_id: "post-1", stage: "research" });
+
+      const options = vi.mocked(toast.success).mock.calls[0][1] as {
+        action?: { label: string };
+      };
+      expect(options.action).toBeUndefined();
     });
   });
 

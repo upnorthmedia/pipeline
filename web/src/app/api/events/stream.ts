@@ -7,7 +7,7 @@
  * stream `publishPipelineEvent()` writes to, and the channel name is gone: the
  * per-post channel and the global channel collapsed into one topic in ledger
  * item 5.5a, so the endpoint that used to pick a channel now picks a
- * `matches` predicate instead. Everything else is the same shape, including
+ * `select` function instead. Everything else is the same shape, including
  * the decision to open one subscription per request rather than share a
  * process-wide one, which is what `redis.pubsub()` per request did.
  *
@@ -31,9 +31,9 @@
  *   destroys the other. Without it a browser refresh leaks both.
  * - **Deliveries are considered one at a time.** `RedisStreamsPubSub` invokes a
  *   subscriber with `sub.cb(event, ack, nack)` and does not await the promise
- *   it returns, so two events whose `matches` calls take different amounts of
+ *   it returns, so two events whose `select` calls take different amounts of
  *   time would race and reach the browser out of publication order. That is
- *   invisible while `matches` is synchronous, which is all the per-post
+ *   invisible while `select` is synchronous, which is all the per-post
  *   endpoint needs, and becomes real as soon as one has to ask the database
  *   (ledger 5.5d-ii). Chaining every delivery onto the previous one restores
  *   the ordering `PUBLISH` gave for free.
@@ -61,13 +61,32 @@ function payloadOf(event: Event): PipelineEventPayload | null {
   return typeof postId === "string" ? (data as PipelineEventPayload) : null
 }
 
+/**
+ * What a stream sends for one published payload, or `null` to send nothing.
+ *
+ * This was a `matches` predicate answering yes or no. It returns the payload
+ * instead because the two callers both resolve the post row before they can
+ * answer at all, and the row carries facts the worker's payload does not: the
+ * global feed's caller reads the post's `topic` so a notification can name the
+ * post in the reader's terms rather than by an id fragment (item P3.3c-i).
+ * Returning the frame keeps that one query where the ownership query already
+ * is, instead of adding a second lookup somewhere else.
+ *
+ * The returned object is what reaches the browser, so a caller that adds a
+ * field must spread the payload *first*: the database is the authority for
+ * anything it also stores, not whatever the publisher happened to attach.
+ */
+export type SelectPayload = (
+  payload: PipelineEventPayload,
+) => PipelineEventPayload | null | Promise<PipelineEventPayload | null>
+
 /** `parsed.get("event", "update")`. */
 function eventName(payload: PipelineEventPayload): string {
   return typeof payload.event === "string" && payload.event.length > 0 ? payload.event : "update"
 }
 
 /**
- * A 200 streaming the pipeline events `matches` accepts, in the shape
+ * A 200 streaming the pipeline events `select` accepts, in the shape
  * `web/src/hooks/use-sse.ts` parses: a named event whose `data` is the whole
  * published payload, `event` and `post_id` included, exactly as Python's
  * `json.dumps(parsed)` sent it, carrying the `id:` field `anchor.ts` describes.
@@ -79,7 +98,7 @@ function eventName(payload: PipelineEventPayload): string {
  * **Replay.** A request carrying an anchor (`Last-Event-ID` or `last_event_id`)
  * resumes from it: the subscription reads the retained stream from the
  * beginning and every delivery is dropped until the replay passes the anchor,
- * after which the stream continues live. The skip runs before `matches`, so a
+ * after which the stream continues live. The skip runs before `select`, so a
  * client with a large backlog behind it does not pay for an ownership lookup
  * per skipped event.
  *
@@ -91,7 +110,7 @@ function eventName(payload: PipelineEventPayload): string {
  */
 export async function pipelineEventStream(
   request: Request,
-  matches: (payload: PipelineEventPayload) => boolean | Promise<boolean>,
+  select: SelectPayload,
 ): Promise<Response> {
   const encoder = new TextEncoder()
   const anchor = requestAnchor(request)
@@ -127,12 +146,12 @@ export async function pipelineEventStream(
         }
       }
 
-      // Publication order, preserved across an asynchronous `matches`. The
+      // Publication order, preserved across an asynchronous `select`. The
       // link is added synchronously, inside the same turn the transport called
-      // the listener in, so the chain is built in delivery order; a `matches`
+      // the listener in, so the chain is built in delivery order; a `select`
       // that rejects is swallowed here rather than left to stall every event
       // behind it, and the event it concerns is not sent, which is the
-      // fail-closed answer for a predicate that decides who may see what.
+      // fail-closed answer for a function that decides who may see what.
       let tail: Promise<void> = Promise.resolve()
 
       // Set while the replay is still working through events the client
@@ -159,8 +178,9 @@ export async function pipelineEventStream(
             }
             catchingUp = false
           }
-          if (payload !== null && (await matches(payload)))
-            send(encodeSseEvent(eventName(payload), payload, id))
+          if (payload === null) return
+          const selected = await select(payload)
+          if (selected !== null) send(encodeSseEvent(eventName(selected), selected, id))
         })
         tail = delivery.catch(() => {})
         try {

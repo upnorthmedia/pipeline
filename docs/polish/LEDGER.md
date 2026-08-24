@@ -369,11 +369,29 @@ explicitly out of scope.
         from one while `data.index` and the operator's logger line stay on the manifest
         position. Three more sites produce the right string by coincidence and were recorded
         rather than changed. Closes P2.112. `ui/p33b-*.png`. [evidence](evidence/p3.md#p33b)
-  - [ ] **P3.3c** The rest of P3.3: no `undefined` in the UI, and buttons and errors in the
-        user's terms. Not swept. P3.3a covered stack traces and P3.3b covered raw enum values;
-        neither looked for a nullable field interpolated into a sentence, nor read the button
-        labels and the server-composed error strings that reach the screen through
-        `apiErrorMessage()`.
+  - [x] **P3.3c-i** No `undefined` in the UI. Swept: four greps over every user-visible
+        template literal, every `new Date(` and every label-map index. The literal string is
+        not reachable today, and in every case but one the guard is already there; the
+        exception, `Post ${postId?.slice(0, 8)}...`, is unreachable one layer up because
+        `payloadOf()` drops a frame with no string `post_id`. Recorded as a measurement, not
+        claimed as a fix. Reading that site found the real defect on the same three lines:
+        `GlobalNotifications` is mounted from the root layout, so `/posts/[id]` raised a
+        second toast for every `stage_complete` and `stage_error` frame, worded "research
+        complete" against the global one's "Research complete", and the global one named the
+        post by an id fragment. A toast can only name a post if it knows the name, and the
+        topic exists only on the server: both event endpoints already read the row, so
+        `pipelineEventStream()`'s `matches` predicate became a `select` function returning the
+        payload to send, `ownedByUser()` selects `posts.topic` instead of `1`, and the column
+        is spread over the payload so a published `topic` cannot spoof it. The page's
+        duplicate toasts are gone, the `View` action is withheld on the post's own page, and
+        `Re-running from write` reads `Re-running from Write`. `ui/p33ci-*.png`.
+        [evidence](evidence/p3.md#p33c-i)
+  - [ ] **P3.3c-ii** Buttons and errors in the user's terms. Unswept: the button labels
+        ("Rerun Stage" reruns the pipeline from the first incomplete stage, "Force Restart"),
+        and the server-composed error strings that reach the screen through
+        `apiErrorMessage()`. Three raw stage names found on the way past P3.3c-i and filed in
+        `todo.md`: the `settings/stage-models-card.tsx` toasts and row errors, and
+        `/profiles/[id]`'s stage-mode `aria-label`.
 - [ ] **P3.4** Speed where it is felt: layout shift, avoidable spinners on cached data, lists
       that refetch everything on a single-row change.
 - [ ] **P3.5** One screen per iteration, verified with `npx -y chrome-devtools-axi`, before and

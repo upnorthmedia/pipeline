@@ -792,3 +792,60 @@ describe("PostDetailPage live image progress", () => {
     expect(screen.queryByText(/images? generated/)).not.toBeInTheDocument();
   });
 });
+
+/**
+ * Item P3.3c-i. `GlobalNotifications` is mounted from the root layout, so it
+ * is open on this page too and toasts the same frames off the queue-wide feed.
+ * The page raising its own toast for `stage_complete` and `stage_error` meant
+ * two notifications per event, worded differently: the global one said
+ * "Research complete" and this one said "research complete".
+ */
+describe("PostDetailPage stage notifications", () => {
+  it("leaves the stage toast to the one notifier that raises it", async () => {
+    mockGet.mockResolvedValue(makePost());
+    renderWithProviders(<PostDetailPage />);
+    await screen.findByText("Test Post Topic");
+    vi.mocked(toast.success).mockClear();
+
+    emitSSE({ event: "stage_complete", stage: "research" });
+
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("leaves the failure toast to it as well", async () => {
+    mockGet.mockResolvedValue(makePost());
+    renderWithProviders(<PostDetailPage />);
+    await screen.findByText("Test Post Topic");
+    vi.mocked(toast.error).mockClear();
+
+    emitSSE({ event: "stage_error", stage: "images", error: "429 RESOURCE_EXHAUSTED" });
+
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("names the stage a re-run starts from the way the rest of the UI does", async () => {
+    mockGet.mockResolvedValue(
+      makePost({ stage_status: { research: "complete" }, research_content: "notes" }),
+    );
+    mockRerun.mockResolvedValue({ status: "queued", mode: "rerun", rerun_from: "write" });
+    renderWithProviders(<PostDetailPage />);
+    await screen.findByText("Test Post Topic");
+
+    await userEvent.click(screen.getByRole("button", { name: /rerun stage/i }));
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Re-running from Write"),
+    );
+  });
+
+  it("still refetches the post the frame is about", async () => {
+    mockGet.mockResolvedValue(makePost());
+    renderWithProviders(<PostDetailPage />);
+    await screen.findByText("Test Post Topic");
+    const before = mockGet.mock.calls.length;
+
+    emitSSE({ event: "stage_complete", stage: "research" });
+
+    await waitFor(() => expect(mockGet.mock.calls.length).toBeGreaterThan(before));
+  });
+});

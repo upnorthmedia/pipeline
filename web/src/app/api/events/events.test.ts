@@ -379,11 +379,15 @@ describe("GET /api/events/{post_id}", () => {
 
     const [frame] = await waitForFrames(connection, 1)
     expect(frame).toBe(
+      // `topic` is last because the endpoint spreads the published payload
+      // and writes the column over it, which is what keeps a published
+      // `topic` from passing itself off as the stored one.
       `id: ${frameId(frame)}\r\nevent: stage_start\r\ndata: ${JSON.stringify({
         event: "stage_start",
         post_id: post.id,
         stage: "research",
         message: "Starting research",
+        topic: post.topic,
       })}\r\n\r\n`,
     )
   })
@@ -407,8 +411,19 @@ describe("GET /api/events/{post_id}", () => {
         stage: "write",
         model: "test-model",
         duration_s: 1.25,
+        topic: post.topic,
       },
     })
+  })
+
+  it("names the post on the per-post stream too, so both feeds carry one shape", async () => {
+    const post = await insertPost(user.userId, { topic: "One wire shape" })
+    const connection = await connect(post.id)
+
+    await publishPipelineEvent(publisher, post.id, "stage_complete", { stage: "research" })
+
+    const frames = await waitForFrames(connection, 1)
+    expect(parseFrame(frames[0]).data.topic).toBe("One wire shape")
   })
 
   it("delivers every event name useSSE() listens for, in publication order", async () => {
@@ -728,6 +743,36 @@ describe("GET /api/events", () => {
     const [theirs] = await waitForFrames(global, 1)
     expect(frameId(theirs)).toBeDefined()
     expect(frameId(mine[1])).toBe(frameId(theirs))
+  })
+
+  /**
+   * Item P3.3c-i. The queue-wide feed is what `global-notifications.tsx`
+   * toasts from, and a toast that cannot name the post it is about named it by
+   * the first eight characters of its uuid. The topic is only knowable here:
+   * the worker publishes a post id, and this is the one layer that already
+   * reads the row to decide whether the caller may see the event at all.
+   */
+  it("names the post each frame is about, which is what a notification can say", async () => {
+    const mine = await insertPost(user.userId, { topic: "Best espresso machines under $500" })
+    const connection = await connectFeed()
+
+    await publishPipelineEvent(publisher, mine.id, "stage_complete", { stage: "research" })
+
+    const frames = await waitForFrames(connection, 1)
+    expect(parseFrame(frames[0]).data.topic).toBe("Best espresso machines under $500")
+  })
+
+  it("takes the topic from the row, not from whatever the publisher put on the payload", async () => {
+    const mine = await insertPost(user.userId, { topic: "The stored topic" })
+    const connection = await connectFeed()
+
+    await publishPipelineEvent(publisher, mine.id, "stage_complete", {
+      stage: "research",
+      topic: "spoofed",
+    })
+
+    const frames = await waitForFrames(connection, 1)
+    expect(parseFrame(frames[0]).data.topic).toBe("The stored topic")
   })
 
   it("scopes two concurrent callers to their own posts on the same topic", async () => {

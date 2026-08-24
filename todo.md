@@ -317,3 +317,27 @@
   next load or the next refetch from another cause. Check whether the optimistic write should
   simply be a refetch before adding a fourth refetch trigger. Found at polish ledger P3.2b-ii.
 
+
+- [confirmed] 2026-08-24 Three more UI sites name a stage by its stored value, the class polish
+  ledger P3.3b closed elsewhere. `web/src/app/settings/stage-models-card.tsx` toasts
+  `research model saved` / `research reverted to default` and falls back to
+  `Failed to save research` on error (lines 157, 158, 163); `web/src/app/profiles/[id]/page.tsx`
+  labels each per-stage mode control `aria-label={`${stage} stage mode`}` (line 1281). All four
+  have `stageLabel()` available and the rest of both screens already uses it. Found at polish
+  ledger P3.3c-i, left for P3.3c-ii.
+
+- [confirmed] 2026-08-24 `WordPressTestResponse.site_name` is typed `string` in
+  `web/src/lib/api.ts` but `GET /api/profiles/{id}/wordpress/test` returns `siteName(info)`,
+  which is `unknown`: it forwards `record.name` verbatim from the WordPress root response
+  without checking its type. A site whose root answers with a non-string `name` puts that value
+  through `Connected to ${status.siteName}` on `/profiles/[id]`, which is `[object Object]` for
+  an object. WordPress core answers a string, so this is a type lie rather than a live defect.
+  Found at polish ledger P3.3c-i.
+
+- [investigate] 2026-08-24 Nothing stops the next nullable field from being interpolated into a
+  user-visible sentence. The P3.3c-i sweep found the string `undefined` unreachable in the UI
+  today, but only by reading ~140 template literals by hand.
+  `@typescript-eslint/restrict-template-expressions` is the rule that would enforce it and it
+  needs type-aware linting, which `web/eslint.config.mjs` does not turn on (it composes
+  `eslint-config-next` only). Measure the cost of type-aware linting on this repo before
+  deciding. Found at polish ledger P3.3c-i.

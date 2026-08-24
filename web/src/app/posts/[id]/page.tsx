@@ -48,7 +48,7 @@ import {
   type PostAnalytics,
   STAGES,
 } from "@/lib/api";
-import { STAGE_LABELS } from "@/lib/stages";
+import { STAGE_LABELS, stageLabel } from "@/lib/stages";
 import { deriveRunState } from "@/lib/run-state";
 import { buildRunTrace, type LiveImage } from "@/lib/run-trace";
 import { lastPublishError } from "@/lib/publish-report";
@@ -243,12 +243,13 @@ export default function PostDetailPage() {
       if (event.event === "stage_complete" || event.event === "stage_error" || event.event === "pipeline_complete") {
         fetchPost();
       }
+      // No toast here. `GlobalNotifications` is mounted from the root layout,
+      // so it is open on this page too and announces both of these off the
+      // queue-wide feed, naming the stage the way the rest of the UI does.
+      // Raising a second one here meant two notifications per event, one of
+      // them worded "research complete".
       if (event.event === "stage_complete") {
-        toast.success(`${event.stage} complete`);
         fetchAnalytics();
-      }
-      if (event.event === "stage_error") {
-        toast.error(`${event.stage || "Pipeline"} failed`);
       }
       if (event.event === "publish_start") {
         const target = (event as Record<string, unknown>).target;
@@ -331,7 +332,7 @@ export default function PostDetailPage() {
   const handleRerun = async () => {
     try {
       const result = await posts.rerun(postId);
-      toast.success(`Re-running from ${result.rerun_from}`);
+      toast.success(`Re-running from ${stageLabel(result.rerun_from)}`);
       fetchPost();
     } catch {
       toast.error("Failed to re-run stage");
