@@ -444,6 +444,18 @@ explicitly out of scope.
         picker also stopped rendering an unoffered value as nothing: it reads `Unrecognised
         format` and says what is stored under the field. Closes P2.113. `ui/p35-*.png`.
         [evidence](evidence/p3.md#p35a)
+  - [x] **P3.5b** `/monitor`. The Queue Controls strip read `Running: 11` for an account whose
+        posts list called five of those rows running, two Not started, two Failed and two
+        Waiting for you. `GET /api/queue` grouped on `current_stage` and summed every group
+        whose key is a stage name, which is Python's arithmetic and is a statement about where
+        a run got to, not what it is doing: a post created and never started, and a post whose
+        research stage threw, both carry `current_stage = 'research'`. It now hands every owned
+        post to `deriveRunState()`, the function the badge column already used, and returns one
+        count per `RunStateKind`; `total` is consequently the sum of the buckets. The strip
+        reads those buckets in the badge column's own words, with Finished with errors hiding
+        at zero, and all six readings now match `/` row for row. The chart beside it keeps its
+        `current_stage` grouping and is renamed `Posts by Stage` to say which question it
+        answers. `ui/p35b-*.png`. [evidence](evidence/p3.md#p35b)
 
 ## P2. Clear the backlog in `todo.md`
 

@@ -30,15 +30,25 @@
 import { STAGES, type PipelineStage, type PostStage, type StageStatusMap } from "./api"
 import { STAGE_LABELS } from "./stages"
 
-export type RunStateKind =
-  | "not_started"
-  | "running"
-  | "review"
-  | "failed"
-  | "finished_with_errors"
-  | "paused"
-  | "complete"
-  | "in_progress"
+/**
+ * Every state a run can be in, in the order a reader scans them: what is in
+ * flight, then what is waiting on a person, then what went wrong, then the
+ * resting states. `GET /api/queue` counts one bucket per entry and the monitor
+ * strip reads them in this order, so the list is the vocabulary rather than a
+ * bare union: adding a kind without giving it a count is then a type error.
+ */
+export const RUN_STATE_KINDS = [
+  "running",
+  "in_progress",
+  "review",
+  "failed",
+  "finished_with_errors",
+  "paused",
+  "not_started",
+  "complete",
+] as const
+
+export type RunStateKind = (typeof RUN_STATE_KINDS)[number]
 
 export interface RunState {
   kind: RunStateKind

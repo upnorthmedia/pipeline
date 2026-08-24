@@ -387,10 +387,18 @@
   four controls that do nothing. `web/src/app/layout.tsx` mounts the sidebar around every
   route including `/auth/[path]`. Found at polish ledger P3.5a.
 
-- [confirmed] 2026-08-24 `/monitor`'s Queue Controls line reads `Running: 11` for an account
-  whose posts list calls two of those posts `Not started` and one `Failed at Research`.
-  `GET /api/queue` sums every `current_stage` that is one of the six stage names, which is
-  the Python definition and is documented in `web/src/app/api/queue/route.ts`, but two
-  screens now give the same rows two different names. `deriveRunState()` is the one that
-  knows the difference; the count should either use it or the label should stop saying
-  Running. Found at polish ledger P3.5a.
+- [confirmed] 2026-08-24 `GET /api/analytics/dashboard` still counts the way
+  `GET /api/queue` did before polish ledger P3.5b: `by_status` groups on `current_stage` and
+  `completion_rate` is the share of rows whose column reads `complete`. On `/monitor` that
+  puts `Completion Rate 26.7%` (4 of 15) directly above a Queue Controls strip calling three
+  of those four Complete and the fourth Finished with errors, because
+  `markPipelineComplete()` is unconditional. The completion rate is the number a user would
+  quote, so it is the one most worth making agree. Found at polish ledger P3.5b.
+
+- [confirmed] 2026-08-24 `POST /api/queue/pause-all` selects on `current_stage` being
+  `["pending", *STAGES]`, which after polish ledger P3.5b is a set the counts beside the
+  button no longer describe: Pause All pauses the rows the strip calls Not started and the
+  row it calls Failed at Research, and pausing a dead run overwrites the only column that
+  said it was dead. Scope the bulk pause to the run states it claims to act on. Distinct from
+  the entry above about pausing being a label rather than a control signal. Found at polish
+  ledger P3.5b.

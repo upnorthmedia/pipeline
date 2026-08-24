@@ -1,4 +1,4 @@
-import type { Post, Profile, PostAnalytics, StageSettings, StageStatusMap } from "@/lib/api";
+import type { Post, Profile, PostAnalytics, QueueStatus, StageSettings, StageStatusMap } from "@/lib/api";
 
 export const defaultStageSettings: StageSettings = {
   research: "auto",
@@ -160,6 +160,29 @@ export function makeAnalytics(overrides?: Partial<PostAnalytics>): PostAnalytics
       external_link_count: 3,
       has_meta_description: true,
     },
+    ...overrides,
+  };
+}
+
+/**
+ * A `GET /api/queue` answer with every `RunStateKind` bucket at zero.
+ *
+ * The endpoint answers one count per kind, so a suite that spelled the whole
+ * object out had to be revisited every time a kind was added. Overrides name
+ * only the buckets the case is about; `total` is not derived, so a case can
+ * also express the sum going wrong.
+ */
+export function makeQueueStatus(overrides?: Partial<QueueStatus>): QueueStatus {
+  return {
+    running: 0,
+    in_progress: 0,
+    review: 0,
+    failed: 0,
+    finished_with_errors: 0,
+    paused: 0,
+    not_started: 0,
+    complete: 0,
+    total: 0,
     ...overrides,
   };
 }

@@ -5,15 +5,18 @@ import {
   Activity,
   Play,
   Pause,
-  Clock,
+  CircleDashed,
+  Eye,
   AlertCircle,
   RefreshCw,
+  TriangleAlert,
   Zap,
   XCircle,
   Plus,
   TrendingUp,
   FileText,
   Timer,
+  type LucideIcon,
 } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
@@ -36,6 +39,7 @@ import {
   type DashboardStats,
 } from "@/lib/api";
 import { STAGE_LABELS } from "@/lib/stages";
+import type { RunStateKind } from "@/lib/run-state";
 import { useSSE, type SSEEvent } from "@/hooks/use-sse";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -73,6 +77,56 @@ const AGGREGATE_EVENTS = new Set([
  * the numbers still move while a run is watched.
  */
 const AGGREGATE_REFETCH_DELAY_MS = 500;
+
+/**
+ * The Queue Controls strip, in the vocabulary the posts list uses.
+ *
+ * `GET /api/queue` answers one count per `RunStateKind`, so each line here is
+ * a sum over the kinds it covers and its label is the word `deriveRunState()`
+ * puts on a single row's badge. The strip used to read the `current_stage`
+ * column instead, which is where `Running: 11` came from on an account whose
+ * posts list called two of those rows "Not started" and one "Failed at
+ * Research".
+ *
+ * `running` and `in_progress` share a line because the difference between them
+ * is about the record (a stage recorded as running, versus a row caught
+ * between two of them), not about what the reader is waiting for. Finished
+ * with errors is the only line that hides at zero: it is a complaint, where
+ * the five above it are the standing shape of the queue.
+ */
+const QUEUE_LINES: {
+  label: string;
+  kinds: RunStateKind[];
+  icon: LucideIcon;
+  iconClass?: string;
+  valueClass?: string;
+  hideAtZero?: boolean;
+}[] = [
+  {
+    label: "Running",
+    kinds: ["running", "in_progress"],
+    icon: Activity,
+    iconClass: "text-amber-500",
+  },
+  { label: "Waiting for you", kinds: ["review"], icon: Eye, iconClass: "text-blue-500" },
+  { label: "Not started", kinds: ["not_started"], icon: CircleDashed },
+  { label: "Paused", kinds: ["paused"], icon: Pause },
+  {
+    label: "Failed",
+    kinds: ["failed"],
+    icon: XCircle,
+    iconClass: "text-red-500",
+    valueClass: "text-red-500",
+  },
+  {
+    label: "Finished with errors",
+    kinds: ["finished_with_errors"],
+    icon: TriangleAlert,
+    iconClass: "text-amber-500",
+    valueClass: "text-amber-500",
+    hideAtZero: true,
+  },
+];
 
 const EVENT_COLORS: Record<string, string> = {
   stage_start: "bg-blue-500/15 text-blue-400",
@@ -364,12 +418,12 @@ export function OverviewTab() {
 
         {/* Charts Row */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Posts by Status */}
+          {/* Posts by Stage */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Posts by Status</CardTitle>
+              <CardTitle className="text-sm font-medium">Posts by Stage</CardTitle>
               <CardDescription className="text-xs">
-                Distribution across pipeline stages
+                Where each post&apos;s row sits in the pipeline, not what its run is doing
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -504,23 +558,20 @@ export function OverviewTab() {
               Resume All
             </Button>
             <Separator orientation="vertical" className="h-6" />
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1.5">
-                <Activity className="h-3.5 w-3.5 text-amber-500" />
-                Running: <span className="font-medium text-foreground">{stats?.running ?? 0}</span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <Clock className="h-3.5 w-3.5 text-blue-500" />
-                Pending: <span className="font-medium text-foreground">{stats?.pending ?? 0}</span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <Pause className="h-3.5 w-3.5" />
-                Paused: <span className="font-medium text-foreground">{stats?.paused ?? 0}</span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <XCircle className="h-3.5 w-3.5 text-red-500" />
-                Failed: <span className="font-medium text-red-500">{stats?.failed ?? 0}</span>
-              </span>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+              {QUEUE_LINES.map(({ label, kinds, icon: Icon, iconClass, valueClass, hideAtZero }) => {
+                const value = kinds.reduce((sum, kind) => sum + (stats?.[kind] ?? 0), 0);
+                if (hideAtZero && value === 0) return null;
+                return (
+                  <span key={label} className="flex items-center gap-1.5">
+                    <Icon className={cn("h-3.5 w-3.5", iconClass)} />
+                    {label}:{" "}
+                    <span className={cn("font-medium", valueClass ?? "text-foreground")}>
+                      {value}
+                    </span>
+                  </span>
+                );
+              })}
             </div>
           </div>
         </CardContent>

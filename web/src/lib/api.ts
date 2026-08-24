@@ -1,4 +1,5 @@
 import { INTERNAL_SERVER_ERROR_DETAIL } from "./route-error";
+import type { RunStateKind } from "./run-state";
 
 // --- Types ---
 
@@ -232,14 +233,13 @@ export interface PaginatedLinks {
   pages: number;
 }
 
-export interface QueueStatus {
-  running: number;
-  pending: number;
-  complete: number;
-  failed: number;
-  paused: number;
-  total: number;
-}
+/**
+ * `GET /api/queue`: one count per `RunStateKind`, plus a total that is their
+ * sum. The keys are the kinds rather than `posts.current_stage` values because
+ * the endpoint counts what `deriveRunState()` calls each row, which is what
+ * the posts list writes on that row's badge.
+ */
+export type QueueStatus = Record<RunStateKind, number> & { total: number };
 
 export interface Setting {
   key: string;

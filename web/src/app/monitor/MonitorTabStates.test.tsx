@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/render";
+import { makeQueueStatus } from "@/test/fixtures";
 import { OverviewTab } from "./_components/overview-tab";
 import { CostsTab } from "./_components/costs-tab";
 import { ModelsTab } from "./_components/models-tab";
@@ -59,14 +60,13 @@ const mockModels = vi.mocked(analytics.models);
 const mockLogs = vi.mocked(analytics.logs);
 const mockProfiles = vi.mocked(profiles.list);
 
-const testStats = {
+const testStats = makeQueueStatus({
   running: 2,
-  pending: 5,
+  not_started: 5,
   complete: 42,
   failed: 1,
-  paused: 0,
   total: 50,
-};
+});
 
 const testDashboard = {
   by_status: { research: 2, pending: 5, complete: 42, failed: 1 },

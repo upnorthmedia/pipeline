@@ -15,6 +15,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/render";
+import { makeQueueStatus } from "@/test/fixtures";
 import { OverviewTab } from "./_components/overview-tab";
 import type { SSEEvent } from "@/hooks/use-sse";
 
@@ -64,14 +65,13 @@ const mockStatus = vi.mocked(queue.status);
 const mockDashboard = vi.mocked(analytics.dashboard);
 const mockUseSSE = vi.mocked(useSSE);
 
-const testStats = {
+const testStats = makeQueueStatus({
   running: 2,
-  pending: 5,
+  not_started: 5,
   complete: 42,
   failed: 1,
-  paused: 0,
   total: 50,
-};
+});
 
 const testDashboard = {
   by_status: { research: 2, pending: 5, complete: 42, failed: 1 },
