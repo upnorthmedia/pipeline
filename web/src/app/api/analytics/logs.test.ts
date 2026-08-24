@@ -19,7 +19,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 import { closeDb, getDb, posts, websiteProfiles } from "@/db"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
-import { GET } from "./logs/route"
+import { asUtcBound, GET } from "./logs/route"
 
 const PREFIX = "analytics-logs-test-"
 const URL_BASE = "http://test/api/analytics/logs"
@@ -360,6 +360,85 @@ describe("GET /api/analytics/logs time bounds", () => {
   it("treats an empty until as no upper bound", async () => {
     await insertPost(profileId, [logEntry({ ts: tsOffsetDays(-1) })])
     expect((await body("?until=")).total).toBe(1)
+  })
+})
+
+describe("GET /api/analytics/logs timestamp renderings", () => {
+  // `appendExecutionLog` is the only writer and `execution-log.test.ts` pins the
+  // shape it stamps, so every entry in the column today renders UTC as `+00:00`
+  // with three fractional digits. Nothing in the database enforces that, and a
+  // text comparison is only correct while it holds: `Z` (0x5A) sorts above both
+  // `.` (0x2E) and `+` (0x2B), and an entry carrying a real offset names an
+  // instant its digits do not sort by. Ledger item P2.56.
+
+  it("orders a Z-suffixed entry by the instant it names, not by its suffix", async () => {
+    await insertPost(profileId, [
+      logEntry({ ts: "2026-08-20T12:00:00Z", message: "on the second" }),
+      logEntry({ ts: "2026-08-20T12:00:00.500000+00:00", message: "half past it" }),
+      logEntry({ ts: "2026-08-20T12:00:01+00:00", message: "a second later" }),
+    ])
+    const { items } = await body("?since=2026-08-20T00:00:00%2B00:00")
+    expect(items.map((item) => item.message)).toEqual([
+      "a second later",
+      "half past it",
+      "on the second",
+    ])
+  })
+
+  it("orders a whole-second entry before a fractional one in the same second", async () => {
+    // The third rendering `todo.md` named. It sorts correctly as text already,
+    // because `+` is below every digit and below `.`, so this is a control:
+    // it has to keep passing across the change rather than start passing.
+    await insertPost(profileId, [
+      logEntry({ ts: "2026-08-20T12:00:00.500000+00:00", message: "half past it" }),
+      logEntry({ ts: "2026-08-20T12:00:00+00:00", message: "on the second" }),
+    ])
+    const { items } = await body("?since=2026-08-20T00:00:00%2B00:00")
+    expect(items.map((item) => item.message)).toEqual(["half past it", "on the second"])
+  })
+
+  it("includes a Z-suffixed entry sitting exactly on the until bound", async () => {
+    await insertPost(profileId, [logEntry({ ts: "2026-08-20T12:00:00Z" })])
+    expect((await body("?since=2026-01-01&until=2026-08-20T12:00:00%2B00:00")).total).toBe(1)
+  })
+
+  it("reads an entry's own offset, so one written at +02:00 is before noon UTC", async () => {
+    // 14:00 in Berlin is 12:00 UTC, which is an hour before the bound.
+    await insertPost(profileId, [logEntry({ ts: "2026-08-20T14:00:00+02:00" })])
+    expect((await body("?since=2026-08-20T13:00:00%2B00:00")).total).toBe(0)
+    expect((await body("?since=2026-08-20T11:00:00%2B00:00")).total).toBe(1)
+  })
+
+  it("reads a bound with no offset as UTC", async () => {
+    // `fromIsoFormat` leaves a naive bound naive, which is what Python bound and
+    // compared as text. Anything that resolves it against the database session's
+    // own time zone instead would move this window by that offset.
+    await insertPost(profileId, [
+      logEntry({ ts: "2026-08-20T11:59:59+00:00", message: "before" }),
+      logEntry({ ts: "2026-08-20T12:00:00+00:00", message: "on it" }),
+    ])
+    const { items } = await body("?since=2026-08-20T12:00:00")
+    expect(items.map((item) => item.message)).toEqual(["on it"])
+  })
+})
+
+describe("asUtcBound", () => {
+  // The database this suite runs against is on UTC, where a naive bound and the
+  // same bound at `+00:00` are the same instant, so the endpoint cannot tell
+  // these two apart. A server on any other `TimeZone` can.
+
+  it("pins a naive bound to UTC", () => {
+    expect(asUtcBound("2026-01-01T00:00:00")).toBe("2026-01-01T00:00:00+00:00")
+  })
+
+  it("leaves a bound that already carries an offset alone", () => {
+    expect(asUtcBound("2026-08-20T14:00:00+02:00")).toBe("2026-08-20T14:00:00+02:00")
+    expect(asUtcBound("2026-08-20T12:00:00+00:00")).toBe("2026-08-20T12:00:00+00:00")
+    expect(asUtcBound("2026-08-20T12:00:00-05:30:15")).toBe("2026-08-20T12:00:00-05:30:15")
+  })
+
+  it("does not read the date's own hyphens as an offset", () => {
+    expect(asUtcBound("2026-08-20T00:00:00.123456")).toBe("2026-08-20T00:00:00.123456+00:00")
   })
 })
 

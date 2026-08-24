@@ -15,11 +15,23 @@
  * is out of scope, and answered 500 on every call.) Verified against the live
  * database, not inferred.
  *
- * Both bounds are compared as *text* against `log_entry->>'ts'`, which is
- * itself `datetime.now(UTC).isoformat()`, so they have to be run through
- * `fromIsoFormat()` first. The dashboard sends `toISOString()`, which ends in
- * `Z`; `Z` (0x5A) sorts above `+` (0x2B), so a bound that kept its `Z` would
- * silently mis-filter the whole boundary second. See ledger item 5.8d-i.
+ * Python ordered and bounded the result set by a *text* comparison on
+ * `log_entry->>'ts'`, which is correct only while every entry renders the clock
+ * the same way. Nothing in the database enforces that: `Z` (0x5A) sorts above
+ * both `.` (0x2E) and `+` (0x2B), so a `Z`-suffixed entry sorts after every
+ * `+00:00` entry in the same second and falls out of a window it belongs in,
+ * and an entry carrying a real offset names an instant its digits do not sort
+ * by. Both comparisons are on `(log_entry->>'ts')::timestamptz` here instead,
+ * so the answer is the same whatever rendering an entry was written with
+ * (ledger item P2.56).
+ *
+ * That trades a mis-sorted row for a 500 on a `ts` Postgres cannot parse. The
+ * column has one writer, `appendExecutionLog`, whose rendering is pinned by a
+ * test, and no route accepts `execution_logs` from a caller, so an unparseable
+ * value means the row was written by hand.
+ *
+ * The bounds still go through `fromIsoFormat()`, which is what answers a 422
+ * for a value CPython's parser rejected. See ledger item 5.8d-i.
  */
 import { sql, type SQL } from "drizzle-orm"
 
@@ -72,6 +84,24 @@ function lastValue(url: URL, name: string): string | undefined {
  * different failure modes. `pathUuidIssue` already drops the same kind of tail
  * for the same reason.
  */
+/** A CPython `isoformat()` offset, which is the only shape `fromIsoFormat` emits. */
+const OFFSET_SUFFIX = /[+-]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/
+
+/**
+ * Pin a bound with no offset to UTC.
+ *
+ * `fromIsoFormat("2026-01-01")` is naive, and Python compared it as text, which
+ * read it as UTC by construction. `::timestamptz` would resolve it against the
+ * database session's own `TimeZone` instead, so the same query would answer
+ * differently depending on which server ran it.
+ *
+ * Exported for its own test: every Postgres this runs against is on UTC, so the
+ * branch is invisible from the endpoint.
+ */
+export function asUtcBound(bound: string): string {
+  return OFFSET_SUFFIX.test(bound) ? bound : `${bound}+00:00`
+}
+
 function boundIssue(name: string, input: string): ValidationErrorDetail {
   return {
     type: "datetime_from_date_parsing",
@@ -128,12 +158,18 @@ async function getHandler(request: Request): Promise<Response> {
   const until = untilRaw ? fromIsoFormat(untilRaw) : null
   if (untilRaw && until === null) issues.push(boundIssue("until", untilRaw))
 
-  if (issues.length > 0) return unprocessableRequest(issues)
+  // A `null` `since` is already one of the issues; repeating it in the guard is
+  // what narrows it out of the query below.
+  if (issues.length > 0 || since === null) return unprocessableRequest(issues)
+
+  // One expression, used by both bounds and by the ordering, so the three
+  // cannot drift apart.
+  const entryAt = sql`(log_entry->>'ts')::timestamptz`
 
   const where: SQL[] = [
     sql`p.execution_logs != '[]'::jsonb`,
     sql`wp.user_id = ${user.id}`,
-    sql`log_entry->>'ts' >= ${since}`,
+    sql`${entryAt} >= ${asUtcBound(since)}::timestamptz`,
   ]
   if (level) {
     // `= ANY(:levels)` over the comma-split list. drizzle's `sql` template
@@ -152,7 +188,7 @@ async function getHandler(request: Request): Promise<Response> {
   // caller types is a wildcard. Preserved rather than fixed: the monitor's
   // search box is the only caller and this is a search, not a lookup.
   if (q) where.push(sql`log_entry->>'message' ilike ${`%${q}%`}`)
-  if (until !== null) where.push(sql`log_entry->>'ts' <= ${until}`)
+  if (until !== null) where.push(sql`${entryAt} <= ${asUtcBound(until)}::timestamptz`)
 
   const whereSql = sql.join(where, sql` and `)
   const from = sql`
@@ -181,7 +217,7 @@ async function getHandler(request: Request): Promise<Response> {
       log_entry->>'message' as message,
       log_entry->'data' as data
     ${from}
-    order by log_entry->>'ts' desc
+    order by ${entryAt} desc
     limit ${perPage} offset ${(page - 1) * perPage}
   `)
 

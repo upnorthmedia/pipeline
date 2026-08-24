@@ -153,14 +153,34 @@ export async function uploadMediaFiles(
   return { imageMap, featuredMediaId }
 }
 
+/** The characters that are special in a JavaScript regex outside a class. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
 /**
- * `for local, remote in image_map.items(): wp_html = wp_html.replace(local, remote)`.
+ * `for local, remote in image_map.items(): wp_html = wp_html.replace(local, remote)`,
+ * with the loop collapsed into one pass.
  *
- * `split().join()` rather than `replaceAll()` because the remote URL is data,
- * not a replacement pattern.
+ * Python rewrote the document once per map entry, over the document its
+ * previous entry had already edited, which corrupts two shapes (ledger item
+ * P2.64). A key that prefixes a later key rewrites the longer URL's prefix
+ * first, so `/media/p1/a.png.png` became `<one.png>.png` and the longer file's
+ * own `source_url` was never inserted; and a `source_url` carrying a later key
+ * was itself rewritten by that later entry. Both were reachable only through a
+ * media directory this app does not produce, which is why the port recorded
+ * them rather than fixing them, and both disappear at once by matching every
+ * key in a single pass.
+ *
+ * The alternation is ordered longest key first, because a JavaScript regex
+ * takes the first alternative that matches at a position rather than the
+ * longest. The type check keeps the map's own order so that a map with two
+ * non-string values names the same one Python's loop reached first, and it runs
+ * over every entry before any matching, because `str.replace` type-checked its
+ * argument whether or not the key occurred in the document.
  */
 export function rewriteImageUrls(html: string, imageMap: Map<string, unknown>): string {
-  let result = html
+  const replacements = new Map<string, string>()
   for (const [local, remote] of imageMap) {
     if (typeof remote !== "string") {
       // `str.replace(local, 7)` is a `TypeError`, raised after every upload
@@ -173,9 +193,15 @@ export function rewriteImageUrls(html: string, imageMap: Map<string, unknown>): 
         }`,
       )
     }
-    result = result.split(local).join(remote)
+    replacements.set(local, remote)
   }
-  return result
+  if (replacements.size === 0) return html
+
+  const keys = [...replacements.keys()].sort((a, b) => b.length - a.length)
+  const pattern = new RegExp(keys.map(escapeRegExp).join("|"), "g")
+  // The callback form, because a `source_url` is data: `$&` and `$\`` in a
+  // replacement string are substitutions, and Python inserted them literally.
+  return html.replace(pattern, (match) => replacements.get(match) as string)
 }
 
 /**

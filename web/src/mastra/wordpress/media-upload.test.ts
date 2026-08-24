@@ -87,11 +87,12 @@ class RecordingUploader implements MediaUploader {
 }
 
 /**
- * The one oracle case the port deliberately answers differently, run on its
- * own below (ledger item P1.2c-i). Every other case is asserted against
- * Python's recorded answer unchanged.
+ * The two oracle cases the port deliberately answers differently, run on their
+ * own below (ledger items P1.2c-i and P2.64). Every other case is asserted
+ * against Python's recorded answer unchanged.
  */
 const WEBP_CASE = "a .webp file is not an image to the deployed table, so it is skipped"
+const PREFIX_CASE = "an earlier local URL that prefixes a later one rewrites its prefix"
 
 const indexOf = (testCase: UploadCase): ManifestImageIndex => ({
   byFile: new Map(Object.entries(testCase.manifest_by_file)),
@@ -131,7 +132,7 @@ describe("the upload loop matches publish_to_wordpress", () => {
   })
 
   for (const testCase of cases) {
-    if (testCase.name === WEBP_CASE) continue
+    if (testCase.name === WEBP_CASE || testCase.name === PREFIX_CASE) continue
     it(testCase.name, async () => {
       const files = await build(testCase)
       const client = new RecordingUploader(testCase.responses)
@@ -164,7 +165,7 @@ describe("the upload loop matches publish_to_wordpress", () => {
   }
 })
 
-describe("the one case the port answers differently from Python", () => {
+describe("the mime-table case the port answers differently from Python", () => {
   const testCase = cases.find((row) => row.name === WEBP_CASE)!
 
   it("is still recorded as a skip by the oracle", () => {
@@ -203,6 +204,51 @@ describe("the one case the port answers differently from Python", () => {
     expect(rewriteImageUrls(testCase.html, result.imageMap)).toBe(
       '<img src="https://wp.example/featured-082326-abc.webp"/>' +
         '<img src="https://wp.example/inline.png"/>',
+    )
+  })
+})
+
+describe("the rewrite case the port answers differently from Python", () => {
+  const testCase = cases.find((row) => row.name === PREFIX_CASE)!
+
+  it("is still recorded as a prefix corruption by the oracle", () => {
+    // Python's loop rewrote `/media/p1/a.png` inside `/media/p1/a.png.png`
+    // first, so the longer file's own `source_url` was never inserted and the
+    // document was left pointing at a URL nothing serves. Assert the premise so
+    // that a regenerated oracle shows up here rather than silently agreeing.
+    expect(testCase).toBeDefined()
+    expect(testCase.expected.html).toBe(
+      '<img src="https://wp.example/one.png"/><img src="https://wp.example/one.png.png"/>',
+    )
+  })
+
+  it("rewrites the longer local URL to its own upload", async () => {
+    const files = await build(testCase)
+    const client = new RecordingUploader(testCase.responses)
+    const result = await uploadMediaFiles(files, {
+      postId: testCase.post_id,
+      title: testCase.title,
+      manifest: indexOf(testCase),
+      client,
+    })
+
+    expect([...result.imageMap]).toEqual(testCase.expected.image_map)
+    expect(rewriteImageUrls(testCase.html, result.imageMap)).toBe(
+      '<img src="https://wp.example/one.png"/><img src="https://wp.example/two.png"/>',
+    )
+  })
+
+  it("does not rewrite a local URL it has just inserted", () => {
+    // The same defect from the other side: Python's loop ran over the document
+    // it had already edited, so an upload whose `source_url` happens to carry a
+    // later key was rewritten a second time.
+    const imageMap = new Map<string, unknown>([
+      ["/media/p1/a.png", "https://wp.example/media/p1/b.png"],
+      ["/media/p1/b.png", "https://wp.example/two.png"],
+    ])
+
+    expect(rewriteImageUrls('<img src="/media/p1/a.png"/>', imageMap)).toBe(
+      '<img src="https://wp.example/media/p1/b.png"/>',
     )
   })
 })

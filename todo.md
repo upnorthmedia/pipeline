@@ -38,37 +38,6 @@
   `retry_delay = 10` was a `WorkerSettings` key and spaced every job function's retries
   equally. Ledger item P2.95.
 
-- [confirmed] 2026-08-23 The whole `/api/analytics/logs` result set is ordered and bounded by
-  a *text* comparison on `log_entry->>'ts'`, in both stacks. That is only correct because
-  every writer renders the timestamp with `datetime.now(UTC).isoformat()`, which always
-  produces the same width and the same `+00:00` offset. Nothing enforces it: an entry
-  written with a `Z` suffix, a non-UTC offset, or a whole-second timestamp with no fraction
-  sorts wrongly against its neighbours and can fall on the wrong side of `since`/`until`.
-  Found while porting the handler (ledger item 5.8d-ii). Ported faithfully rather than
-  fixed, because changing the comparison to a cast (`(log_entry->>'ts')::timestamptz`) would
-  change which rows a given bound returns and defeat the parity oracle. Worth revisiting
-  once the TypeScript writers are the only ones producing `execution_logs` entries: item
-  5.5c's `log` publisher is the single writer, so pinning its format in one place is cheap.
-  Update 2026-08-24: `api/` is gone, so the TypeScript handler is the only reader and item
-  5.5c's `log` publisher the only writer, which is what makes pinning the format in one
-  place cheap. Ledger item P2.56.
-
-- [confirmed] 2026-08-23 The local-to-remote image URL rewrite in
-  `api/src/pipeline/publish.py` corrupts a media URL that is a prefix of another one. The
-  loop is `for local, remote in image_map.items(): wp_html = wp_html.replace(local, remote)`
-  over a map keyed in the walk's sorted order, so with both `a.png` and `a.png.png` in the
-  media directory the shorter key rewrites the longer URL's prefix first and the longer
-  file's `source_url` is never inserted: `/media/p1/a.png.png` becomes
-  `https://wp.example/one.png.png`, which 404s. Recorded verbatim in
-  `web/src/mastra/wordpress/data/wp-media-upload-parity.json` (case "an earlier local URL
-  that prefixes a later one rewrites its prefix") and reproduced by the port under ledger
-  item 5.3c-iii-b-1-c-ii-3. Not reachable through the images stage, which names every file
-  with a timestamp, so the fix (rewrite longest key first, or one pass with a single
-  alternation) is a deliberate behaviour change rather than part of the port. Update
-  2026-08-24: `api/` is gone, so the live site of this is `rewriteImageUrls()` in
-  `web/src/mastra/wordpress/media-upload.ts`, which reproduces the loop faithfully. Ledger
-  item P2.64.
-
 - [confirmed] 2026-08-23 `POST /api/posts/{post_id}/publish` cannot publish a post whose
   `output_format` is `both`, which is the column's default value. `publish_post()` in
   `api/src/api/posts.py` compares `output_format == "wordpress"` and then `== "nextjs"`,
