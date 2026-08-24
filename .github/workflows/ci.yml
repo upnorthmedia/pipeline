@@ -131,6 +131,20 @@ jobs:
       - name: build
         run: pnpm build
 
+      # The worker is the second half of this deployment and `pnpm build` says
+      # nothing about it: `mastra worker build` resolves modules its own way, so
+      # a dependency reaching the Mastra instance can be fine for Next.js and
+      # unresolvable in the bundle. Building is not the whole gate either, since
+      # a bundle that inlines a native module builds clean and throws on its
+      # first import, so the artifact is booted as well. From a clean output
+      # directory, because a stale one would boot regardless of what this build
+      # produced. See `docs/polish/evidence/p2.md#p218`.
+      - name: worker bundle
+        run: |
+          rm -rf .mastra/worker
+          pnpm worker:build
+          pnpm worker:check
+
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
 

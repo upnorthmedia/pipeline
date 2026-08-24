@@ -1,13 +1,5 @@
 # todo
 
-- [confirmed] 2026-08-22 The `mastra worker` bundle does not inherit the dev machine's module
-  resolution. Two packages that `next build`, `vitest` and `mastra dev` all resolve fine were
-  unresolvable in the worker bundle: `@opentelemetry/api` (undeclared by any package in the
-  tree, so the deployer's own import check fails at build time) and `sharp` (native, so its
-  `.node` binary cannot be inlined). Both are fixed, but the class of problem is not: any new
-  runtime dependency reaching the Mastra instance needs `pnpm -C web worker:build` run against
-  a clean `.mastra/worker` before it is trusted. Phase 7's Railway configuration should run
-  that build in CI.
 - [investigate] 2026-08-22 `mastra worker start` prints `[mastra] Shutting down workers...`
   twice under a process-group signal, because the CLI and the worker it spawns each handle
   their own SIGTERM and the CLI's handler forwards a second one. Cosmetic locally; worth

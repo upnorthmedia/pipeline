@@ -15,6 +15,7 @@
     "auth:migrate": "node --env-file=../.env scripts/auth-migrate.mts",
     "worker:build": "mastra worker build -o .mastra/worker",
     "worker": "mastra worker start --dir .mastra/worker",
+    "worker:check": "node --env-file=../.env scripts/check-worker-bundle.mjs",
     "studio": "MASTRA_WORKERS=false mastra dev --env ../.env"
   },
   "dependencies": {
