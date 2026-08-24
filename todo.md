@@ -10,11 +10,6 @@
   plus up to one 30s tick, and the reclaiming worker re-runs the stage from the beginning.
   The fix has to drain in-flight steps before exiting, which means owning the worker entry
   rather than using the one `mastra worker build` generates. Ledger item P2.91.
-- [investigate] 2026-08-22 BetterAuth has no `BETTER_AUTH_SECRET` in `.env` or `.env.example`, so
-  it falls back to its built-in default secret and every session cookie in this deployment is
-  signed with a publicly known key. Setting one invalidates existing sessions, which is free now
-  (`auth_users` was empty when the tables were created) and expensive later. Belongs with the
-  Phase 7 env documentation, item 7.4.
 - [confirmed] 2026-08-22 `web/src/app/api/profiles/serialize.ts` formats timestamps with a plain
   `Date.toISOString()`, which always writes exactly three fractional digits. Pydantic 2.12 trims
   trailing zeros and drops the fraction entirely when it is zero, so a profile whose
@@ -180,15 +175,6 @@
   which reads `getAll("model").at(-1)` and has a test for it. Two one-line changes plus two
   tests; left out of 5.8c to keep that iteration to one ledger item. `/dashboard` is already
   correct (`parseDays()` in `web/src/app/api/analytics/days.ts` uses `getAll().at(-1)`).
-- [confirmed] 2026-08-23 `npx next build` in `web/` prints 15 `[Error [BetterAuthError]: You
-  are using the default secret. Please set BETTER_AUTH_SECRET ...]` lines while collecting
-  page data for the 15 prerendered `/auth/[path]` routes. The build still exits 0. Cause is
-  environmental, not code: the repo `.env` has no `BETTER_AUTH_SECRET`
-  (`grep -c BETTER_AUTH_SECRET .env` answers `0`), so BetterAuth falls back to its default
-  secret at build time. It has to be gone before item 9.1 can claim a build with no errors in
-  its output, and Phase 7's `.env` documentation (item 7.4) is where the variable should be
-  written down. Note this contradicts the iteration 95 note that the build *fails* without it;
-  measured at HEAD on 2026-08-23 it exits 0 either way.
 - [confirmed] 2026-08-23 `GET /api/analytics/logs` in `api/src/api/analytics.py` answers a
   500 for any `since` or `until` that `datetime.fromisoformat()` rejects. The parse sits
   outside any `try`, the parameters are declared `str | None` so pydantic never validates
@@ -274,14 +260,6 @@
   OpenAI-compatible `/chat/completions` shape, so research calls stop working after that
   date unless the stage moves to Perplexity's Agent API. Found while verifying model IDs
   for ledger item 6.1; out of scope there, but it has a hard deadline.
-- [investigate] 2026-08-23 `next build` inside the web image prints seven
-  `[Error [BetterAuthError]: You are using the default secret...]` lines plus a matching
-  BetterAuth base-URL warning per route during page-data collection. Non-fatal (the build
-  exits 0) and pre-existing, but it is error-shaped output in a green build, which is exactly
-  the noise the gate rules forbid introducing. Worth deciding whether the build stage should
-  supply throwaway `BETTER_AUTH_SECRET`/`BETTER_AUTH_URL` placeholders the way it now does for
-  `DATABASE_URL_SYNC` and `REDIS_URL`, or whether `src/lib/auth.ts` should not be reachable
-  from page-data collection at all.
 
 - [confirmed] 2026-08-23 Nothing runs database migrations on deploy. `deploy.preDeployCommand`
   is the documented Railway hook, but neither runtime image carries `drizzle-kit` or the

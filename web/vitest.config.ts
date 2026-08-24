@@ -31,7 +31,17 @@ export default defineConfig({
     // fallback is the repository's own `media/`, so a run that inherits it
     // writes post directories into the working tree.
     // `src/test/media-root-isolation.test.ts` fails when this stops being set.
-    env: { ...repoRootEnv(__dirname), MEDIA_DIR: testMediaRoot() },
+    // `BETTER_AUTH_SECRET` is required at import of `src/lib/auth.ts` and the
+    // repo `.env` is the only place it can come from, so the suite supplies a
+    // fixed one when that file has none. Every session it signs is minted and
+    // validated inside the same run by `src/test/session.ts`, so the value
+    // never has to match anything; what matters is that it is not better-auth's
+    // published fallback. A real `.env` value still wins.
+    env: {
+      BETTER_AUTH_SECRET: "vitest-fixed-secret-not-used-outside-the-suite",
+      ...repoRootEnv(__dirname),
+      MEDIA_DIR: testMediaRoot(),
+    },
   },
   resolve: {
     alias: {

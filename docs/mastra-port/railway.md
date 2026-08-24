@@ -74,7 +74,7 @@ those once in the dashboard or with `railway variables --set`.
 | `DATABASE_URL_SYNC` | `${{postgres.DATABASE_URL}}` | yes | Posts and Mastra run state. `src/lib/auth.ts` reads this name directly, so `DATABASE_URL` alone is not enough. |
 | `REDIS_URL` | `${{redis.REDIS_URL}}` | yes | Event bus and SSE fan-out. `src/mastra/index.ts` throws at import without it. |
 | `WP_ENCRYPTION_KEY` | `preserve()` | yes | The Fernet key the `api_settings` rows were encrypted with, not a fresh secret. A different value decrypts nothing and every stage loses its provider credentials. |
-| `BETTER_AUTH_SECRET` | `preserve()` | yes | BetterAuth warns in dev but **throws** under `NODE_ENV=production`, which the image sets, surfacing as an unhandled rejection on the first request. |
+| `BETTER_AUTH_SECRET` | `preserve()` | yes | `src/lib/auth.ts` **throws at import** without it, in every environment: BetterAuth's own fallback is a constant published in the package. |
 | `BETTER_AUTH_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` | yes | Callback and verification links are built against it. |
 | `NEXT_PUBLIC_APP_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` | yes | Read by `src/lib/auth-client.ts`, so `next build` inlines it. It reaches the image through the `NEXT_PUBLIC_APP_URL` build arg, not the runtime environment: changing it needs a rebuild, and an unset value leaves the browser client pointing at `http://localhost:3000`. |
 | `STRIPE_SECRET_KEY` | `preserve()` | for billing | Falls back to a mock key, so the app boots without it. |

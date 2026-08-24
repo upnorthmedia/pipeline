@@ -92,8 +92,9 @@ export default defineRailway(() => {
     replicas: 1,
     env: {
       ...shared,
-      // BetterAuth throws rather than warns without a secret under
-      // NODE_ENV=production, which the image sets.
+      // Required, not optional: `src/lib/auth.ts` throws at import without
+      // it, because BetterAuth's own fallback is a constant published in the
+      // package. Nothing in the image supplies one.
       BETTER_AUTH_SECRET: preserve(),
       BETTER_AUTH_URL: "https://${{RAILWAY_PUBLIC_DOMAIN}}",
       // Read by `src/lib/auth-client.ts`, which means `next build` inlines it:

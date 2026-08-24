@@ -47,6 +47,15 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV DATABASE_URL_SYNC="postgresql://build:build@127.0.0.1:5432/build"
 ENV REDIS_URL="redis://127.0.0.1:6379"
 
+# Same reason, one module further in: `/api/auth/[...all]` imports
+# `src/lib/auth.ts`, which now refuses to start on better-auth's published
+# fallback secret rather than signing cookies with it. This value signs nothing
+# and reaches no runtime stage; the deployment supplies its own. Without both,
+# page-data collection printed a BetterAuthError and a base-URL warning per
+# worker into an otherwise green build.
+ENV BETTER_AUTH_SECRET="build-only-placeholder-never-signs-a-cookie"
+ENV BETTER_AUTH_URL="http://127.0.0.1:3000"
+
 # `NEXT_PUBLIC_*` values are inlined into the client bundle by `next build`, so
 # the dashboard's BetterAuth client takes its base URL from here and not from
 # the runtime environment. Railway passes a service's variables to the build,

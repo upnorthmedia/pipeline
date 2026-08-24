@@ -4,6 +4,8 @@ import Stripe from "stripe"
 import { Resend } from "resend"
 import { Pool } from "pg"
 
+import { resolveAuthSecret } from "@/lib/auth-secret"
+
 const resend = new Resend(process.env.RESEND_API_KEY || "re_mock_dev_key")
 
 const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY || "sk_test_mock_dev_key")
@@ -14,6 +16,10 @@ const pool = new Pool({
 
 export const auth = betterAuth({
   database: pool,
+  // Passed rather than left to BetterAuth's own `BETTER_AUTH_SECRET` lookup,
+  // which falls back to a constant published in the package. See
+  // `src/lib/auth-secret.ts`.
+  secret: resolveAuthSecret(),
   user: {
     modelName: "auth_users",
     fields: {
