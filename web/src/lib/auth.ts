@@ -4,7 +4,13 @@ import Stripe from "stripe"
 import { Resend } from "resend"
 import { Pool } from "pg"
 
-import { resolveAuthSecret } from "@/lib/auth-secret"
+// Relative and extensioned, not the `@/` alias: `scripts/auth-migrate.mts`
+// loads this module under bare node to read `auth.options`, and node resolves
+// neither a tsconfig path nor an extensionless specifier. That is the same
+// reason `tsconfig.json` sets `allowImportingTsExtensions`.
+// `src/db/migration-scripts.test.ts` runs the script, so an alias reappearing
+// anywhere in this graph fails a test rather than the fresh-database procedure.
+import { resolveAuthSecret } from "./auth-secret.ts"
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_mock_dev_key")
 

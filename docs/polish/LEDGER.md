@@ -599,7 +599,22 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [x] **P2.74** `[confirmed]` A worker process running outside the test suite breaks the suite. While a `jena-worker` container was up against the shared dev Redis, a full ... Contradicted: three worker-up runs are identical to three worker-down runs; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [x] **P2.75** `[investigate]` `next build` inside the web image prints seven `[Error [BetterAuthError]: You are using the default secret...]` lines plus a matching BetterAuth ... Fixed with P2.28: the builder stage carries build-only `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` placeholders beside the database and Redis ones, and no runtime stage inherits either. Image build verified clean. [evidence](evidence/p2.md#p228-p254-p275)
 - [x] **P2.76** `[confirmed]` Generated images are unreachable from the `web` service on Railway. The `/media` volume is mounted on `worker`, which writes them, but Railway ... Fixed by P1.2c-ii; entry removed from `todo.md`. [evidence](evidence/p1.md#p12c-ii)
-- [ ] **P2.77** `[confirmed]` Nothing runs database migrations on deploy. `deploy.preDeployCommand` is the documented Railway hook, but neither runtime image carries ...
+- [ ] **P2.77** `[confirmed]` Nothing runs database migrations on deploy. `deploy.preDeployCommand` is the documented Railway hook, but neither runtime image carries ... Split, because a pre-deploy hook pointed at a script nothing has ever executed fails the deploy rather than migrating anything.
+  - [x] **P2.77a** The commands have to run at all. `pnpm auth:migrate` had been dead since
+        `c24f196` (P2.28) added a `@/`-aliased import to `src/lib/auth.ts`, which the script
+        loads under bare node: `ERR_MODULE_NOT_FOUND: Cannot find package '@/lib'`. Fixed by
+        importing the sibling relatively and with the real extension, the spelling
+        `tsconfig.json`'s `allowImportingTsExtensions` comment already names. `src/db/migration-scripts.test.ts`
+        now runs both documented commands as commands against a scratch database, which is the
+        thing `baseline-parity.test.ts` cannot do: it calls `migrate()` as a library and stayed
+        green through the whole outage. [evidence](evidence/p2.md#p277a)
+  - [ ] **P2.77b** Ship them and run them. `drizzle-orm` is absent from
+        `.next/standalone/node_modules` (it is bundled into the server chunks, not listed in
+        `serverExternalPackages`), so `drizzle-orm/node-postgres/migrator` is not reachable in
+        either runtime image. Needs the image change, `preDeployCommand` on the `web` service in
+        `.railway/railway.ts` (`IntentServiceConfig.preDeployCommand`, verified against
+        railway@3.10.0), the `--env-file` / `--env-file-if-exists` choice, and P2.99's
+        `ensureMastraStorage()` folded in, since that is the same hook.
 - [x] **P2.78** `[confirmed]` `scaffold-check.test.ts > emits the workflow lifecycle events the trace view will read` fails under a full parallel `pnpm -C web test` while ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.79** `[confirmed]` The objective's literal typecheck gate `pnpm -C web tsc --noEmit` does not run on the installed pnpm (10.26.2): it exits 254 with ...
 - [x] **P2.80** `[confirmed]` The 6 failing tests in `web/src/components/__tests__/image-preview.test.tsx`. The same finding as P0.1, removed from `todo.md`. [evidence](evidence/p0.md#p01)

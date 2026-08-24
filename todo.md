@@ -39,11 +39,16 @@
   equally. Ledger item P2.95.
 
 - [confirmed] 2026-08-23 Nothing runs database migrations on deploy. `deploy.preDeployCommand`
-  is the documented Railway hook, but neither runtime image carries `drizzle-kit` or the
-  `drizzle/` folder, so a fresh Railway environment needs `pnpm -C web db:migrate` and
-  `pnpm -C web auth:migrate` run by hand against the Postgres service's `DATABASE_PUBLIC_URL`.
-  Either ship the migrator in the image and set a preDeploy command, or accept the manual step
-  and keep it documented. Ledger item P2.77.
+  is the documented Railway hook, but neither runtime image can run either migration: the Next
+  standalone output carries `drizzle/` and `scripts/` but not `drizzle-orm`, which is bundled
+  into the server chunks rather than listed in `serverExternalPackages`, so
+  `drizzle-orm/node-postgres/migrator` is absent. A fresh Railway environment therefore needs
+  `pnpm -C web db:migrate` and `pnpm -C web auth:migrate --apply` run by hand against the
+  Postgres service's `DATABASE_PUBLIC_URL`. Half done: polish ledger P2.77a fixed
+  `pnpm auth:migrate`, which had been unrunnable since the `@/` import added by P2.28, and
+  `web/src/db/migration-scripts.test.ts` now executes both commands against a scratch database.
+  What is left is shipping them in the image and setting the hook, together with the
+  `ensureMastraStorage()` entry below, which needs the same one. Ledger item P2.77b.
 
 - [confirmed] 2026-08-23 The objective's literal typecheck gate `pnpm -C web tsc --noEmit`
   does not run on the installed pnpm (10.26.2): it exits 254 with
