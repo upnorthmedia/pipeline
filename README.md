@@ -126,7 +126,7 @@ sourcing. The Mastra CLI has no such loader, which is why the `studio` script pa
 Both migration runners target `DATABASE_URL_SYNC`, and neither runs automatically on deploy.
 
 ```bash
-pnpm -C web db:migrate               # pipeline tables (drizzle-kit, web/drizzle/)
+pnpm -C web db:migrate               # pipeline tables (web/drizzle/)
 pnpm -C web auth:migrate --apply     # BetterAuth tables
 ```
 

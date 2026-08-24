@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * `pnpm db:migrate` is the only thing in this repo that can build an empty
+ * The `drizzle/` folder is the only thing in this repo that can build an empty
  * database, and drizzle-kit ships no env loader, so `drizzle.config.ts` has to
  * read the repo-root `.env` itself. Without that it falls through to its
  * hardcoded fallback and fails to connect on any machine whose Postgres is not

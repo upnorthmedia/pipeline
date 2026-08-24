@@ -44,11 +44,16 @@
   into the server chunks rather than listed in `serverExternalPackages`, so
   `drizzle-orm/node-postgres/migrator` is absent. A fresh Railway environment therefore needs
   `pnpm -C web db:migrate` and `pnpm -C web auth:migrate --apply` run by hand against the
-  Postgres service's `DATABASE_PUBLIC_URL`. Half done: polish ledger P2.77a fixed
+  Postgres service's `DATABASE_PUBLIC_URL`. Two thirds done. Polish ledger P2.77a fixed
   `pnpm auth:migrate`, which had been unrunnable since the `@/` import added by P2.28, and
   `web/src/db/migration-scripts.test.ts` now executes both commands against a scratch database.
-  What is left is shipping them in the image and setting the hook, together with the
-  `ensureMastraStorage()` entry below, which needs the same one. Ledger item P2.77b.
+  P2.77b-i made the pipeline half runnable in the image: `pnpm db:migrate` is
+  `scripts/migrate.mjs` over drizzle-orm's own migrator rather than drizzle-kit, and the
+  Dockerfile copies `drizzle-orm` into `/app/node_modules`, verified by running
+  `node scripts/migrate.mjs` inside the built image. What is left is `preDeployCommand` in
+  `.railway/railway.ts`, the BetterAuth half (which needs `better-auth`, `@better-auth/stripe`,
+  `stripe` and `resend` in the image plus node's TypeScript stripping), and the
+  `ensureMastraStorage()` entry below, which needs the same hook. Ledger item P2.77b-ii.
 
 - [confirmed] 2026-08-23 The objective's literal typecheck gate `pnpm -C web tsc --noEmit`
   does not run on the installed pnpm (10.26.2): it exits 254 with

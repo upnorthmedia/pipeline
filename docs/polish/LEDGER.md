@@ -608,13 +608,23 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
         now runs both documented commands as commands against a scratch database, which is the
         thing `baseline-parity.test.ts` cannot do: it calls `migrate()` as a library and stayed
         green through the whole outage. [evidence](evidence/p2.md#p277a)
-  - [ ] **P2.77b** Ship them and run them. `drizzle-orm` is absent from
-        `.next/standalone/node_modules` (it is bundled into the server chunks, not listed in
-        `serverExternalPackages`), so `drizzle-orm/node-postgres/migrator` is not reachable in
-        either runtime image. Needs the image change, `preDeployCommand` on the `web` service in
-        `.railway/railway.ts` (`IntentServiceConfig.preDeployCommand`, verified against
-        railway@3.10.0), the `--env-file` / `--env-file-if-exists` choice, and P2.99's
-        `ensureMastraStorage()` folded in, since that is the same hook.
+  - [ ] **P2.77b** Ship them and run them. Split again, because the image change was the only
+        part the rest depends on and it had a wrong answer in it.
+    - [x] **P2.77b-i** A migration command a runtime image can run. `pnpm db:migrate` was
+          `drizzle-kit migrate`, a devDependency installed in no runtime stage, so it is now
+          `scripts/migrate.mjs` over `drizzle-orm`'s own migrator: one implementation for the
+          dev command and the deploy hook, proven to write the same
+          `drizzle.__drizzle_migrations` rows as drizzle-kit in both directions. The ORM is
+          copied into the image by the Dockerfile rather than named in
+          `outputFileTracingIncludes`, which Next expands against all sixteen aliases of the
+          package in pnpm's virtual store and takes `.next/standalone` from 151MB to 426MB.
+          Run inside the built image against a real Postgres. [evidence](evidence/p2.md#p277b-i)
+    - [ ] **P2.77b-ii** Run it on deploy. `preDeployCommand` on the `web` service in
+          `.railway/railway.ts` (`IntentServiceConfig.preDeployCommand`, verified against
+          railway@3.10.0), the BetterAuth half (`scripts/auth-migrate.mts` reaches
+          `better-auth`, `@better-auth/stripe`, `stripe` and `resend`, none of them at the top
+          level of the standalone `node_modules`, and needs node's TypeScript stripping), and
+          P2.99's `ensureMastraStorage()` folded in, since that is the same hook.
 - [x] **P2.78** `[confirmed]` `scaffold-check.test.ts > emits the workflow lifecycle events the trace view will read` fails under a full parallel `pnpm -C web test` while ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.79** `[confirmed]` The objective's literal typecheck gate `pnpm -C web tsc --noEmit` does not run on the installed pnpm (10.26.2): it exits 254 with ...
 - [x] **P2.80** `[confirmed]` The 6 failing tests in `web/src/components/__tests__/image-preview.test.tsx`. The same finding as P0.1, removed from `todo.md`. [evidence](evidence/p0.md#p01)

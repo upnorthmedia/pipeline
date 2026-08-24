@@ -3,10 +3,15 @@ import { defineConfig } from "drizzle-kit"
 import { applyRepoRootEnv } from "./repo-env"
 
 /**
- * drizzle-kit has no env loader of its own, so without this `pnpm db:migrate`
- * silently falls through to the hardcoded fallback below and fails to connect
- * on any machine whose Postgres is not on 5433. An exported DATABASE_URL_SYNC
- * still wins, which is what the compose and Railway paths rely on.
+ * drizzle-kit has no env loader of its own, so without this every drizzle-kit
+ * command silently falls through to the hardcoded fallback below and fails to
+ * connect on any machine whose Postgres is not on 5433. An exported
+ * DATABASE_URL_SYNC still wins, which is what the compose and Railway paths
+ * rely on.
+ *
+ * `pnpm db:migrate` no longer comes through here: it runs `scripts/migrate.mjs`
+ * so the same command exists in the runtime images. This config still drives
+ * `drizzle-kit generate`, `check` and `pull`, which are authoring commands.
  */
 applyRepoRootEnv(__dirname)
 

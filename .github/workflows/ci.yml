@@ -131,6 +131,16 @@ jobs:
       - name: build
         run: pnpm build
 
+      # The pre-deploy migration runs from the standalone output, beside a
+      # `node_modules` holding only what file tracing copied. `drizzle-orm` is
+      # bundled into the server chunks, so nothing traced it and
+      # `scripts/migrate.mjs` could not start in either image; the build alone
+      # still says nothing about that, since on this runner the tree sits inside
+      # `web/` and Node resolution walks up. See
+      # `docs/polish/evidence/p2.md#p277b-i`.
+      - name: standalone migration command
+        run: pnpm standalone:check
+
       # The worker is the second half of this deployment and `pnpm build` says
       # nothing about it: `mastra worker build` resolves modules its own way, so
       # a dependency reaching the Mastra instance can be fine for Next.js and

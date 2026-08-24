@@ -21,6 +21,16 @@ COPY web/package.json web/pnpm-lock.yaml* web/.npmrc web/pnpm-workspace.yaml ./
 
 RUN pnpm install --frozen-lockfile
 
+# The pre-deploy migration (`node scripts/migrate.mjs`) runs beside the Next
+# standalone output, whose `node_modules` holds only what file tracing copied.
+# `drizzle-orm` is bundled into the server chunks and nothing the app imports
+# reaches `drizzle-orm/node-postgres/migrator`, so tracing never sees it, and
+# naming it in `outputFileTracingIncludes` is worse than useless: Next copies an
+# included package once per alias in pnpm's virtual store, which is 16 of them
+# here and 275MB. Materialising it once with the symlinks resolved is the
+# predictable half; the `runner` stage below puts it where Node will look.
+RUN cp -RL node_modules/drizzle-orm /app/vendor-drizzle-orm
+
 # Copy config files needed for dev server
 COPY web/next.config.ts web/tsconfig.json web/postcss.config.mjs web/eslint.config.mjs web/components.json ./
 
@@ -84,6 +94,14 @@ COPY --from=builder /app/.next/static ./.next/static
 # The stage prompts and the rules editor read these off disk. Baked in rather
 # than mounted so a deployment without bind mounts still has them; a compose
 # bind mount on the same path still wins.
+# `scripts/migrate.mjs` and the `drizzle/` folder it walks arrive with the
+# standalone output above, which copies the whole project tree. `drizzle-orm` is
+# the one package they import that the tree does not carry, so it is placed
+# where Node's resolution from `/app/scripts` will find it. Without it,
+# `deploy.preDeployCommand` has nothing to run. See
+# `docs/polish/evidence/p2.md#p277b-i`.
+COPY --from=deps /app/vendor-drizzle-orm ./node_modules/drizzle-orm
+
 COPY rules ./rules
 ENV RULES_DIR=/app/rules
 

@@ -22,10 +22,14 @@ column, index by index and constraint by constraint, in both directions.
 Three owners, applied in this order. Only the first is in this folder.
 
 1. **Pipeline tables** (`posts`, `website_profiles`, `internal_links`,
-   `settings`): `pnpm db:migrate`, which runs `drizzle-kit migrate` against
-   `DATABASE_URL_SYNC`. drizzle-kit has no env loader, so `drizzle.config.ts`
-   reads the repo-root `.env` itself; an exported `DATABASE_URL_SYNC` still
-   wins.
+   `settings`): `pnpm db:migrate`, which walks this folder's `meta/_journal.json`
+   against `DATABASE_URL_SYNC`. It runs `scripts/migrate.mjs` rather than
+   `drizzle-kit migrate` so that the same command exists in the runtime images,
+   where drizzle-kit (a devDependency) does not; the two write the same
+   `drizzle.__drizzle_migrations` rows, so a database built by either is
+   migrated for both. The script loads the repo-root `.env` if there is one and
+   an already-set `DATABASE_URL_SYNC` still wins, which is what the compose,
+   Railway and pre-deploy paths rely on.
 2. **Auth tables** (`auth_users`, `auth_sessions`, `auth_accounts`,
    `auth_verifications`, `subscription`): `pnpm auth:migrate`. BetterAuth owns
    these, so they are deliberately absent from `schema.ts` and from the
