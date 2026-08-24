@@ -339,9 +339,27 @@ explicitly out of scope.
         trace row reads `3 images generated, 2 failed`, live off `liveImages` before any
         refetch. Closes P2.47. `ui/p32c-*.png`. [evidence](evidence/p3.md#p32c)
 - [ ] **P3.3** Naming and copy. Stage names, buttons and errors in the user's terms. No raw
-      enum values, no stack traces, no `undefined` in the UI. Carries P2.96 (the route error
-      boundaries print a raw V8 message), P2.112 (`placement.location` renders as the raw
-      enum) and the fan-out's 0-based ordinal (`Image 0 generated`, filed at P3.2c).
+      enum values, no stack traces, no `undefined` in the UI.
+  - [x] **P3.3a** The route error boundaries. All three printed the exception's own message as
+        body copy, and that is always wrong here rather than merely ugly: every request goes
+        through `request()` and every page that makes one catches the throw and renders the
+        server's complaint through `apiErrorMessage()`, so a boundary only ever receives a
+        render-time exception V8 worded for whoever is reading the stack. The old heading was
+        wrong for the same reason ("Failed to load post" describes a load that has already
+        succeeded). One `RouteError` component now carries a per-route title, one sentence
+        saying what the failure did not touch, the back link and retry, and the message plus
+        digest under a closed `Technical details` disclosure, where the person who has to
+        report it is one click away. `technicalDetail()` falls back to the error's name so an
+        empty message never renders a blank line or the string `undefined`. P2.96's second
+        half (`buildRunTrace()` throwing on a missing `execution_logs`) does not reproduce:
+        the column is `NOT NULL DEFAULT '[]'`, `serializePost()` coalesces it anyway and the
+        client type is not optional, so it is deleted rather than fixed. Closes P2.96.
+        `ui/p33a-*.png`. [evidence](evidence/p3.md#p33a)
+  - [ ] **P3.3b** Raw enum values in the UI. Carries P2.112 (`ImagePreview` renders
+        `placement.location` as the raw enum, so a featured image reads `featured_image`) and
+        the images fan-out's 0-based ordinal (`Image 0 generated`, now visible in the Debug
+        Logs panel, filed at P3.2c). Sweep the rest of the UI for the same class before
+        closing: anything a model or a column writes that reaches the screen unmapped.
 - [ ] **P3.4** Speed where it is felt: layout shift, avoidable spinners on cached data, lists
       that refetch everything on a single-row change.
 - [ ] **P3.5** One screen per iteration, verified with `npx -y chrome-devtools-axi`, before and
@@ -460,13 +478,11 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [ ] **P2.94** `[confirmed 2026-08-24]` `sitemapCrawlWorkflow`, `recrawlCheckWorkflow` and `wordpressPublishWorkflow` declare no `retryConfig`, so each gets a single attempt where Python's `WorkerSettings.max_tries = MAX_ATTEMPTS` gave all four `functions` entries three. A WordPress publish that meets one 502 fails for good. Found by P2.39.
 - [ ] **P2.95** `[confirmed 2026-08-24]` P2.39's retry pause covers the eight pipeline stage steps only, because it lives in `recordStageRetry()`. `nextjsPublishWorkflow` retries three times with no gap, where Python's `retry_delay` was a worker-wide setting. Found by P2.39.
 
-- [ ] **P2.96** `[confirmed 2026-08-24]` The route error boundaries print a raw JavaScript
-      exception as user-facing copy: `posts/[id]/error.tsx:24` and `profiles/[id]/error.tsx`
-      render `{error.message}` verbatim, so a render-time `TypeError` reaches the screen as
-      V8 wrote it ("input.entries is not iterable"). Behind it, `buildRunTrace()`
-      (`web/src/lib/run-trace.ts:176`) throws on a post payload with no `execution_logs`
-      instead of treating it as empty, which takes the whole page down rather than one panel.
-      Belongs with P3.3.
+- [x] **P2.96** `[confirmed 2026-08-24]` The route error boundaries print a raw JavaScript
+      exception as user-facing copy. Fixed at P3.3a; the `buildRunTrace()` half of the finding
+      was measured and does not reproduce, so it was deleted rather than fixed.
+      [evidence](evidence/p3.md#p33a)
+
 - [ ] **P2.97** `[confirmed 2026-08-24]` A post created with no profile is unreachable and
       undeletable through the app. `/posts/new` offers "No profile (manual config)" and
       `POST /api/posts` accepts a null `profile_id`, but every read handler inner-joins

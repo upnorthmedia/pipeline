@@ -167,19 +167,6 @@
   credentials, which is why it was not done inline: `stage-models.test.ts` also restores the
   row's `updated_at`, which the shared helper does not carry yet. Ledger item P2.89.
 
-- [confirmed] 2026-08-24 The route error boundaries print a raw JavaScript exception message as
-  user-facing copy. `web/src/app/posts/[id]/error.tsx:24` and
-  `web/src/app/profiles/[id]/error.tsx` render `{error.message}` verbatim under "Failed to load
-  post" / "Failed to load profile", so a render-time `TypeError` reaches the screen as written by
-  V8. Seen while measuring polish ledger P0.5b: the two screens showed "input.entries is not
-  iterable" and "Cannot read properties of undefined (reading 'length')". Two things behind it,
-  both worth fixing: the boundary needs copy of its own with the raw message kept for the console,
-  and `buildRunTrace()` (`web/src/lib/run-trace.ts:176`) throws on a post payload with no
-  `execution_logs` instead of treating it as empty, which takes the whole post page down rather
-  than the one panel that needs the column. The live API always sends the field, so the trigger
-  today is a client-side shape mismatch, not a server response. Belongs to P3.3 ("no stack traces,
-  no `undefined` in the UI"). Ledger item P2.96.
-
 - [confirmed] 2026-08-24 A post created with no profile is unreachable and undeletable through
   the app. `/posts/new` offers "No profile (manual config)"
   (`web/src/components/profile-select-card.tsx:110`) and `POST /api/posts` accepts a body with
