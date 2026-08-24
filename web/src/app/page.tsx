@@ -51,7 +51,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PipelineProgress } from "@/components/pipeline-progress";
-import { StageBadge } from "@/components/stage-badge";
+import { RunStateBadge } from "@/components/run-state-badge";
 import {
   posts,
   profiles,
@@ -410,7 +410,10 @@ export default function PostsPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <StageBadge stage={post.current_stage} />
+                      <RunStateBadge
+                currentStage={post.current_stage}
+                stageStatus={post.stage_status}
+              />
                     </TableCell>
                     <TableCell>
                       <PipelineProgress

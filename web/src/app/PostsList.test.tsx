@@ -224,4 +224,40 @@ describe("PostsPage", () => {
       expect(counts).toHaveLength(3);
     });
   });
+
+  it("names the run's state in the list rather than echoing the stage column", async () => {
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Complete")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Running Write")).toBeInTheDocument();
+    // `p1` sits on `research` with an untouched `stage_status`, which is a post
+    // nothing has executed against, not a post in the research stage.
+    expect(screen.getByText("Not started")).toBeInTheDocument();
+  });
+
+  it("does not call a run with a failed stage complete", async () => {
+    mockPostsList.mockResolvedValue([
+      makePost({
+        id: "p4",
+        topic: "Broken Post",
+        slug: "broken-post",
+        current_stage: "complete",
+        stage_status: {
+          research: "complete",
+          outline: "complete",
+          write: "complete",
+          edit: "complete",
+          images: "failed",
+          ready: "complete",
+        },
+      }),
+    ]);
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Broken Post")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Finished with errors")).toBeInTheDocument();
+    expect(screen.queryByText("Complete")).not.toBeInTheDocument();
+  });
 });

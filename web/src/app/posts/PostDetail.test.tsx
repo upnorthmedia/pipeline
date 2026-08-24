@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import PostDetailPage from "./[id]/page";
 import { renderWithProviders } from "@/test/render";
@@ -489,7 +489,9 @@ describe("PostDetailPage publishing", () => {
       expect(screen.getByText("Publishing to WordPress failed")).toBeInTheDocument();
     });
     expect(
-      screen.getByText("The run recorded no reason. The worker log has the detail.")
+      within(screen.getByRole("alert")).getByText(
+        "The run recorded no reason. The worker log has the detail."
+      )
     ).toBeInTheDocument();
   });
 
@@ -531,5 +533,116 @@ describe("PostDetailPage publishing", () => {
       expect(screen.getByText("Published")).toBeInTheDocument();
     });
     expect(screen.queryByText("Publishing to WordPress failed")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Ledger item P3.2a. `markPipelineComplete()` is unconditional, so a run whose
+ * `images` stage wrote `images: failed` and returned still ends up stamped
+ * `current_stage = "complete"`. The header used to print that column and say
+ * COMPLETE; the page has to say what failed, why, and offer the one retry the
+ * API has for it.
+ */
+describe("PostDetailPage stage failures", () => {
+  const failedPost = (error: string | null) =>
+    makePost({
+      current_stage: "complete",
+      completed_at: "2026-08-24T10:00:00Z",
+      stage_status: {
+        research: "complete",
+        outline: "complete",
+        write: "complete",
+        edit: "complete",
+        images: "failed",
+        ready: "complete",
+      },
+      execution_logs:
+        error === null
+          ? []
+          : [
+              {
+                ts: "2026-08-24T09:59:00Z",
+                stage: "images",
+                level: "error",
+                event: "stage_error",
+                message: "Images failed",
+                data: { error },
+              },
+            ],
+    });
+
+  beforeEach(() => {
+    mockGet.mockResolvedValue(failedPost("Gemini returned 429: quota exhausted"));
+  });
+
+  it("does not call a run with a failed stage complete", async () => {
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Finished with errors")).toBeInTheDocument();
+    });
+  });
+
+  it("names the failed stage and what it reported", async () => {
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Images failed")).toBeInTheDocument();
+    });
+    // Scoped to the banner: the run trace below it renders the same reason,
+    // which is the point of reading both out of `execution_logs`.
+    const banner = screen.getByRole("alert");
+    expect(
+      within(banner).getByText("Gemini returned 429: quota exhausted")
+    ).toBeInTheDocument();
+  });
+
+  it("says so plainly when the run recorded no reason", async () => {
+    mockGet.mockResolvedValue(failedPost(null));
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Images failed")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("The run recorded no reason. The worker log has the detail.")
+    ).toBeInTheDocument();
+  });
+
+  it("retries exactly the stage that failed", async () => {
+    const user = userEvent.setup();
+    mockRun.mockResolvedValue({ status: "queued", stage: "images" });
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Images failed")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Re-run Images" }));
+    expect(mockRun).toHaveBeenCalledWith("post-1", "images");
+  });
+
+  it("gives each failed stage its own reason and its own retry", async () => {
+    mockGet.mockResolvedValue(
+      makePost({
+        current_stage: "complete",
+        stage_status: { research: "failed", images: "failed", ready: "complete" },
+      })
+    );
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Research failed")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Images failed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Re-run Research" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Re-run Images" })).toBeInTheDocument();
+  });
+
+  it("shows no failure banner on a clean run", async () => {
+    mockGet.mockResolvedValue(makeCompletedPost());
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => {
+      // The run trace names every stage `Complete` too, so the badge is the
+      // first of them rather than the only one.
+      expect(screen.getAllByText("Complete").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Re-run / })).not.toBeInTheDocument();
   });
 });

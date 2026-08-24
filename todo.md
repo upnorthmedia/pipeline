@@ -281,17 +281,6 @@
   routes and shipped in the Docker image for no reason. Confirm nothing outside the repo links
   them before deleting. Found at polish ledger P1.1. Ledger item P2.105.
 
-- [confirmed] 2026-08-24 A full run stamps `current_stage = "complete"` and `completed_at` even
-  when a stage inside it failed. `markPipelineComplete()` (`web/src/mastra/post-state.ts:275`) is
-  unconditional by design, ported that way so a run that finished has a finish time, and the
-  `images` stage is the one stage that can finish without succeeding: it writes
-  `stage_status.images = "failed"` and returns rather than raising, so the run carries on to
-  `ready` and ends. After polish ledger P1.2a that branch is reachable for an all-failed image
-  stage as well as for an unparseable manifest, so the posts list and `PostsList`'s status
-  filter now call such a post finished while its stage badge says failed. Decide which of the two
-  the list should read; a post with no pictures is not finished in any sense a user means. Found
-  at polish ledger P1.2a. Ledger item P2.106.
-
 - [confirmed] 2026-08-24 `wp_url` accepts a URL carrying credentials
   (`https://user:pass@example.com`). `checkWpUrl` in `web/src/app/api/profiles/validation.ts`
   refuses a query string, a fragment and surrounding whitespace because those break the REST
@@ -350,3 +339,13 @@
   a fix in passing. Found under polish ledger P3.1a, which is why the new `Pipeline` card on
   `/posts/new` is read-only and links to the profile instead of offering an edit. Ledger item
   P2.114.
+
+- [confirmed] 2026-08-24 Pausing a post is a label, not a control signal, and the dashboard now
+  states the label as if it were the fact. `POST /api/posts/{id}/pause`
+  (`web/src/app/api/posts/[id]/pause/route.ts`) writes `current_stage = "paused"` and nothing
+  else, and its own docblock records that no worker reads that value, so the stage already
+  executing runs to completion and the next stage still starts. `deriveRunState()`
+  (`web/src/lib/run-state.ts`, polish ledger P3.2a) puts `paused` above the stage map, because
+  the pause overwrites `current_stage` while leaving a stale `running` entry behind, so a paused
+  post reads `Paused` over a stage that is still billing. Either make the pause reach the worker
+  or say what it actually does. Found at polish ledger P3.2a. Ledger item P2.115.

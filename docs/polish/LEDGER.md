@@ -289,8 +289,28 @@ explicitly out of scope.
       post is in, what is blocked and why, what a review gate waits for, what a failure was
       and how to retry it. Make the run-trace view the thing you would actually watch.
       Carries P2.98 (no surface lists the posts waiting at a gate), P2.108 (the trace renders
-      no publish events), P2.106 (a run with a failed stage still reads "complete") and P2.47
-      (the SSE hook drops `image_generated` and `image_failed`).
+      no publish events), P2.106 (a run with a failed stage still reads "complete", closed at
+      P3.2a) and P2.47 (the SSE hook drops `image_generated` and `image_failed`).
+  - [x] **P3.2a** The one line every surface shows about a run was not true. Both the posts
+        list and the post header rendered `current_stage` alone, uppercased, so a run whose
+        `images` stage failed but which reached the end read `COMPLETE` beside its own red
+        progress dot: `markPipelineComplete()` is unconditional by design and the images stage
+        finishes without succeeding. `deriveRunState()` in `src/lib/run-state.ts` now reads
+        both columns and is the only thing the UI asks; `RunStateBadge` replaces `StageBadge`
+        and prints its label rather than the enum. `/posts/[id]` gains one banner per failed
+        stage with the reason read out of the same `execution_logs` the trace reads and a
+        `Re-run <Stage>` button. The two row states written *over* a run in flight
+        (`failed`, `paused`) outrank the stage map, because they leave it stale: a browser
+        pass caught a dead run reading `Running Research` forever. Closes P2.106, files
+        P2.115. `ui/p32a-*.png`. [evidence](evidence/p3.md#p32a)
+  - [ ] **P3.2b** The gate queue and the publish leg of the trace: P2.98 (nothing lists the
+        posts waiting at a review gate, so a parked run is only findable by opening it) and
+        P2.108 (both publish steps write their `execution_logs` entries with `stage: ""`, so
+        `publish_start`, `publish_complete` and `publish_error` are invisible in the one view
+        built for watching a run).
+  - [ ] **P3.2c** Live image events: P2.47 (`NAMED_EVENTS` in `src/hooks/use-sse.ts` lists
+        eight names and neither `image_generated` nor `image_failed` is among them, so the
+        images stage is the one stage whose progress never reaches an open page).
 - [ ] **P3.3** Naming and copy. Stage names, buttons and errors in the user's terms. No raw
       enum values, no stack traces, no `undefined` in the UI. Carries P2.96 (the route error
       boundaries print a raw V8 message) and P2.112 (`placement.location` renders as the raw
@@ -459,10 +479,11 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       starter assets (`next.svg`, `vercel.svg`, `file.svg`, `globe.svg`, `window.svg`), served
       as public routes and shipped in the Docker image. Confirm nothing outside the repo links
       them, then delete. Batched into P2.C1.
-- [ ] **P2.106** `[confirmed 2026-08-24]` A full run stamps `current_stage = "complete"` and
-      `completed_at` even when a stage inside it failed. `markPipelineComplete()` is
-      unconditional by design and the `images` stage can finish without succeeding, so the
-      posts list calls a post with no pictures finished while its stage badge says failed.
+- [x] **P2.106** A full run stamps `current_stage = "complete"` and `completed_at` even when a
+      stage inside it failed, and both summary surfaces read that column alone. Closed at
+      P3.2a: `deriveRunState()` reads `current_stage` and `stage_status` together and such a
+      run reads `Finished with errors` with a banner naming the stage, its reason and a retry.
+      The write is unchanged and still stamps `complete`. [evidence](evidence/p3.md#p32a)
 - [ ] **P2.107** `[confirmed 2026-08-24]` `wp_url` accepts a URL carrying credentials
       (`https://user:pass@example.com`), so a password can land in `website_profiles.wp_url`,
       which is stored in plain text while `wp_app_password` is Fernet-encrypted.
@@ -495,6 +516,11 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       form rewrites it. Same value P2.68's publish endpoint refuses. Decide whether `both` is
       a real format or a default that should never have been `both`, then make the column and
       the picker agree.
+- [ ] **P2.115** `[confirmed 2026-08-24]` Pausing is a label, not a control signal: the pause
+      route writes `current_stage = "paused"` and nothing else, and no worker reads it, so the
+      running stage finishes and the next one starts. `deriveRunState()` puts `paused` above
+      the stage map (a pause leaves a stale `running` entry behind), so the badge now says
+      `Paused` over a stage that is still billing. Found by P3.2a.
 - [ ] **P2.114** `[confirmed 2026-08-24]` `applyProfilePrefill` makes a per-post gate edit
       unexpressible: it copies the profile's `default_stage_settings` over any submitted
       `stage_settings` equal to the schema default, and that default is six `auto`s, so

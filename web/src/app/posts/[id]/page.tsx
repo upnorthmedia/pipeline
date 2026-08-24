@@ -26,7 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { PipelineProgress } from "@/components/pipeline-progress";
-import { StageBadge } from "@/components/stage-badge";
+import { RunStateBadge } from "@/components/run-state-badge";
 import { MarkdownEditor } from "@/components/markdown-editor";
 import { ContentPreview } from "@/components/content-preview";
 import {
@@ -49,6 +49,8 @@ import {
   STAGES,
 } from "@/lib/api";
 import { STAGE_LABELS } from "@/lib/stages";
+import { deriveRunState } from "@/lib/run-state";
+import { buildRunTrace } from "@/lib/run-trace";
 import { lastPublishError } from "@/lib/publish-report";
 import { plainMessage } from "@/lib/plain-message";
 import { useSSE, type SSEEvent } from "@/hooks/use-sse";
@@ -307,21 +309,24 @@ export default function PostDetailPage() {
   };
 
   /**
-   * The retry behind a failed image. `POST /run?stage=images` runs that stage
-   * alone, which is the only retry the API offers: there is no per-entry
-   * regeneration endpoint, so one failed image and five failed images take the
-   * same action. Item P1.2a is what makes it reach the worker at all, because a
-   * stage `stage_status` still called complete was skipped by `shouldRunStage`.
+   * The retry behind a failed stage. `POST /run?stage=<stage>` runs that stage
+   * alone, which is the only retry the API offers: there is no finer grain, so
+   * one failed image and five failed images take the same action. Item P1.2a is
+   * what makes it reach the worker at all, because a stage `stage_status` still
+   * called complete was skipped by `shouldRunStage`.
    */
-  const handleRetryImages = async () => {
+  const handleRetryStage = async (stage: PipelineStage) => {
+    const name = STAGE_LABELS[stage];
     try {
-      await posts.run(postId, "images");
-      toast.success("Re-running images");
+      await posts.run(postId, stage);
+      toast.success(`Re-running ${name}`);
       fetchPost();
     } catch (e) {
-      toast.error(apiErrorMessage(e, "Failed to re-run the images stage"));
+      toast.error(apiErrorMessage(e, `Failed to re-run the ${name} stage`));
     }
   };
+
+  const handleRetryImages = () => handleRetryStage("images");
 
   const handleRestart = async () => {
     try {
@@ -401,6 +406,27 @@ export default function PostDetailPage() {
 
   const isRunning = STAGES.some((s) => post.stage_status[s] === "running");
   const isComplete = post.current_stage === "complete";
+  // The two columns read together, which is the only way to tell a run that
+  // finished from one that finished without its pictures: `markPipelineComplete()`
+  // stamps `complete` unconditionally. See `src/lib/run-state.ts`.
+  const runState = deriveRunState({
+    currentStage: post.current_stage,
+    stageStatus: post.stage_status,
+  });
+  // What each failed stage actually reported, folded out of the same
+  // `execution_logs` column the run trace below reads, so the banner and the
+  // trace cannot disagree about the reason.
+  const stageFailures = runState.failedStages.map((stage) => {
+    const row = buildRunTrace({
+      entries: post.execution_logs,
+      stageStatus: post.stage_status,
+    }).stages.find((s) => s.stage === stage);
+    return {
+      stage,
+      reason:
+        row?.error ?? "The run recorded no reason. The worker log has the detail.",
+    };
+  });
   // The destination this post's `output_format` names, and what the last
   // attempt at it did. The two status columns are independent and neither
   // publish step clears the other, so a post that changed format can still
@@ -447,7 +473,10 @@ export default function PostDetailPage() {
               <span className="text-xs font-mono text-muted-foreground">
                 {post.slug}
               </span>
-              <StageBadge stage={post.current_stage} />
+              <RunStateBadge
+                currentStage={post.current_stage}
+                stageStatus={post.stage_status}
+              />
               {post.wp_publish_status === "published" && post.wp_post_url && (
                 <a
                   href={post.wp_post_url}
@@ -602,6 +631,31 @@ export default function PostDetailPage() {
           </Button>
         </div>
       )}
+
+      {/*
+        A stage can fail without stopping the run: the `images` stage writes
+        `images: failed` and returns rather than raising, and the chain carries
+        on to `ready` and stamps the post complete. Without this the only trace
+        of it on screen was a red dot in the progress bar. One row per failed
+        stage, each with what it reported and the one retry the API has for it.
+      */}
+      {stageFailures.map(({ stage, reason }) => (
+        <div
+          key={stage}
+          role="alert"
+          className="flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">{STAGE_LABELS[stage]} failed</p>
+            <p className="mt-0.5 text-sm text-muted-foreground break-words">{reason}</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => handleRetryStage(stage)}>
+            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+            Re-run {STAGE_LABELS[stage]}
+          </Button>
+        </div>
+      ))}
 
       {/* Pipeline Progress */}
       <Card className="gap-0 py-0">
