@@ -193,6 +193,12 @@ export default function BatchCreatePage() {
       toast.error("No posts to create");
       return;
     }
+    // Every item needs a profile: a post reaches its owner only through one,
+    // so the endpoint refuses a batch that names none (ledger item P2.97).
+    if (!selectedProfile) {
+      toast.error("Pick a website profile first");
+      return;
+    }
 
     const seen = new Set<string>();
     for (const row of activeRows) {
@@ -214,7 +220,7 @@ export default function BatchCreatePage() {
       const items: PostCreate[] = activeRows.map((row) => ({
         slug: row.slug || slugify(row.topic),
         topic: row.topic.trim(),
-        profile_id: selectedProfile?.id || undefined,
+        profile_id: selectedProfile.id,
         intent: row.intent || undefined,
         niche: row.niche || selectedProfile?.niche || undefined,
         target_audience: selectedProfile?.target_audience || undefined,
@@ -475,7 +481,12 @@ export default function BatchCreatePage() {
       )}
 
       {/* Submit */}
-      <div className="flex justify-end gap-3">
+      <div className="flex items-center justify-end gap-3">
+        {!selectedProfile && (
+          <p className="mr-auto text-sm text-muted-foreground">
+            Pick a website profile to create these posts.
+          </p>
+        )}
         <Link href="/">
           <Button variant="outline" type="button">
             Cancel
@@ -483,7 +494,7 @@ export default function BatchCreatePage() {
         </Link>
         <Button
           onClick={handleSubmit}
-          disabled={submitting || activeRows.length === 0}
+          disabled={submitting || activeRows.length === 0 || !selectedProfile}
         >
           {submitting ? (
             <>

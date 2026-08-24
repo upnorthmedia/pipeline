@@ -707,11 +707,15 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       was measured and does not reproduce, so it was deleted rather than fixed.
       [evidence](evidence/p3.md#p33a)
 
-- [ ] **P2.97** `[confirmed 2026-08-24]` A post created with no profile is unreachable and
+- [x] **P2.97** `[confirmed 2026-08-24]` A post created with no profile is unreachable and
       undeletable through the app. `/posts/new` offers "No profile (manual config)" and
       `POST /api/posts` accepts a null `profile_id`, but every read handler inner-joins
       `website_profiles` to reach `user_id`, so the form redirects to "Post not found" and
-      `GET`/`DELETE /api/posts/{id}` both 404. Only SQL can remove the row.
+      `GET`/`DELETE /api/posts/{id}` both 404. Only SQL can remove the row. Fixed at the
+      writers, not the readers: `profile_id` is required on `postCreateSchema`, which both
+      create paths share, and the picker no longer offers "none". Exposed a second defect,
+      the picker handing the page a null selection back through Radix's `onValueChange("")`.
+      Pre-existing orphan rows still need SQL. [evidence](evidence/p2.md#p297)
 - [x] **P2.98** `[confirmed 2026-08-24]` There is no surface that lists the posts waiting at a
       review gate. The queue API is real and `/monitor` shows aggregate counters, but a
       suspended post is discoverable only by opening its own detail page. Fixed at P3.2b-i:

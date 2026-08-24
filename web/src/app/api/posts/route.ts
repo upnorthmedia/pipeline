@@ -89,9 +89,11 @@ export const GET = withServerError(getHandler)
  *
  * A `profile_id` the caller does not own is a 404, which is what keeps another
  * account's settings from being read through the prefill. A body with no
- * `profile_id` is accepted, as Python accepted it, even though the resulting
- * row is invisible to every read handler: they all join through
- * `website_profiles` to reach `user_id`.
+ * `profile_id` at all is a 422, which Python did not do: the row it would write
+ * is invisible to every read handler, because they all join through
+ * `website_profiles` to reach `user_id`, so nothing could list, read, update or
+ * delete it afterwards. Ledger item P2.97; the deviation is declared on
+ * `postCreateSchema`.
  *
  * `current_stage` and `stage_status` are stamped after the prefill, so a body
  * or profile cannot set them.
@@ -117,16 +119,13 @@ async function postHandler(request: Request): Promise<Response> {
   const parsed = postCreateSchema.safeParse(body)
   if (!parsed.success) return unprocessableBody(parsed.error.issues, body)
 
-  let values: PostWriteInput = parsed.data
-  if (values.profile_id) {
-    const [profile] = await getDb()
-      .select()
-      .from(websiteProfiles)
-      .where(and(eq(websiteProfiles.id, values.profile_id), eq(websiteProfiles.userId, user.id)))
-      .limit(1)
-    if (!profile) return Response.json({ detail: "Profile not found" }, { status: 404 })
-    values = applyProfilePrefill(values, profile)
-  }
+  const [profile] = await getDb()
+    .select()
+    .from(websiteProfiles)
+    .where(and(eq(websiteProfiles.id, parsed.data.profile_id), eq(websiteProfiles.userId, user.id)))
+    .limit(1)
+  if (!profile) return Response.json({ detail: "Profile not found" }, { status: 404 })
+  const values: PostWriteInput = applyProfilePrefill(parsed.data, profile)
 
   const [row] = await getDb()
     .insert(posts)

@@ -135,7 +135,7 @@ describe("api client", () => {
   describe("posts endpoints", () => {
     it("creates a post", async () => {
       mockResponse.body = { id: "new-1", topic: "Test" };
-      await posts.create({ slug: "test", topic: "Test" });
+      await posts.create({ slug: "test", topic: "Test", profile_id: "profile-1" });
       expect(fetchCalls[0].init?.method).toBe("POST");
       expect(fetchCalls[0].url).toBe(`${API_BASE}/api/posts`);
     });
@@ -192,8 +192,8 @@ describe("api client", () => {
     it("batch creates posts", async () => {
       mockResponse.body = [{ id: "b1" }, { id: "b2" }];
       await posts.batchCreate([
-        { slug: "a", topic: "A" },
-        { slug: "b", topic: "B" },
+        { slug: "a", topic: "A", profile_id: "profile-1" },
+        { slug: "b", topic: "B", profile_id: "profile-1" },
       ]);
       expect(fetchCalls[0].url).toBe(`${API_BASE}/api/posts/batch`);
       expect(JSON.parse(fetchCalls[0].init?.body as string)).toHaveLength(2);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -31,10 +31,15 @@ interface ProfileSelectCardProps {
 /**
  * The "Website Profile" picker shared by `/posts/new` and `/posts/batch`.
  *
- * A profile is optional on both pages, so none of the failure states block the
- * form: a load error and an account with no profiles both leave the page usable
- * with no profile selected, they just say so instead of showing a select whose
- * only option is "No profile".
+ * A profile is required on both pages (ledger item P2.97): a post reaches its
+ * owner only through `website_profiles.user_id`, so one written without a
+ * profile is invisible to every read handler and `POST /api/posts` refuses it.
+ * The picker therefore offers no "none" option, and both pages keep their
+ * submit disabled until it has a value.
+ *
+ * The failure states say what to do rather than blocking silently: a load error
+ * offers a retry, and an account with no profiles offers to create one, which
+ * is the only way forward from there.
  */
 export function ProfileSelectCard({
   description,
@@ -64,6 +69,20 @@ export function ProfileSelectCard({
     load();
   }, [load]);
 
+  // One profile is the common account, and a picker with a single option is a
+  // required field nobody would think to open. The ref, not the `selected`
+  // prop, is what keeps this to one call: `onSelect` is redefined on every
+  // render of the page, so the effect re-runs before the page's own state
+  // update has come back down as a new `selected`, and the page reads a second
+  // selection as a second user choice, which on `/posts/new` refetches the
+  // profile's WordPress categories and authors.
+  const autoSelected = useRef(false);
+  useEffect(() => {
+    if (autoSelected.current || selected || list.length !== 1) return;
+    autoSelected.current = true;
+    onSelect(list[0]);
+  }, [list, selected, onSelect]);
+
   return (
     <Card>
       <CardHeader>
@@ -91,8 +110,8 @@ export function ProfileSelectCard({
           <div className="space-y-2">
             <p className="text-sm font-medium">No profiles yet</p>
             <p className="text-sm text-muted-foreground">
-              A profile carries the niche, tone and publishing defaults so you do
-              not retype them for every post.
+              Every post belongs to a profile, which carries the niche, tone and
+              publishing defaults so you do not retype them for every post.
             </p>
             <Link href="/profiles">
               <Button variant="outline" size="sm">
@@ -101,25 +120,37 @@ export function ProfileSelectCard({
             </Link>
           </div>
         ) : (
-          <Select
-            name="profile_id"
-            value={selected?.id ?? "none"}
-            onValueChange={(v) =>
-              onSelect(v === "none" ? null : list.find((p) => p.id === v) ?? null)
-            }
-          >
-            <SelectTrigger aria-label="Website profile">
-              <SelectValue placeholder="No profile (manual config)" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">No profile</SelectItem>
-              {list.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="space-y-2">
+            <Select
+              name="profile_id"
+              value={selected?.id ?? ""}
+              // Only ever upwards: with no "none" item there is nothing to
+              // deselect to, and Radix answers the empty value this renders
+              // before a pick with an `onValueChange("")` of its own, which
+              // read as the page clearing its own selection.
+              onValueChange={(v) => {
+                const picked = list.find((p) => p.id === v);
+                if (picked) onSelect(picked);
+              }}
+            >
+              <SelectTrigger aria-label="Website profile">
+                <SelectValue placeholder="Select a profile" />
+              </SelectTrigger>
+              <SelectContent>
+                {list.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {!selected && (
+              <p className="text-sm text-muted-foreground">
+                Required: a post is filed under its profile, and its publishing
+                settings come from there.
+              </p>
+            )}
+          </div>
         )}
       </CardContent>
     </Card>

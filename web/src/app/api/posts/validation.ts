@@ -13,7 +13,7 @@ import { z } from "zod"
 import type { StageSettingsJson, posts } from "@/db"
 
 import { outputFormatField } from "../output-format"
-import { jsonObject, pydanticInt, pydanticUuid } from "../pydantic"
+import { jsonObject, pydanticInt, pydanticRequiredUuid, pydanticUuid } from "../pydantic"
 
 /** `PostBase.stage_settings`, spelled exactly as pydantic spelled it. */
 const DEFAULT_STAGE_SETTINGS: StageSettingsJson = {
@@ -26,14 +26,21 @@ const DEFAULT_STAGE_SETTINGS: StageSettingsJson = {
 }
 
 /**
- * One entry per field, in `PostCreate`'s declaration order. `slug` and `topic`
- * are the only required ones; every other field carries the default
- * `model_dump()` would have supplied.
+ * One entry per field, in `PostCreate`'s declaration order. Every field but the
+ * three required ones carries the default `model_dump()` would have supplied.
+ *
+ * `profile_id` is required here where pydantic defaulted it to null, the one
+ * deliberate deviation in this schema (ledger item P2.97). A post carries no
+ * owner of its own: every read handler reaches `user_id` by joining
+ * `website_profiles` through `profile_id`, so a row written without one belongs
+ * to nobody, cannot be listed, read, updated or deleted through the app, and
+ * can only be removed with SQL. Refusing the body is the only place that can be
+ * stopped, since the column stays nullable for the rows already written.
  */
 export const postCreateSchema = z.object({
   slug: z.string(),
   topic: z.string(),
-  profile_id: pydanticUuid.nullable().default(null),
+  profile_id: pydanticRequiredUuid,
   target_audience: z.string().nullable().default(null),
   niche: z.string().nullable().default(null),
   intent: z.string().nullable().default(null),
@@ -62,11 +69,16 @@ export type PostCreateInput = z.infer<typeof postCreateSchema>
  * The schema default of every field, which is what `create_post` compares the
  * submitted value against before deciding to prefill it from the profile.
  * Taken from parsing an empty body, so it cannot drift from the schema above.
+ *
+ * `profile_id` keeps the null pydantic dumped: this is a record of the defaults
+ * the comparison is made against, not of what the endpoint now accepts, and
+ * nothing reads that entry.
  */
-export const POST_CREATE_DEFAULTS = postCreateSchema.parse({
-  slug: "",
-  topic: "",
-}) satisfies PostCreateInput
+export const POST_CREATE_DEFAULTS = postCreateSchema
+  .extend({ profile_id: pydanticUuid.nullable().default(null) })
+  .parse({ slug: "", topic: "" }) satisfies Omit<PostCreateInput, "profile_id"> & {
+  profile_id: string | null
+}
 
 /**
  * The create body as it is written, after `prefill.ts` has folded the profile

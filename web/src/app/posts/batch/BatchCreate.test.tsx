@@ -48,6 +48,21 @@ const _toast = await import("sonner");
 const mockProfilesList = vi.mocked(profiles.list);
 const mockBatchCreate = vi.mocked(posts.batchCreate);
 
+/**
+ * A batch cannot be submitted without a profile since P2.97, so the cases that
+ * reach `batchCreate` render against an account with exactly one, which the
+ * picker selects for the page.
+ */
+async function renderWithOneProfile() {
+  mockProfilesList.mockResolvedValue([makeProfile({ id: "prof-1", name: "Test Site" })]);
+  renderWithProviders(<BatchCreatePage />);
+  await waitFor(() =>
+    expect(screen.getByRole("combobox", { name: "Website profile" })).toHaveTextContent(
+      "Test Site"
+    )
+  );
+}
+
 describe("BatchCreatePage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -103,9 +118,25 @@ describe("BatchCreatePage", () => {
   });
 
   it("renders profile selector", async () => {
-    mockProfilesList.mockResolvedValue([makeProfile()]);
+    mockProfilesList.mockResolvedValue([makeProfile({ name: "Test Site" }), makeProfile()]);
     renderWithProviders(<BatchCreatePage />);
-    expect(await screen.findByText("No profile")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("combobox", { name: "Website profile" })
+    ).toHaveTextContent("Select a profile");
+  });
+
+  it("cannot submit until a profile is picked", async () => {
+    const user = userEvent.setup();
+    mockProfilesList.mockResolvedValue([makeProfile({ name: "A" }), makeProfile({ name: "B" })]);
+    renderWithProviders(<BatchCreatePage />);
+    await user.click(screen.getByText("Manual Entry"));
+    await user.type(screen.getByPlaceholderText("Topic"), "Test Blog Post");
+
+    // Every item needs a profile since P2.97, so the button says so rather
+    // than sending a batch the endpoint answers with a 422.
+    expect(await screen.findByText("Pick a website profile to create these posts.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Create 1 Post$/i })).toBeDisabled();
+    expect(mockBatchCreate).not.toHaveBeenCalled();
   });
 
   it("loads profiles on mount", async () => {
@@ -159,7 +190,7 @@ describe("BatchCreatePage", () => {
 
   it("submit creates posts and redirects", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<BatchCreatePage />);
+    await renderWithOneProfile();
 
     await user.click(screen.getByText("Manual Entry"));
 
@@ -191,7 +222,7 @@ describe("BatchCreatePage", () => {
       new Error(JSON.stringify({ detail: "Slug already in use: test-blog-post" }))
     );
     const user = userEvent.setup();
-    renderWithProviders(<BatchCreatePage />);
+    await renderWithOneProfile();
 
     await user.click(screen.getByText("Manual Entry"));
     await user.type(screen.getByPlaceholderText("Topic"), "Test Blog Post");
@@ -207,7 +238,7 @@ describe("BatchCreatePage", () => {
   it("falls back to its own wording when the failure carries no message", async () => {
     mockBatchCreate.mockRejectedValue(new Error("Server error"));
     const user = userEvent.setup();
-    renderWithProviders(<BatchCreatePage />);
+    await renderWithOneProfile();
 
     await user.click(screen.getByText("Manual Entry"));
     await user.type(screen.getByPlaceholderText("Topic"), "Test Blog Post");

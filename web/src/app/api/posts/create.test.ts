@@ -29,10 +29,11 @@ import { STAGES, STATUS_RUNNING } from "@/mastra/state"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { OUTPUT_FORMAT_INVALID } from "../output-format"
+import { pydanticUuid } from "../pydantic"
 
 import parity from "./data/create-parity.json"
 import { applyProfilePrefill } from "./prefill"
-import { GET as getPost } from "./[id]/route"
+import { DELETE as deletePost, GET as getPost } from "./[id]/route"
 import { POST as createPost } from "./route"
 import { POST_CREATE_DEFAULTS, postCreateSchema, type PostWriteInput } from "./validation"
 
@@ -62,6 +63,13 @@ const URL_BASE = "http://test/api/posts"
 
 /** Discard port on loopback: nothing here should ever reach a real site. */
 const SITE = "http://127.0.0.1:9/site"
+
+/**
+ * A well-formed `profile_id` that names no row, for the bodies whose refusal is
+ * about another field: `profile_id` is required since P2.97, and a body without
+ * one is refused before the field under test is reached.
+ */
+const UNKNOWN_PROFILE = "a7c97e11-0000-4000-8000-000000000097"
 
 /** `stage_settings` that pause the run at its first stage. */
 const GATED_STAGE_SETTINGS = {
@@ -197,18 +205,45 @@ describe("create_post parity", () => {
   })
 
   /**
-   * The corpus is a recording of Python, and Python took `output_format` as a
-   * bare `str`. Two of the ten bodies carry `both`, which `../output-format.ts`
-   * now refuses at this boundary (ledger item P2.68). The recording is not
-   * edited to agree: the refusal is asserted on its own below, and the prefill
-   * each case was recorded to prove is replayed through the same schema with
-   * only that one check lifted, so nothing else about the parse is relaxed.
+   * The corpus is a recording of Python, and the shipped schema has since left
+   * it in two places. Python took `output_format` as a bare `str` and two of
+   * the ten bodies carry `both`, which `../output-format.ts` now refuses
+   * (ledger item P2.68); Python defaulted `profile_id` to null and two of the
+   * ten bodies name no profile, which `validation.ts` now refuses (ledger item
+   * P2.97). The recording is not edited to agree: each refusal is asserted on
+   * its own below, and the prefill every case was recorded to prove is replayed
+   * with only those two checks lifted, so nothing else about the parse is
+   * relaxed.
    */
-  const corpusSchema = postCreateSchema.extend({ output_format: z.string().default("markdown") })
+  const recordedProfiles = postCreateSchema.extend({
+    profile_id: pydanticUuid.nullable().default(null),
+  })
+  const corpusSchema = recordedProfiles.extend({ output_format: z.string().default("markdown") })
+
+  it("refuses the two recorded bodies that name no profile", () => {
+    const vocabularyLifted = postCreateSchema.extend({
+      output_format: z.string().default("markdown"),
+    })
+    const refused = parity.cases
+      .map((testCase, index) => ({ index, parsed: vocabularyLifted.safeParse(testCase.body) }))
+      .filter(({ parsed }) => !parsed.success)
+
+    expect(refused.map(({ index }) => index + 1)).toEqual([1, 2])
+    // The absent key and the explicit null are pydantic's two different errors.
+    expect(refused.map(({ parsed }) => (parsed.success ? null : parsed.error.issues))).toEqual([
+      [expect.objectContaining({ path: ["profile_id"], message: "Field required" })],
+      [
+        expect.objectContaining({
+          path: ["profile_id"],
+          message: "UUID input should be a string, bytes or UUID object",
+        }),
+      ],
+    ])
+  })
 
   it("refuses the two recorded bodies whose output_format left the vocabulary", () => {
     const refused = parity.cases
-      .map((testCase, index) => ({ index, parsed: postCreateSchema.safeParse(testCase.body) }))
+      .map((testCase, index) => ({ index, parsed: recordedProfiles.safeParse(testCase.body) }))
       .filter(({ parsed }) => !parsed.success)
 
     expect(refused.map(({ index }) => index + 1)).toEqual([2, 4])
@@ -227,7 +262,9 @@ describe("create_post parity", () => {
       expect(parsed.success).toBe(true)
       if (!parsed.success) return
 
-      let values: PostWriteInput = parsed.data
+      // The corpus keeps Python's nullable `profile_id`, which the write type
+      // no longer expresses; nothing in the prefill reads that field.
+      let values = parsed.data as unknown as PostWriteInput
       if (testCase.profile) {
         values = applyProfilePrefill(values, profileRow(testCase.profile))
       }
@@ -260,17 +297,22 @@ describe("POST /api/posts", () => {
   })
 
   it("answers a missing required field with pydantic's missing 422", async () => {
+    // Two entries since P2.97 made `profile_id` required, reported in schema
+    // declaration order, as pydantic reported every missing key at once.
     const body = { topic: "No slug" }
     const response = await create(body, user.cookie)
     expect(response.status).toBe(422)
     await expect(response.json()).resolves.toEqual({
-      detail: [{ type: "missing", loc: ["body", "slug"], msg: "Field required", input: body }],
+      detail: [
+        { type: "missing", loc: ["body", "slug"], msg: "Field required", input: body },
+        { type: "missing", loc: ["body", "profile_id"], msg: "Field required", input: body },
+      ],
     })
   })
 
   it("answers an unparseable word_count with pydantic's int_parsing 422", async () => {
     const response = await create(
-      { slug: `${PREFIX}bad-int`, topic: "T", word_count: "abc" },
+      { slug: `${PREFIX}bad-int`, topic: "T", profile_id: UNKNOWN_PROFILE, word_count: "abc" },
       user.cookie,
     )
     expect(response.status).toBe(422)
@@ -326,7 +368,7 @@ describe("POST /api/posts", () => {
     // The vocabulary is closed here rather than widened at the publish
     // endpoint, so no new row can carry a format the app cannot produce.
     const response = await create(
-      { slug: `${PREFIX}both`, topic: "T", output_format: "both" },
+      { slug: `${PREFIX}both`, topic: "T", profile_id: UNKNOWN_PROFILE, output_format: "both" },
       user.cookie,
     )
 
@@ -344,8 +386,9 @@ describe("POST /api/posts", () => {
   })
 
   it.each(["markdown", "wordpress", "nextjs"])("still takes output_format %s", async (format) => {
+    const profile = await insertProfile(user.userId)
     const response = await create(
-      { slug: `${PREFIX}fmt-${format}`, topic: "T", output_format: format },
+      { slug: `${PREFIX}fmt-${format}`, topic: "T", profile_id: profile.id, output_format: format },
       user.cookie,
     )
 
@@ -370,16 +413,29 @@ describe("POST /api/posts", () => {
   })
 
   it("writes the pydantic defaults, not the column defaults, and stamps the first stage", async () => {
+    // A profile is required since P2.97, so the defaults are measured against
+    // one that fills as little as the columns allow: every nullable prefill
+    // field left null, and the six "auto" stages as `default_stage_settings`,
+    // which the prefill copies unconditionally.
+    const profile = await insertProfile(user.userId, {
+      defaultStageSettings: POST_CREATE_DEFAULTS.stage_settings,
+    })
     // The only body here with no review gate, so the run is not really started.
     start.mode = "skip"
-    const response = await create({ slug: `${PREFIX}minimal`, topic: "Minimal topic" }, user.cookie)
+    const response = await create(
+      { slug: `${PREFIX}minimal`, topic: "Minimal topic", profile_id: profile.id },
+      user.cookie,
+    )
     expect(response.status).toBe(201)
 
     const body = await response.json()
     expect(body).toMatchObject({
       slug: `${PREFIX}minimal`,
       topic: "Minimal topic",
-      profile_id: null,
+      profile_id: profile.id,
+      // The one field the profile does fill: `website_url` is NOT NULL on
+      // `website_profiles`, so there is no profile that prefills nothing.
+      website_url: SITE,
       word_count: 2000,
       tone: "Conversational and friendly",
       // The pydantic default, materialised on the row rather than left to
@@ -515,6 +571,66 @@ describe("POST /api/posts", () => {
       expect.objectContaining({ postId: id, error: "redis is down" }),
     )
     warn.mockRestore()
+  })
+
+  /**
+   * The reason the create above is refused, measured on a row SQL put there:
+   * ownership lives on `website_profiles.user_id` alone, so a post with no
+   * profile belongs to nobody and every handler that reaches for an owner
+   * misses. A row like this can only be removed with SQL, which is why the
+   * endpoint must never write one.
+   */
+  it("cannot read or delete a profile-less row, which is why it refuses to write one", async () => {
+    const [orphan] = await db
+      .insert(posts)
+      .values({ slug: `${PREFIX}orphan-row`, topic: "Orphan row", profileId: null })
+      .returning()
+
+    const read = await getPost(apiRequest(`${URL_BASE}/${orphan.id}`, { cookie: user.cookie }), {
+      params: Promise.resolve({ id: orphan.id }),
+    })
+    expect(read.status).toBe(404)
+    await expect(read.json()).resolves.toEqual({ detail: "Post not found" })
+
+    const removed = await deletePost(
+      apiRequest(`${URL_BASE}/${orphan.id}`, { method: "DELETE", cookie: user.cookie }),
+      { params: Promise.resolve({ id: orphan.id }) },
+    )
+    expect(removed.status).toBe(404)
+
+    const [still] = await db.select().from(posts).where(eq(posts.id, orphan.id)).limit(1)
+    expect(still).toBeDefined()
+  })
+
+  it("refuses a body with no profile_id, which would write a post nobody owns", async () => {
+    const body = { slug: `${PREFIX}no-profile`, topic: "No profile" }
+    const response = await create(body, user.cookie)
+    expect(response.status).toBe(422)
+    await expect(response.json()).resolves.toEqual({
+      detail: [{ type: "missing", loc: ["body", "profile_id"], msg: "Field required", input: body }],
+    })
+
+    const rows = await db.select().from(posts).where(eq(posts.slug, `${PREFIX}no-profile`))
+    expect(rows).toHaveLength(0)
+  })
+
+  it("refuses an explicit null profile_id the way pydantic refuses a wrong type", async () => {
+    const body = { slug: `${PREFIX}null-profile`, topic: "Null profile", profile_id: null }
+    const response = await create(body, user.cookie)
+    expect(response.status).toBe(422)
+    await expect(response.json()).resolves.toEqual({
+      detail: [
+        {
+          type: "uuid_type",
+          loc: ["body", "profile_id"],
+          msg: "UUID input should be a string, bytes or UUID object",
+          input: null,
+        },
+      ],
+    })
+
+    const rows = await db.select().from(posts).where(eq(posts.slug, `${PREFIX}null-profile`))
+    expect(rows).toHaveLength(0)
   })
 
   it("returns a post the ported read endpoint then serves identically", async () => {

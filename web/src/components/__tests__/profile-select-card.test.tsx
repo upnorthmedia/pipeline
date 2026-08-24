@@ -17,6 +17,7 @@ const { profiles } = await import("@/lib/api");
 const mockList = vi.mocked(profiles.list);
 
 const firearms = makeProfile({ id: "prof-1", name: "Firearms Blog" });
+const cookware = makeProfile({ id: "prof-2", name: "Cookware Blog" });
 
 function renderCard(onSelect = vi.fn()) {
   renderWithProviders(
@@ -43,13 +44,28 @@ describe("ProfileSelectCard", () => {
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   });
 
-  it("shows the select once the profiles arrive", async () => {
+  it("shows the select once the profiles arrive, with nothing picked", async () => {
+    mockList.mockResolvedValue([firearms, cookware]);
     renderCard();
 
-    expect(await screen.findByRole("combobox")).toHaveTextContent("No profile");
+    // No "none" option since P2.97: a post with no profile has no owner, so
+    // the picker cannot express one and the page keeps its submit disabled.
+    expect(await screen.findByRole("combobox")).toHaveTextContent("Select a profile");
+    expect(screen.getByText(/Required: a post is filed under its profile/)).toBeInTheDocument();
     expect(
       screen.queryByTestId("profile-select-loading")
     ).not.toBeInTheDocument();
+  });
+
+  it("picks the only profile for the page, and never one of several", async () => {
+    const onSelect = renderCard();
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith(firearms));
+
+    onSelect.mockClear();
+    mockList.mockResolvedValue([firearms, cookware]);
+    renderCard(onSelect);
+    await screen.findAllByRole("combobox");
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it("hands the picked profile back to the page", async () => {

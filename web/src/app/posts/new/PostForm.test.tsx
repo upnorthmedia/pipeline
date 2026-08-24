@@ -76,6 +76,21 @@ beforeEach(() => {
   } as never);
 });
 
+/**
+ * A post cannot be created without a profile since P2.97, so the cases that
+ * reach `posts.create` render against an account with exactly one, which the
+ * picker selects for the page.
+ */
+async function renderWithOneProfile() {
+  mockProfilesList.mockResolvedValue([makeProfile({ id: "prof-1", name: "Test Site" })]);
+  renderWithProviders(<NewPostPage />);
+  await waitFor(() =>
+    expect(screen.getByRole("combobox", { name: "Website profile" })).toHaveTextContent(
+      "Test Site"
+    )
+  );
+}
+
 describe("NewPostPage", () => {
   it("renders the form title", async () => {
     renderWithProviders(<NewPostPage />);
@@ -142,7 +157,7 @@ describe("NewPostPage", () => {
 
   it("submits form and redirects on success", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<NewPostPage />);
+    await renderWithOneProfile();
 
     const topicInput = screen.getByLabelText(/Topic/);
     await user.type(topicInput, "My Test Post");
@@ -164,6 +179,24 @@ describe("NewPostPage", () => {
     });
   });
 
+  it("cannot submit until a profile is picked", async () => {
+    const user = userEvent.setup();
+    mockProfilesList.mockResolvedValue([
+      makeProfile({ id: "prof-1", name: "A" }),
+      makeProfile({ id: "prof-2", name: "B" }),
+    ]);
+    renderWithProviders(<NewPostPage />);
+    await user.type(screen.getByLabelText(/Topic/), "Test Post");
+
+    // A post reaches its owner only through its profile since P2.97, so the
+    // form says so rather than sending a body the endpoint answers with a 422.
+    expect(
+      await screen.findByText("Pick a website profile to create this post.")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Create Post").closest("button")).toBeDisabled();
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
   // A toast would be gone in four seconds and the operator is still looking at
   // a filled-in form, so the reason stays on the page next to the button.
   it("shows the server's own reason inline on submission failure", async () => {
@@ -171,7 +204,7 @@ describe("NewPostPage", () => {
       new Error(JSON.stringify({ detail: "Slug already in use" }))
     );
     const user = userEvent.setup();
-    renderWithProviders(<NewPostPage />);
+    await renderWithOneProfile();
 
     await user.type(screen.getByLabelText(/Topic/), "Test Post");
     await user.click(screen.getByText("Create Post"));
@@ -184,7 +217,7 @@ describe("NewPostPage", () => {
   it("falls back to its own wording when the failure carries no message", async () => {
     mockCreate.mockRejectedValue(new Error("Server error"));
     const user = userEvent.setup();
-    renderWithProviders(<NewPostPage />);
+    await renderWithOneProfile();
 
     await user.type(screen.getByLabelText(/Topic/), "Test Post");
     await user.click(screen.getByText("Create Post"));
@@ -197,7 +230,7 @@ describe("NewPostPage", () => {
       new Error(JSON.stringify({ detail: "Slug already in use" }))
     );
     const user = userEvent.setup();
-    renderWithProviders(<NewPostPage />);
+    await renderWithOneProfile();
 
     await user.type(screen.getByLabelText(/Topic/), "Test Post");
     await user.click(screen.getByText("Create Post"));
@@ -242,9 +275,7 @@ describe("NewPostPage", () => {
     const user = userEvent.setup();
     renderWithProviders(<NewPostPage />);
 
-    await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
-    await user.click(await screen.findByRole("option", { name: "WP Site" }));
-
+    // The only profile is picked for the page, which is what loads the lists.
     expect(
       await screen.findByText("WordPress rejected the credentials")
     ).toBeInTheDocument();
@@ -262,7 +293,7 @@ describe("NewPostPage", () => {
   it("disables submit button while submitting", async () => {
     mockCreate.mockReturnValue(new Promise(() => {})); // never resolves
     const user = userEvent.setup();
-    renderWithProviders(<NewPostPage />);
+    await renderWithOneProfile();
 
     await user.type(screen.getByLabelText(/Topic/), "Test Post");
     await user.click(screen.getByText("Create Post"));

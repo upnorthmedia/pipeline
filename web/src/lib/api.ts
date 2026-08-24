@@ -160,7 +160,11 @@ export interface Post {
 export interface PostCreate {
   slug: string;
   topic: string;
-  profile_id?: string | null;
+  /**
+   * Required: a post reaches its owner only through the profile, so
+   * `POST /api/posts` answers a body without one with a 422 (ledger P2.97).
+   */
+  profile_id: string;
   intent?: string | null;
   target_audience?: string | null;
   niche?: string | null;

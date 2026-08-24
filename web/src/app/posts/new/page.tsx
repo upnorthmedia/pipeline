@@ -177,6 +177,13 @@ export default function NewPostPage() {
       toast.error("Topic and slug are required");
       return;
     }
+    // The endpoint refuses a post with no profile, because a post reaches its
+    // owner only through one (ledger item P2.97). Said here rather than left to
+    // the 422, which names a field the form does not label "profile_id".
+    if (!selectedProfile) {
+      toast.error("Pick a website profile first");
+      return;
+    }
 
     setSubmitting(true);
     setSubmitError(null);
@@ -184,7 +191,7 @@ export default function NewPostPage() {
       const data: PostCreate = {
         slug: slug.trim(),
         topic: topic.trim(),
-        profile_id: selectedProfile?.id || undefined,
+        profile_id: selectedProfile.id,
         intent: intent || undefined,
         niche: niche || undefined,
         target_audience: targetAudience || undefined,
@@ -562,13 +569,18 @@ export default function NewPostPage() {
           </div>
         )}
 
-        <div className="flex justify-end gap-3">
+        <div className="flex items-center justify-end gap-3">
+          {!selectedProfile && (
+            <p className="mr-auto text-sm text-muted-foreground">
+              Pick a website profile to create this post.
+            </p>
+          )}
           <Link href="/">
             <Button variant="outline" type="button">
               Cancel
             </Button>
           </Link>
-          <Button type="submit" disabled={submitting}>
+          <Button type="submit" disabled={submitting || !selectedProfile}>
             {submitting ? "Creating..." : "Create Post"}
           </Button>
         </div>

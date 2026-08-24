@@ -45,7 +45,9 @@ export const pydanticInt = z.preprocess(
  */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-export const pydanticUuid = z.unknown().superRefine((value, ctx) => {
+type UnknownRefinement = Parameters<ReturnType<typeof z.unknown>["superRefine"]>[0]
+
+const checkUuid: UnknownRefinement = (value, ctx) => {
   if (typeof value !== "string") {
     ctx.addIssue({
       code: "custom",
@@ -61,6 +63,23 @@ export const pydanticUuid = z.unknown().superRefine((value, ctx) => {
       params: { type: "uuid_parsing" },
     })
   }
+}
+
+export const pydanticUuid = z.unknown().superRefine(checkUuid) as unknown as z.ZodType<string>
+
+/**
+ * The same field where pydantic declared it without a default, so an absent key
+ * is `missing` rather than a type error. `z.unknown()` leaves the key optional,
+ * but the check still runs with `undefined`, and an `invalid_type` issue over a
+ * value that is not there is what `detailFor` reads back as pydantic's
+ * `{"type": "missing", "msg": "Field required"}`.
+ */
+export const pydanticRequiredUuid = z.unknown().superRefine((value, ctx) => {
+  if (value === undefined) {
+    ctx.addIssue({ code: "invalid_type", expected: "string", input: value, message: "Field required" })
+    return
+  }
+  checkUuid(value, ctx)
 }) as unknown as z.ZodType<string>
 
 export interface ValidationErrorDetail {

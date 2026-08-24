@@ -17,7 +17,7 @@
  */
 import { RedisStreamsPubSub } from "@mastra/redis-streams"
 import { and, eq, like } from "drizzle-orm"
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, posts, websiteProfiles } from "@/db"
 import { stateFromPost } from "@/mastra/post-state"
@@ -112,9 +112,16 @@ function batch(body: unknown, cookie?: string) {
   )
 }
 
+/**
+ * A batch item. Every one carries a `profile_id`, required since P2.97, and
+ * `itemProfile` is a bare profile the batch block creates per test: `afterEach`
+ * clears the fixtures, so it cannot be made once.
+ */
 function item(slug: string, extra: Record<string, unknown> = {}) {
-  return { slug: `${PREFIX}${slug}`, topic: `Topic ${slug}`, ...extra }
+  return { slug: `${PREFIX}${slug}`, topic: `Topic ${slug}`, profile_id: itemProfile, ...extra }
 }
+
+let itemProfile: string
 
 /** Resolves once a `workflow.start` for `pipeline` carrying `postId` arrives. */
 async function waitForStart(postId: string, timeoutMs = 15_000): Promise<StartEvent> {
@@ -379,6 +386,10 @@ describe("POST /api/posts/{post_id}/duplicate", () => {
 // --- POST /api/posts/batch --------------------------------------------------
 
 describe("POST /api/posts/batch", () => {
+  beforeEach(async () => {
+    itemProfile = (await insertProfile(user.userId)).id
+  })
+
   it("rejects an unauthenticated request", async () => {
     const response = await batch([item("a")])
     expect(response.status).toBe(401)
@@ -412,24 +423,18 @@ describe("POST /api/posts/batch", () => {
   })
 
   it("reports the failing item's index in `loc`", async () => {
-    const response = await batch([item("a"), { topic: "no slug" }], user.cookie)
+    const noSlug = { topic: "no slug", profile_id: itemProfile }
+    const response = await batch([item("a"), noSlug], user.cookie)
     expect(response.status).toBe(422)
     expect(await response.json()).toEqual({
-      detail: [
-        {
-          type: "missing",
-          loc: ["body", 1, "slug"],
-          msg: "Field required",
-          input: { topic: "no slug" },
-        },
-      ],
+      detail: [{ type: "missing", loc: ["body", 1, "slug"], msg: "Field required", input: noSlug }],
     })
     expect(await countFixturePosts()).toBe(0)
   })
 
   it("reports every failing item in one response", async () => {
     const response = await batch(
-      [{ topic: "no slug" }, item("b", { word_count: "abc" })],
+      [{ topic: "no slug", profile_id: itemProfile }, item("b", { word_count: "abc" })],
       user.cookie,
     )
     expect(response.status).toBe(422)
@@ -462,6 +467,21 @@ describe("POST /api/posts/batch", () => {
     // `create_post` stamps "research"/{research: "running"} here; `batch` does not.
     expect(created[0].current_stage).toBe("pending")
     expect(created[0].stage_status).toEqual({})
+  })
+
+  it("refuses an item with no profile and writes nothing", async () => {
+    // The same refusal `POST /api/posts` makes, from the shared schema: a row
+    // with no `profile_id` has no owner, so nothing could read it back.
+    const orphan = { slug: `${PREFIX}orphan`, topic: "Topic orphan" }
+    const response = await batch([item("a"), orphan], user.cookie)
+
+    expect(response.status).toBe(422)
+    expect(await response.json()).toEqual({
+      detail: [
+        { type: "missing", loc: ["body", 1, "profile_id"], msg: "Field required", input: orphan },
+      ],
+    })
+    expect(await countFixturePosts()).toBe(0)
   })
 
   it("prefills each item from its profile", async () => {

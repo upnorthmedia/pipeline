@@ -31,6 +31,9 @@
  * with, so the two create paths agree. The only case that changes for a
  * legitimate caller is a `profile_id` that does not exist at all, which was a
  * 500 from the foreign key before and is now a 404.
+ *
+ * An item with no `profile_id` is refused by `postCreateSchema` before this
+ * handler runs, for the reason declared there: the row would have no owner.
  */
 import { and, eq, inArray } from "drizzle-orm"
 
@@ -70,25 +73,18 @@ async function postHandler(request: Request): Promise<Response> {
   const db = getDb()
 
   // One query for every profile the batch names, rather than one per item.
-  const profileIds = [
-    ...new Set(parsed.data.map((item) => item.profile_id).filter((id) => id !== null)),
-  ]
-  const profiles = profileIds.length
-    ? await db
-        .select()
-        .from(websiteProfiles)
-        .where(and(inArray(websiteProfiles.id, profileIds), eq(websiteProfiles.userId, user.id)))
-    : []
+  const profileIds = [...new Set(parsed.data.map((item) => item.profile_id))]
+  const profiles = await db
+    .select()
+    .from(websiteProfiles)
+    .where(and(inArray(websiteProfiles.id, profileIds), eq(websiteProfiles.userId, user.id)))
   const profileById = new Map(profiles.map((profile) => [profile.id, profile]))
 
   const values = []
   for (const item of parsed.data) {
-    let write: PostWriteInput = item
-    if (write.profile_id) {
-      const profile = profileById.get(write.profile_id)
-      if (!profile) return Response.json({ detail: "Profile not found" }, { status: 404 })
-      write = applyProfilePrefill(write, profile)
-    }
+    const profile = profileById.get(item.profile_id)
+    if (!profile) return Response.json({ detail: "Profile not found" }, { status: 404 })
+    const write: PostWriteInput = applyProfilePrefill(item, profile)
     values.push(toColumns(write))
   }
 

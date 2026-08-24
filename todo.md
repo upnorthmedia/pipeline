@@ -33,19 +33,13 @@
   project has no deployed Railway environment, so nobody has seen Railway execute the hook or
   abort a deployment on its exit code.
 
-- [confirmed] 2026-08-24 A post created with no profile is unreachable and undeletable through
-  the app. `/posts/new` offers "No profile (manual config)"
-  (`web/src/components/profile-select-card.tsx:110`) and `POST /api/posts` accepts a body with
-  no `profile_id` (`web/src/app/api/posts/route.ts:101`, deliberately, as Python did), but every
-  read handler joins `posts` to `website_profiles` to reach `user_id`, and the join is inner. The
-  form then redirects to the row it just created and the page reads "Could not load this post /
-  Post not found". Measured against the running dev server: create -> `201` with
-  `profile_id: null`, `GET /api/posts/{id}` -> `404 {"detail":"Post not found"}`,
-  `DELETE /api/posts/{id}` -> `404`, and the row is absent from `GET /api/posts`. So the UI can
-  produce an orphan row that only SQL can remove. Two candidate fixes, and the choice is a
-  product decision: require a profile on the form, or make `profile_id` nullable in the read
-  path. Found while repairing `full-pipeline.test.ts` for polish ledger P0.5c. Ledger item
-  P2.97.
+- [confirmed] 2026-08-24 The `posts` rows already written with `profile_id = NULL` are still
+  unreachable and undeletable through the app, and always will be: ownership lives on
+  `website_profiles.user_id` alone, so an orphan row has no owner to restore it to and only SQL
+  can remove one. Polish ledger P2.97 closed the writers (`profile_id` is required on
+  `postCreateSchema` and the picker offers no "none"), so no new orphan can be created, and the
+  column stays nullable for the rows that predate it. Needs a decision on the existing rows:
+  leave them, or a one-off cleanup that names them in a migration.
 
 - [investigate] 2026-08-24 `pnpm auth:migrate --apply` against a fresh database reports
   `tables to create: auth_users, auth_sessions, auth_accounts, auth_verifications` and no
