@@ -407,7 +407,7 @@ export async function announceStageComplete(
       tokens_in: output.tokensIn,
       tokens_out: output.tokensOut,
       duration_s: durationS,
-      cost_usd: stageCostUsd(output.tokensIn, output.tokensOut),
+      cost_usd: stageCostUsd(output.tokensIn, output.tokensOut, output.model),
     },
   })
   await publishPipelineEvent(mastra.pubsub, output.postId, "stage_complete", {

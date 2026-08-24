@@ -17,6 +17,7 @@ import { eq, sql } from "drizzle-orm"
 
 import { getDb, posts } from "../db"
 import { pythonRound } from "./analytics/python-round"
+import { MODEL_COSTS } from "./model-costs"
 import type { Stage } from "./state"
 
 /**
@@ -120,26 +121,36 @@ export async function appendExecutionLog(
 }
 
 /**
- * The per-million-token prices Python used to price a stage, hardcoded in the
- * `stage_complete` log entry at `api/src/worker.py:244`.
+ * Price one stage's token counts, for the `cost_usd` on its `stage_complete`
+ * entry.
  *
- * These are Anthropic's Opus prices and Python applied them to every stage,
- * including the Perplexity call in `research` and the Gemini calls in `images`,
- * so `cost_usd` on these entries is an Opus-priced estimate rather than a bill.
- * Reproduced rather than corrected because `GET /api/analytics/logs` serves
- * these entries straight through, and changing the number would make a run's
- * cost jump at the cutover for reasons no operator could account for.
- * `MODEL_COSTS` in `api/src/pipeline/helpers.py` is the per-model table, and it
- * is what the analytics service uses; it is not what this entry uses.
+ * `api/src/worker.py:244` hardcoded 15.0 and 75.0 here, which are Anthropic's
+ * Opus prices, and applied them to every stage: the Perplexity call in
+ * `research` and the Gemini calls in `images` were both billed as Opus in what
+ * `GET /api/analytics/logs` and the run trace report. The port reproduced that
+ * verbatim and it is ledger item P2.38. The rates now come from `MODEL_COSTS`,
+ * keyed by the model the stage reported, which is the table Python's own
+ * per-model pricer used and the same one `GET /api/analytics/costs` ships as
+ * `model_costs_reference`, so the number a stage is priced at and the number
+ * the dashboard says it was priced at agree.
+ *
+ * A model with no row prices at zero, which is Python's
+ * `MODEL_COSTS.get(model, {"input": 0.0, "output": 0.0})` and the honest answer
+ * for a rate nobody has published: the alternative is to invent one, which is
+ * exactly what the Opus constants did. `model-costs.test.ts` keeps that from
+ * mattering in practice by failing when a model on `STAGE_MODEL_ALLOWLIST` has
+ * no price. It does still mean a provider that starts echoing a model id the
+ * table does not carry reports $0.00 rather than a wrong number; the entry
+ * stores the id it priced against beside the cost, so the two are checkable.
+ *
+ * Historical entries are untouched: this column is append-only and every row
+ * already in it keeps the number it was written with.
  */
-const LOG_COST_INPUT_PER_MTOK = 15.0
-const LOG_COST_OUTPUT_PER_MTOK = 75.0
-
-/** Python's `round(..., 6)` over the same two terms in the same order. */
-export function stageCostUsd(tokensIn: number, tokensOut: number): number {
+export function stageCostUsd(tokensIn: number, tokensOut: number, model: string): number {
+  const cost = MODEL_COSTS[model] ?? { input: 0, output: 0 }
+  // Python's `round(..., 6)` over the same two terms in the same order.
   return pythonRound(
-    (tokensIn / 1_000_000) * LOG_COST_INPUT_PER_MTOK +
-      (tokensOut / 1_000_000) * LOG_COST_OUTPUT_PER_MTOK,
+    (tokensIn / 1_000_000) * cost.input + (tokensOut / 1_000_000) * cost.output,
     6,
   )
 }

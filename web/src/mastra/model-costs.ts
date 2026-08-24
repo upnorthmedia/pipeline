@@ -20,11 +20,19 @@
  * output is billed per image rather than per token, and the number below is the
  * per-million-token rate the provider quotes alongside it.
  *
- * This is not the table `web/src/mastra/execution-log.ts` uses. That file
- * reproduces the two rates `api/src/worker.py:244` hardcoded for its
- * `stage_complete` log entry, which are Opus prices applied to every stage.
- * Python had the same split and both halves are served through the API, so they
- * stay separate here too.
+ * `web/src/mastra/execution-log.ts` reads this table too, as of the fix for
+ * ledger item P2.38. It used to reproduce the two rates `api/src/worker.py:244`
+ * hardcoded for its `stage_complete` entry, which were Opus prices applied to
+ * every stage including the Perplexity call in `research` and the Gemini calls
+ * in `images`. Python's split between a per-model table and a hardcoded pair
+ * was a defect on the hardcoded side, so the port now has one price table and
+ * `model-costs.test.ts` holds it to covering every model a stage can be
+ * configured to run.
+ *
+ * `claude-fable-5` is the one row with no Python ancestor: item 6.1 put it on
+ * the `outline`, `write`, `edit` and `ready` allowlists without a price, and a
+ * selectable model with no price would report every stage run on it as costing
+ * nothing. Its rate is Anthropic's published one for the model.
  */
 export interface ModelCost {
   input: number
@@ -37,4 +45,5 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   "gemini-3.1-flash-image-preview": { input: 0.1, output: 60.0 },
   "claude-opus-5": { input: 5.0, output: 25.0 },
   "gemini-3-pro-image": { input: 2.0, output: 120.0 },
+  "claude-fable-5": { input: 10.0, output: 50.0 },
 }

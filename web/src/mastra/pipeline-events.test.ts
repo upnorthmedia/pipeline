@@ -37,14 +37,16 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, getPool, posts } from "../db"
 import { inDeliveryOrder } from "../test/in-delivery-order"
+import { pythonRound } from "./analytics/python-round"
 import { editAgent } from "./agents/edit"
 import { imagesAgent } from "./agents/images"
 import { outlineAgent } from "./agents/outline"
 import { readyAgent } from "./agents/ready"
 import { researchAgent } from "./agents/research"
 import { writeAgent } from "./agents/write"
+import { MODEL_COSTS } from "./model-costs"
 import { TOPIC_PIPELINE_EVENTS, publishPipelineEvent } from "./pipeline-events"
-import { STAGES, STATUS_COMPLETE, STATUS_RUNNING } from "./state"
+import { STAGES, STATUS_COMPLETE, STATUS_RUNNING, type Stage } from "./state"
 import { announceStageComplete } from "./steps/stage-io"
 import { imagesWorkflow } from "./workflows/images"
 import { pipelineWorkflow } from "./workflows/pipeline"
@@ -82,6 +84,26 @@ const AGENT_TEXT = {
   images: JSON.stringify(MANIFEST),
   ready: "---\ntitle: Ready\n---\n\nThe publishable article.",
 } as const
+
+/**
+ * What each stage's stubbed provider reports back as the model it ran.
+ *
+ * Real ids from `MODEL_COSTS` rather than a `stub-<stage>` placeholder, because
+ * item P2.38 made the `stage_complete` entry price its tokens against the
+ * reported model and a placeholder id prices at zero, which would assert
+ * nothing. Five distinct ids across six stages, so an event or a log entry that
+ * carried another stage's model would still be visible; `outline` and `ready`
+ * share one because Anthropic has three allowlisted models and four stages run
+ * on them.
+ */
+const STUB_MODEL: Record<Stage, string> = {
+  research: "sonar-pro",
+  outline: "claude-opus-5",
+  write: "claude-fable-5",
+  edit: "claude-opus-4-6",
+  images: "gemini-3-pro-image",
+  ready: "claude-opus-5",
+}
 
 /** The post that runs all six stages. */
 const FULL_POST_ID = "00000000-0000-4000-8000-00000000055a"
@@ -226,7 +248,7 @@ beforeAll(async () => {
   for (const [stage, agent] of Object.entries(agents)) {
     vi.spyOn(agent, "generate").mockImplementation((async () => ({
       text: AGENT_TEXT[stage as keyof typeof AGENT_TEXT],
-      response: { modelId: `stub-${stage}` },
+      response: { modelId: STUB_MODEL[stage as Stage] },
       usage: { inputTokens: 100, outputTokens: 20 },
     })) as never)
   }
@@ -385,7 +407,7 @@ describe("a run that executes every stage", () => {
         // The provider's reported model, not the requested one, which is what
         // every step's output carries and what the run trace will read.
         stage: event.data.stage,
-        model: `stub-${event.data.stage}`,
+        model: STUB_MODEL[event.data.stage as Stage],
         duration_s: expect.any(Number),
       })
     }
@@ -658,17 +680,24 @@ describe("what a run writes to execution_logs", () => {
   it("carries Python's stage_complete data, including the tokens the event omits", async () => {
     const entries = await logsFor(FULL_POST_ID)
     for (const entry of entries.filter((item) => item.event === "stage_complete")) {
+      const model = STUB_MODEL[entry.stage as Stage]
+      const rate = MODEL_COSTS[model]
       expect(entry).toMatchObject({
         level: "info",
         message: `Stage ${entry.stage} complete`,
         data: {
-          model: `stub-${entry.stage}`,
+          model,
           // The stub reports 100 in and 20 out for every agent call.
           tokens_in: 100,
           tokens_out: 20,
           duration_s: expect.any(Number),
-          // round((100/1e6 * 15) + (20/1e6 * 75), 6), Python's hardcoded rates.
-          cost_usd: 0.003,
+          // Item P2.38: the reported model's own rate, not the one pair of Opus
+          // rates Python applied to every stage. Every entry read 0.003 before
+          // the fix; `research` is 0.0006 here and `images` is 0.0026.
+          cost_usd: pythonRound(
+            (100 / 1_000_000) * rate.input + (20 / 1_000_000) * rate.output,
+            6,
+          ),
         },
       })
     }

@@ -188,16 +188,33 @@ describe("appendExecutionLog", () => {
 })
 
 describe("stageCostUsd", () => {
-  it("prices both token counts at Python's hardcoded Opus rates", () => {
-    // `round((100/1e6 * 15.0) + (20/1e6 * 75.0), 6)` = 0.0015 + 0.0015.
-    expect(stageCostUsd(100, 20)).toBe(0.003)
-    expect(stageCostUsd(0, 0)).toBe(0)
+  it("prices a Perplexity stage at sonar-pro's rates, not Anthropic's", () => {
+    // `round((100/1e6 * 3.0) + (20/1e6 * 15.0), 6)` = 0.0003 + 0.0003. The
+    // Opus-rate answer for the same counts is 0.003, five times larger.
+    expect(stageCostUsd(100, 20, "sonar-pro")).toBe(0.0006)
+  })
+
+  it("prices a Gemini image stage at the image model's rates", () => {
+    // `round((100/1e6 * 2.0) + (20/1e6 * 120.0), 6)` = 0.0002 + 0.0024.
+    expect(stageCostUsd(100, 20, "gemini-3-pro-image")).toBe(0.0026)
+  })
+
+  it("prices a Claude stage at the configured model's rates", () => {
+    // Opus 5 is 5/25, not the 15/75 the log entry used to apply to every stage.
+    expect(stageCostUsd(100, 20, "claude-opus-5")).toBe(0.001)
+    expect(stageCostUsd(100, 20, "claude-fable-5")).toBe(0.002)
+  })
+
+  it("prices a model with no published rate at zero rather than guessing", () => {
+    expect(stageCostUsd(100, 20, "stub-research")).toBe(0)
+    expect(stageCostUsd(100, 20, "")).toBe(0)
+    expect(stageCostUsd(0, 0, "claude-opus-5")).toBe(0)
   })
 
   it("rounds to six places the way Python's round() does", () => {
-    // 1 input token is 1.5e-5, so the sixth place is where a stage's cost stops
-    // being distinguishable at all.
-    expect(stageCostUsd(1, 0)).toBe(0.000015)
-    expect(stageCostUsd(1, 1)).toBe(0.00009)
+    // 1 input token on Opus 5 is 5e-6, so the sixth place is where a stage's
+    // cost stops being distinguishable at all.
+    expect(stageCostUsd(1, 0, "claude-opus-5")).toBe(0.000005)
+    expect(stageCostUsd(1, 1, "claude-opus-5")).toBe(0.00003)
   })
 })

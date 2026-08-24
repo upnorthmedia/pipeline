@@ -29,16 +29,16 @@
   is not exported), so the fix is a console bridge in a worker entry this repo owns, which
   is the prerequisite the entry above already carries. Mechanism documented at
   `web/src/test/engine-step-errors.ts`. Ledger item P2.35.
-- [confirmed] 2026-08-22 The `cost_usd` on every `stage_complete` execution log entry is
-  priced at Anthropic Opus rates regardless of provider. `api/src/worker.py:244` hardcodes
-  15.0 / 75.0 per million tokens and ignores `MODEL_COSTS` in
-  `api/src/pipeline/helpers.py`, so the `research` stage's Perplexity tokens and the
-  `images` stage's Gemini tokens are both billed as Opus in what
-  `GET /api/analytics/logs` reports. Reproduced verbatim in the TypeScript port
-  (`stageCostUsd` in `web/src/mastra/execution-log.ts`) because the analytics endpoint
-  serves these entries straight through and correcting it during the port would make a
-  run's reported cost jump at the cutover. Found while porting item 5.5c-i. Worth fixing
-  once `MODEL_COSTS` has a TypeScript home, which is Phase 6's per-stage model config.
+- [confirmed] 2026-08-24 `MODEL_COSTS` prices `claude-opus-4-6` at 15.0 / 75.0 per million
+  tokens, which is that model's launch price; Anthropic publishes 5.0 / 25.0 for it now.
+  The row was pinned value for value from Python so historic `stage_logs` costs would agree
+  with the `model_costs_reference` the same response ships, but item 6.1 put the model on
+  the `outline`, `write`, `edit` and `ready` allowlists, so a stage a user configures for it
+  today is priced 3x over in the run trace and in `GET /api/analytics/logs`. Found while
+  fixing the entry above it, and left alone there because repricing a row also rewrites what
+  pre-cutover runs are reported to have cost, which is a decision of its own. The two other
+  Python rows are unaffected: `sonar-pro` and `gemini-3.1-flash-image-preview` still match
+  their providers' published rates. Ledger item P2.93.
 - [confirmed] 2026-08-22 The port's stage retries are immediate where Python spaced them
   10 seconds apart. `WorkerSettings.retry_delay = 10` (`api/src/worker.py:610`) has no
   equivalent in Mastra's evented engine: the processor's only `retryConfig` reference is

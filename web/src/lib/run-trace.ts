@@ -22,10 +22,13 @@
  * matching row entry.
  *
  * **Cost is an estimate and is not this module's arithmetic.** `cost_usd` is
- * stored per entry by the pipeline, priced at Anthropic Opus rates for every
- * stage including the Perplexity and Gemini ones (see `stageCostUsd`). The
- * trace sums what is stored rather than repricing, so the run total and the
- * per-stage lines cannot disagree with the analytics endpoints.
+ * stored per entry by the pipeline, priced at the reported model's published
+ * per-million-token rate (see `stageCostUsd`, and note that a model with no
+ * published rate prices at zero). The trace sums what is stored rather than
+ * repricing, so the run total and the per-stage lines cannot disagree with the
+ * analytics endpoints. Entries written before ledger item P2.38 carry an
+ * Opus-rate number for every stage, which for `research` and `images` is an
+ * overestimate the trace faithfully sums.
  */
 import { STAGES, type PipelineStage, type StageStatus, type StageStatusMap } from "./api"
 

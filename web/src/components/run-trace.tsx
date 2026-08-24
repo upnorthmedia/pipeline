@@ -68,9 +68,9 @@ function formatDuration(seconds: number): string {
 }
 
 /**
- * Priced at Anthropic Opus rates for every stage, which is what the pipeline
- * stores, so sub-cent runs are common and `$0.00` would tell an operator
- * nothing. Four decimal places until a run is worth more than a cent.
+ * Priced by the pipeline at the model each stage reported (see `stageCostUsd`),
+ * so sub-cent stages are common and `$0.00` would tell an operator nothing.
+ * Four decimal places until a run is worth more than a cent.
  */
 function formatCost(usd: number): string {
   if (usd === 0) return "$0";
