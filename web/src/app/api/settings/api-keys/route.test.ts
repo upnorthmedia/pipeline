@@ -19,7 +19,7 @@
 import { randomBytes } from "node:crypto"
 
 import { eq } from "drizzle-orm"
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, settings } from "@/db"
 import { decryptWithKey, encryptWithKey } from "@/lib/crypto"
@@ -32,6 +32,7 @@ import {
 } from "@/mastra/api-keys"
 import { borrowApiKeysRow, returnApiKeysRow } from "@/test/api-keys-row"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
+import { swapFetch, type Swap } from "@/test/swapped-fetch"
 
 import { GET as GET_STATUS, PUT } from "./route"
 import { GET as GET_REVEAL } from "./[provider]/reveal/route"
@@ -213,13 +214,12 @@ describe("GET /api/settings/api-keys/{provider}/reveal", () => {
  * through to the real `fetch`, so nothing else in the process is affected.
  */
 describe("PUT /api/settings/api-keys", () => {
-  let restoreFetch: (() => void) | undefined
+  let swap: Swap | undefined
 
   /** Replays one status per provider endpoint and records what was called. */
   function stubProviders(status: Partial<Record<Provider, number>>) {
     const calledFor: Provider[] = []
-    const realFetch = globalThis.fetch
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    swap = swapFetch((input, init, realFetch) => {
       const url = typeof input === "string" ? input : String(input)
       const provider: Provider | undefined = url.startsWith(ANTHROPIC_MESSAGES_URL)
         ? "anthropic"
@@ -234,8 +234,7 @@ describe("PUT /api/settings/api-keys", () => {
         status: status[provider] ?? 200,
         headers: { "content-type": "application/json" },
       })
-    }) as typeof globalThis.fetch
-    restoreFetch = () => void (globalThis.fetch = realFetch)
+    })
     return calledFor
   }
 
@@ -260,11 +259,6 @@ describe("PUT /api/settings/api-keys", () => {
       .values({ key: API_KEYS_SETTING_KEY, value })
       .onConflictDoUpdate({ target: [settings.key, settings.userId], set: { value } })
     await getDb().delete(settings).where(eq(settings.key, API_KEYS_VALIDATION_SETTING_KEY))
-  })
-
-  afterEach(() => {
-    restoreFetch?.()
-    restoreFetch = undefined
   })
 
   it("401s without a session", async () => {
@@ -341,8 +335,9 @@ describe("PUT /api/settings/api-keys", () => {
     stubProviders({ anthropic: 200, perplexity: 401 })
 
     await PUT(put({ anthropic: "sk-ant-newkey1234", perplexity: "pplx-badkey5678" }))
-    restoreFetch?.()
-    restoreFetch = undefined
+    // Taking the transport away before the GET: a re-validation would have to
+    // reach a real provider, so the assertion below cannot pass by accident.
+    swap?.restore()
 
     const body = await (await GET_STATUS(apiRequest(STATUS_URL, { cookie: user.cookie }))).json()
     expect(body.anthropic.valid).toBe(true)

@@ -15,7 +15,7 @@
  * and Perplexity have no equivalent here because this environment holds no key
  * for either; that gap is recorded in the ledger.
  */
-import { afterEach, describe, expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 
 import {
   ANTHROPIC_API_VERSION,
@@ -29,6 +29,7 @@ import {
   validatePerplexity,
 } from "./api-key-validator"
 import { GEMINI_API_BASE } from "./images/gemini"
+import { swapFetch } from "@/test/swapped-fetch"
 
 interface SentRequest {
   url: string
@@ -69,18 +70,10 @@ const GEMINI_400 = JSON.stringify({
   },
 })
 
-let restoreFetch: (() => void) | undefined
-
-afterEach(() => {
-  restoreFetch?.()
-  restoreFetch = undefined
-})
-
 /** Replaces `fetch` with one that records the request and replays `respond`. */
 function stubFetch(respond: (sent: SentRequest) => Response | Promise<Response>) {
   const sent: SentRequest[] = []
-  const realFetch = globalThis.fetch
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  swapFetch((input, init) => {
     const request: SentRequest = {
       url: typeof input === "string" ? input : String(input),
       method: init?.method ?? "GET",
@@ -89,8 +82,7 @@ function stubFetch(respond: (sent: SentRequest) => Response | Promise<Response>)
     }
     sent.push(request)
     return respond(request)
-  }) as typeof globalThis.fetch
-  restoreFetch = () => void (globalThis.fetch = realFetch)
+  })
   return sent
 }
 

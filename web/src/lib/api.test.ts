@@ -35,6 +35,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // `restoreAllMocks` puts spies back but leaves `vi.stubGlobal` in place, so
+  // without this the stubbed `fetch` outlives the test that installed it.
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 

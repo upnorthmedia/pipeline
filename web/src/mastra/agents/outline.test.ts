@@ -52,6 +52,7 @@ import {
 } from "./outline"
 
 import { borrowApiKeysRow, returnApiKeysRow } from "@/test/api-keys-row"
+import { swapFetch } from "@/test/swapped-fetch"
 import { createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 const GOLDEN_DIR = path.resolve(process.cwd(), "..", "docs", "mastra-port", "golden")
@@ -138,8 +139,7 @@ describe("outline agent registration", () => {
  */
 function captureAnthropicRequests() {
   const captured: { url: string; body: Record<string, unknown> }[] = []
-  const realFetch = globalThis.fetch
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  swapFetch(async (input, init) => {
     captured.push({
       url: typeof input === "string" ? input : String(input),
       body: JSON.parse(String(init?.body)),
@@ -160,25 +160,17 @@ function captureAnthropicRequests() {
       }),
       { status: 200, headers: { "content-type": "application/json" } },
     )
-  }) as typeof globalThis.fetch
-  return { captured, restore: () => void (globalThis.fetch = realFetch) }
+  })
+  return { captured }
 }
 
 describe("outline agent provider request", () => {
-  let restoreFetch: (() => void) | undefined
-
-  afterEach(() => {
-    restoreFetch?.()
-    restoreFetch = undefined
-  })
-
   it("puts item 6.1's model and thinking config on the wire, at Python's max_tokens", async () => {
     await writeAnthropicKey("sk-ant-not-a-real-key")
     const fixture = loadFixture(GOLDEN_SLUGS[0])
     const recorded = fixture.provider_calls[0].request
 
     const capture = captureAnthropicRequests()
-    restoreFetch = capture.restore
     const result = await outlineAgent.generate(fixture.rendered_prompts[0])
 
     expect(capture.captured).toHaveLength(1)
@@ -268,8 +260,6 @@ describe.skipIf(!LIVE_KEY)("outline agent live smoke test", () => {
 describe("outline agent per-user model configuration", () => {
   const SESSION_PREFIX = "outline-agent-6-2b-"
   let user: TestSession
-  let restoreFetch: (() => void) | undefined
-
   async function setOverride(value: unknown) {
     await getDb()
       .delete(settings)
@@ -285,7 +275,6 @@ describe("outline agent per-user model configuration", () => {
   async function capturedRequest(userId: string | null) {
     await writeAnthropicKey("sk-ant-not-a-real-key")
     const capture = captureAnthropicRequests()
-    restoreFetch = capture.restore
     await outlineAgent.generate("Reply with the single word OK.", {
       requestContext: stageRequestContext(userId),
     })
@@ -298,8 +287,6 @@ describe("outline agent per-user model configuration", () => {
   }, 30_000)
 
   afterEach(async () => {
-    restoreFetch?.()
-    restoreFetch = undefined
     await setOverride(null)
   })
 

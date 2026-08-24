@@ -33,8 +33,11 @@ move on. A split is not an iteration on its own: split and complete the first ch
         invokes callbacks in stream order but does not await them, so the test's own row read
         decided the order of `received`. Covers P2.37, P2.42, P2.48 and P2.69.
         [evidence](evidence/p0.md#p03b)
-  - [ ] **P0.3c** The suites that swap `globalThis.fetch` (P2.8's suspects). Restore it on every
-        path, and prove a swap cannot outlive the test that installed it.
+  - [x] **P0.3c** The suites that swap `globalThis.fetch`. Not P2.8's suspects: those eight
+        restore correctly, and the three files that did leak were `api.test.ts`,
+        `images-generate.test.ts` and `stage-models-to-provider.test.tsx`. All eleven now go
+        through `src/test/swapped-fetch.ts`, and a guard in `setup.ts` fails any test that
+        finds the transport left swapped. [evidence](evidence/p0.md#p03c)
   - [ ] **P0.3d** Post ids colliding across files, which vitest runs in parallel against one
         database (P2.53). One registry, or a per-file prefix that is enforced.
   - [ ] **P0.3e** The proof: three `pnpm test` runs with identical summaries, worker running and
@@ -87,7 +90,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [ ] **P2.5** `[confirmed]` `settings` primary key is `key` alone while `user_id` is only an index, so two users cannot hold different values for the same setting key. ...
 - [ ] **P2.6** `[confirmed]` `api/src/models/post.py` disagrees with the Alembic-produced database on two defaults: it declares `output_format` server default `"markdown"` ...
 - [ ] **P2.7** `[confirmed]` `next build`'s output file tracing does not know about the two runtime data files under `web/src/mastra/textstat/data/`, which the port reads ...
-- [ ] **P2.8** `[investigate]` `src/mastra/agents/{edit,research,write}.test.ts` fail intermittently under a full `pnpm test` run (seen: 4 extra failures, then 1, then 0 ...
+- [ ] **P2.8** `[investigate]` `src/mastra/agents/{edit,research,write}.test.ts` fail intermittently under a full `pnpm test` run (seen: 4 extra failures, then 1, then 0 ... Both causes it named are now addressed (P0.3a for the settings row, P0.3c for the transport, which measured these eight files as *not* leaking); stays open until P0.3e's six runs. [evidence](evidence/p0.md#p03c)
 - [x] **P2.9** `[confirmed]` The agent test files' `beforeAll`/`afterAll` key save-and-restore makes the placeholder key permanent: a run captures whatever is in ... Fixed by P0.3a; entry removed from `todo.md`. [evidence](evidence/p0.md#p03a)
 - [ ] **P2.10** `[confirmed]` `_generate_one` gives every featured image the same filename, `featured-<MMDDYY>-<randint(10,99)>.webp`, so two featured entries in one manifest ...
 - [ ] **P2.11** `[confirmed]` The featured overrides in `_generate_one` rewrite the local `aspect_ratio` / `image_size` without touching the manifest entry, so a stored entry ...

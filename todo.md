@@ -49,6 +49,13 @@
   api-keys, then outline, then none), with `agents/outline.test.ts` new to the list. Still
   only ever 1-2 extra failures and always in the suites that swap `globalThis.fetch` or read
   `settings.api_keys`.
+  2026-08-23: both named causes are now addressed and neither was these files. The shared
+  `settings.api_keys` row moved into a database-backed borrow (polish item P0.3a). The
+  `globalThis.fetch` half was measured under a guard that fails any test finding the transport
+  left swapped: these eight files restore correctly and did not leak, while `src/lib/api.test.ts`,
+  `src/mastra/steps/images-generate.test.ts` and
+  `src/app/settings/stage-models-to-provider.test.tsx` did, and were fixed (polish item P0.3c).
+  Keep open until a six-run determinism check says the intermittency is gone.
 
 - [confirmed] 2026-08-22 `_generate_one` gives every featured image the same filename,
   `featured-<MMDDYY>-<randint(10,99)>.webp`, so two featured entries in one manifest collide:

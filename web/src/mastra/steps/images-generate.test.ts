@@ -44,6 +44,7 @@ import sharp from "sharp"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, posts, settings, websiteProfiles } from "../../db"
+import { swapFetchForSuite } from "../../test/swapped-fetch"
 import { TOPIC_PIPELINE_EVENTS } from "../pipeline-events"
 import geminiCorpus from "../images/data/gemini-parity.json"
 import corpus from "../images/data/image-generation-parity.json"
@@ -201,20 +202,20 @@ async function diskBytes(spec: Record<string, unknown>): Promise<number> {
   return (await stat(path.join(mediaDir, path.basename(url)))).size
 }
 
-beforeAll(async () => {
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    const headers = new Headers(init?.headers)
-    requests.push({
-      url: String(input),
-      apiKey: headers.get("x-goog-api-key"),
-      body: JSON.parse(String(init?.body)) as CapturedRequest["body"],
-    })
-    return new Response(recordedSuccess(), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    })
+swapFetchForSuite((input, init) => {
+  const headers = new Headers(init?.headers)
+  requests.push({
+    url: String(input),
+    apiKey: headers.get("x-goog-api-key"),
+    body: JSON.parse(String(init?.body)) as CapturedRequest["body"],
   })
+  return new Response(recordedSuccess(), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  })
+})
 
+beforeAll(async () => {
   mediaDir = await mkdtemp(path.join(tmpdir(), "images-generate-"))
 
   await db.delete(posts).where(eq(posts.id, POST_ID))
@@ -467,16 +468,17 @@ describe("an image whose provider call fails", () => {
   let failed: GeneratedImageOutput
   const failRequests: string[] = []
 
+  swapFetchForSuite((input) => {
+    failRequests.push(String(input))
+    return new Response(JSON.stringify({ error: { status: "UNAVAILABLE" } }), {
+      status: 503,
+      headers: { "content-type": "application/json" },
+    })
+  })
+
   beforeAll(async () => {
     published.length = 0
     loggedErrors.length = 0
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      failRequests.push(String(input))
-      return new Response(JSON.stringify({ error: { status: "UNAVAILABLE" } }), {
-        status: 503,
-        headers: { "content-type": "application/json" },
-      })
-    })
 
     failed = await generate(
       { ...contentSpec, id: "doomed", filename: "doomed.png", prompt: "a doomed image" },
@@ -542,21 +544,21 @@ describe("imagesGenerateStep model configuration", () => {
   const OWNER_ID = "images-generate-owner-6-2b"
   const OVERRIDE = "gemini-3.1-flash-image-preview"
   /**
-   * This suite installs its own transport rather than reading `requests`:
-   * earlier suites in the file replace the shared `fetch` mock with failing
-   * ones to exercise the retry paths and leave them installed, so a suite that
-   * runs after them and expects a 200 has to say so.
+   * This suite installs its own transport rather than reading `requests`: it
+   * needs the request URL of a call it makes itself, and it wants a 200 rather
+   * than the failure the retry suites send.
    */
   const urls: string[] = []
 
-  beforeAll(async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      urls.push(String(input))
-      return new Response(recordedSuccess(), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      })
+  swapFetchForSuite((input) => {
+    urls.push(String(input))
+    return new Response(recordedSuccess(), {
+      status: 200,
+      headers: { "content-type": "application/json" },
     })
+  })
+
+  beforeAll(async () => {
     await db.insert(websiteProfiles).values({
       id: PROFILE_ID,
       name: "Images owner",

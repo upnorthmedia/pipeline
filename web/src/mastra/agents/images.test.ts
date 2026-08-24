@@ -31,7 +31,7 @@ import path from "node:path"
 
 import { Agent } from "@mastra/core/agent"
 import { eq } from "drizzle-orm"
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, settings } from "../../db"
 import { encryptWithKey } from "../../lib/crypto"
@@ -53,6 +53,7 @@ import {
 } from "./images"
 
 import { borrowApiKeysRow, returnApiKeysRow } from "@/test/api-keys-row"
+import { swapFetch } from "@/test/swapped-fetch"
 
 const GOLDEN_DIR = path.resolve(process.cwd(), "..", "docs", "mastra-port", "golden")
 const GOLDEN_SLUGS = ["how-to-choose-a-crm-for-a-small-team", "best-time-tracking-tools-for-agencies"]
@@ -196,8 +197,7 @@ describe("images agent registration", () => {
  */
 function captureAnthropicRequests() {
   const captured: { url: string; body: Record<string, unknown> }[] = []
-  const realFetch = globalThis.fetch
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  swapFetch(async (input, init) => {
     captured.push({
       url: typeof input === "string" ? input : String(input),
       body: JSON.parse(String(init?.body)),
@@ -218,18 +218,11 @@ function captureAnthropicRequests() {
       }),
       { status: 200, headers: { "content-type": "application/json" } },
     )
-  }) as typeof globalThis.fetch
-  return { captured, restore: () => void (globalThis.fetch = realFetch) }
+  })
+  return { captured }
 }
 
 describe("images agent provider request", () => {
-  let restoreFetch: (() => void) | undefined
-
-  afterEach(() => {
-    restoreFetch?.()
-    restoreFetch = undefined
-  })
-
   for (const slug of GOLDEN_SLUGS) {
     it(`puts item 6.1's model and thinking config on the wire, at Python's max_tokens (${slug})`, async () => {
       await writeAnthropicKey("sk-ant-not-a-real-key")
@@ -237,7 +230,6 @@ describe("images agent provider request", () => {
       const recorded = fixture.provider_calls[0].request
 
       const capture = captureAnthropicRequests()
-      restoreFetch = capture.restore
       const result = await imagesAgent.generate(fixture.rendered_prompts[0])
 
       expect(capture.captured).toHaveLength(1)

@@ -1,9 +1,19 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import { afterEach, vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
+import { assertFetchNotLeaked } from "./swapped-fetch";
 
 afterEach(() => {
   cleanup();
+});
+
+// A test that leaves `globalThis.fetch` swapped changes what every later test
+// in the file talks to without failing anything, so the suite stops being a
+// function of its own source. `beforeEach` is where this is checkable: it runs
+// after the previous test's `afterEach` hooks and after the enclosing suites'
+// `beforeAll` hooks, so a swap still standing here has outlived its scope.
+beforeEach(() => {
+  assertFetchNotLeaked();
 });
 
 // jsdom implements neither the Pointer Events capture API nor scrollIntoView,

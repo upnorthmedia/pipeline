@@ -64,6 +64,7 @@ import {
   unlockGlobalStageModelsRow,
 } from "@/test/stage-models-row"
 import { renderWithProviders } from "@/test/render"
+import { swapFetchForSuite } from "@/test/swapped-fetch"
 import { createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { PATCH as settingsPatch } from "@/app/api/settings/route"
@@ -94,7 +95,6 @@ const db = getDb()
 let user: TestSession
 let mediaDir = ""
 let savedGlobalStageModels: { value: unknown } | undefined
-let restoreFetch: (() => void) | undefined
 
 /** Every request the router sent nowhere, in order. */
 const captured: { url: string; body: Record<string, unknown> }[] = []
@@ -132,45 +132,45 @@ function anthropicSuccess(): string {
 /** The origin the dashboard's own origin-relative paths resolve against. */
 const DASHBOARD_ORIGIN = "http://dashboard.test"
 
-function installRouter(cookie: string) {
-  const real = globalThis.fetch
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
-    // The dashboard client addresses its own origin, so its paths arrive
-    // relative and need a base before either `new URL` or `new Request`.
-    const url = new URL(raw, DASHBOARD_ORIGIN)
-    const href = url.href
-    const method = (init?.method ?? "GET").toUpperCase()
+function routeRequest(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+): Response | Promise<Response> {
+  const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+  // The dashboard client addresses its own origin, so its paths arrive
+  // relative and need a base before either `new URL` or `new Request`.
+  const url = new URL(raw, DASHBOARD_ORIGIN)
+  const href = url.href
+  const method = (init?.method ?? "GET").toUpperCase()
 
-    if (url.hostname === "api.anthropic.com") {
-      captured.push({ url: href, body: JSON.parse(String(init?.body)) })
-      return new Response(anthropicSuccess(), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      })
-    }
-    if (url.hostname === "generativelanguage.googleapis.com") {
-      captured.push({ url: href, body: JSON.parse(String(init?.body)) })
-      return new Response(geminiSuccess, {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      })
-    }
+  if (url.hostname === "api.anthropic.com") {
+    captured.push({ url: href, body: JSON.parse(String(init?.body)) })
+    return new Response(anthropicSuccess(), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })
+  }
+  if (url.hostname === "generativelanguage.googleapis.com") {
+    captured.push({ url: href, body: JSON.parse(String(init?.body)) })
+    return new Response(geminiSuccess, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })
+  }
 
-    const headers = new Headers(init?.headers)
-    headers.set("cookie", cookie)
-    const request = new Request(href, { ...init, headers })
-    if (url.pathname === "/api/settings/stage-models" && method === "GET") {
-      return stageModelsGet(request)
-    }
-    if (url.pathname === "/api/settings" && method === "PATCH") {
-      return settingsPatch(request)
-    }
-    throw new Error(`unrouted request: ${method} ${href}`)
-  }) as typeof globalThis.fetch
-
-  return () => void (globalThis.fetch = real)
+  const headers = new Headers(init?.headers)
+  headers.set("cookie", user.cookie)
+  const request = new Request(href, { ...init, headers })
+  if (url.pathname === "/api/settings/stage-models" && method === "GET") {
+    return stageModelsGet(request)
+  }
+  if (url.pathname === "/api/settings" && method === "PATCH") {
+    return settingsPatch(request)
+  }
+  throw new Error(`unrouted request: ${method} ${href}`)
 }
+
+swapFetchForSuite(routeRequest)
 
 /** The card that holds one stage's controls, found through its model selector. */
 function stageCard(stage: string) {
@@ -276,11 +276,9 @@ beforeAll(async () => {
     .values({ id: POST_ID, profileId: PROFILE_ID, slug: "stage-models-e2e", topic: "E2E" })
 
   mediaDir = await mkdtemp(path.join(tmpdir(), "stage-models-e2e-"))
-  restoreFetch = installRouter(user.cookie)
 }, 60_000)
 
 afterAll(async () => {
-  restoreFetch?.()
   await db.delete(posts).where(eq(posts.id, POST_ID))
   await db.delete(websiteProfiles).where(eq(websiteProfiles.id, PROFILE_ID))
   await db.delete(settings).where(like(settings.userId, `${PREFIX}%`))
