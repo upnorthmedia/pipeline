@@ -265,13 +265,6 @@
   slow real-transport ones is. That is consistent with the shared-topic reading and means
   the failure count a future iteration measures depends on what it added, so both sides
   have to be measured every time until this is fixed.
-- [investigate] 2026-08-22 `src/mastra/pipeline-events.test.ts > carries Python's log payload
-  and nothing else` failed once on a full `vitest run` during item 5.5e-i, passed on the
-  rerun of the same suite, and passes when run alone. It reads the shared
-  `TOPIC_PIPELINE_EVENTS` stream on the default Redis key prefix, so this looks like the
-  same cross-file interference as the `scaffold-check` entry above rather than a second
-  defect; the same fix (an isolated instance and `keyPrefix` per real-transport test file)
-  would cover both. Worth confirming they share one cause before fixing either.
 - [confirmed] 2026-08-22 The `cost_usd` on every `stage_complete` execution log entry is
   priced at Anthropic Opus rates regardless of provider. `api/src/worker.py:244` hardcodes
   15.0 / 75.0 per million tokens and ignores `MODEL_COSTS` in
@@ -313,17 +306,6 @@
   Note the residual asymmetry, deliberate: the policy now applies per sub-step, so a
   failing `images-generate` re-runs only that fan-out entry where Python's job retry
   re-entered the stage from the manifest.
-- [confirmed] 2026-08-23 `received` in `web/src/mastra/pipeline-events.test.ts` is not in
-  delivery order, so any assertion built on its ordering is unsound. Its subscriber
-  `await`s a row read before pushing the event (5.5b's deliberate fix for a real flake),
-  so the array records the order those reads resolved in rather than the order the topic
-  delivered. Measured under ledger item 5.5c-iv-a on the suite's own full run:
-  `stage_complete/research` was recorded ahead of `stage_start/research`, and one
-  `log/ready` after `stage_complete/ready`. The new SSE assertions were rewritten as
-  counts, and ordering is pinned on `execution_logs` instead. Still standing on this
-  basis: "sends pipeline_complete after the last stage_complete", which reads
-  `order.at(-1)`. It has not been seen to flake, but nothing stops it. A sound fix is to
-  record the delivery index synchronously at the top of the subscriber and sort by it.
 - [confirmed, fixed 2026-08-23] Two test files shared post id
   `00000000-0000-4000-8000-0000000055d1`: `web/src/mastra/steps/stage-log.test.ts` and
   `web/src/mastra/steps/pipeline-start.test.ts`. vitest runs files in parallel, so each
@@ -372,15 +354,6 @@
   contract decision for ledger item 5.5d (the SSE route handlers), not a bug fix; left
   alone under 5.5c-iv-d-2 because adding names to `NAMED_EVENTS` changes what
   `debug-log-panel.tsx` renders mid-run.
-- [investigate] 2026-08-23 New sighting of the `received`-ordering defect recorded above:
-  `pipeline-events.test.ts > carries Python's log payload and nothing else` failed at HEAD
-  during the 5.5c-iv-d-2 baseline measurement and passed on the following three runs. It
-  does `eventsFor(FULL_POST_ID, "log").find(e => e.data.stage === "outline")` and asserts
-  the payload is the first of `outline`'s three lines, so it fails whenever the
-  subscriber's row read resolves the second line ahead of the first. Same root cause and
-  same fix as the entry above (record a delivery index synchronously at the top of the
-  subscriber and sort by it); this is the first time it has been observed failing rather
-  than argued to be unsound.
 - [investigate] 2026-08-23 Running `pnpm -C web test` leaves untracked WebP files in the
   repo's `media/test-123/` directory (six appeared during the 5.5c-iv-d-2 iteration, named
   `featured-<mmddyy>-<nn>.webp`). `mediaRoot()` falls back to `<cwd>/../media` when
@@ -585,20 +558,6 @@
   5.3c-iii-b-2-e with its own test, because widening it would start two publish runs from
   one request and that is a behaviour change, not a port. `_post_completion_hook`'s
   auto-publish half has the same shape, so a `both` post is not auto-published either.
-- [confirmed] 2026-08-23 `web/src/mastra/pipeline-events.test.ts > a run that executes
-  every stage > carries Python's log payload and nothing else` is flaky: it reads the first
-  `log` event delivered for the `outline` stage and roughly one run in four gets
-  "Calling Claude for outline..." where it expects "Rules loaded, building prompt...".
-  Isolated during ledger item 5.11: four runs of the file alone failed once both with that
-  item's changes present and with them stashed away, so it is not a regression from it.
-  Two events published back to back from one step arrive out of order, which is either the
-  test's `.find()` over a set it assumes is ordered or a real ordering gap in the Redis
-  Streams fan-out; the second reading would matter to the Phase 8 trace view, so this needs
-  a real diagnosis rather than a retry.
-  2026-08-23: reproduced on two of three full runs during polish item P0.3a, with the same two
-  messages in the same order each time, against a clean full run immediately before that item's
-  change. That is a higher rate than the recorded one in four on a small sample. It is polish
-  ledger item P0.3b and the last known blocker on a repeatable full run.
 - [confirmed] 2026-08-23 Perplexity's Sonar Chat Completions endpoint is deprecated with
   support ending 2026-09-27, per `docs.perplexity.ai/getting-started/models`. The
   `research` stage reaches `sonar-pro` through Mastra's model router, which uses the

@@ -36,6 +36,7 @@ import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, getPool, posts } from "../db"
+import { inDeliveryOrder } from "../test/in-delivery-order"
 import { editAgent } from "./agents/edit"
 import { imagesAgent } from "./agents/images"
 import { outlineAgent } from "./agents/outline"
@@ -124,7 +125,11 @@ const testMastra = new Mastra({
   },
 })
 
-/** Every event delivered on the topic, in delivery order. */
+/**
+ * Every event delivered on the topic, in delivery order: the subscription is
+ * wrapped in `inDeliveryOrder`, so the row read it does per event cannot decide
+ * the order of this array.
+ */
 const received: Event[] = []
 /**
  * What `stage_status` said for the announced stage at the instant the event was
@@ -253,27 +258,35 @@ beforeAll(async () => {
   // run's. Measured: a negative control that removed an announcement still
   // passed, on the events of the run before it.
   await pubsub.clearTopic(TOPIC_PIPELINE_EVENTS)
-  await pubsub.subscribe(TOPIC_PIPELINE_EVENTS, async (event) => {
-    const postId = event.data?.post_id
-    const name = event.data?.event
-    const stage = event.data?.stage
-    if (typeof postId === "string") {
-      const row = await readPost(postId)
-      currentStageOnDelivery[`${postId}/${name}`] = row?.currentStage ?? undefined
-      if (typeof stage === "string") {
-        // Keyed by the event as well as the stage: `stage_start` and
-        // `stage_complete` both name a stage, so a single key would let the
-        // later delivery overwrite what the earlier one saw.
-        statusOnDelivery[`${postId}/${name}/${stage}`] = (
-          (row?.stageStatus ?? {}) as Record<string, string>
-        )[stage]
+  // Wrapped, because the transport invokes a subscriber in stream order but
+  // does not await it: without this the row read below decides the order this
+  // array ends up in, and every assertion here that reads a sequence is really
+  // reading how fast each query came back. Item P0.3b, with the transport's own
+  // ordering measured in `src/test/in-delivery-order.test.ts`.
+  await pubsub.subscribe(
+    TOPIC_PIPELINE_EVENTS,
+    inDeliveryOrder(async (event: Event) => {
+      const postId = event.data?.post_id
+      const name = event.data?.event
+      const stage = event.data?.stage
+      if (typeof postId === "string") {
+        const row = await readPost(postId)
+        currentStageOnDelivery[`${postId}/${name}`] = row?.currentStage ?? undefined
+        if (typeof stage === "string") {
+          // Keyed by the event as well as the stage: `stage_start` and
+          // `stage_complete` both name a stage, so a single key would let the
+          // later delivery overwrite what the earlier one saw.
+          statusOnDelivery[`${postId}/${name}/${stage}`] = (
+            (row?.stageStatus ?? {}) as Record<string, string>
+          )[stage]
+        }
       }
-    }
-    // Pushed last, deliberately: the waits below count this array, so an event
-    // recorded before its row snapshot lets `beforeAll` return while the read
-    // is still in flight. Measured as a flake under full-suite load.
-    received.push(event)
-  })
+      // Pushed last, deliberately: the waits below count this array, so an
+      // event recorded before its row snapshot lets `beforeAll` return while
+      // the read is still in flight. Measured as a flake under full-suite load.
+      received.push(event)
+    }),
+  )
   await testMastra.startWorkers()
 
   for (const postId of [FULL_POST_ID, SKIP_POST_ID, GATE_POST_ID]) {

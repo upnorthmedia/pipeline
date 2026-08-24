@@ -31,6 +31,7 @@ import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, getPool, posts } from "../db"
+import { inDeliveryOrder } from "../test/in-delivery-order"
 import { editAgent } from "./agents/edit"
 import { imagesAgent } from "./agents/images"
 import { outlineAgent } from "./agents/outline"
@@ -287,17 +288,24 @@ beforeAll(async () => {
     if (event.type === "workflow.fail") failEvents.push(event)
   })
   await pubsub.clearTopic(TOPIC_PIPELINE_EVENTS)
-  await pubsub.subscribe(TOPIC_PIPELINE_EVENTS, async (event) => {
-    const postId = event.data?.post_id
-    if (typeof postId === "string") {
-      currentStageOnDelivery[`${postId}/${event.data?.event}`] =
-        (await readPost(postId))?.currentStage ?? undefined
-    }
-    // Pushed last: `settleStageError` counts this array, so recording the event
-    // before its row snapshot lets `beforeAll` return while the read is still
-    // in flight. Measured as a flake under full-suite load.
-    pipelineEvents.push(event)
-  })
+  // Wrapped for the reason `pipeline-events.test.ts` records: the transport
+  // invokes a subscriber in stream order and does not await it, so without this
+  // the row read below decides what order `pipelineEvents` ends up in. Item
+  // P0.3b.
+  await pubsub.subscribe(
+    TOPIC_PIPELINE_EVENTS,
+    inDeliveryOrder(async (event: Event) => {
+      const postId = event.data?.post_id
+      if (typeof postId === "string") {
+        currentStageOnDelivery[`${postId}/${event.data?.event}`] =
+          (await readPost(postId))?.currentStage ?? undefined
+      }
+      // Pushed last: `settleStageError` counts this array, so recording the
+      // event before its row snapshot lets `beforeAll` return while the read is
+      // still in flight. Measured as a flake under full-suite load.
+      pipelineEvents.push(event)
+    }),
+  )
   await testMastra.startWorkers()
 
   const run = await pipelineWorkflow.createRun()
