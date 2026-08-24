@@ -53,18 +53,42 @@ test.describe("Profile Flow", () => {
 
   test("profile detail shows internal links", async ({ page }) => {
     await page.goto(`/profiles/${profile.id}`)
+    await page.getByRole("tab", { name: "Internal links" }).click()
 
     await expect(page.getByText("Internal Links").first()).toBeVisible()
     await expect(page.getByRole("link", { name: LINK_URL })).toBeVisible()
     await expect(page.getByText("Page One")).toBeVisible()
   })
 
-  test("profile detail shows settings form", async ({ page }) => {
+  test("profile detail opens on the site tab", async ({ page }) => {
     await page.goto(`/profiles/${profile.id}`)
 
-    await expect(page.getByText("Profile Settings").first()).toBeVisible()
+    await expect(page.getByRole("tab", { name: "Site" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
     await expect(page.locator("#name")).toHaveValue(PROFILE_NAME)
     await expect(page.locator("#websiteUrl")).toHaveValue(PROFILE_URL)
+  })
+
+  /**
+   * The four tabs are the ownership table in `docs/polish/evidence/p3.md`, and
+   * `?tab=` is how another screen sends a user straight to one of them.
+   */
+  test("a link can open the publishing connection directly", async ({ page }) => {
+    await page.goto(`/profiles/${profile.id}?tab=publishing`)
+
+    await expect(page.getByLabel("WordPress URL")).toBeVisible()
+    await expect(page.locator("#name")).toHaveCount(0)
+  })
+
+  test("the tab a user picks ends up in the URL", async ({ page }) => {
+    await page.goto(`/profiles/${profile.id}`)
+
+    await page.getByRole("tab", { name: "New post defaults" }).click()
+
+    await expect(page).toHaveURL(`/profiles/${profile.id}?tab=defaults`)
+    await expect(page.getByText("Article Defaults")).toBeVisible()
   })
 
   test("navigate from profiles list to detail", async ({ page }) => {

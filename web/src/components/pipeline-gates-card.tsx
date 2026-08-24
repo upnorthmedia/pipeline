@@ -90,7 +90,9 @@ export const PipelineGatesCard = ({ profile }: { profile: Profile | null }) => {
 
         {profile && (
           <Link
-            href={`/profiles/${profile.id}`}
+            /* Straight to the tab that owns the gates: the profile editor has
+               four of them and this one is three cards down the third. */
+            href={`/profiles/${profile.id}?tab=defaults`}
             className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground underline-offset-4 hover:underline"
           >
             Edit gates in the {profile.name} profile

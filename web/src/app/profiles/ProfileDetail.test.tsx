@@ -94,8 +94,22 @@ const testLinks: InternalLink[] = [
   },
 ];
 
+/**
+ * The detail page groups its cards into four tabs, so an assertion about a card
+ * has to say which tab owns it. Clicking rather than deep linking with `?tab=`
+ * keeps these tests independent of the URL mechanism, which has its own.
+ */
+async function renderOnTab(tab: "Site" | "Publishing" | "New post defaults" | "Internal links") {
+  const result = renderWithProviders(<ProfileDetailPage />);
+  await userEvent.setup().click(await screen.findByRole("tab", { name: tab }));
+  return result;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  // The page reads its tab off the URL, so one test's deep link must not
+  // decide the next test's starting tab.
+  window.history.replaceState({}, "", "/profiles/prof-1");
   mockGet.mockResolvedValue(makeProfile());
   mockLinks.mockResolvedValue({ items: testLinks, total: testLinks.length, page: 1, per_page: 20, pages: 1 });
   mockWpCategories.mockResolvedValue([]);
@@ -171,7 +185,7 @@ describe("ProfileDetailPage", () => {
 
   it("shows crawl status", async () => {
     mockGet.mockResolvedValue(makeProfile({ crawl_status: "crawling" }));
-    renderWithProviders(<ProfileDetailPage />);
+    await renderOnTab("Internal links");
     await waitFor(() => {
       expect(screen.getByText("crawling")).toBeInTheDocument();
     });
@@ -180,7 +194,7 @@ describe("ProfileDetailPage", () => {
   it("crawl button starts crawl", async () => {
     mockCrawl.mockResolvedValue({ status: "started" });
     const user = userEvent.setup();
-    renderWithProviders(<ProfileDetailPage />);
+    await renderOnTab("Internal links");
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Crawl Sitemap/i })).toBeInTheDocument();
     });
@@ -191,7 +205,7 @@ describe("ProfileDetailPage", () => {
   });
 
   it("renders internal links", async () => {
-    renderWithProviders(<ProfileDetailPage />);
+    await renderOnTab("Internal links");
     await waitFor(() => {
       expect(screen.getByText("https://example.com/page-1")).toBeInTheDocument();
       expect(screen.getByText("https://example.com/page-2")).toBeInTheDocument();
@@ -200,14 +214,14 @@ describe("ProfileDetailPage", () => {
 
   it("shows empty links state", async () => {
     mockLinks.mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20, pages: 0 });
-    renderWithProviders(<ProfileDetailPage />);
+    await renderOnTab("Internal links");
     await waitFor(() => {
       expect(screen.getByText("No internal links yet")).toBeInTheDocument();
     });
   });
 
   it("search links input present", async () => {
-    renderWithProviders(<ProfileDetailPage />);
+    await renderOnTab("Internal links");
     await waitFor(() => {
       expect(
         screen.getByPlaceholderText("Search links by URL or title...")
@@ -217,7 +231,7 @@ describe("ProfileDetailPage", () => {
 
   it("add link button toggles form", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<ProfileDetailPage />);
+    await renderOnTab("Internal links");
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Add Link/i })).toBeInTheDocument();
     });
@@ -229,7 +243,7 @@ describe("ProfileDetailPage", () => {
   it("delete link removes from list", async () => {
     mockDeleteLink.mockResolvedValue(undefined);
     const user = userEvent.setup();
-    const { container } = renderWithProviders(<ProfileDetailPage />);
+    const { container } = await renderOnTab("Internal links");
     await waitFor(() => {
       expect(screen.getByText("https://example.com/page-1")).toBeInTheDocument();
     });
@@ -281,7 +295,7 @@ describe("ProfileDetailPage", () => {
     mockLinks.mockRejectedValueOnce(
       new Error(JSON.stringify({ detail: "Links unavailable" }))
     );
-    renderWithProviders(<ProfileDetailPage />);
+    await renderOnTab("Internal links");
     await waitFor(() => {
       expect(screen.getByText("Could not load internal links")).toBeInTheDocument();
     });
@@ -303,7 +317,7 @@ describe("ProfileDetailPage", () => {
 
   it("renders skeleton rows while the first page of links is in flight", async () => {
     mockLinks.mockReturnValue(new Promise(() => {}));
-    const { container } = renderWithProviders(<ProfileDetailPage />);
+    const { container } = await renderOnTab("Internal links");
     await waitFor(() => {
       expect(screen.getByText("Internal Links")).toBeInTheDocument();
     });
@@ -322,7 +336,7 @@ describe("ProfileDetailPage", () => {
       })
     );
     mockWpAuthors.mockRejectedValue(rejection);
-    renderWithProviders(<ProfileDetailPage />);
+    await renderOnTab("Publishing");
     await waitFor(() => {
       expect(
         screen.getByText(
@@ -346,7 +360,7 @@ describe("ProfileDetailPage", () => {
       { id: 7, name: "Guides", slug: "guides", count: 3 },
     ]);
     mockWpAuthors.mockRejectedValue(new Error(JSON.stringify({ detail: "nope" })));
-    renderWithProviders(<ProfileDetailPage />);
+    await renderOnTab("Publishing");
     await waitFor(() => {
       expect(screen.getByText("nope")).toBeInTheDocument();
     });
@@ -412,7 +426,7 @@ describe("ProfileDetailPage", () => {
     const user = userEvent.setup();
     mockGet.mockResolvedValue(wpProfile());
     mockUpdate.mockRejectedValueOnce(new Error(REJECTED_WP_URL));
-    renderWithProviders(<ProfileDetailPage />);
+    await renderOnTab("Publishing");
     await waitFor(() => {
       expect(screen.getByDisplayValue("https://wp.example")).toBeInTheDocument();
     });
@@ -439,27 +453,18 @@ describe("ProfileDetailPage", () => {
    */
   describe("publishing connections", () => {
     it("offers the WordPress fields on a profile that has never used WordPress", async () => {
-      renderWithProviders(<ProfileDetailPage />);
-      await waitFor(() => {
-        expect(screen.getByDisplayValue("Test Site")).toBeInTheDocument();
-      });
+      await renderOnTab("Publishing");
       expect(screen.getByLabelText("WordPress URL")).toBeInTheDocument();
       expect(screen.getByLabelText("Application Password")).toBeInTheDocument();
     });
 
     it("offers the Next.js webhook fields on the same profile", async () => {
-      renderWithProviders(<ProfileDetailPage />);
-      await waitFor(() => {
-        expect(screen.getByDisplayValue("Test Site")).toBeInTheDocument();
-      });
+      await renderOnTab("Publishing");
       expect(screen.getByLabelText("Webhook URL")).toBeInTheDocument();
     });
 
     it("says a connection with no credentials is not configured, and tests nothing", async () => {
-      renderWithProviders(<ProfileDetailPage />);
-      await waitFor(() => {
-        expect(screen.getByDisplayValue("Test Site")).toBeInTheDocument();
-      });
+      await renderOnTab("Publishing");
       expect(screen.getAllByText("Not configured")).toHaveLength(2);
       expect(mockWpTest).not.toHaveBeenCalled();
       expect(mockNextjsTest).not.toHaveBeenCalled();
@@ -468,7 +473,7 @@ describe("ProfileDetailPage", () => {
     it("reports the site a real test reached, not the fields that were filled in", async () => {
       mockGet.mockResolvedValue(wpProfile());
       mockWpTest.mockResolvedValue({ connected: true, site_name: "Editorial" });
-      renderWithProviders(<ProfileDetailPage />);
+      await renderOnTab("Publishing");
       await waitFor(() => {
         expect(screen.getByText("Connected")).toBeInTheDocument();
       });
@@ -481,7 +486,7 @@ describe("ProfileDetailPage", () => {
         connected: false,
         error: "Authentication failed. Check the username and application password.",
       });
-      renderWithProviders(<ProfileDetailPage />);
+      await renderOnTab("Publishing");
       await waitFor(() => {
         expect(
           screen.getByText(
@@ -505,7 +510,7 @@ describe("ProfileDetailPage", () => {
           "WordPress API error: <strong>Error:</strong> Unknown username. " +
           "Check again or try your email address.",
       });
-      renderWithProviders(<ProfileDetailPage />);
+      await renderOnTab("Publishing");
       await waitFor(() => {
         expect(
           screen.getByText(
@@ -525,7 +530,7 @@ describe("ProfileDetailPage", () => {
           })
         )
       );
-      renderWithProviders(<ProfileDetailPage />);
+      await renderOnTab("Publishing");
       await waitFor(() => {
         expect(
           screen.getByText("WordPress API error: Error: Not allowed.")
@@ -542,7 +547,7 @@ describe("ProfileDetailPage", () => {
           nextjs_webhook_secret_set: true,
         })
       );
-      renderWithProviders(<ProfileDetailPage />);
+      await renderOnTab("Publishing");
       await waitFor(() => {
         expect(
           screen.getByDisplayValue("https://blog.example/api/jena-webhook")
@@ -565,10 +570,7 @@ describe("ProfileDetailPage", () => {
         connected: false,
         error: "Webhook returned 401",
       });
-      renderWithProviders(<ProfileDetailPage />);
-      await waitFor(() => {
-        expect(screen.getByDisplayValue("Test Site")).toBeInTheDocument();
-      });
+      await renderOnTab("Publishing");
 
       await user.click(screen.getByRole("button", { name: /Test webhook/i }));
 
@@ -587,10 +589,7 @@ describe("ProfileDetailPage", () => {
   describe("output format availability", () => {
     it("refuses both publishing formats on a profile with no credentials", async () => {
       const user = userEvent.setup();
-      renderWithProviders(<ProfileDetailPage />);
-      await waitFor(() => {
-        expect(screen.getByDisplayValue("Test Site")).toBeInTheDocument();
-      });
+      await renderOnTab("Publishing");
 
       await user.click(screen.getByRole("combobox", { name: "Output Format" }));
 
@@ -609,10 +608,7 @@ describe("ProfileDetailPage", () => {
     });
 
     it("points at the card that fixes it rather than just greying the option", async () => {
-      renderWithProviders(<ProfileDetailPage />);
-      await waitFor(() => {
-        expect(screen.getByDisplayValue("Test Site")).toBeInTheDocument();
-      });
+      await renderOnTab("Publishing");
 
       expect(
         screen.getByText(
@@ -630,7 +626,7 @@ describe("ProfileDetailPage", () => {
       const user = userEvent.setup();
       mockGet.mockResolvedValue(wpProfile());
       mockWpTest.mockResolvedValue({ connected: true, site_name: "Editorial" });
-      renderWithProviders(<ProfileDetailPage />);
+      await renderOnTab("Publishing");
       await waitFor(() => {
         expect(screen.getByText("Connected")).toBeInTheDocument();
       });
@@ -650,10 +646,7 @@ describe("ProfileDetailPage", () => {
      */
     it("opens up the format as the credentials are typed, before any save", async () => {
       const user = userEvent.setup();
-      renderWithProviders(<ProfileDetailPage />);
-      await waitFor(() => {
-        expect(screen.getByDisplayValue("Test Site")).toBeInTheDocument();
-      });
+      await renderOnTab("Publishing");
 
       await user.type(screen.getByLabelText("WordPress URL"), "https://wp.example");
       await user.type(screen.getByLabelText("Username"), "editor");
@@ -670,7 +663,7 @@ describe("ProfileDetailPage", () => {
 
     it("raises the reason to an alert when the profile already names that format", async () => {
       mockGet.mockResolvedValue(makeProfile({ output_format: "nextjs" }));
-      renderWithProviders(<ProfileDetailPage />);
+      await renderOnTab("Publishing");
 
       await waitFor(() => {
         expect(screen.getByRole("alert")).toHaveTextContent(
@@ -682,7 +675,7 @@ describe("ProfileDetailPage", () => {
 
   describe("default stage settings", () => {
     it("names the mode a stage is configured for", async () => {
-      renderWithProviders(<ProfileDetailPage />);
+      await renderOnTab("New post defaults");
 
       await waitFor(() => {
         expect(screen.getByLabelText("research stage mode")).toHaveTextContent(
@@ -707,7 +700,7 @@ describe("ProfileDetailPage", () => {
           },
         })
       );
-      renderWithProviders(<ProfileDetailPage />);
+      await renderOnTab("New post defaults");
 
       await waitFor(() => {
         expect(screen.getByLabelText("research stage mode")).toHaveTextContent(
@@ -725,7 +718,7 @@ describe("ProfileDetailPage", () => {
           default_stage_settings: { research: "auto" } as Profile["default_stage_settings"],
         })
       );
-      renderWithProviders(<ProfileDetailPage />);
+      await renderOnTab("New post defaults");
 
       await waitFor(() =>
         expect(screen.getByLabelText("outline stage mode")).toBeInTheDocument()
@@ -752,7 +745,7 @@ describe("ProfileDetailPage", () => {
           },
         })
       );
-      renderWithProviders(<ProfileDetailPage />);
+      await renderOnTab("New post defaults");
 
       await waitFor(() =>
         expect(screen.getByLabelText("outline stage mode")).toBeInTheDocument()
@@ -764,6 +757,108 @@ describe("ProfileDetailPage", () => {
           "Run automatically",
         ])
       );
+    });
+  });
+
+  /**
+   * The seven cards used to sit in one scroll, so the publishing connection a
+   * user came for was below a form about tone of voice. They are grouped by
+   * the ownership table in `docs/polish/evidence/p3.md`: what the site is,
+   * where its posts go, what a new post starts from, and its link inventory.
+   */
+  describe("tabs", () => {
+    it("groups the cards into four tabs named for what they own", async () => {
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: "Test Site" })).toBeInTheDocument();
+      });
+
+      expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+        "Site",
+        "Publishing",
+        "New post defaults",
+        "Internal links",
+      ]);
+    });
+
+    it("opens on Site, with the other three tabs' contents out of the way", async () => {
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(screen.getByLabelText(/^Name/)).toBeInTheDocument();
+      });
+
+      expect(screen.getByLabelText("Brand Voice")).toBeInTheDocument();
+      expect(screen.queryByLabelText("WordPress URL")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Word Count")).not.toBeInTheDocument();
+      expect(screen.queryByText("Internal Links")).not.toBeInTheDocument();
+    });
+
+    it("opens on the tab the URL names, so a link can point at the connection", async () => {
+      window.history.replaceState({}, "", "/profiles/prof-1?tab=publishing");
+      renderWithProviders(<ProfileDetailPage />);
+
+      expect(await screen.findByLabelText("WordPress URL")).toBeInTheDocument();
+      expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
+    });
+
+    it("falls back to Site when the URL names a tab that does not exist", async () => {
+      window.history.replaceState({}, "", "/profiles/prof-1?tab=nonsense");
+      renderWithProviders(<ProfileDetailPage />);
+
+      expect(await screen.findByLabelText(/^Name/)).toBeInTheDocument();
+    });
+
+    it("puts the tab it is on into the URL", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(screen.getByLabelText(/^Name/)).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole("tab", { name: "Publishing" }));
+
+      expect(window.location.search).toBe("?tab=publishing");
+      expect(await screen.findByLabelText("WordPress URL")).toBeInTheDocument();
+    });
+
+    it("keeps Save Profile reachable from a tab that holds no profile form", async () => {
+      mockUpdate.mockResolvedValue(makeProfile());
+      const user = userEvent.setup();
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(screen.getByLabelText(/^Name/)).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole("tab", { name: "Internal links" }));
+      await user.click(screen.getByRole("button", { name: /Save Profile/i }));
+
+      await waitFor(() => {
+        expect(mockUpdate).toHaveBeenCalledWith(
+          "prof-1",
+          expect.objectContaining({ name: "Test Site" })
+        );
+      });
+    });
+
+    it("saves an edit made on a tab the user has since left", async () => {
+      mockUpdate.mockResolvedValue(makeProfile());
+      const user = userEvent.setup();
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(screen.getByLabelText("Tone")).toBeInTheDocument();
+      });
+
+      await user.clear(screen.getByLabelText("Tone"));
+      await user.type(screen.getByLabelText("Tone"), "wry");
+      await user.click(screen.getByRole("tab", { name: "Publishing" }));
+      await user.click(screen.getByRole("button", { name: /Save Profile/i }));
+
+      await waitFor(() => {
+        expect(mockUpdate).toHaveBeenCalledWith(
+          "prof-1",
+          expect.objectContaining({ tone: "wry" })
+        );
+      });
     });
   });
 });

@@ -263,10 +263,16 @@ explicitly out of scope.
         profile's gates over any submission equal to the schema default, so a per-post editor
         that cleared every gate would be discarded silently. Closes P2.111.
         `ui/p31a-newpost-gates-*.png`. [evidence](evidence/p3.md#p31a)
-  - [ ] **P3.1b** `/profiles/[id]`: 1489 lines and seven cards in one scroll, mixing site
-        identity with publishing connections with an action (Crawl Sitemap) and a data table
-        (Internal Links). Group it by the ownership table so the connection a user came for is
-        not below the fold of a form about tone of voice.
+  - [x] **P3.1b** `/profiles/[id]`: seven cards in one scroll, mixing site identity with
+        publishing connections with an action (Crawl Sitemap) and a data table (Internal
+        Links). Now four tabs, one per row of the ownership table: `Site` (identity, voice),
+        `Publishing` (destination and both connections), `New post defaults` (article, image
+        and stage defaults), `Internal links` (crawl and inventory). The WordPress card's
+        title moves from y=1728 of a 3235-tall page to y=439 of a 1279-tall tab. One form
+        spans the three settings tabs and a sticky save bar submits it by `form=` id, so
+        `Re-crawl Schedule` saves from the tab it lives on. `?tab=` is read and written with
+        the History API, and the new-post gate link now points at `?tab=defaults`.
+        `ui/p31b-profile-*.png`. [evidence](evidence/p3.md#p31b)
   - [ ] **P3.1c** `/settings` against `/profiles/[id]`: the boundary is right but invisible.
         Neither page links to the other, "Settings" is the sidebar label for the account-wide
         page while every per-site setting lives under "Profiles", and `Default Stage Settings`

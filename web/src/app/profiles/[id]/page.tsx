@@ -33,7 +33,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -72,6 +72,41 @@ import { ProfileDetailSkeleton } from "./profile-detail-skeleton";
  * anywhere to release it. So a stored gate is shown and can be cleared, and a
  * new one cannot be added until there is something to release it with.
  */
+/**
+ * The four things a profile owns, one tab each, in the order of the ownership
+ * table in `docs/polish/evidence/p3.md`: what the site is, where its finished
+ * posts go, what a new post for it starts from, and its link inventory.
+ */
+const TABS = [
+  { value: "site", label: "Site" },
+  { value: "publishing", label: "Publishing" },
+  { value: "defaults", label: "New post defaults" },
+  { value: "links", label: "Internal links" },
+] as const;
+
+type TabValue = (typeof TABS)[number]["value"];
+
+const DEFAULT_TAB: TabValue = "site";
+
+function isTabValue(value: string | null): value is TabValue {
+  return TABS.some((tab) => tab.value === value);
+}
+
+/**
+ * Read on mount only, off the History API rather than `useSearchParams`, which
+ * would put a Suspense boundary requirement on a page that renders nothing on
+ * the server anyway. A wrong or missing `?tab=` opens the first tab rather
+ * than an empty page.
+ */
+function tabFromUrl(): TabValue {
+  if (typeof window === "undefined") return DEFAULT_TAB;
+  const named = new URLSearchParams(window.location.search).get("tab");
+  return isTabValue(named) ? named : DEFAULT_TAB;
+}
+
+/** Ties the action bar to the form it submits without nesting it inside. */
+const PROFILE_FORM_ID = "profile-form";
+
 const OFFERED_STAGE_MODES: StageMode[] = ["auto"];
 
 function stageModeOptions(current: StageMode | undefined): StageMode[] {
@@ -175,6 +210,21 @@ export default function ProfileDetailPage() {
   const profileId = params.id as string;
 
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [activeTab, setActiveTab] = useState<TabValue>(tabFromUrl);
+
+  /**
+   * Written back with `replaceState` so the tab a user is on can be copied out
+   * of the address bar and linked to, without the router round trip a
+   * `router.replace` would cost on a page that fetches everything itself.
+   */
+  const selectTab = (value: string) => {
+    if (!isTabValue(value)) return;
+    setActiveTab(value);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", value);
+    window.history.replaceState(window.history.state, "", url);
+  };
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -728,762 +778,825 @@ export default function ProfileDetailPage() {
         </div>
       </div>
 
-      {/* Profile Settings Form */}
-      <form onSubmit={handleSave} className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Profile Settings</CardTitle>
-            <CardDescription>Core profile configuration</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">
-                  Name <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="name"
-                  /* The profile's name, not the operator's: browser autofill
-                     recognises `name` and would offer a person's name here. */
-                  autoComplete="off"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="websiteUrl">
-                  Website URL <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="websiteUrl"
-                  value={websiteUrl}
-                  onChange={(e) => setWebsiteUrl(e.target.value)}
-                  placeholder="https://example.com"
-                  required
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="niche">Niche</Label>
-                <Input
-                  id="niche"
-                  value={niche}
-                  onChange={(e) => setNiche(e.target.value)}
-                  placeholder="e.g., Firearms & Accessories"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="targetAudience">Target Audience</Label>
-                <Input
-                  id="targetAudience"
-                  value={targetAudience}
-                  onChange={(e) => setTargetAudience(e.target.value)}
-                  placeholder="e.g., Gun enthusiasts"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="tone">Tone</Label>
-                <Input
-                  id="tone"
-                  value={tone}
-                  onChange={(e) => setTone(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="wordCount">Word Count</Label>
-                <Input
-                  id="wordCount"
-                  type="number"
-                  min={500}
-                  max={10000}
-                  step={100}
-                  value={wordCount}
-                  onChange={(e) => setWordCount(Number(e.target.value))}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="brandVoice">Brand Voice</Label>
-              <Textarea
-                id="brandVoice"
-                value={brandVoice}
-                onChange={(e) => setBrandVoice(e.target.value)}
-                placeholder="Describe the brand's voice and personality..."
-                rows={2}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <OutputFormatSelect
-                value={outputFormat}
-                onValueChange={setOutputFormat}
-                availability={formatAvailability}
-              />
-              <div className="space-y-2">
-                <Label htmlFor="avoid">Avoid</Label>
-                <Input
-                  id="avoid"
-                  value={avoid}
-                  onChange={(e) => setAvoid(e.target.value)}
-                  placeholder="Words or phrases to avoid"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="requiredMentions">Required Mentions</Label>
-              <Input
-                id="requiredMentions"
-                value={requiredMentions}
-                onChange={(e) => setRequiredMentions(e.target.value)}
-                placeholder="Brands, products, or phrases that must be mentioned"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="relatedKeywords">Related Keywords</Label>
-              <Input
-                id="relatedKeywords"
-                value={relatedKeywords}
-                onChange={(e) => setRelatedKeywords(e.target.value)}
-                placeholder="keyword1, keyword2, keyword3"
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Comma-separated. Used as default keywords for new posts.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      <Tabs value={activeTab} onValueChange={selectTab} className="gap-6">
+        <TabsList>
+          {TABS.map(({ value, label }) => (
+            <TabsTrigger key={value} value={value}>
+              {label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
 
-        {/* Image Settings */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Image Settings</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="imageStyle">Image Style</Label>
-              <Input
-                id="imageStyle"
-                value={imageStyle}
-                onChange={(e) => setImageStyle(e.target.value)}
-                placeholder="e.g., photorealistic, flat illustration, watercolor"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="imageBrandColors">Image Brand Colors</Label>
-                <Input
-                  id="imageBrandColors"
-                  value={imageBrandColors}
-                  onChange={(e) => setImageBrandColors(e.target.value)}
-                  placeholder="#FF5733, #33FF57, #3357FF"
-                />
-                <p className="text-[11px] text-muted-foreground">Comma-separated</p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="imageExclude">Image Exclude</Label>
-                <Input
-                  id="imageExclude"
-                  value={imageExclude}
-                  onChange={(e) => setImageExclude(e.target.value)}
-                  placeholder="text, watermarks, logos"
-                />
-                <p className="text-[11px] text-muted-foreground">Comma-separated</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Pipeline Settings */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Default Stage Settings</CardTitle>
-            <CardDescription>
-              Default pipeline mode for new posts using this profile
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {STAGES.map((stage) => (
-                <div
-                  key={stage}
-                  className="flex items-center justify-between rounded-md border border-border px-3 py-2"
-                >
-                  <span className="text-sm font-medium">{STAGE_LABELS[stage]}</span>
-                  <Select
-                    name={`stage_${stage}`}
-                    value={stageSettings[stage]}
-                    onValueChange={(v: StageMode) =>
-                      setStageSettings((prev) => ({ ...prev, [stage]: v }))
-                    }
-                  >
-                    <SelectTrigger
-                      // Wide enough for the longest mode name. At 140px
-                      // `line-clamp-1` cut "Run automatically" mid-word.
-                      className="w-[180px] h-8"
-                      aria-label={`${stage} stage mode`}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {stageModeOptions(stageSettings[stage]).map((mode) => (
-                        <SelectItem key={mode} value={mode}>
-                          <span>{STAGE_MODE_LABELS[mode]}</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* WordPress Integration */}
         {/*
-          Rendered whatever the output format is. Gating it on
-          `outputFormat === "wordpress"` left a profile that had never picked
-          WordPress with nowhere to enter a connection, and the new-post form's
-          `wordpress` option with nothing to check against.
+          One form across three of the four tabs, submitted by the action bar
+          below. Every field is React state rather than an uncontrolled input,
+          so a tab the user has left keeps its edits and saves with the rest.
         */}
-        <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between gap-2">
-                <CardTitle className="text-base">WordPress</CardTitle>
-                <ConnectionBadge status={wpStatus} />
-              </div>
-              <CardDescription>
-                Publish straight to a WordPress site when the pipeline finishes
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+        <form id={PROFILE_FORM_ID} onSubmit={handleSave} className="space-y-6">
+          <TabsContent value="site" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Site</CardTitle>
+                <CardDescription>
+                  Which site this profile writes for, and who it writes for.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="name">
+                      Name <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="name"
+                      /* The profile's name, not the operator's: browser autofill
+                         recognises `name` and would offer a person's name here. */
+                      autoComplete="off"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="websiteUrl">
+                      Website URL <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="websiteUrl"
+                      value={websiteUrl}
+                      onChange={(e) => setWebsiteUrl(e.target.value)}
+                      placeholder="https://example.com"
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="niche">Niche</Label>
+                    <Input
+                      id="niche"
+                      value={niche}
+                      onChange={(e) => setNiche(e.target.value)}
+                      placeholder="e.g., Firearms & Accessories"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="targetAudience">Target Audience</Label>
+                    <Input
+                      id="targetAudience"
+                      value={targetAudience}
+                      onChange={(e) => setTargetAudience(e.target.value)}
+                      placeholder="e.g., Gun enthusiasts"
+                    />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Voice</CardTitle>
+                <CardDescription>
+                  How every post for this site should read. The writing stages
+                  are given this as written.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="tone">Tone</Label>
+                    <Input
+                      id="tone"
+                      value={tone}
+                      onChange={(e) => setTone(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="avoid">Avoid</Label>
+                    <Input
+                      id="avoid"
+                      value={avoid}
+                      onChange={(e) => setAvoid(e.target.value)}
+                      placeholder="Words or phrases to avoid"
+                    />
+                  </div>
+                </div>
                 <div className="space-y-2">
-                  <Label htmlFor="wpUrl">WordPress URL</Label>
-                  <Input
-                    id="wpUrl"
-                    value={wpUrl}
-                    onChange={(e) => setWpUrl(e.target.value)}
-                    placeholder="https://yoursite.com"
+                  <Label htmlFor="brandVoice">Brand Voice</Label>
+                  <Textarea
+                    id="brandVoice"
+                    value={brandVoice}
+                    onChange={(e) => setBrandVoice(e.target.value)}
+                    placeholder="Describe the brand's voice and personality..."
+                    rows={2}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="wpUsername">Username</Label>
+                  <Label htmlFor="requiredMentions">Required Mentions</Label>
                   <Input
-                    id="wpUsername"
-                    value={wpUsername}
-                    onChange={(e) => setWpUsername(e.target.value)}
+                    id="requiredMentions"
+                    value={requiredMentions}
+                    onChange={(e) => setRequiredMentions(e.target.value)}
+                    placeholder="Brands, products, or phrases that must be mentioned"
                   />
                 </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="publishing" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Destination</CardTitle>
+                <CardDescription>
+                  Where a finished post for this site goes. A post can be
+                  switched to a different destination before it runs.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <OutputFormatSelect
+                  value={outputFormat}
+                  onValueChange={setOutputFormat}
+                  availability={formatAvailability}
+                />
+              </CardContent>
+            </Card>
+
+            {/* WordPress Integration */}
+            {/*
+              Rendered whatever the output format is. Gating it on
+              `outputFormat === "wordpress"` left a profile that had never picked
+              WordPress with nowhere to enter a connection, and the new-post form's
+              `wordpress` option with nothing to check against.
+            */}
+            <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between gap-2">
+                    <CardTitle className="text-base">WordPress</CardTitle>
+                    <ConnectionBadge status={wpStatus} />
+                  </div>
+                  <CardDescription>
+                    Publish straight to a WordPress site when the pipeline finishes
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="wpUrl">WordPress URL</Label>
+                      <Input
+                        id="wpUrl"
+                        value={wpUrl}
+                        onChange={(e) => setWpUrl(e.target.value)}
+                        placeholder="https://yoursite.com"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="wpUsername">Username</Label>
+                      <Input
+                        id="wpUsername"
+                        value={wpUsername}
+                        onChange={(e) => setWpUsername(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="wpAppPassword">Application Password</Label>
+                      <Input
+                        id="wpAppPassword"
+                        type="password"
+                        value={wpAppPassword}
+                        onChange={(e) => setWpAppPassword(e.target.value)}
+                        placeholder={
+                          wpStatus.kind === "unconfigured"
+                            ? "Enter app password"
+                            : "(unchanged)"
+                        }
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        Generate in WordPress &gt; Users &gt; Application Passwords
+                      </p>
+                    </div>
+                    <div className="flex flex-col justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="self-start"
+                        onClick={handleWpTest}
+                        disabled={wpTesting || !wpUrl || !wpUsername}
+                      >
+                        {wpTesting ? (
+                          <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                        )}
+                        Test connection
+                      </Button>
+                      <ConnectionMessage
+                        status={wpStatus}
+                        unconfigured="Enter the site URL, a username and an application password, then test the connection."
+                        untested="Test the connection to check these credentials."
+                      />
+                    </div>
+                  </div>
+
+                  {wpStatus.kind === "connected" && (
+                    <>
+                      <div className="grid grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="wpDefaultCategory">Default Category</Label>
+                          <Select
+                            name="wp_default_category_id"
+                            value={wpDefaultCategoryId?.toString() || "none"}
+                            onValueChange={(v) =>
+                              setWpDefaultCategoryId(v === "none" ? null : Number(v))
+                            }
+                          >
+                            <SelectTrigger id="wpDefaultCategory">
+                              <SelectValue placeholder="Select category" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">None</SelectItem>
+                              {wpCategories.map((c) => (
+                                <SelectItem key={c.id} value={c.id.toString()}>
+                                  {c.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="wpDefaultAuthor">Default Author</Label>
+                          <Select
+                            name="wp_default_author_id"
+                            value={wpDefaultAuthorId?.toString() || "none"}
+                            onValueChange={(v) =>
+                              setWpDefaultAuthorId(v === "none" ? null : Number(v))
+                            }
+                          >
+                            <SelectTrigger id="wpDefaultAuthor">
+                              <SelectValue placeholder="Select author" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">None</SelectItem>
+                              {wpAuthors.map((a) => (
+                                <SelectItem key={a.id} value={a.id.toString()}>
+                                  {a.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="wpDefaultStatus">Default Status</Label>
+                          <Select
+                            name="wp_default_status"
+                            value={wpDefaultStatus}
+                            onValueChange={setWpDefaultStatus}
+                          >
+                            <SelectTrigger id="wpDefaultStatus">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="publish">Publish</SelectItem>
+                              <SelectItem value="draft">Draft</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      {wpListError && (
+                        <p role="alert" className="text-xs text-destructive">
+                          {wpListError}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+
+            {/* Next.js Integration */}
+            <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between gap-2">
+                    <CardTitle className="text-base">Next.js</CardTitle>
+                    <ConnectionBadge status={nextjsStatus} />
+                  </div>
+                  <CardDescription>
+                    Publish to a Next.js site over a webhook when the pipeline finishes
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="nextjsWebhookUrl">Webhook URL</Label>
+                    <Input
+                      id="nextjsWebhookUrl"
+                      value={nextjsWebhookUrl}
+                      onChange={(e) => setNextjsWebhookUrl(e.target.value)}
+                      placeholder="https://yoursite.com/api/jena-webhook"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="nextjsWebhookSecret">Webhook Secret</Label>
+                      <Input
+                        id="nextjsWebhookSecret"
+                        type="password"
+                        value={nextjsWebhookSecret}
+                        onChange={(e) => setNextjsWebhookSecret(e.target.value)}
+                        placeholder={
+                          nextjsStatus.kind === "unconfigured"
+                            ? "Enter webhook secret"
+                            : "(unchanged)"
+                        }
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        Shared secret for HMAC signature verification
+                      </p>
+                    </div>
+                    <div className="flex flex-col justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="self-start"
+                        onClick={handleNextjsTest}
+                        disabled={nextjsTesting || !nextjsWebhookUrl}
+                      >
+                        {nextjsTesting ? (
+                          <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                        )}
+                        Test webhook
+                      </Button>
+                      <ConnectionMessage
+                        status={nextjsStatus}
+                        unconfigured="Enter the webhook URL and shared secret, then test it."
+                        untested="Test the webhook to check that the site answers."
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="nextjsFrontmatterMap">Frontmatter Mapping</Label>
+                    <Textarea
+                      id="nextjsFrontmatterMap"
+                      value={nextjsFrontmatterMap}
+                      onChange={(e) => setNextjsFrontmatterMap(e.target.value)}
+                      placeholder='{"category": "blog", "author": "Jena AI"}'
+                      rows={4}
+                      className="font-mono text-sm"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      JSON object of extra frontmatter fields to include in published posts.
+                      These are merged with the default frontmatter (title, slug, date, etc.).
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+          </TabsContent>
+
+          <TabsContent value="defaults" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Article Defaults</CardTitle>
+                <CardDescription>
+                  What a new post for this site starts with. Each one can be
+                  changed on the post itself.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="wordCount">Word Count</Label>
+                    <Input
+                      id="wordCount"
+                      type="number"
+                      min={500}
+                      max={10000}
+                      step={100}
+                      value={wordCount}
+                      onChange={(e) => setWordCount(Number(e.target.value))}
+                    />
+                  </div>
+                </div>
                 <div className="space-y-2">
-                  <Label htmlFor="wpAppPassword">Application Password</Label>
+                  <Label htmlFor="relatedKeywords">Related Keywords</Label>
                   <Input
-                    id="wpAppPassword"
-                    type="password"
-                    value={wpAppPassword}
-                    onChange={(e) => setWpAppPassword(e.target.value)}
-                    placeholder={
-                      wpStatus.kind === "unconfigured"
-                        ? "Enter app password"
-                        : "(unchanged)"
-                    }
+                    id="relatedKeywords"
+                    value={relatedKeywords}
+                    onChange={(e) => setRelatedKeywords(e.target.value)}
+                    placeholder="keyword1, keyword2, keyword3"
                   />
                   <p className="text-[11px] text-muted-foreground">
-                    Generate in WordPress &gt; Users &gt; Application Passwords
+                    Comma-separated. Used as default keywords for new posts.
                   </p>
                 </div>
-                <div className="flex flex-col justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="self-start"
-                    onClick={handleWpTest}
-                    disabled={wpTesting || !wpUrl || !wpUsername}
-                  >
-                    {wpTesting ? (
-                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                    )}
-                    Test connection
-                  </Button>
-                  <ConnectionMessage
-                    status={wpStatus}
-                    unconfigured="Enter the site URL, a username and an application password, then test the connection."
-                    untested="Test the connection to check these credentials."
+              </CardContent>
+            </Card>
+
+            {/* Image Settings */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Image Settings</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="imageStyle">Image Style</Label>
+                  <Input
+                    id="imageStyle"
+                    value={imageStyle}
+                    onChange={(e) => setImageStyle(e.target.value)}
+                    placeholder="e.g., photorealistic, flat illustration, watercolor"
                   />
                 </div>
-              </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="imageBrandColors">Image Brand Colors</Label>
+                    <Input
+                      id="imageBrandColors"
+                      value={imageBrandColors}
+                      onChange={(e) => setImageBrandColors(e.target.value)}
+                      placeholder="#FF5733, #33FF57, #3357FF"
+                    />
+                    <p className="text-[11px] text-muted-foreground">Comma-separated</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="imageExclude">Image Exclude</Label>
+                    <Input
+                      id="imageExclude"
+                      value={imageExclude}
+                      onChange={(e) => setImageExclude(e.target.value)}
+                      placeholder="text, watermarks, logos"
+                    />
+                    <p className="text-[11px] text-muted-foreground">Comma-separated</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-              {wpStatus.kind === "connected" && (
-                <>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="wpDefaultCategory">Default Category</Label>
+            {/* Pipeline Settings */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Default Stage Settings</CardTitle>
+                <CardDescription>
+                  Default pipeline mode for new posts using this profile
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {STAGES.map((stage) => (
+                    <div
+                      key={stage}
+                      className="flex items-center justify-between rounded-md border border-border px-3 py-2"
+                    >
+                      <span className="text-sm font-medium">{STAGE_LABELS[stage]}</span>
                       <Select
-                        name="wp_default_category_id"
-                        value={wpDefaultCategoryId?.toString() || "none"}
-                        onValueChange={(v) =>
-                          setWpDefaultCategoryId(v === "none" ? null : Number(v))
+                        name={`stage_${stage}`}
+                        value={stageSettings[stage]}
+                        onValueChange={(v: StageMode) =>
+                          setStageSettings((prev) => ({ ...prev, [stage]: v }))
                         }
                       >
-                        <SelectTrigger id="wpDefaultCategory">
-                          <SelectValue placeholder="Select category" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">None</SelectItem>
-                          {wpCategories.map((c) => (
-                            <SelectItem key={c.id} value={c.id.toString()}>
-                              {c.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="wpDefaultAuthor">Default Author</Label>
-                      <Select
-                        name="wp_default_author_id"
-                        value={wpDefaultAuthorId?.toString() || "none"}
-                        onValueChange={(v) =>
-                          setWpDefaultAuthorId(v === "none" ? null : Number(v))
-                        }
-                      >
-                        <SelectTrigger id="wpDefaultAuthor">
-                          <SelectValue placeholder="Select author" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">None</SelectItem>
-                          {wpAuthors.map((a) => (
-                            <SelectItem key={a.id} value={a.id.toString()}>
-                              {a.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="wpDefaultStatus">Default Status</Label>
-                      <Select
-                        name="wp_default_status"
-                        value={wpDefaultStatus}
-                        onValueChange={setWpDefaultStatus}
-                      >
-                        <SelectTrigger id="wpDefaultStatus">
+                        <SelectTrigger
+                          // Wide enough for the longest mode name. At 140px
+                          // `line-clamp-1` cut "Run automatically" mid-word.
+                          className="w-[180px] h-8"
+                          aria-label={`${stage} stage mode`}
+                        >
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="publish">Publish</SelectItem>
-                          <SelectItem value="draft">Draft</SelectItem>
+                          {stageModeOptions(stageSettings[stage]).map((mode) => (
+                            <SelectItem key={mode} value={mode}>
+                              <span>{STAGE_MODE_LABELS[mode]}</span>
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
-                  </div>
-                  {wpListError && (
-                    <p role="alert" className="text-xs text-destructive">
-                      {wpListError}
-                    </p>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </Card>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </form>
 
-        {/* Next.js Integration */}
-        <Card>
+        {/* The links inventory is this site's data, not its settings, so it
+            sits outside the profile form. The crawl card's Re-crawl Schedule
+            is a profile field and is saved by the action bar below, which is
+            why that bar is bound to the form by id rather than nested in it. */}
+        <TabsContent value="links" className="space-y-6">
+          {/* Crawl Sitemap */}
+          <Card>
             <CardHeader>
-              <div className="flex items-center justify-between gap-2">
-                <CardTitle className="text-base">Next.js</CardTitle>
-                <ConnectionBadge status={nextjsStatus} />
-              </div>
+              <CardTitle className="text-base">Crawl Sitemap</CardTitle>
               <CardDescription>
-                Publish to a Next.js site over a webhook when the pipeline finishes
+                Crawl the website sitemap to discover internal links
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="nextjsWebhookUrl">Webhook URL</Label>
-                <Input
-                  id="nextjsWebhookUrl"
-                  value={nextjsWebhookUrl}
-                  onChange={(e) => setNextjsWebhookUrl(e.target.value)}
-                  placeholder="https://yoursite.com/api/jena-webhook"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="nextjsWebhookSecret">Webhook Secret</Label>
-                  <Input
-                    id="nextjsWebhookSecret"
-                    type="password"
-                    value={nextjsWebhookSecret}
-                    onChange={(e) => setNextjsWebhookSecret(e.target.value)}
-                    placeholder={
-                      nextjsStatus.kind === "unconfigured"
-                        ? "Enter webhook secret"
-                        : "(unchanged)"
-                    }
-                  />
-                  <p className="text-[11px] text-muted-foreground">
-                    Shared secret for HMAC signature verification
-                  </p>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Status:</span>
+                  <Badge variant={CRAWL_STATUS_VARIANT[profile.crawl_status] || "secondary"}>
+                    {isCrawling && <Loader2 className="h-3 w-3 animate-spin" />}
+                    {profile.crawl_status}
+                  </Badge>
                 </div>
-                <div className="flex flex-col justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="self-start"
-                    onClick={handleNextjsTest}
-                    disabled={nextjsTesting || !nextjsWebhookUrl}
-                  >
-                    {nextjsTesting ? (
-                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                    )}
-                    Test webhook
-                  </Button>
-                  <ConnectionMessage
-                    status={nextjsStatus}
-                    unconfigured="Enter the webhook URL and shared secret, then test it."
-                    untested="Test the webhook to check that the site answers."
-                  />
-                </div>
+                {profile.last_crawled_at && (
+                  <span className="text-xs text-muted-foreground">
+                    Last crawled:{" "}
+                    {new Date(profile.last_crawled_at).toLocaleString()}
+                  </span>
+                )}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="nextjsFrontmatterMap">Frontmatter Mapping</Label>
-                <Textarea
-                  id="nextjsFrontmatterMap"
-                  value={nextjsFrontmatterMap}
-                  onChange={(e) => setNextjsFrontmatterMap(e.target.value)}
-                  placeholder='{"category": "blog", "author": "Jena AI"}'
-                  rows={4}
-                  className="font-mono text-sm"
-                />
+                <Label htmlFor="recrawlInterval">Re-crawl Schedule</Label>
+                <Select
+                  name="recrawl_interval"
+                  value={recrawlInterval}
+                  onValueChange={setRecrawlInterval}
+                >
+                  <SelectTrigger id="recrawlInterval" className="w-[200px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="disabled">Disabled</SelectItem>
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                  </SelectContent>
+                </Select>
                 <p className="text-[11px] text-muted-foreground">
-                  JSON object of extra frontmatter fields to include in published posts.
-                  These are merged with the default frontmatter (title, slug, date, etc.).
+                  Automatically re-crawl the sitemap on a schedule. Saves with the profile.
                 </p>
               </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCrawl}
+                disabled={isCrawling}
+              >
+                {isCrawling ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                    Crawling...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                    Crawl Sitemap
+                  </>
+                )}
+              </Button>
             </CardContent>
           </Card>
 
-        {saveError && (
-          <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3">
-            <AlertCircle className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
-            <div className="min-w-0">
-              <p className="text-sm font-medium">Could not save this profile</p>
-              <p className="mt-0.5 text-sm text-muted-foreground">{saveError}</p>
-            </div>
-          </div>
-        )}
+          {/* Internal Links */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base">Internal Links</CardTitle>
+                  <CardDescription>
+                    Links available for automatic insertion into blog posts
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowAddLink((prev) => !prev)}
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1.5" />
+                  Add Link
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Add Link Form */}
+              {showAddLink && (
+                <form
+                  onSubmit={handleAddLink}
+                  className="flex items-end gap-2 rounded-md border border-border p-3"
+                >
+                  <div className="flex-1 space-y-1">
+                    <Label htmlFor="newLinkUrl" className="text-xs">
+                      URL <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="newLinkUrl"
+                      value={newLinkUrl}
+                      onChange={(e) => setNewLinkUrl(e.target.value)}
+                      placeholder="https://example.com/page"
+                      required
+                    />
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <Label htmlFor="newLinkTitle" className="text-xs">
+                      Title
+                    </Label>
+                    <Input
+                      id="newLinkTitle"
+                      value={newLinkTitle}
+                      onChange={(e) => setNewLinkTitle(e.target.value)}
+                      placeholder="Page title (optional)"
+                    />
+                  </div>
+                  <Button type="submit" size="sm" disabled={addingLink}>
+                    {addingLink ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      "Add"
+                    )}
+                  </Button>
+                </form>
+              )}
 
-        <div className="flex justify-end">
-          <Button type="submit" disabled={saving}>
-            {saving ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <Save className="h-4 w-4 mr-1.5" />
-                Save Profile
-              </>
-            )}
-          </Button>
-        </div>
-      </form>
-
-      <Separator />
-
-      {/* Crawl Sitemap */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Crawl Sitemap</CardTitle>
-          <CardDescription>
-            Crawl the website sitemap to discover internal links
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">Status:</span>
-              <Badge variant={CRAWL_STATUS_VARIANT[profile.crawl_status] || "secondary"}>
-                {isCrawling && <Loader2 className="h-3 w-3 animate-spin" />}
-                {profile.crawl_status}
-              </Badge>
-            </div>
-            {profile.last_crawled_at && (
-              <span className="text-xs text-muted-foreground">
-                Last crawled:{" "}
-                {new Date(profile.last_crawled_at).toLocaleString()}
-              </span>
-            )}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="recrawlInterval">Re-crawl Schedule</Label>
-            <Select
-              name="recrawl_interval"
-              value={recrawlInterval}
-              onValueChange={setRecrawlInterval}
-            >
-              <SelectTrigger id="recrawlInterval" className="w-[200px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="disabled">Disabled</SelectItem>
-                <SelectItem value="weekly">Weekly</SelectItem>
-                <SelectItem value="monthly">Monthly</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-[11px] text-muted-foreground">
-              Automatically re-crawl the sitemap on a schedule. Saves with the profile.
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleCrawl}
-            disabled={isCrawling}
-          >
-            {isCrawling ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                Crawling...
-              </>
-            ) : (
-              <>
-                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                Crawl Sitemap
-              </>
-            )}
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* Internal Links */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-base">Internal Links</CardTitle>
-              <CardDescription>
-                Links available for automatic insertion into blog posts
-              </CardDescription>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowAddLink((prev) => !prev)}
-            >
-              <Plus className="h-3.5 w-3.5 mr-1.5" />
-              Add Link
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Add Link Form */}
-          {showAddLink && (
-            <form
-              onSubmit={handleAddLink}
-              className="flex items-end gap-2 rounded-md border border-border p-3"
-            >
-              <div className="flex-1 space-y-1">
-                <Label htmlFor="newLinkUrl" className="text-xs">
-                  URL <span className="text-destructive">*</span>
-                </Label>
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  id="newLinkUrl"
-                  value={newLinkUrl}
-                  onChange={(e) => setNewLinkUrl(e.target.value)}
-                  placeholder="https://example.com/page"
-                  required
+                  name="link-search"
+                  aria-label="Search internal links"
+                  placeholder="Search links by URL or title..."
+                  value={linksSearch}
+                  onChange={(e) => {
+                    setLinksSearch(e.target.value);
+                    setLinksPage(1);
+                  }}
+                  className="pl-9"
                 />
               </div>
-              <div className="flex-1 space-y-1">
-                <Label htmlFor="newLinkTitle" className="text-xs">
-                  Title
-                </Label>
-                <Input
-                  id="newLinkTitle"
-                  value={newLinkTitle}
-                  onChange={(e) => setNewLinkTitle(e.target.value)}
-                  placeholder="Page title (optional)"
-                />
-              </div>
-              <Button type="submit" size="sm" disabled={addingLink}>
-                {addingLink ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  "Add"
-                )}
-              </Button>
-            </form>
-          )}
 
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              name="link-search"
-              aria-label="Search internal links"
-              placeholder="Search links by URL or title..."
-              value={linksSearch}
-              onChange={(e) => {
-                setLinksSearch(e.target.value);
-                setLinksPage(1);
-              }}
-              className="pl-9"
-            />
-          </div>
-
-          {/* Links Table */}
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>URL</TableHead>
-                  <TableHead>Title</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="w-[50px]" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {linksLoading && links.length === 0 ? (
-                  Array.from({ length: 5 }).map((_, i) => (
-                    <TableRow key={i}>
-                      <TableCell><Skeleton className="h-4 w-48" /></TableCell>
-                      <TableCell><Skeleton className="h-4 w-32" /></TableCell>
-                      <TableCell><Skeleton className="h-5 w-16" /></TableCell>
-                      <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-                      <TableCell><Skeleton className="h-4 w-4" /></TableCell>
+              {/* Links Table */}
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>URL</TableHead>
+                      <TableHead>Title</TableHead>
+                      <TableHead>Source</TableHead>
+                      <TableHead>Created</TableHead>
+                      <TableHead className="w-[50px]" />
                     </TableRow>
-                  ))
-                ) : linksError ? (
-                  <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={5} className="h-32 text-center">
-                      <AlertCircle className="mx-auto h-5 w-5 text-destructive" />
-                      <p className="mt-2 text-sm font-medium">
-                        Could not load internal links
-                      </p>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {linksError}
-                      </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="mt-3"
-                        onClick={() => fetchLinks(1, linksSearch)}
-                      >
-                        <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                        Retry links
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ) : links.length === 0 ? (
-                  <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={5} className="h-32 text-center">
-                      {linksSearch ? (
-                        <>
-                          <p className="text-sm font-medium">
-                            No links match your search
+                  </TableHeader>
+                  <TableBody>
+                    {linksLoading && links.length === 0 ? (
+                      Array.from({ length: 5 }).map((_, i) => (
+                        <TableRow key={i}>
+                          <TableCell><Skeleton className="h-4 w-48" /></TableCell>
+                          <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+                          <TableCell><Skeleton className="h-5 w-16" /></TableCell>
+                          <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                          <TableCell><Skeleton className="h-4 w-4" /></TableCell>
+                        </TableRow>
+                      ))
+                    ) : linksError ? (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell colSpan={5} className="h-32 text-center">
+                          <AlertCircle className="mx-auto h-5 w-5 text-destructive" />
+                          <p className="mt-2 text-sm font-medium">
+                            Could not load internal links
+                          </p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            {linksError}
                           </p>
                           <Button
                             variant="outline"
                             size="sm"
                             className="mt-3"
-                            onClick={() => setLinksSearch("")}
+                            onClick={() => fetchLinks(1, linksSearch)}
                           >
-                            Clear search
+                            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                            Retry links
                           </Button>
-                        </>
-                      ) : (
-                        <>
-                          <p className="text-sm font-medium">
-                            No internal links yet
-                          </p>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            Crawl the sitemap or add a link by hand to give the
-                            pipeline something to link to.
-                          </p>
-                        </>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  links.map((link) => (
-                    <TableRow key={link.id}>
-                      <TableCell className="max-w-[250px]">
-                        <a
-                          href={link.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sm text-blue-600 hover:underline truncate block"
-                        >
-                          {link.url}
-                        </a>
-                      </TableCell>
-                      <TableCell className="max-w-[200px]">
-                        <span className="text-sm truncate block">
-                          {link.title || "-"}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            link.source === "sitemap"
-                              ? "secondary"
-                              : link.source === "manual"
-                                ? "outline"
-                                : "default"
-                          }
-                        >
-                          {link.source}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {new Date(link.created_at).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => handleDeleteLink(link.id)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : links.length === 0 ? (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell colSpan={5} className="h-32 text-center">
+                          {linksSearch ? (
+                            <>
+                              <p className="text-sm font-medium">
+                                No links match your search
+                              </p>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="mt-3"
+                                onClick={() => setLinksSearch("")}
+                              >
+                                Clear search
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-sm font-medium">
+                                No internal links yet
+                              </p>
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                Crawl the sitemap or add a link by hand to give the
+                                pipeline something to link to.
+                              </p>
+                            </>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      links.map((link) => (
+                        <TableRow key={link.id}>
+                          <TableCell className="max-w-[250px]">
+                            <a
+                              href={link.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm text-blue-600 hover:underline truncate block"
+                            >
+                              {link.url}
+                            </a>
+                          </TableCell>
+                          <TableCell className="max-w-[200px]">
+                            <span className="text-sm truncate block">
+                              {link.title || "-"}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                link.source === "sitemap"
+                                  ? "secondary"
+                                  : link.source === "manual"
+                                    ? "outline"
+                                    : "default"
+                              }
+                            >
+                              {link.source}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {new Date(link.created_at).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => handleDeleteLink(link.id)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
 
-          {/* Load More / Loading */}
-          {linksLoading && links.length > 0 && (
-            <div className="flex justify-center py-4">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              {/* Load More / Loading */}
+              {linksLoading && links.length > 0 && (
+                <div className="flex justify-center py-4">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              )}
+              {linksHasMore && !linksLoading && (
+                <div className="flex justify-center">
+                  <Button variant="outline" size="sm" onClick={handleLoadMore}>
+                    Load More
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <div className="sticky bottom-0 z-10 -mx-6 space-y-3 border-t border-border bg-background/95 px-6 py-3 backdrop-blur">
+          {saveError && (
+            <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3">
+              <AlertCircle className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Could not save this profile</p>
+                <p className="mt-0.5 text-sm text-muted-foreground">{saveError}</p>
+              </div>
             </div>
           )}
-          {linksHasMore && !linksLoading && (
-            <div className="flex justify-center">
-              <Button variant="outline" size="sm" onClick={handleLoadMore}>
-                Load More
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          <div className="flex justify-end">
+            <Button type="submit" form={PROFILE_FORM_ID} disabled={saving}>
+              {saving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-1.5" />
+                  Save Profile
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      </Tabs>
     </div>
   );
 }

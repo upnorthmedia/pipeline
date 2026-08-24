@@ -474,7 +474,7 @@ describe("NewPostPage", () => {
 
       expect(
         await screen.findByRole("link", { name: "Edit gates in the Gated Blog profile" })
-      ).toHaveAttribute("href", "/profiles/prof-gated");
+      ).toHaveAttribute("href", "/profiles/prof-gated?tab=defaults");
     });
 
     it("reads as an ungated run before a profile is chosen", async () => {
