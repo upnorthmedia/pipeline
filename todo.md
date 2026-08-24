@@ -44,6 +44,12 @@
   OpenAI-compatible `/chat/completions` shape, so research calls stop working after that
   date unless the stage moves to Perplexity's Agent API. Found while verifying model IDs
   for ledger item 6.1; out of scope there, but it has a hard deadline. Ledger item P2.71.
+  Half done: P2.71a added `web/src/mastra/perplexity/agent-api.ts`, a `LanguageModelV2` over
+  `POST /v1/agent`, because nothing installed can reach that endpoint (`@ai-sdk/perplexity`
+  4.0.31 is chat-completions only, Mastra's `perplexity-agent` registry entry builds an OpenAI
+  chat model and 404s, and `@ai-sdk/openai`'s Responses schema has no `search_results` branch).
+  What is left is P2.71b: pointing the stage, the `stage_models` allowlist and default, the
+  stored setting, `MODEL_COSTS` and the `sonar-pro` copy at it.
 
 - [confirmed] 2026-08-23 Nothing runs database migrations on deploy. `deploy.preDeployCommand`
   is the documented Railway hook, but neither runtime image carries `drizzle-kit` or the

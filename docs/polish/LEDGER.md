@@ -564,6 +564,19 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [x] **P2.69** `[confirmed]` `web/src/mastra/pipeline-events.test.ts > a run that executes every stage > carries Python's log payload and nothing else` is flaky: it reads ... Fixed by P0.3b; entry removed from `todo.md`. [evidence](evidence/p0.md#p03b)
 - [x] **P2.70** `[confirmed]` The vitest suites that borrow the global `settings.api_keys` row can destroy live credentials. `web/src/mastra/api-keys.test.ts` deletes the row ... Fixed by P0.3a; entry removed from `todo.md`. [evidence](evidence/p0.md#p03a)
 - [ ] **P2.71** `[confirmed]` Perplexity's Sonar Chat Completions endpoint is deprecated with support ending 2026-09-27, per `docs.perplexity.ai/getting-started/models`. The ...
+  - [x] **P2.71a** Reach the replacement at all. Nothing installed could: `@ai-sdk/perplexity`
+        4.0.31 still builds `${baseURL}/chat/completions`, Mastra's own `perplexity-agent`
+        registry entry builds an OpenAI *chat* model and 404s, and `@ai-sdk/openai`'s Responses
+        schema parses `output[]` with a closed union that has no `search_results` member, so it
+        would reject exactly the grounded answers this stage exists for. Added
+        `web/src/mastra/perplexity/agent-api.ts`, a `LanguageModelV2` over `POST /v1/agent`,
+        with a recorded live response as the mapping oracle and a live case that drives a real
+        Mastra `Agent` end to end. [evidence](evidence/p2.md#p271a)
+  - [ ] **P2.71b** Move the `research` stage onto it: the agent's model resolution, the
+        `stage_models` allowlist and default, the stored setting, `MODEL_COSTS` (the Agent API
+        bills tool calls separately), and the two places the UI and the run log say
+        `sonar-pro`. Needs an output-quality comparison between today's `sonar-pro` and
+        `perplexity/sonar` plus web_search before the swap.
 - [x] **P2.72** `[confirmed]` The Playwright suite (`pnpm -C web test:e2e`) is stale. A full run during ledger item 7.1b ended `4 passed (7.4m)` with failures listed across ... Fixed across P0.5a, P0.5b and P0.5c: 34 passed / 0 failed, twice; entry removed from `todo.md`. [evidence](evidence/p0.md#p05c)
 - [x] **P2.73** `[confirmed]` `src/mastra/workflows/scaffold-check.test.ts` fails intermittently under a full `pnpm -C web test` run with `Error: Hook timed out in 60000ms` ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [x] **P2.74** `[confirmed]` A worker process running outside the test suite breaks the suite. While a `jena-worker` container was up against the shared dev Redis, a full ... Contradicted: three worker-up runs are identical to three worker-down runs; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
