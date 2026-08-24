@@ -13,6 +13,7 @@ import { and, eq } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { postMediaDir } from "@/mastra/images/media-dir"
 
 import { isUuid, ownedByCaller, postNotFound, unprocessableUuid } from "../params"
@@ -24,7 +25,7 @@ import {
   updateToColumns,
 } from "../validation"
 
-export async function GET(
+async function getHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -45,6 +46,8 @@ export async function GET(
   return Response.json(serializePost(rows[0].post))
 }
 
+export const GET = withServerError(getHandler)
+
 /**
  * Port of `PATCH /api/posts/{post_id}`.
  *
@@ -62,7 +65,7 @@ export async function GET(
  * which is a worse bug than a timestamp no caller branches on. The same
  * deviation is already recorded for `PATCH /api/profiles/{profile_id}`.
  */
-export async function PATCH(
+async function patchHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -104,6 +107,8 @@ export async function PATCH(
   return Response.json(serializePost(rows[0]))
 }
 
+export const PATCH = withServerError(patchHandler)
+
 /**
  * Port of `DELETE /api/posts/{post_id}`.
  *
@@ -121,7 +126,7 @@ export async function PATCH(
  * that was. `post_id` has already been checked against the uuid pattern, so it
  * cannot escape the media root.
  */
-export async function DELETE(
+async function deleteHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -142,3 +147,5 @@ export async function DELETE(
 
   return new Response(null, { status: 204 })
 }
+
+export const DELETE = withServerError(deleteHandler)

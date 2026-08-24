@@ -20,6 +20,7 @@
 import { stat } from "node:fs/promises"
 
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 
 import { RULE_NAMES, ruleFilename, rulePath } from "./rule-files"
 
@@ -40,9 +41,11 @@ async function describeRule(name: string): Promise<RuleFileResponse> {
   }
 }
 
-export async function GET(request: Request): Promise<Response> {
+async function getHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
   return Response.json(await Promise.all(RULE_NAMES.map(describeRule)))
 }
+
+export const GET = withServerError(getHandler)

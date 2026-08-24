@@ -20,6 +20,7 @@ import { and, eq } from "drizzle-orm"
 import { getDb, posts, websiteProfiles } from "@/db"
 import type { StageStatusJson } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { startPipeline } from "@/mastra/start-pipeline"
 import { STAGES, STATUS_PENDING } from "@/mastra/state"
 
@@ -29,7 +30,7 @@ const ALL_PENDING: StageStatusJson = Object.fromEntries(
   STAGES.map((stage) => [stage, STATUS_PENDING]),
 )
 
-export async function POST(
+async function postHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -71,3 +72,5 @@ export async function POST(
 
   return Response.json({ status: "queued", mode: "restart", post_id: rows[0].id }, { status: 202 })
 }
+
+export const POST = withServerError(postHandler)

@@ -18,6 +18,7 @@ import { and, eq } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { startPipeline } from "@/mastra/start-pipeline"
 import { STATUS_RUNNING } from "@/mastra/state"
 import type { Stage } from "@/mastra/state"
@@ -25,7 +26,7 @@ import type { Stage } from "@/mastra/state"
 import { isUuid, ownedByCaller, postNotFound, unprocessableUuid } from "../../params"
 import { badRequest, isStage, nextStage } from "../../run-control"
 
-export async function POST(
+async function postHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -79,3 +80,5 @@ export async function POST(
     { status: 202 },
   )
 }
+
+export const POST = withServerError(postHandler)

@@ -26,11 +26,12 @@ import { and, eq, sql } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 
 import { isUuid, postNotFound, unprocessableUuid } from "../../posts/params"
 import { pipelineEventStream } from "../stream"
 
-export async function GET(
+async function getHandler(
   request: Request,
   context: { params: Promise<{ post_id: string }> },
 ): Promise<Response> {
@@ -52,3 +53,5 @@ export async function GET(
 
   return pipelineEventStream(request, (payload) => payload.post_id === postId)
 }
+
+export const GET = withServerError(getHandler)

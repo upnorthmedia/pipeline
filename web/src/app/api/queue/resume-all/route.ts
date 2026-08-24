@@ -23,12 +23,13 @@ import { and, eq } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { startPipeline } from "@/mastra/start-pipeline"
 import type { Stage } from "@/mastra/state"
 
 import { nextStage } from "../../posts/run-control"
 
-export async function POST(request: Request): Promise<Response> {
+async function postHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -65,3 +66,5 @@ export async function POST(request: Request): Promise<Response> {
 
   return Response.json({ status: "resumed", count: rows.length }, { status: 200 })
 }
+
+export const POST = withServerError(postHandler)

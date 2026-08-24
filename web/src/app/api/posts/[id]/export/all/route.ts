@@ -39,6 +39,7 @@ import { zipSync } from "fflate"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { postMediaDir } from "@/mastra/images/media-dir"
 import { listStoredMediaFiles } from "@/mastra/images/media-store"
 
@@ -84,7 +85,7 @@ async function readMediaFiles(dir: string): Promise<MediaFile[]> {
   return files
 }
 
-export async function GET(
+async function getHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -146,3 +147,5 @@ export async function GET(
     },
   })
 }
+
+export const GET = withServerError(getHandler)

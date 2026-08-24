@@ -35,6 +35,7 @@ import { sql } from "drizzle-orm"
 
 import { getDb } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { pythonRound } from "@/mastra/analytics/python-round"
 import { STAGES } from "@/mastra/state"
 
@@ -66,7 +67,7 @@ type StatusRow = {
   count: string
 }
 
-export async function GET(request: Request): Promise<Response> {
+async function getHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -175,3 +176,5 @@ export async function GET(request: Request): Promise<Response> {
     stage_success_rates: stageSuccessRates,
   })
 }
+
+export const GET = withServerError(getHandler)

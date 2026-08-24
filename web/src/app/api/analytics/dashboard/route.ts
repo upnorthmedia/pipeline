@@ -26,11 +26,12 @@ import { and, count, desc, eq, gte, isNotNull, sql } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { pythonRound } from "@/mastra/analytics/python-round"
 
 import { DAY_MS, parseDays } from "../days"
 
-export async function GET(request: Request): Promise<Response> {
+async function getHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -121,3 +122,5 @@ export async function GET(request: Request): Promise<Response> {
     posts_today: todayRow?.total ?? 0,
   })
 }
+
+export const GET = withServerError(getHandler)

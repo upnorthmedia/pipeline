@@ -25,6 +25,7 @@ import { sql, type SQL } from "drizzle-orm"
 
 import { getDb } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 
 import { parseInt422, unprocessableRequest, type ValidationErrorDetail } from "../../pydantic"
 import { fromIsoFormat, toPythonUtcIsoFormat } from "../from-isoformat"
@@ -80,7 +81,7 @@ function boundIssue(name: string, input: string): ValidationErrorDetail {
   }
 }
 
-export async function GET(request: Request): Promise<Response> {
+async function getHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -192,3 +193,5 @@ export async function GET(request: Request): Promise<Response> {
     pages: total > 0 ? Math.floor((total + perPage - 1) / perPage) : 0,
   })
 }
+
+export const GET = withServerError(getHandler)

@@ -11,6 +11,7 @@ import { and, asc, desc, eq, ilike, or, type SQL } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { logger } from "@/mastra"
 import { startPipeline } from "@/mastra/start-pipeline"
 import { STAGES, STATUS_RUNNING } from "@/mastra/state"
@@ -26,7 +27,7 @@ import {
   type PostWriteInput,
 } from "./validation"
 
-export async function GET(request: Request): Promise<Response> {
+async function getHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -57,6 +58,8 @@ export async function GET(request: Request): Promise<Response> {
   return Response.json(body)
 }
 
+export const GET = withServerError(getHandler)
+
 /**
  * Port of `POST /api/posts`.
  *
@@ -83,7 +86,7 @@ export async function GET(request: Request): Promise<Response> {
  * treatment `POST /api/profiles` already gives its crawl enqueue, where Python
  * itself swallowed the error.
  */
-export async function POST(request: Request): Promise<Response> {
+async function postHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -128,3 +131,5 @@ export async function POST(request: Request): Promise<Response> {
 
   return Response.json(serializePost(row), { status: 201 })
 }
+
+export const POST = withServerError(postHandler)

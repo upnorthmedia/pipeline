@@ -25,10 +25,11 @@
  *   carries the reasoning.
  */
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { listDeadLetterEntries } from "@/mastra/dead-letter"
 import { clearFailureMarkers } from "@/mastra/post-state"
 
-export async function GET(request: Request): Promise<Response> {
+async function getHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -42,6 +43,8 @@ export async function GET(request: Request): Promise<Response> {
 
   return Response.json({ entries, count: entries.length })
 }
+
+export const GET = withServerError(getHandler)
 
 /**
  * Port of `DELETE /api/queue/dead-letter` in `api/src/api/queue.py:202`.
@@ -68,7 +71,7 @@ export async function GET(request: Request): Promise<Response> {
  *   two failed runs contributes two entries and one write, for the reason
  *   `listDeadLetterEntries` records.
  */
-export async function DELETE(request: Request): Promise<Response> {
+async function deleteHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -77,3 +80,5 @@ export async function DELETE(request: Request): Promise<Response> {
 
   return Response.json({ status: "cleared", count: entries.length })
 }
+
+export const DELETE = withServerError(deleteHandler)

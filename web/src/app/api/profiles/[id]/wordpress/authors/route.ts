@@ -9,11 +9,12 @@
  * no defaulted field at all.
  */
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 
 import { isUuid, profileNotFound, unprocessableUuid } from "../../../params"
 import { requireField, resolveWpClient, upstreamFailure } from "../client"
 
-export async function GET(
+async function getHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -47,3 +48,5 @@ export async function GET(
     throw error
   }
 }
+
+export const GET = withServerError(getHandler)

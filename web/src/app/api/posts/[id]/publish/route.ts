@@ -35,13 +35,14 @@ import { and, eq } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { startNextjsPublish } from "@/mastra/start-nextjs-publish"
 import { startWordPressPublish } from "@/mastra/start-wordpress-publish"
 
 import { isUuid, ownedByCaller, postNotFound, unprocessableUuid } from "../../params"
 import { badRequest } from "../../run-control"
 
-export async function POST(
+async function postHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -100,3 +101,5 @@ export async function POST(
   const format = post.outputFormat === null ? "None" : post.outputFormat
   return badRequest(`Publishing not supported for output_format '${format}'`)
 }
+
+export const POST = withServerError(postHandler)

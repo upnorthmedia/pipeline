@@ -13,10 +13,11 @@
  */
 import { getDb, posts } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 
 import { isUuid, ownedByCaller, postNotFound, unprocessableUuid } from "../../params"
 
-export async function POST(
+async function postHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -40,3 +41,5 @@ export async function POST(
 
   return Response.json({ status: "paused", post_id: updated[0].id }, { status: 200 })
 }
+
+export const POST = withServerError(postHandler)

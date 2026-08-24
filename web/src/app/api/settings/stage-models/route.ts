@@ -34,6 +34,7 @@ import {
   STAGE_MODELS_SETTING_KEY,
   type StageModelSettings,
 } from "@/mastra/stage-models"
+import { withServerError } from "@/lib/route-error"
 import { STAGES } from "@/mastra/state"
 
 /** One row of the settings page's stage table. */
@@ -66,7 +67,7 @@ async function ownOverrides(userId: string): Promise<StageModelSettings> {
   return parsed.ok ? parsed.data : {}
 }
 
-export async function GET(request: Request): Promise<Response> {
+async function getHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -91,3 +92,5 @@ export async function GET(request: Request): Promise<Response> {
 
   return Response.json({ stages, overrides })
 }
+
+export const GET = withServerError(getHandler)

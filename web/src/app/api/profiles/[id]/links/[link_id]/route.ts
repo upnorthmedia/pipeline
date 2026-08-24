@@ -15,10 +15,11 @@ import { and, eq, exists, sql } from "drizzle-orm"
 
 import { getDb, internalLinks, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 
 import { linkNotFound, parseLinkPath } from "../params"
 
-export async function DELETE(
+async function deleteHandler(
   request: Request,
   { params }: { params: Promise<{ id: string; link_id: string }> },
 ): Promise<Response> {
@@ -51,3 +52,5 @@ export async function DELETE(
   if (deleted.length === 0) return linkNotFound()
   return new Response(null, { status: 204 })
 }
+
+export const DELETE = withServerError(deleteHandler)

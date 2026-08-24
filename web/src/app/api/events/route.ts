@@ -15,13 +15,16 @@
  * ownership is resolved per event rather than snapshotted at connect time.
  */
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 
 import { ownedByUser } from "./scope"
 import { pipelineEventStream } from "./stream"
 
-export async function GET(request: Request): Promise<Response> {
+async function getHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
   return pipelineEventStream(request, ownedByUser(user.id))
 }
+
+export const GET = withServerError(getHandler)

@@ -25,6 +25,7 @@ import { getDb, websiteProfiles } from "@/db"
 import { decrypt } from "@/lib/crypto"
 import { signPayload } from "@/lib/hmac-signing"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 
 import { isUuid, profileNotFound, unprocessableUuid } from "../../../params"
 import { webhookDetail } from "../detail"
@@ -47,7 +48,7 @@ function testPayload(now: Date): string {
   return `{"event": "test", "timestamp": ${JSON.stringify(utcIsoformat(now))}}`
 }
 
-export async function POST(
+async function postHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -116,3 +117,5 @@ export async function POST(
     error: `Webhook returned ${response.status}: ${webhookDetail(text)}`,
   })
 }
+
+export const POST = withServerError(postHandler)

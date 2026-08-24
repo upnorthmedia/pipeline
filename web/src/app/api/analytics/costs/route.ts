@@ -35,6 +35,7 @@ import { inArray, sql } from "drizzle-orm"
 
 import { getDb, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { pythonRound } from "@/mastra/analytics/python-round"
 import { MODEL_COSTS } from "@/mastra/model-costs"
 
@@ -72,7 +73,7 @@ function bucket(into: Record<string, Totals>, key: string, row: CostRow): void {
   totals.calls += 1
 }
 
-export async function GET(request: Request): Promise<Response> {
+async function getHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -184,6 +185,8 @@ export async function GET(request: Request): Promise<Response> {
     model_costs_reference: MODEL_COSTS,
   })
 }
+
+export const GET = withServerError(getHandler)
 
 /**
  * Python resolved the names with an unscoped `WHERE id IN (...)`, which is safe

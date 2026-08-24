@@ -265,14 +265,6 @@
   it must stay ungrouped so two `web` replicas each see every event rather than splitting
   them. Not done now because nothing has hit the limit and the teardown path
   (`request.signal` -> `unsubscribe()`) already prevents the leak, proven by a test.
-- [confirmed] 2026-08-23 `delete_link()` in `api/src/api/links.py` has no ownership check:
-  unlike the other two endpoints in that router it never calls `_get_profile_or_404()`, so
-  it matches on `link_id` and `profile_id` alone and any authenticated user who knows both
-  ids can delete another tenant's internal link. The TypeScript port
-  (`web/src/app/api/profiles/[id]/links/[link_id]/route.ts`, ledger item 5.7) scopes the
-  delete to the caller and has a test for it, so the new stack is not affected; this entry
-  exists because the Python router is still serving until Phase 7 deletes it. No fix
-  applied to `api/` because Phase 7 removes the file and the port already closes the hole.
 - [confirmed] 2026-08-23 `cost_analytics()` in `api/src/api/analytics.py` has never run.
   Its raw SQL puts the `website_profiles` join inside the second `FROM` item
   (`FROM posts p, jsonb_each(...) AS sl(...) JOIN website_profiles wp ON p.profile_id = wp.id`),
@@ -430,15 +422,6 @@
   neither disk is what the handler falls back to. Still open only for the images generated
   before the mirror: those bytes exist on one disk and in no shared store, so re-running the
   images stage is the only thing that makes them viewable from the other.
-
-- [investigate] 2026-08-23 `GET /api/posts` answers `500` with an empty body when its database
-  is unreachable (verified by stopping the compose `db` container under a live page:
-  `{"status":500,"body":""}`), so the client has nothing of the server's own to show and the
-  new error state on `/` falls back to its own wording. Every ported handler returns
-  `{"detail": "..."}` for the failures it anticipates; an unanticipated throw appears to reach
-  Next's default 500 instead. Worth deciding whether the route handlers need a shared catch
-  that answers `{"detail": ...}` for unexpected errors too, since Phase 8's error states are
-  only as informative as the bodies they get.
 
 - [confirmed] 2026-08-23 `/posts/[id]` names two of the six stages twice: the tab strip in
   `web/src/app/posts/[id]/page.tsx` labels them "Draft" and "Editing" while the pipeline

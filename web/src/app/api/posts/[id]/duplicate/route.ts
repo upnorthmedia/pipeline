@@ -25,6 +25,7 @@ import { and, eq } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 
 import { isUuid, postNotFound, unprocessableUuid } from "../../params"
 import { serializePost } from "../../serialize"
@@ -56,7 +57,7 @@ const CONFIG_COLUMNS = [
   "stageSettings",
 ] as const satisfies readonly (keyof typeof posts.$inferInsert)[]
 
-export async function POST(
+async function postHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -89,3 +90,5 @@ export async function POST(
   const [copy] = await getDb().insert(posts).values(values).returning()
   return Response.json(serializePost(copy), { status: 201 })
 }
+
+export const POST = withServerError(postHandler)

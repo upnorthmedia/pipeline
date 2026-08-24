@@ -28,13 +28,14 @@ import { and, eq } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { listDeadLetterEntries } from "@/mastra/dead-letter"
 import { retryFailedPost } from "@/mastra/post-state"
 import { startPipeline } from "@/mastra/start-pipeline"
 
 import { isUuid, postNotFound, unprocessableUuid } from "../../../../posts/params"
 
-export async function POST(
+async function postHandler(
   request: Request,
   { params }: { params: Promise<{ post_id: string }> },
 ): Promise<Response> {
@@ -65,3 +66,5 @@ export async function POST(
 
   return Response.json({ status: "retrying", post_id: postId }, { status: 202 })
 }
+
+export const POST = withServerError(postHandler)

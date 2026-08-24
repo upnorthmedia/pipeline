@@ -12,7 +12,7 @@ import { GET } from "./route"
 
 describe("GET /api/health", () => {
   it("answers 200, which is the only status Railway accepts", async () => {
-    const response = GET()
+    const response = await GET()
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({ status: "ok" })
@@ -22,7 +22,7 @@ describe("GET /api/health", () => {
     const db = await import("@/db")
     const getPool = vi.spyOn(db, "getPool")
 
-    GET()
+    await GET()
 
     expect(getPool).not.toHaveBeenCalled()
     getPool.mockRestore()

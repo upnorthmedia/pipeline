@@ -17,8 +17,12 @@
  *
  * `/api/*` is outside the middleware matcher, so no session is required here.
  */
+import { withServerError } from "@/lib/route-error"
+
 export const dynamic = "force-dynamic"
 
-export function GET() {
+function getHandler() {
   return Response.json({ status: "ok" })
 }
+
+export const GET = withServerError(getHandler)

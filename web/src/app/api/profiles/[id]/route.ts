@@ -12,13 +12,14 @@ import { and, eq } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 
 import { isUuid, profileNotFound, unprocessableUuid } from "../params"
 import { encryptCredentials } from "../secrets"
 import { serializeProfile } from "../serialize"
 import { invalidJsonBody, profileUpdateSchema, toColumns, unprocessableBody } from "../validation"
 
-export async function GET(
+async function getHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -38,6 +39,8 @@ export async function GET(
   return Response.json(serializeProfile(rows[0]))
 }
 
+export const GET = withServerError(getHandler)
+
 /**
  * Port of `PATCH /api/profiles/{profile_id}`.
  *
@@ -52,7 +55,7 @@ export async function GET(
  * alone, whereas this issues the UPDATE and bumps it. Reproducing attribute
  * level dirty tracking is not worth it for a timestamp no caller branches on.
  */
-export async function PATCH(
+async function patchHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -93,6 +96,8 @@ export async function PATCH(
   return Response.json(serializeProfile(rows[0]))
 }
 
+export const PATCH = withServerError(patchHandler)
+
 /**
  * Port of `DELETE /api/profiles/{profile_id}`.
  *
@@ -109,7 +114,7 @@ export async function PATCH(
  * `internal_links_profile_id_fkey` does have `ON DELETE CASCADE`, so the
  * database removes those rows without help.
  */
-export async function DELETE(
+async function deleteHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -139,3 +144,5 @@ export async function DELETE(
   if (!deleted) return profileNotFound()
   return new Response(null, { status: 204 })
 }
+
+export const DELETE = withServerError(deleteHandler)

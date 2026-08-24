@@ -505,11 +505,21 @@ describe("POST /api/posts/batch", () => {
       item("dup", { profile_id: profile.id }),
     ]
 
-    // Drizzle wraps the driver error, so the constraint name is on `cause`.
-    const rejection = await batch(items, user.cookie).catch((error: unknown) => error)
-    expect((rejection as { cause?: { constraint?: string } }).cause?.constraint).toBe(
-      "uq_posts_profile_slug",
-    )
+    // The constraint is not something the handler anticipates, so it reaches
+    // `withServerError`: the caller gets the same envelope as every other
+    // failure and the driver's own detail goes to the log instead of the body.
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const response = await batch(items, user.cookie)
+
+      expect(response.status).toBe(500)
+      expect(await response.json()).toEqual({ detail: "Internal Server Error" })
+      const [, error] = logged.mock.calls[0] as [string, { cause?: { constraint?: string } }]
+      // Drizzle wraps the driver error, so the constraint name is on `cause`.
+      expect(error.cause?.constraint).toBe("uq_posts_profile_slug")
+    } finally {
+      logged.mockRestore()
+    }
     expect(await countFixturePosts()).toBe(0)
   })
 

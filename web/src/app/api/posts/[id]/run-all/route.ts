@@ -15,12 +15,13 @@ import { and, eq } from "drizzle-orm"
 import { getDb, posts, websiteProfiles } from "@/db"
 import type { StageSettingsJson } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { startPipeline } from "@/mastra/start-pipeline"
 import { STAGES, STATUS_COMPLETE } from "@/mastra/state"
 
 import { isUuid, ownedByCaller, postNotFound, unprocessableUuid } from "../../params"
 
-export async function POST(
+async function postHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -59,3 +60,5 @@ export async function POST(
 
   return Response.json({ status: "queued", mode: "run-all", post_id: rows[0].id }, { status: 202 })
 }
+
+export const POST = withServerError(postHandler)

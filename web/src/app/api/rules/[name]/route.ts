@@ -23,6 +23,7 @@ import { readFile, writeFile } from "node:fs/promises"
 import { z } from "zod"
 
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { invalidJsonBody, unprocessableBody } from "../../pydantic"
 
 import { isRuleName, rulePath, unknownRule } from "../rule-files"
@@ -30,7 +31,7 @@ import { isRuleName, rulePath, unknownRule } from "../rule-files"
 /** `RuleUpdate` in `api/src/api/rules.py`: one required `str` field. */
 const ruleUpdateSchema = z.object({ content: z.string() })
 
-export async function GET(
+async function getHandler(
   request: Request,
   { params }: { params: Promise<{ name: string }> },
 ): Promise<Response> {
@@ -50,7 +51,9 @@ export async function GET(
   return Response.json({ name, content })
 }
 
-export async function PUT(
+export const GET = withServerError(getHandler)
+
+async function putHandler(
   request: Request,
   { params }: { params: Promise<{ name: string }> },
 ): Promise<Response> {
@@ -77,3 +80,5 @@ export async function PUT(
 
   return Response.json({ name, content: parsed.data.content })
 }
+
+export const PUT = withServerError(putHandler)

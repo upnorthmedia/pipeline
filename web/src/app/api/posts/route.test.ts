@@ -10,7 +10,7 @@
  * hide a read bug.
  */
 import { like } from "drizzle-orm"
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, posts, websiteProfiles } from "@/db"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
@@ -91,6 +91,27 @@ describe("GET /api/posts", () => {
     expect(response.status).toBe(200)
     const body = (await response.json()) as { slug: string }[]
     expect(body.map((p) => p.slug)).toEqual([`${PREFIX}mine`])
+  })
+
+  it("answers a search Postgres refuses with the shape every other failure uses", async () => {
+    await insertProfile(user.userId)
+
+    // A NUL byte is legal in a query string and illegal in a UTF-8 text
+    // parameter, so `ilike '%\u0000%'` is rejected by the server rather than
+    // by any validator the handler runs first. That is an unanticipated throw
+    // reaching Next's default 500, which has no body at all.
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const response = await list(`?q=${encodeURIComponent("\u0000")}`, user.cookie)
+
+      expect(response.status).toBe(500)
+      await expect(response.json()).resolves.toEqual({ detail: "Internal Server Error" })
+      const [message, cause] = logged.mock.calls[0] as [string, { cause?: { code?: string } }]
+      expect(message).toBe("Unhandled error in GET /api/posts")
+      expect(cause.cause?.code).toBe("22021")
+    } finally {
+      logged.mockRestore()
+    }
   })
 
   it("hides a post with no profile, which no user_id filter can match", async () => {

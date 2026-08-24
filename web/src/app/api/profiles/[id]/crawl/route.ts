@@ -17,11 +17,12 @@ import { and, eq } from "drizzle-orm"
 
 import { getDb, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { startSitemapCrawl } from "@/mastra/start-crawl"
 
 import { isUuid, profileNotFound, unprocessableUuid } from "../../params"
 
-export async function POST(
+async function postHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -60,3 +61,5 @@ export async function POST(
   // canonical form, so echo the row rather than the raw path segment.
   return Response.json({ status: "crawling", profile_id: rows[0].id }, { status: 202 })
 }
+
+export const POST = withServerError(postHandler)

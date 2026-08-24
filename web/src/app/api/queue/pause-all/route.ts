@@ -17,12 +17,13 @@ import { and, eq, inArray } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { STAGES } from "@/mastra/state"
 
 /** Python's `["pending", *STAGES]`. */
 const PAUSABLE: string[] = ["pending", ...STAGES]
 
-export async function POST(request: Request): Promise<Response> {
+async function postHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -51,3 +52,5 @@ export async function POST(request: Request): Promise<Response> {
 
   return Response.json({ status: "paused", count: rows.length }, { status: 200 })
 }
+
+export const POST = withServerError(postHandler)

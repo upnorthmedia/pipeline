@@ -33,10 +33,11 @@ import { and, count, eq, inArray } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { STAGES } from "@/mastra/state"
 import { getHealthRedis, readLastCompleted, readWorkerHealth } from "@/mastra/worker-health"
 
-export async function GET(request: Request): Promise<Response> {
+async function getHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -69,3 +70,5 @@ export async function GET(request: Request): Promise<Response> {
     last_completed: lastCompleted,
   })
 }
+
+export const GET = withServerError(getHandler)

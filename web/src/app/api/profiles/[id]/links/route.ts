@@ -11,6 +11,7 @@ import { and, count, desc, eq, ilike, or, type SQL } from "drizzle-orm"
 
 import { getDb, internalLinks, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 
 import {
   bodyDetails,
@@ -42,7 +43,7 @@ async function ownedProfile(profileId: string, userId: string): Promise<boolean>
   return rows.length > 0
 }
 
-export async function GET(
+async function getHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -87,6 +88,8 @@ export async function GET(
   return Response.json(body)
 }
 
+export const GET = withServerError(getHandler)
+
 /**
  * `create_link()`. The duplicate check is a read before the insert, as Python
  * wrote it, so the ordinary duplicate is a 409 rather than the 500 the
@@ -97,7 +100,7 @@ export async function GET(
  * `source` is always `"manual"` here: the sitemap crawl writes `"sitemap"`,
  * and `LinkCreate` has no field a client could use to claim otherwise.
  */
-export async function POST(
+async function postHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -153,3 +156,5 @@ export async function POST(
 
   return Response.json(serializeLink(row), { status: 201 })
 }
+
+export const POST = withServerError(postHandler)

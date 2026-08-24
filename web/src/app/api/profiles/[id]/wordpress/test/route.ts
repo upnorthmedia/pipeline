@@ -18,6 +18,7 @@
  * name would be worse than either: the URL is not a WordPress install.
  */
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { WordPressError } from "@/mastra/wordpress"
 
 import { isUuid, profileNotFound, unprocessableUuid } from "../../../params"
@@ -45,7 +46,7 @@ function siteName(info: unknown): unknown {
   return "name" in record ? record.name : ""
 }
 
-export async function GET(
+async function getHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -72,3 +73,5 @@ export async function GET(
     throw error
   }
 }
+
+export const GET = withServerError(getHandler)

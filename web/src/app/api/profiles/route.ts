@@ -8,6 +8,7 @@ import { desc, eq } from "drizzle-orm"
 
 import { getDb, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { logger } from "@/mastra"
 import { startSitemapCrawl } from "@/mastra/start-crawl"
 
@@ -15,7 +16,7 @@ import { encryptCredentials } from "./secrets"
 import { serializeProfile, type ProfileResponse } from "./serialize"
 import { invalidJsonBody, profileCreateSchema, toColumns, unprocessableBody } from "./validation"
 
-export async function GET(request: Request): Promise<Response> {
+async function getHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -28,6 +29,8 @@ export async function GET(request: Request): Promise<Response> {
   const body: ProfileResponse[] = rows.map(serializeProfile)
   return Response.json(body)
 }
+
+export const GET = withServerError(getHandler)
 
 /**
  * Port of `POST /api/profiles`.
@@ -47,7 +50,7 @@ export async function GET(request: Request): Promise<Response> {
  * client believing the create failed. The swallowed error is logged, which
  * Python did not do, so an outage is visible somewhere.
  */
-export async function POST(request: Request): Promise<Response> {
+async function postHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -77,3 +80,5 @@ export async function POST(request: Request): Promise<Response> {
 
   return Response.json(serializeProfile(row), { status: 201 })
 }
+
+export const POST = withServerError(postHandler)

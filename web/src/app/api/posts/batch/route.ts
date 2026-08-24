@@ -36,6 +36,7 @@ import { and, eq, inArray } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { logger } from "@/mastra"
 import { startPipeline } from "@/mastra/start-pipeline"
 
@@ -51,7 +52,7 @@ import {
 
 const batchSchema = postCreateSchema.array()
 
-export async function POST(request: Request): Promise<Response> {
+async function postHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -110,3 +111,5 @@ export async function POST(request: Request): Promise<Response> {
   const created: PostResponse[] = rows.map((row) => serializePost(row))
   return Response.json(created, { status: 201 })
 }
+
+export const POST = withServerError(postHandler)

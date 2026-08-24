@@ -27,6 +27,7 @@ import { and, asc, eq } from "drizzle-orm"
 
 import { getDb, settings } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { parseStageModelSettings, STAGE_MODELS_SETTING_KEY } from "@/mastra/stage-models"
 
 /** The wire shape of one row, matching `SettingRead`. */
@@ -50,12 +51,14 @@ async function listForUser(userId: string): Promise<SettingResponse[]> {
   }))
 }
 
-export async function GET(request: Request): Promise<Response> {
+async function getHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
   return Response.json(await listForUser(user.id))
 }
+
+export const GET = withServerError(getHandler)
 
 /**
  * Body shape is `{"<key>": <value>, ...}`, and the value is stored verbatim.
@@ -64,7 +67,7 @@ export async function GET(request: Request): Promise<Response> {
  * Preserving that keeps existing rows readable rather than silently changing
  * the meaning of stored settings.
  */
-export async function PATCH(request: Request): Promise<Response> {
+async function patchHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -111,3 +114,5 @@ export async function PATCH(request: Request): Promise<Response> {
 
   return Response.json(await listForUser(user.id))
 }
+
+export const PATCH = withServerError(patchHandler)

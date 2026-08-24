@@ -19,6 +19,7 @@
  * header the trusted proxy adds, so there is no way to talk a deployed
  * instance into the allowed branch.
  */
+import { withServerError } from "@/lib/route-error"
 import { revealApiKey } from "@/mastra/api-keys"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 
@@ -47,7 +48,7 @@ function isLoopbackRequest(request: Request): boolean {
   return LOOPBACK_HOSTS.has(hostname.toLowerCase())
 }
 
-export async function GET(
+async function getHandler(
   request: Request,
   { params }: { params: Promise<{ provider: string }> },
 ): Promise<Response> {
@@ -66,3 +67,5 @@ export async function GET(
 
   return Response.json({ provider, key })
 }
+
+export const GET = withServerError(getHandler)

@@ -35,6 +35,7 @@ import { and, eq } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 import { mediaRoot } from "@/mastra/images/media-dir"
 import { readStoredMediaFile } from "@/mastra/images/media-store"
 
@@ -96,7 +97,7 @@ async function readMedia(file: string, postId: string, filename: string): Promis
   return { bytes: Buffer.from(stored.bytes), modifiedMs: stored.updatedAt.getTime() }
 }
 
-export async function GET(
+async function getHandler(
   request: Request,
   { params }: { params: Promise<{ path: string[] }> },
 ): Promise<Response> {
@@ -147,3 +148,5 @@ export async function GET(
 
   return new Response(served.bytes, { status: 200, headers })
 }
+
+export const GET = withServerError(getHandler)

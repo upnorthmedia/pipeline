@@ -16,11 +16,12 @@ import { and, eq } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
 
 import { rewriteMediaUrls, stripLeadingH1 } from "../../../export-content"
 import { isUuid, postNotFound, unprocessableUuid } from "../../../params"
 
-export async function GET(
+async function getHandler(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
@@ -57,3 +58,5 @@ export async function GET(
     },
   })
 }
+
+export const GET = withServerError(getHandler)

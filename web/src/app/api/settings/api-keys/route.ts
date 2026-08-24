@@ -13,6 +13,7 @@
  */
 import { z } from "zod"
 
+import { withServerError } from "@/lib/route-error"
 import { validateKeys } from "@/mastra/api-key-validator"
 import {
   getMaskedKeys,
@@ -24,12 +25,14 @@ import {
 } from "@/mastra/api-keys"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 
-export async function GET(request: Request): Promise<Response> {
+async function getHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
   return Response.json(await getMaskedKeys())
 }
+
+export const GET = withServerError(getHandler)
 
 /**
  * `ApiKeyUpdate` from `api/src/models/schemas.py`: one optional nullable string
@@ -56,7 +59,7 @@ const updateSchema = z.object({
  * request's result rather than from the row just written, so the response is
  * consistent even if a concurrent write lands between the two.
  */
-export async function PUT(request: Request): Promise<Response> {
+async function putHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
@@ -96,3 +99,5 @@ export async function PUT(request: Request): Promise<Response> {
 
   return Response.json(result)
 }
+
+export const PUT = withServerError(putHandler)
