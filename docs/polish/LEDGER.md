@@ -52,9 +52,10 @@ move on. A split is not an iteration on its own: split and complete the first ch
       committed image files under `media/test-123/` come out. The whole run shares one
       `MEDIA_DIR` under `tmpdir`, `media/` is gone and gitignored, and 51 committed artifacts
       are deleted. Closes P2.14, P2.24, P2.33 and P2.49. [evidence](evidence/p0.md#p04)
-- [ ] **P0.5** `pnpm test:e2e` is stale and fails. Repair the Playwright suite against the
+- [x] **P0.5** `pnpm test:e2e` is stale and fails. Repair the Playwright suite against the
       current UI. Baseline 31 failed / 4 passed / 7.3m; the single cause of all 31 is that the
       suite ran signed out, so `src/middleware.ts` served every route as the sign-in page.
+      Closed at P0.5c: 34 passed / 0 failed in 24.7s, twice. Closes P2.72.
   - [x] **P0.5a** The session, plus `navigation.test.ts`. A `setup` project signs one fixed
         account in over the real BetterAuth endpoints, clears its rows and saves the cookie
         jar; `auth.test.ts` guards the precondition with its own kill check. Five stale
@@ -66,8 +67,11 @@ move on. A split is not an iteration on its own: split and complete the first ch
         drifted far enough to crash the page they fed. `e2e/seed.ts` now creates the rows over
         the real API and six stale assertions are repaired against the source. 12/26 -> 3/35,
         2.4m -> 34.8s. [evidence](evidence/p0.md#p05b)
-  - [ ] **P0.5c** `full-pipeline.test.ts` (3), including a `/queue` route that no longer
-        exists and several tests whose body asserts nothing.
+  - [x] **P0.5c** `full-pipeline.test.ts` (3 failed, 4 more asserting nothing). `/queue` never
+        existed in this repository, so that test is deleted and the queue counters it was
+        reaching for are asserted on `/monitor` instead. The file now drives the real profile
+        and post forms end to end rather than duplicating `navigation.test.ts`. 3/8 -> 0/6,
+        whole suite 34 passed. [evidence](evidence/p0.md#p05c)
 - [ ] **P0.6** CI. Add `.github/workflows` running tsc, lint, test, build and e2e on push and
       PR with Postgres and Redis services. Green on a real run, URL in the evidence. This is
       the acceptance criterion for all of P0.
@@ -94,10 +98,14 @@ move on. A split is not an iteration on its own: split and complete the first ch
 ## P2. Clear the backlog in `todo.md`
 
 Worked top to bottom against `todo.md`, one numbered entry per finding in that file's order.
-For each: fix it, or delete it with a one-line reason in the evidence file if it is stale or
-wrong. Every `[confirmed]` item affecting correctness, data integrity, security or anything a
-user can see gets fixed. Every `[investigate]` item gets verified before it is acted on, and
-demoted or deleted when it does not reproduce.
+The numbering below is a snapshot of that file taken at the first iteration: findings appended
+to `todo.md` since then are unnumbered here and get worked from `todo.md` itself, because
+renumbering a list that is re-read every iteration costs more than it is worth. `todo.md` is
+the authority for what is left, not this list. For each: fix it, or delete it with a one-line
+reason in the evidence file if it is stale or wrong. Every `[confirmed]` item affecting
+correctness, data integrity, security or anything a user can see gets fixed. Every
+`[investigate]` item gets verified before it is acted on, and demoted or deleted when it does
+not reproduce.
 
 High value, done first within P2: P2.51 (`delete_link()` ownership check), P2.87
 (`POST /api/profiles` accepting any string as a website URL), P2.83 (`GET /api/posts`
@@ -176,7 +184,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [x] **P2.69** `[confirmed]` `web/src/mastra/pipeline-events.test.ts > a run that executes every stage > carries Python's log payload and nothing else` is flaky: it reads ... Fixed by P0.3b; entry removed from `todo.md`. [evidence](evidence/p0.md#p03b)
 - [x] **P2.70** `[confirmed]` The vitest suites that borrow the global `settings.api_keys` row can destroy live credentials. `web/src/mastra/api-keys.test.ts` deletes the row ... Fixed by P0.3a; entry removed from `todo.md`. [evidence](evidence/p0.md#p03a)
 - [ ] **P2.71** `[confirmed]` Perplexity's Sonar Chat Completions endpoint is deprecated with support ending 2026-09-27, per `docs.perplexity.ai/getting-started/models`. The ...
-- [ ] **P2.72** `[confirmed]` The Playwright suite (`pnpm -C web test:e2e`) is stale. A full run during ledger item 7.1b ended `4 passed (7.4m)` with failures listed across ... Reproduced exactly at P0.5a, reduced to 12 failed / 26 passed there and to 3 failed / 35 passed at P0.5b; stays open until P0.5c closes. [evidence](evidence/p0.md#p05b)
+- [x] **P2.72** `[confirmed]` The Playwright suite (`pnpm -C web test:e2e`) is stale. A full run during ledger item 7.1b ended `4 passed (7.4m)` with failures listed across ... Fixed across P0.5a, P0.5b and P0.5c: 34 passed / 0 failed, twice; entry removed from `todo.md`. [evidence](evidence/p0.md#p05c)
 - [x] **P2.73** `[confirmed]` `src/mastra/workflows/scaffold-check.test.ts` fails intermittently under a full `pnpm -C web test` run with `Error: Hook timed out in 60000ms` ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [x] **P2.74** `[confirmed]` A worker process running outside the test suite breaks the suite. While a `jena-worker` container was up against the shared dev Redis, a full ... Contradicted: three worker-up runs are identical to three worker-down runs; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.75** `[investigate]` `next build` inside the web image prints seven `[Error [BetterAuthError]: You are using the default secret...]` lines plus a matching BetterAuth ...
@@ -221,7 +229,9 @@ explicitly out of scope.
       with zero failing tests, three runs with identical results, worker running and not.
       True as measured at P0.3e ([evidence](evidence/p0.md#p03e)); left unchecked because it is
       an acceptance condition for the finished run and has to be re-measured at the end.
-- [ ] `pnpm test:e2e` passes.
+- [ ] `pnpm test:e2e` passes. True as measured at P0.5c
+      ([evidence](evidence/p0.md#p05c)); left unchecked because it is an acceptance condition
+      for the finished run and has to be re-measured at the end.
 - [ ] CI green on a real run, URL in the evidence.
 - [ ] `pnpm test` leaves the working tree clean. True as measured at P0.4
       ([evidence](evidence/p0.md#p04)); left unchecked because it is an acceptance condition

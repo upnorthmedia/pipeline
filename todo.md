@@ -433,27 +433,6 @@
   OpenAI-compatible `/chat/completions` shape, so research calls stop working after that
   date unless the stage moves to Perplexity's Agent API. Found while verifying model IDs
   for ledger item 6.1; out of scope there, but it has a hard deadline.
-- [confirmed] 2026-08-23 The Playwright suite (`pnpm -C web test:e2e`) is stale. A full run
-  during ledger item 7.1b ended `4 passed (7.4m)` with failures listed across all four spec
-  files. The failures are expectation drift, not a regression from the port: the one
-  reproduced in isolation, `navigation.test.ts > sidebar navigation items are visible`,
-  waits for a sidebar item named "Monitor" while the sidebar renders "Observability", and
-  the page itself loaded fine. No baseline for this gate was ever recorded in Phase 0, so
-  there is nothing to compare against; item 9.1 needs it green, which means auditing every
-  spec against the current UI and giving the ones that need data a real session.
-  Update 2026-08-24 (polish ledger P0.5a): reproduced exactly (31 failed / 4 passed / 7.3m).
-  The dominant cause was not drift: the suite ran signed out, so `src/middleware.ts` served
-  every route as the sign-in page. A Playwright `setup` project now signs a real account in
-  and saves its cookie jar, which with five stale assertions repaired in `navigation.test.ts`
-  takes the suite to 12 failed / 26 passed / 2.3m. The remaining 12 are in
-  `post-editor.test.ts`, `profile-flow.test.ts` (both stub the app's own API with
-  `page.route`, so they need real seeded rows) and `full-pipeline.test.ts` (asserts on a
-  `/queue` route that no longer exists). Stays open until P0.5b and P0.5c close.
-  Update 2026-08-24 (polish ledger P0.5b): both mock-driven files now seed real rows through
-  the app's own API (`web/e2e/seed.ts`) and their stale assertions are repaired against the
-  source. 3 failed / 35 passed / 34.8s, identical twice in a row. Everything left is
-  `full-pipeline.test.ts`, which P0.5c owns.
-
 - [investigate] 2026-08-23 `next build` inside the web image prints seven
   `[Error [BetterAuthError]: You are using the default secret...]` lines plus a matching
   BetterAuth base-URL warning per route during page-data collection. Non-fatal (the build
@@ -592,3 +571,25 @@
   than the one panel that needs the column. The live API always sends the field, so the trigger
   today is a client-side shape mismatch, not a server response. Belongs to P3.3 ("no stack traces,
   no `undefined` in the UI").
+
+- [confirmed] 2026-08-24 A post created with no profile is unreachable and undeletable through
+  the app. `/posts/new` offers "No profile (manual config)"
+  (`web/src/components/profile-select-card.tsx:110`) and `POST /api/posts` accepts a body with
+  no `profile_id` (`web/src/app/api/posts/route.ts:101`, deliberately, as Python did), but every
+  read handler joins `posts` to `website_profiles` to reach `user_id`, and the join is inner. The
+  form then redirects to the row it just created and the page reads "Could not load this post /
+  Post not found". Measured against the running dev server: create -> `201` with
+  `profile_id: null`, `GET /api/posts/{id}` -> `404 {"detail":"Post not found"}`,
+  `DELETE /api/posts/{id}` -> `404`, and the row is absent from `GET /api/posts`. So the UI can
+  produce an orphan row that only SQL can remove. Two candidate fixes, and the choice is a
+  product decision: require a profile on the form, or make `profile_id` nullable in the read
+  path. Found while repairing `full-pipeline.test.ts` for polish ledger P0.5c.
+
+- [confirmed] 2026-08-24 There is no surface that lists the posts waiting at a review gate.
+  `full-pipeline.test.ts` asserted on a `/queue` page with a "Review Queue" heading;
+  `git log --all -- 'web/src/app/queue*'` is empty, so that page never existed in this
+  repository and the test was written against something that was only ever planned. The queue
+  API is real (`/api/queue`, `/api/queue/dead-letter`, `/api/queue/worker-status`) and
+  `/monitor` shows the four aggregate counters, but a post suspended at a gate is discoverable
+  only by opening its own detail page, which means an operator has to already know which post is
+  blocked. Belongs to P3.2 ("what a review gate is waiting for"). Found at polish ledger P0.5c.
