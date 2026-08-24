@@ -1,5 +1,15 @@
 # todo
 
+- [confirmed] 2026-08-23 `src/mastra/workflows/scaffold-check.test.ts` fails whenever a real
+  Mastra worker is running against the same Redis, because it uses the default database and
+  topic instead of isolating like `worker-process.test.ts` (db 9), `web-restart.test.ts`
+  (db 10) and `crash-probe.test.ts` (db 11) do. The live worker's `mastra-orchestration`
+  consumer group claims the events the test asserts on. Proven: with a worker up the
+  lifecycle-events test fails, with it stopped the file is 5/5. This was previously logged as
+  a nondeterministic "stream-event race"; it is deterministic given a live consumer. Fix by
+  isolating the suite on its own Redis database, and note that `pnpm test` is not safe to run
+  against a running worker until then.
+
 - [confirmed] 2026-08-21 The `images` stage's featured-image handling never fires on real
   manifests. `images.py` tests `image_spec.get("placement") == "featured"`, but the manifest
   Claude actually produces (live capture, `docs/mastra-port/golden/how-to-choose-a-crm-for-a-small-team/images.json`)

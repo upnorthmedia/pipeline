@@ -27,7 +27,26 @@ const NAMED_EVENTS = [
   "log",
 ] as const;
 
-export function useSSE(postId?: string, onEvent?: SSECallback) {
+/**
+ * Options for {@link useSSE}.
+ */
+export interface UseSSEOptions {
+  /**
+   * Whether to hold a connection open. Defaults to `true`.
+   *
+   * Pass `false` while the caller has no authenticated session. `/api/events`
+   * answers 401 without one, `EventSource` surfaces that as `onerror` with no
+   * status code to branch on, and the reconnect below would then retry a
+   * request that cannot start succeeding until a session exists.
+   */
+  enabled?: boolean;
+}
+
+export function useSSE(
+  postId?: string,
+  onEvent?: SSECallback,
+  { enabled = true }: UseSSEOptions = {},
+) {
   const [connected, setConnected] = useState(false);
   const [lastEvent, setLastEvent] = useState<SSEEvent | null>(null);
   const callbackRef = useRef(onEvent);
@@ -36,6 +55,7 @@ export function useSSE(postId?: string, onEvent?: SSECallback) {
   }, [onEvent]);
 
   useEffect(() => {
+    if (!enabled) return;
     const url = postId ? sseUrl.post(postId) : sseUrl.global();
     let source: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -120,7 +140,10 @@ export function useSSE(postId?: string, onEvent?: SSECallback) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       setConnected(false);
     };
-  }, [postId]);
+  }, [postId, enabled]);
 
-  return { connected, lastEvent };
+  // Derived rather than set from the effect: flipping `enabled` off must not
+  // leave a stale `true` behind, and setting state synchronously in an effect
+  // triggers cascading renders (react-hooks/set-state-in-effect).
+  return { connected: enabled && connected, lastEvent };
 }

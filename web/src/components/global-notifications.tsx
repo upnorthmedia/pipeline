@@ -1,6 +1,7 @@
 "use client";
 
 import { useSSE, type SSEEvent } from "@/hooks/use-sse";
+import { authClient } from "@/lib/auth-client";
 import { toast } from "sonner";
 import { useCallback } from "react";
 
@@ -54,7 +55,13 @@ export const GlobalNotifications = () => {
     }
   }, []);
 
-  useSSE(undefined, handleEvent);
+  // Mounted from `providers.tsx`, which wraps every route including `/auth/*`.
+  // `GET /api/events` is session-scoped, so opening the feed before sign-in
+  // answers 401 and the hook's reconnect retries it forever. Gate on a
+  // resolved session: a 401 here is not a transient failure.
+  const { data: session, isPending } = authClient.useSession();
+
+  useSSE(undefined, handleEvent, { enabled: !isPending && Boolean(session?.user) });
 
   return null;
 };
