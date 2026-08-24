@@ -83,11 +83,13 @@ export type ClaudeEffort = (typeof CLAUDE_EFFORTS)[number]
  * minimal call in item 6.1, sending the request shape its stage sends.
  */
 export const STAGE_MODEL_ALLOWLIST: Record<Stage, readonly string[]> = {
-  // Perplexity's only tier that pairs live grounding with the citations this
-  // stage's link extraction reads. `sonar` is weaker and
-  // `sonar-deep-research` is a report generator; neither has a live call
-  // behind it here, so neither is offered.
-  research: ["sonar-pro"],
+  // The only Perplexity search model the Agent API accepts, which is the only
+  // Perplexity surface still answering after 2026-09-27. `GET /v1/models`
+  // lists no other, and `perplexity/sonar-pro` is refused outright, so this
+  // list has one entry by the provider's decision rather than by ours.
+  // `sonar-pro` is retired rather than kept alongside it: it is unreachable
+  // from the endpoint this stage now posts to.
+  research: ["perplexity/sonar"],
   outline: ["claude-opus-5", "claude-fable-5", "claude-opus-4-6"],
   write: ["claude-opus-5", "claude-fable-5", "claude-opus-4-6"],
   edit: ["claude-opus-5", "claude-fable-5", "claude-opus-4-6"],
@@ -123,7 +125,7 @@ export interface StageModelConfig {
  * the manifest call this setting deliberately does not configure.
  */
 export const STAGE_MODEL_DEFAULTS: Record<Stage, StageModelConfig> = {
-  research: { model: "sonar-pro", effort: null },
+  research: { model: "perplexity/sonar", effort: null },
   outline: { model: "claude-opus-5", effort: "high" },
   write: { model: "claude-opus-5", effort: "high" },
   edit: { model: "claude-opus-5", effort: "high" },
@@ -208,14 +210,31 @@ export function parseStageModelSettings(
   return { ok: true, data: parsed }
 }
 
-/** A stored row value, reduced to the overrides that survive validation. */
+/**
+ * A stored row value, reduced to the overrides that survive validation.
+ *
+ * An entry that no longer validates (a model id retired from the allowlist, a
+ * hand-edited row) falls back rather than failing a pipeline run: the stage
+ * still has a verified default, and refusing to start would be a worse outcome
+ * than quietly running the model that is known to work.
+ *
+ * The fallback is per stage, not per row. `parseStageModelSettings` answers
+ * with one reason for the whole value because that is what a 422 body carries,
+ * but reading it that way here would mean retiring `sonar-pro` from `research`
+ * also discarded a stored `write` or `edit` override in the same row, which
+ * nothing told the user about and no screen would show.
+ */
 function storedSettings(value: unknown): StageModelSettings {
-  const parsed = parseStageModelSettings(value)
-  // A row that no longer validates (a model id retired from the allowlist, a
-  // hand-edited row) falls back rather than failing a pipeline run: the stage
-  // still has a verified default, and refusing to start would be a worse
-  // outcome than quietly running the model that is known to work.
-  return parsed.ok ? parsed.data : {}
+  const whole = parseStageModelSettings(value)
+  if (whole.ok) return whole.data
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return {}
+
+  const kept: StageModelSettings = {}
+  for (const [stage, entry] of Object.entries(value as Record<string, unknown>)) {
+    const one = parseStageModelSettings({ [stage]: entry })
+    if (one.ok) Object.assign(kept, one.data)
+  }
+  return kept
 }
 
 /**

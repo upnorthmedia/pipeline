@@ -132,16 +132,18 @@ export const researchStep = createStep({
 
       for (let attempt = 1; attempt <= MAX_RESEARCH_ATTEMPTS; attempt += 1) {
         // Python's ternary: the bare form on the first call, the counted form
-        // on every retry. The model is named from the message rather than read
-        // off the response, which is Python's own wording and means the line
-        // still says `sonar-pro` if the provider answers as an alias.
+        // on every retry. Python interpolated the model id here, which went
+        // stale the moment the stage changed models (P2.71b), and named an id
+        // no screen offers to change. The other four stages write "Calling
+        // Claude for <what it is doing>...", so this now reads the same way;
+        // the model that actually ran is on the stage's own log entry.
         await publishStageLog(
           mastra,
           postId,
           "research",
           attempt > 1
-            ? `Calling Perplexity sonar-pro (attempt ${attempt}/${MAX_RESEARCH_ATTEMPTS})...`
-            : "Calling Perplexity sonar-pro...",
+            ? `Calling Perplexity for research (attempt ${attempt}/${MAX_RESEARCH_ATTEMPTS})...`
+            : "Calling Perplexity for research...",
         )
 
         const startedAt = Date.now()

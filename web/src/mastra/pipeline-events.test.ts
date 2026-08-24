@@ -751,7 +751,7 @@ describe("what a run writes to execution_logs", () => {
 
     expect(messagesFor("research")).toEqual([
       "Rules loaded, building prompt...",
-      "Calling Perplexity sonar-pro...",
+      "Calling Perplexity for research...",
       expect.stringMatching(/^Received 20 tokens in \d+\.\ds$/),
     ])
     expect(messagesFor("outline")).toEqual([

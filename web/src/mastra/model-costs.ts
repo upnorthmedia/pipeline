@@ -29,6 +29,14 @@
  * `model-costs.test.ts` holds it to covering every model a stage can be
  * configured to run.
  *
+ * `perplexity/sonar` is the `research` stage's model since P2.71b moved it off
+ * the Sonar Chat Completions endpoint. `sonar-pro` stays above it for the same
+ * reason every other superseded row does: it priced the runs already recorded.
+ * The rate is the one `GET https://api.perplexity.ai/v1/models` publishes for
+ * the id, checked on 2026-08-24, and it reproduces a live call's token cost to
+ * the cent. What it cannot express is the Agent API's per-search fee, which
+ * this table has no column for; see ledger item P2.71b-ii.
+ *
  * `claude-fable-5` is the one row with no Python ancestor: item 6.1 put it on
  * the `outline`, `write`, `edit` and `ready` allowlists without a price, and a
  * selectable model with no price would report every stage run on it as costing
@@ -41,6 +49,7 @@ export interface ModelCost {
 
 export const MODEL_COSTS: Record<string, ModelCost> = {
   "sonar-pro": { input: 3.0, output: 15.0 },
+  "perplexity/sonar": { input: 0.25, output: 2.5 },
   "claude-opus-4-6": { input: 15.0, output: 75.0 },
   "gemini-3.1-flash-image-preview": { input: 0.1, output: 60.0 },
   "claude-opus-5": { input: 5.0, output: 25.0 },

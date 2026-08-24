@@ -28,6 +28,7 @@ import { encryptWithKey } from "../../lib/crypto"
 import { API_KEYS_SETTING_KEY } from "../api-keys"
 import { STAGE_MODEL_ALLOWLIST, STAGE_MODEL_DEFAULTS } from "../stage-models"
 import { mastra, pubsub } from "../index"
+import { PERPLEXITY_AGENT_PROVIDER } from "../perplexity/agent-api"
 import {
   RESEARCH_PROVIDER,
   RESEARCH_SYSTEM_MESSAGE,
@@ -85,13 +86,20 @@ describe("research agent registration", () => {
     }
   })
 
-  it("carries the model the golden fixtures were captured with", async () => {
+  it("draws its credential from the provider the golden fixtures name", async () => {
+    // The model id deliberately no longer agrees with the recording. Python
+    // captured `sonar-pro` on the Chat Completions endpoint, which Perplexity
+    // retires on 2026-09-27 and whose replacement refuses that id outright
+    // (P2.71b). Asserting the divergence rather than deleting the check keeps
+    // the recording honest: a regenerated fixture that somehow answers
+    // `perplexity/sonar` would fail here and be read rather than absorbed.
     for (const slug of GOLDEN_SLUGS) {
       const fixture = JSON.parse(
         fs.readFileSync(path.join(GOLDEN_DIR, slug, "research.json"), "utf8"),
       ) as { provider_calls: { provider: string; request: { model: string } }[] }
       expect(fixture.provider_calls[0].provider).toBe(RESEARCH_PROVIDER)
-      expect(fixture.provider_calls[0].request.model).toBe(STAGE_MODEL_DEFAULTS.research.model)
+      expect(fixture.provider_calls[0].request.model).toBe("sonar-pro")
+      expect(STAGE_MODEL_DEFAULTS.research.model).toBe("perplexity/sonar")
     }
   })
 })
@@ -101,8 +109,10 @@ describe("research agent credential resolution", () => {
     await writePerplexityKey("pplx-not-a-real-key")
 
     const model = await researchAgent.getModel()
-    expect(model.modelId).toBe("sonar-pro")
-    expect(model.provider).toContain("perplexity")
+    expect(model.modelId).toBe("perplexity/sonar")
+    // Not the model router's `perplexity` provider: that one posts to
+    // `/chat/completions`. This name is the Agent API client's own.
+    expect(model.provider).toBe(PERPLEXITY_AGENT_PROVIDER)
   })
 
   it("fails at model resolution with an actionable message when no key is stored", async () => {
@@ -121,18 +131,42 @@ describe.skipIf(!LIVE_KEY)("research agent live smoke test", () => {
     const result = await researchAgent.generate("Reply with the single word OK.")
     const response = await result.response
 
-    expect(response?.modelId).toBe("sonar-pro")
+    expect(response?.modelId).toBe("perplexity/sonar")
     expect(result.text.trim().length).toBeGreaterThan(0)
     expect(result.usage?.outputTokens).toBeGreaterThan(0)
   }, 120_000)
+
+  it("comes back grounded, which is the whole reason this stage exists", async () => {
+    // Separate from the call above because "Reply with the single word OK."
+    // legitimately searches nothing: `tool_choice` is `auto`, so grounding is
+    // only observable on a question that needs it. Measured live, the same
+    // request with no `tools` field returns a bare message and no sources at
+    // all, so this is the assertion a migration that forgot `web_search`
+    // fails on, and every length-based assertion would still pass.
+    await writePerplexityKey(LIVE_KEY!)
+
+    const result = await researchAgent.generate(
+      "Research the topic: best patient scheduling software for small dental practices. " +
+        "Cover keyword opportunities, audience pain points, competitor content and search intent.",
+    )
+
+    expect(result.sources?.length).toBeGreaterThan(0)
+    // Mastra wraps each source part, so the URL is under `payload`.
+    expect(
+      result.sources?.every((source) =>
+        (source.payload as { url?: unknown }).url?.toString().startsWith("http"),
+      ),
+    ).toBe(true)
+    expect(result.text.length).toBeGreaterThan(1000)
+  }, 300_000)
 })
 
 describe("research agent model configuration", () => {
   it("has one verified model, which is why nothing here asserts an override", () => {
     // Item 6.2b resolves this agent's model through the request context like
-    // every Claude stage, but Perplexity has exactly one id with a live call
-    // behind it, so no stored override can change what reaches the wire and a
-    // mutation that drops the context is undetectable from outside. This is
+    // every Claude stage, but the Agent API accepts exactly one Perplexity
+    // search model, so no stored override can change what reaches the wire and
+    // a mutation that drops the context is undetectable from outside. This is
     // the tripwire: verify a second Perplexity id into the allowlist and this
     // fails, which is where the missing override test belongs.
     expect(STAGE_MODEL_ALLOWLIST.research).toEqual([STAGE_MODEL_DEFAULTS.research.model])

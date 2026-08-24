@@ -160,9 +160,12 @@ describe("the allowlist and the defaults", () => {
 
   it("lists only ids with a live provider response behind them", () => {
     // Item 6.1's pasted evidence, and nothing else. A new entry needs a new
-    // live call, not a plausible-looking id.
+    // live call, not a plausible-looking id. `research` reads
+    // `perplexity/sonar` because P2.71b moved the stage onto the Agent API,
+    // which refuses `sonar-pro` outright; the old id is unreachable from the
+    // endpoint the stage now posts to, so it is retired rather than kept.
     expect(STAGE_MODEL_ALLOWLIST).toEqual({
-      research: ["sonar-pro"],
+      research: ["perplexity/sonar"],
       outline: ["claude-opus-5", "claude-fable-5", "claude-opus-4-6"],
       write: ["claude-opus-5", "claude-fable-5", "claude-opus-4-6"],
       edit: ["claude-opus-5", "claude-fable-5", "claude-opus-4-6"],
@@ -236,7 +239,9 @@ describe("parseStageModelSettings", () => {
 
   it("rejects a model that is allowed on a different stage", () => {
     const result = parseStageModelSettings({ research: { model: "claude-opus-5" } })
-    expect(result.ok === false && result.detail).toContain("Verified values are sonar-pro")
+    expect(result.ok === false && result.detail).toContain(
+      "Verified values are perplexity/sonar",
+    )
   })
 
   it("rejects an effort on a provider that has none", () => {
@@ -345,6 +350,22 @@ describe("resolveStageModels", () => {
     })
   })
 
+  it("keeps the stages that still validate when one entry does not", async () => {
+    // P2.71b retired `sonar-pro` from the `research` allowlist, and a row
+    // stored before that carries it alongside overrides for other stages.
+    // Reading the row as one unit would drop the `write` choice a user made
+    // and never say so, so the fallback is per stage.
+    await setUser(user.userId, {
+      research: { model: "sonar-pro" },
+      write: { model: "claude-fable-5", effort: "medium" },
+    } as StageModelSettings)
+
+    expect(await resolveStageModels(user.userId)).toMatchObject({
+      research: { model: "perplexity/sonar", modelSource: "default" },
+      write: { model: "claude-fable-5", modelSource: "user", effort: "medium" },
+    })
+  })
+
   it("resolveStageModel returns one stage's effective pair", async () => {
     await setUser(user.userId, { edit: { model: "claude-fable-5", effort: "medium" } })
 
@@ -353,7 +374,7 @@ describe("resolveStageModels", () => {
       effort: "medium",
     })
     expect(await resolveStageModel("research", user.userId)).toEqual({
-      model: "sonar-pro",
+      model: "perplexity/sonar",
       effort: null,
     })
   })

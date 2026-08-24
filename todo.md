@@ -44,12 +44,20 @@
   OpenAI-compatible `/chat/completions` shape, so research calls stop working after that
   date unless the stage moves to Perplexity's Agent API. Found while verifying model IDs
   for ledger item 6.1; out of scope there, but it has a hard deadline. Ledger item P2.71.
-  Half done: P2.71a added `web/src/mastra/perplexity/agent-api.ts`, a `LanguageModelV2` over
-  `POST /v1/agent`, because nothing installed can reach that endpoint (`@ai-sdk/perplexity`
-  4.0.31 is chat-completions only, Mastra's `perplexity-agent` registry entry builds an OpenAI
-  chat model and 404s, and `@ai-sdk/openai`'s Responses schema has no `search_results` branch).
-  What is left is P2.71b: pointing the stage, the `stage_models` allowlist and default, the
-  stored setting, `MODEL_COSTS` and the `sonar-pro` copy at it.
+  Closed at P2.71b-i: P2.71a added `web/src/mastra/perplexity/agent-api.ts`, a
+  `LanguageModelV2` over `POST /v1/agent`, and P2.71b-i pointed the stage at it. The
+  `research` allowlist and default are `perplexity/sonar`, which `GET /v1/models` says is the
+  only Perplexity search model the endpoint accepts. What is left is one accounting gap, not
+  a deadline: ledger item P2.71b-ii.
+
+- [confirmed] 2026-08-24 `MODEL_COSTS` cannot express the Agent API's per-search fee, so a
+  research run is under-reported by it. Measured on a real call: token cost $0.0167 and
+  `usage.cost.total_cost` $0.0242, the $0.0075 gap being three `web_search` invocations at
+  $0.0025 each. Not a regression, the same shape existed for `sonar-pro` (a $0.006
+  `request_cost` against a $0.0353 token cost), but it is larger as a fraction now, and the
+  Agent API is the first provider here that reports its own cost in the response, so the fix
+  is to carry `usage.cost.total_cost` through the step rather than to add a fee column. Found
+  closing P2.71b-i. Ledger item P2.71b-ii.
 
 - [confirmed] 2026-08-23 Nothing runs database migrations on deploy. `deploy.preDeployCommand`
   is the documented Railway hook, but neither runtime image carries `drizzle-kit` or the

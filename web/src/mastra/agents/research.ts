@@ -10,6 +10,7 @@
 import { Agent } from "@mastra/core/agent"
 
 import { requireApiKey } from "../api-keys"
+import { perplexityAgentModel } from "../perplexity/agent-api"
 import { resolveStageModel, stageRequestContextUserId } from "../stage-models"
 
 /**
@@ -25,28 +26,32 @@ export const RESEARCH_SYSTEM_MESSAGE =
   "Do not discuss your capabilities or ask clarifying questions. " +
   "Produce the complete research directly."
 
-/**
- * Mastra's model-router prefix for this stage's provider. The model id itself
- * is resolved per call from the owning user's `stage_models` setting (item
- * 6.2b), falling back to item 6.1's verified `sonar-pro`.
- *
- * `sonar-pro` is carried over unchanged from `PerplexityClient.chat()`'s
- * default, and ledger item 6.1 kept it. Of the four Sonar models Perplexity
- * documents, only `sonar` and `sonar-pro` pair live web grounding with the
- * citations this stage's link extraction depends on, `sonar` is the weaker of
- * the two, and `sonar-deep-research` is a report generator priced and paced
- * for a different job. A live call in item 6.1 returned 17 citations, so the
- * grounding the stage relies on is intact.
- *
- * The router resolves `perplexity/*` from `@mastra/core`'s bundled provider
- * registry, so no `@ai-sdk/perplexity` dependency is needed.
- */
-export const RESEARCH_ROUTER_PREFIX = "perplexity/"
-
 /** The provider id `research` draws its credential from. */
 export const RESEARCH_PROVIDER = "perplexity" as const
 
 /**
+ * This stage does not go through Mastra's model router.
+ *
+ * Perplexity is retiring the Sonar Chat Completions endpoint on 2026-09-27 and
+ * points every caller at the Agent API, which nothing installed can reach:
+ * `@ai-sdk/perplexity` still builds `${baseURL}/chat/completions`, and the
+ * router's own `perplexity/*` entry resolves to that same surface. The reasons
+ * each candidate provider fails are in `../perplexity/agent-api.ts`, which is
+ * the hand-written `LanguageModelV2` this agent uses instead.
+ *
+ * The Agent API accepts exactly one Perplexity search model,
+ * `perplexity/sonar`; `GET https://api.perplexity.ai/v1/models` lists no other,
+ * and `perplexity/sonar-pro` is refused with `model ... is not supported`. So
+ * leaving the deprecated endpoint also means leaving `sonar-pro`, which is why
+ * the swap waited on an output comparison of the two on this stage's real
+ * prompt. Measured 2026-08-24: the Agent API answer was 22,750 characters
+ * against 9,708, filled the same rule template, carried 13 distinct source URLs
+ * inline against 3, passed `isValidResearch`, and cost $0.0242 against $0.0413.
+ *
+ * The model id is still resolved per call from the owning user's
+ * `stage_models` setting rather than pinned here, so a second verified id can
+ * be added to the allowlist without touching this file.
+ *
  * The model and the credential are both resolved per call rather than captured
  * at module load, so a settings change (the stored model, or a rotated key)
  * takes effect without restarting the worker, and so importing this module
@@ -62,8 +67,9 @@ export const researchAgent = new Agent({
       "research",
       stageRequestContextUserId(requestContext),
     )
-    // See `claudeStageModel` for why the id needs an annotated binding.
-    const id: `${string}/${string}` = `${RESEARCH_ROUTER_PREFIX}${model}`
-    return { id, apiKey: await requireApiKey(RESEARCH_PROVIDER) }
+    return perplexityAgentModel({
+      modelId: model,
+      apiKey: await requireApiKey(RESEARCH_PROVIDER),
+    })
   },
 })

@@ -412,10 +412,10 @@ describe("research step progress lines", () => {
     const lines = await progressLines(fixtureIds[0])
     expect(lines.slice(0, 2)).toEqual([
       ["info", "Rules loaded, building prompt..."],
-      // Python named the model in the message rather than reading it back off
-      // the response, so the line says `sonar-pro` even when the provider
-      // answers as something else.
-      ["info", "Calling Perplexity sonar-pro..."],
+      // Python named the model in the message. P2.71b moved the stage onto a
+      // different model, which the line would have gone on misreporting, so it
+      // now names the stage's job the way the four Claude stages do.
+      ["info", "Calling Perplexity for research..."],
     ])
     expect(lines[2][0]).toBe("info")
     // The token count is the fixture's; the duration is real elapsed time
@@ -437,9 +437,9 @@ describe("research step progress lines", () => {
     expect(lines.slice(0, 4)).toEqual([
       ["info", "Rules loaded, building prompt..."],
       // Python's ternary: the bare form on attempt 1, the counted form after.
-      ["info", "Calling Perplexity sonar-pro..."],
+      ["info", "Calling Perplexity for research..."],
       ["warning", "Response validation failed (attempt 1), retrying..."],
-      ["info", `Calling Perplexity sonar-pro (attempt 2/${MAX_RESEARCH_ATTEMPTS})...`],
+      ["info", `Calling Perplexity for research (attempt 2/${MAX_RESEARCH_ATTEMPTS})...`],
     ])
     expect(lines[4][0]).toBe("info")
     expect(lines[4][1]).toMatch(
@@ -461,11 +461,11 @@ describe("research step progress lines", () => {
     // The `else` clause's line is what tells a reader the stage gave up.
     expect(lines.slice(0, 8)).toEqual([
       ["info", "Rules loaded, building prompt..."],
-      ["info", "Calling Perplexity sonar-pro..."],
+      ["info", "Calling Perplexity for research..."],
       ["warning", "Response validation failed (attempt 1), retrying..."],
-      ["info", `Calling Perplexity sonar-pro (attempt 2/${MAX_RESEARCH_ATTEMPTS})...`],
+      ["info", `Calling Perplexity for research (attempt 2/${MAX_RESEARCH_ATTEMPTS})...`],
       ["warning", "Response validation failed (attempt 2), retrying..."],
-      ["info", `Calling Perplexity sonar-pro (attempt 3/${MAX_RESEARCH_ATTEMPTS})...`],
+      ["info", `Calling Perplexity for research (attempt 3/${MAX_RESEARCH_ATTEMPTS})...`],
       ["warning", "Response validation failed (attempt 3), retrying..."],
       ["error", PYTHON_DEGRADED_MESSAGE],
     ])

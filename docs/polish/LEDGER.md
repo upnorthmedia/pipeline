@@ -572,11 +572,27 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
         `web/src/mastra/perplexity/agent-api.ts`, a `LanguageModelV2` over `POST /v1/agent`,
         with a recorded live response as the mapping oracle and a live case that drives a real
         Mastra `Agent` end to end. [evidence](evidence/p2.md#p271a)
-  - [ ] **P2.71b** Move the `research` stage onto it: the agent's model resolution, the
-        `stage_models` allowlist and default, the stored setting, `MODEL_COSTS` (the Agent API
-        bills tool calls separately), and the two places the UI and the run log say
-        `sonar-pro`. Needs an output-quality comparison between today's `sonar-pro` and
-        `perplexity/sonar` plus web_search before the swap.
+  - [ ] **P2.71b** Move the `research` stage onto it. Split, because the swap is not a
+        transport change: the Agent API accepts exactly one Perplexity search model and it is
+        not `sonar-pro`.
+    - [x] **P2.71b-i** The swap. `GET /v1/models` lists `perplexity/sonar` and no other
+          Perplexity search model, and `/v1/agent` refuses every spelling of `sonar-pro`, so
+          the output comparison this item was waiting on decided whether the stage could move
+          at all. It can: on the stage's real prompt the Agent API answer was 22,750
+          characters against 9,708, filled the same rule template, left 13 distinct source
+          URLs in the saved column against 3, passed `isValidResearch`, and cost $0.0242
+          against $0.0413. The agent, the allowlist, the default, `MODEL_COSTS`, the run-log
+          line and the analytics model picker all moved; `storedSettings()` now falls back per
+          stage so retiring an allowlist entry cannot silently discard another stage's stored
+          override. [evidence](evidence/p2.md#p271b-i)
+    - [ ] **P2.71b-ii** The accounting gap the swap leaves. `MODEL_COSTS` prices tokens only,
+          and the Agent API bills `web_search` separately at $0.0025 an invocation: a measured
+          call's token cost was $0.0167 against a reported `usage.cost.total_cost` of $0.0242.
+          Not a regression (`sonar-pro` had a $0.006 per-request fee this table never saw
+          either) but larger as a fraction, and the Agent API is the first provider here that
+          reports its own cost in the response, so the fix is to carry
+          `usage.cost.total_cost` through the step rather than to add a fee column to a
+          per-token table.
 - [x] **P2.72** `[confirmed]` The Playwright suite (`pnpm -C web test:e2e`) is stale. A full run during ledger item 7.1b ended `4 passed (7.4m)` with failures listed across ... Fixed across P0.5a, P0.5b and P0.5c: 34 passed / 0 failed, twice; entry removed from `todo.md`. [evidence](evidence/p0.md#p05c)
 - [x] **P2.73** `[confirmed]` `src/mastra/workflows/scaffold-check.test.ts` fails intermittently under a full `pnpm -C web test` run with `Error: Hook timed out in 60000ms` ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [x] **P2.74** `[confirmed]` A worker process running outside the test suite breaks the suite. While a `jena-worker` container was up against the shared dev Redis, a full ... Contradicted: three worker-up runs are identical to three worker-down runs; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
