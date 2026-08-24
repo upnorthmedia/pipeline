@@ -1,41 +1,5 @@
 # todo
 
-- [confirmed] 2026-08-21 The Gemini API key in the main checkout's `.env` has **zero** image
-  quota: every `gemini-3.1-flash-image` call returns 429 `RESOURCE_EXHAUSTED` with
-  `limit: 0, model: gemini-3.1-flash-image` on the free tier. No image can be generated in
-  any environment using that key. Blocks the images half of Phase 0 golden capture and the
-  Phase 5 images-model verification until billing is enabled on that Google project.
-
-- [investigate] 2026-08-21 `ClaudeClient.chat` sends `thinking={"type": "enabled",
-  "budget_tokens": 10000}`, which the installed anthropic SDK now warns is deprecated for
-  `claude-opus-4-6`: "Use 'thinking.type=adaptive' instead which results in better model
-  performance in our testing". Every live pipeline run emits this UserWarning. Decide the
-  target thinking configuration during the Phase 3 stage ports rather than copying the
-  deprecated shape into TypeScript.
-
-- [confirmed] 2026-08-21 `settings` primary key is `key` alone while `user_id` is only an
-  index, so two users cannot hold different values for the same setting key. Phase 6 asks for
-  per-user per-stage model settings and the port forbids schema changes, so this needs a
-  decision (namespaced keys, or a schema change deferred past the port).
-- [confirmed] 2026-08-21 `api/src/models/post.py` disagrees with the Alembic-produced
-  database on two defaults: it declares `output_format` server default `"markdown"` and a
-  six-stage all-`"auto"` `stage_settings`, while the database has `'both'` and a five-stage
-  all-`"review"` map. Rows created through SQLAlchemy and rows created by raw SQL therefore
-  get different defaults.
-
-- [confirmed] 2026-08-21 `next build`'s output file tracing does not know about the two
-  runtime data files under `web/src/mastra/textstat/data/`, which the port reads with
-  `readFileSync` relative to `process.cwd()`. `rules/*.md` has the same shape of dependency
-  through `rulesDir()`. Both need to be resolved before the Phase 7 Railway deploy, either by
-  copying them into the standalone output or by moving them somewhere the tracer follows.
-
-- [confirmed] 2026-08-22 The `posts.stage_settings` column default in the live database is
-  `{"edit":"review","write":"review","images":"review","outline":"review","research":"review"}`,
-  which predates the gate removal and does not mention `ready` at all. SQLAlchemy sent its own
-  all-auto default on every insert, so no post created through FastAPI ever inherited it, but a
-  TypeScript insert that omits the column does: with review gates back (item 4.3) such a post
-  parks at the `research` gate on its first run. The Phase 5.3 `posts` route handler must send
-  `stage_settings` explicitly, the way `api/src/models/post.py` did.
 - [confirmed] 2026-08-22 `EventedRun.resume()` resolves with a stale snapshot. It subscribes to
   the shared `workflows-finish` topic and the Redis stream still holds the run's earlier
   `workflow.suspend` event, so the promise resolves with that event the moment it subscribes
@@ -83,12 +47,6 @@
   and the variable is the only lever. Item 7.2 must set `RULES_DIR`, `TEXTSTAT_DATA_DIR` and
   `MEDIA_DIR` on the Railway `worker` service, and 7.1 must set them on the compose `worker`
   service.
-- [confirmed] 2026-08-22 `settings.key` is the entire primary key, so two users cannot both hold
-  one settings key. `PATCH /api/settings` therefore 500s with a `23505` unique violation when a
-  user patches a key another user already owns, in both stacks (Python raises the same
-  IntegrityError from the same INSERT). Alembic 010 added `user_id` as an index only. The fix is
-  a composite `(key, user_id)` primary key, which section 8 of the port objective forbids as part
-  of the port. Asserted as-is in `web/src/app/api/settings/route.test.ts`.
 - [investigate] 2026-08-22 BetterAuth has no `BETTER_AUTH_SECRET` in `.env` or `.env.example`, so
   it falls back to its built-in default secret and every session cookie in this deployment is
   signed with a publicly known key. Setting one invalidates existing sessions, which is free now
@@ -566,3 +524,11 @@
   header now carries a failure panel (polish ledger P1.3d-iii), so the reason is reachable;
   this is about the trace being the complete account it presents itself as. Found at polish
   ledger P1.3d-iii.
+
+- [confirmed] 2026-08-24 The Next standalone output copies the whole `web/src/` tree into the
+  production image, test files included: `/app/src/mastra/**/*.test.ts` is present in the
+  `runner` and `railway` images. Two costs. It ships test code and fixtures (including the
+  parity corpora, which are large) to production, and it is what makes the readability corpus
+  resolve there by accident rather than by declaration, which item P2.7 pinned down instead of
+  relying on. Worth narrowing once there is a build gate that would catch the regression.
+

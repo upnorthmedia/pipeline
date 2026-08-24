@@ -78,6 +78,21 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY rules ./rules
 ENV RULES_DIR=/app/rules
 
+# The readability corpus. The web process reads it because
+# `GET /api/posts/{id}/analytics` computes a Flesch score, and a syllable count
+# opens the CMU dictionary and the hyphenation patterns off disk; a missing
+# corpus is an `ENOENT` out of `readFileSync`, so a 500 rather than a build
+# error.
+#
+# It is already in the image without this: the standalone output carries the
+# whole `src/` tree, so `textstatDataDir()`'s `process.cwd()` fallback resolves.
+# That is an accident of what Next copies, not a dependency anything declares,
+# and file tracing follows imports rather than a runtime `path.resolve`, so
+# nothing would fail at build time if it stopped. Two lines to say it, and
+# `src/mastra/runtime-data-files.test.ts` to keep it said.
+COPY --from=builder /app/src/mastra/textstat/data ./src/mastra/textstat/data
+ENV TEXTSTAT_DATA_DIR=/app/src/mastra/textstat/data
+
 # Generated images. A volume is mounted here in every deployment; the default
 # is pinned so an unmounted container writes inside /app instead of /.
 ENV MEDIA_DIR=/app/media
@@ -146,14 +161,10 @@ CMD ["node", ".mastra/worker/index.mjs"]
 FROM runner AS railway
 
 COPY --from=worker-builder /app/.mastra/worker ./.mastra/worker
-COPY --from=worker-builder /app/src/mastra/textstat/data ./src/mastra/textstat/data
 COPY --from=worker-builder /app/src/mastra/scripts/worker-healthcheck.mjs ./scripts/
 
-# Set here rather than only in the `worker` stage because the Next standalone
-# server has the same problem for a different reason: file tracing does not
-# follow a runtime `path.resolve` into a data directory, so the readability
-# scores in the `edit` stage need the corpus pointed at explicitly in both
-# entry points.
-ENV TEXTSTAT_DATA_DIR=/app/src/mastra/textstat/data
+# The readability corpus and `RULES_DIR` are inherited from `runner`, which
+# needs both for its own entry point. The `worker` service runs this image with
+# a different start command and reads the same two directories.
 
 CMD ["node", "server.js"]
