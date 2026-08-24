@@ -53,6 +53,7 @@ test.describe("Navigation", () => {
     await expect(page.locator("[data-slot='card-title']:has-text('Content')")).toBeVisible();
     await expect(page.getByText("Writing Config", { exact: true })).toBeVisible();
     await expect(page.getByText("SEO & Research", { exact: true })).toBeVisible();
+    await expect(page.locator("[data-slot='card-title']:has-text('Pipeline')")).toBeVisible();
   });
 
   test("new post form has required inputs", async ({ page }) => {

@@ -1,4 +1,4 @@
-import type { PipelineStage, StageMode, StageStatus } from "./api";
+import type { PipelineStage, StageMode, StageSettings, StageStatus } from "./api";
 
 /**
  * The one name each pipeline stage is called by in the UI.
@@ -66,4 +66,30 @@ export const STAGE_STATUS_LABELS: Record<StageStatus, string> = {
 /** A status read off a row that is only typed as a string. */
 export function stageStatusLabel(status: string): string {
   return (STAGE_STATUS_LABELS as Record<string, string>)[status] ?? status;
+}
+
+/**
+ * What a stage will actually do on a run configured by `settings`.
+ *
+ * Two fallbacks, and they disagree, which is why this is a function rather
+ * than an index. A post whose whole `stage_settings` column is null runs every
+ * stage unattended (`post.stageSettings || defaultStageSettings()` in
+ * `src/mastra/post-state.ts`), but a column that names *some* stages parks the
+ * run at the ones it leaves out: `DEFAULT_GATE_MODE` in
+ * `src/mastra/steps/stage-io.ts` reads it with a `review` fallback, failing
+ * safe towards the human rather than towards the provider's bill. A profile
+ * row with a hole in it therefore stops a run at a stage nothing on screen
+ * ever named. `stage-modes.test.ts` cross-checks both constants.
+ */
+export function effectiveStageMode(
+  stage: PipelineStage,
+  settings: Partial<StageSettings> | null | undefined,
+): StageMode {
+  if (!settings) return "auto";
+  return settings[stage] ?? "review";
+}
+
+/** Whether a mode parks the run in front of the stage, `REVIEW_MODES`. */
+export function stageModeStopsRun(mode: StageMode): boolean {
+  return mode !== "auto";
 }

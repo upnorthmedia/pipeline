@@ -248,8 +248,29 @@ explicitly out of scope.
 
 - [ ] **P3.1** Information architecture. Settings, profiles and per-post configuration overlap
       and nothing says which owns what. Decide, move things, write the reasoning in the
-      evidence file. Publishing configuration drives this. Carries P2.111 (`/posts/new` has
-      no per-post gate editor while `/profiles/[id]` and `/posts/batch` both do).
+      evidence file. Publishing configuration drives this. Carried P2.111 (`/posts/new` has
+      no per-post gate editor while `/profiles/[id]` and `/posts/batch` both do), closed at
+      P3.1a.
+  - [x] **P3.1a** The decision, and the surface it settles first. Three owners, one concern
+        each: the account owns keys, stage models and rules; the site profile owns identity,
+        voice, publishing connections and the defaults new posts start from; the post owns the
+        article and per-run overrides. `/posts/new` broke both rules that follow: nine values
+        arrive from the profile as plain editable inputs with nothing saying where they came
+        from, and `stage_settings`, which decides where the run stops, was never mentioned at
+        all. A `Pipeline` card now names what each of the six stages will do, summarises where
+        the run will stop and links to the profile that owns the gates; `Writing Config` names
+        the profile it was filled from. Read-only on purpose: `applyProfilePrefill` copies the
+        profile's gates over any submission equal to the schema default, so a per-post editor
+        that cleared every gate would be discarded silently. Closes P2.111.
+        `ui/p31a-newpost-gates-*.png`. [evidence](evidence/p3.md#p31a)
+  - [ ] **P3.1b** `/profiles/[id]`: 1489 lines and seven cards in one scroll, mixing site
+        identity with publishing connections with an action (Crawl Sitemap) and a data table
+        (Internal Links). Group it by the ownership table so the connection a user came for is
+        not below the fold of a form about tone of voice.
+  - [ ] **P3.1c** `/settings` against `/profiles/[id]`: the boundary is right but invisible.
+        Neither page links to the other, "Settings" is the sidebar label for the account-wide
+        page while every per-site setting lives under "Profiles", and `Default Stage Settings`
+        on the profile is the only editor for a value four other surfaces read.
 - [ ] **P3.2** The pipeline is the product: make its state readable at a glance. What stage a
       post is in, what is blocked and why, what a review gate waits for, what a failure was
       and how to retry it. Make the run-trace view the thing you would actually watch.
@@ -446,11 +467,11 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       `web/src/mastra/index.ts` differ from the workflow's own `id`, and a resume resolves by
       id, so those five would answer `MASTRA_GET_WORKFLOW_BY_ID_NOT_FOUND` the moment a step
       in them suspends. Latent today; blocks P2.109.
-- [ ] **P2.111** `[confirmed 2026-08-24]` `/posts/new` has no per-post pipeline configuration.
-      `stage_settings` decides which of the six stages stops at a review gate and the only
-      editors are `/profiles/[id]` and `/posts/batch`, so a post created on the single-post
-      form silently takes the profile's gates with no indication that it did. Belongs with
-      P3.1.
+- [x] **P2.111** `/posts/new` had no per-post pipeline configuration, so a post created on the
+      single-post form silently took the profile's gates. Closed at P3.1a with a read-only
+      `Pipeline` card that names what each of the six stages will do and links to the profile
+      that owns the gates; a per-post editor is not possible while P2.114 stands.
+      [evidence](evidence/p3.md#p31a)
 - [ ] **P2.112** `[confirmed 2026-08-23]` `ImagePreview` renders `placement.location` as the
       raw enum the model writes, so a featured image's placement reads `featured_image`.
       Belongs with P3.3.
@@ -460,6 +481,12 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       form rewrites it. Same value P2.68's publish endpoint refuses. Decide whether `both` is
       a real format or a default that should never have been `both`, then make the column and
       the picker agree.
+- [ ] **P2.114** `[confirmed 2026-08-24]` `applyProfilePrefill` makes a per-post gate edit
+      unexpressible: it copies the profile's `default_stage_settings` over any submitted
+      `stage_settings` equal to the schema default, and that default is six `auto`s, so
+      clearing every gate for one post is silently written back to the profile's gates. A
+      faithful port of Python's rule that the parity oracle asserts, so changing it is a
+      deliberate deviation. Found under P3.1a.
 - [ ] **P2.C1** Cleanup batch, one iteration for all four: P2.53 (`searchParams.get` returns
       the first value of a repeated key where Starlette returned the last, two lines plus two
       tests), P2.66 (`pythonJsonDumps` does not escape U+007F; reuse `encodeBasestringAscii`),

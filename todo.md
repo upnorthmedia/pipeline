@@ -167,14 +167,6 @@
   (exit 0). Item 9.1 has to paste every gate command, so it needs the `exec` form or a
   `typecheck` script in `web/package.json`. Ledger item P2.79.
 
-- [confirmed] 2026-08-24 `/posts/new` has no per-post pipeline configuration. `stage_settings`
-  decides which of the six stages stops at a review gate, and the only editors for it are
-  `/profiles/[id]` and `/posts/batch`; the single-post creation form never mentions it, so a
-  post created there silently takes the profile's gates with no indication that it did. Found
-  under polish ledger item P0.5a while removing `navigation.test.ts`'s stale assertion for a
-  "Pipeline Settings" card, which had been describing this hole rather than a renamed card.
-  Ledger item P2.111, carried by P3.1.
-
 - [confirmed] 2026-08-23 `ImagePreview` renders `placement.location` as the raw enum the model
   writes, so a featured image's placement reads `featured_image` in the UI. Belongs to polish
   ledger item P3.3, which carries it. Ledger item P2.112.
@@ -347,3 +339,14 @@
   (`nested-retry.test.ts` keys its five registrations by id, and `images`, the one nested
   workflow the app registers, matches); the resume path is the second place it bites. Ledger
   item P2.110.
+
+- [confirmed] 2026-08-24 `applyProfilePrefill` makes a per-post gate edit unexpressible.
+  `src/app/api/posts/prefill.ts` copies the profile's `default_stage_settings` over the
+  submitted `stage_settings` whenever the submitted value equals the schema default, and that
+  default is six `auto`s. So "clear one gate, leave another" survives the create, and "clear
+  them all", which is what a user reaches for, is silently written back to the profile's gates
+  with a 201 and no warning. It is a faithful port of Python's rule and the parity oracle in
+  `src/app/api/posts/create.test.ts` asserts it, so changing it is a deliberate deviation, not
+  a fix in passing. Found under polish ledger P3.1a, which is why the new `Pipeline` card on
+  `/posts/new` is read-only and links to the profile instead of offering an edit. Ledger item
+  P2.114.

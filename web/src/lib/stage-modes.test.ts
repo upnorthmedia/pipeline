@@ -10,9 +10,15 @@
  */
 import { describe, it, expect } from "vitest"
 
-import { REVIEW_MODES } from "@/mastra/steps/stage-io"
+import { DEFAULT_GATE_MODE, REVIEW_MODES } from "@/mastra/steps/stage-io"
 
-import { STAGE_MODE_LABELS, STAGE_STATUS_LABELS, stageModeLabel } from "./stages"
+import {
+  STAGE_MODE_LABELS,
+  STAGE_STATUS_LABELS,
+  effectiveStageMode,
+  stageModeLabel,
+  stageModeStopsRun,
+} from "./stages"
 
 describe("STAGE_MODE_LABELS", () => {
   it("names every mode the pipeline acts on", () => {
@@ -45,5 +51,30 @@ describe("STAGE_STATUS_LABELS", () => {
     expect(STAGE_STATUS_LABELS.running).toBe("Running")
     expect(STAGE_STATUS_LABELS.complete).toBe("Complete")
     expect(STAGE_STATUS_LABELS.failed).toBe("Failed")
+  })
+})
+
+describe("effectiveStageMode", () => {
+  it("reads the mode the settings name", () => {
+    expect(effectiveStageMode("outline", { outline: "review" })).toBe("review")
+    expect(effectiveStageMode("outline", { outline: "auto" })).toBe("auto")
+  })
+
+  // The defect this exists for: a profile row that names five stages parks the
+  // run at the sixth, and a dashboard that fell back to "auto" would show a
+  // run that never stops and then stop it.
+  it("falls back to the pipeline's own default for a stage the settings omit", () => {
+    expect(effectiveStageMode("ready", { research: "auto" })).toBe(DEFAULT_GATE_MODE)
+  })
+
+  it("reads a whole missing column as unattended, as the pipeline does", () => {
+    // `post.stageSettings || defaultStageSettings()` in `post-state.ts`.
+    expect(effectiveStageMode("ready", null)).toBe("auto")
+    expect(effectiveStageMode("ready", undefined)).toBe("auto")
+  })
+
+  it("stops the run for exactly the modes the gate acts on", () => {
+    for (const mode of REVIEW_MODES) expect(stageModeStopsRun(mode)).toBe(true)
+    expect(stageModeStopsRun("auto")).toBe(false)
   })
 })

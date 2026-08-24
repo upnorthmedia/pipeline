@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import NewPostPage from "./page";
 import { renderWithProviders } from "@/test/render";
-import { makeProfile } from "@/test/fixtures";
+import { defaultStageSettings, makeProfile } from "@/test/fixtures";
 
 const mockPush = vi.fn();
 
@@ -393,5 +393,118 @@ describe("NewPostPage", () => {
           "Set one up in the profile."
       );
     });
+  });
+
+  /**
+   * `stage_settings` decides which stages park the run in front of a reviewer,
+   * and `applyProfilePrefill` copies it off the profile whether or not the
+   * form ever mentions it. A form that stays silent sells a run that stops
+   * halfway with nothing on screen that said it would.
+   */
+  describe("pipeline gates", () => {
+    const gatedProfile = makeProfile({
+      id: "prof-gated",
+      name: "Gated Blog",
+      default_stage_settings: {
+        ...defaultStageSettings,
+        outline: "review",
+        ready: "approve_only",
+      },
+    });
+
+    it("names what each of the six stages will do for this post", async () => {
+      mockProfilesList.mockResolvedValue([gatedProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Gated Blog" }));
+
+      await screen.findByTestId("gate-research");
+      const rows: [string, string, string][] = [
+        ["research", "Research", "Run automatically"],
+        ["outline", "Outline", "Wait for review"],
+        ["write", "Write", "Run automatically"],
+        ["edit", "Edit", "Run automatically"],
+        ["images", "Images", "Run automatically"],
+        ["ready", "Ready", "Wait for approval"],
+      ];
+      for (const [stage, label, mode] of rows) {
+        const row = within(screen.getByTestId(`gate-${stage}`));
+        expect(row.getByText(label)).toBeInTheDocument();
+        expect(row.getByText(mode)).toBeInTheDocument();
+      }
+    });
+
+    it("summarises the stages that will stop the run", async () => {
+      mockProfilesList.mockResolvedValue([gatedProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Gated Blog" }));
+
+      expect(await screen.findByTestId("gate-summary")).toHaveTextContent(
+        "This run will stop at Outline and Ready and wait for you."
+      );
+    });
+
+    it("says the run will not stop when the profile gates nothing", async () => {
+      mockProfilesList.mockResolvedValue([testProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Firearms Blog" }));
+
+      expect(await screen.findByTestId("gate-summary")).toHaveTextContent(
+        "This run will go from Research to Ready without stopping."
+      );
+    });
+
+    // The gates are the profile's, not the post's: nothing on this form can
+    // change them, so the form has to say where they are changed.
+    it("points at the profile that owns the gates", async () => {
+      mockProfilesList.mockResolvedValue([gatedProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Gated Blog" }));
+
+      expect(
+        await screen.findByRole("link", { name: "Edit gates in the Gated Blog profile" })
+      ).toHaveAttribute("href", "/profiles/prof-gated");
+    });
+
+    it("reads as an ungated run before a profile is chosen", async () => {
+      mockProfilesList.mockResolvedValue([]);
+      renderWithProviders(<NewPostPage />);
+
+      expect(await screen.findByTestId("gate-summary")).toHaveTextContent(
+        "This run will go from Research to Ready without stopping."
+      );
+      expect(screen.queryByRole("link", { name: /Edit gates/ })).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * Every value in Writing Config and SEO & Research arrives from the profile
+   * and is then editable, so the form owes the reader both facts: where the
+   * value came from, and that changing it here does not change the profile.
+   */
+  it("says which profile the defaults were filled in from", async () => {
+    mockProfilesList.mockResolvedValue([testProfile]);
+    const user = userEvent.setup();
+    renderWithProviders(<NewPostPage />);
+
+    await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+    await user.click(await screen.findByRole("option", { name: "Firearms Blog" }));
+
+    expect(
+      await screen.findByText(
+        'Filled in from "Firearms Blog". Edits here apply to this post only.'
+      )
+    ).toBeInTheDocument();
   });
 });

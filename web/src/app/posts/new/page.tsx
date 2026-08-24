@@ -25,6 +25,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { ProfileSelectCard } from "@/components/profile-select-card";
 import { OutputFormatSelect } from "@/components/output-format-select";
+import { PipelineGatesCard } from "@/components/pipeline-gates-card";
 import { publishTargets, type FormatAvailabilityMap } from "@/lib/publishing";
 import {
   apiErrorMessage,
@@ -337,6 +338,16 @@ export default function NewPostPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Writing Config</CardTitle>
+            {/*
+              Every field below arrives from the profile and is then editable,
+              so the card owes the reader both facts: where the value came
+              from, and that changing it here does not change the profile.
+            */}
+            <CardDescription>
+              {selectedProfile
+                ? `Filled in from "${selectedProfile.name}". Edits here apply to this post only.`
+                : "How the article should read. Choose a profile above to fill these in."}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -531,6 +542,13 @@ export default function NewPostPage() {
             </CardContent>
           </Card>
         )}
+
+        {/*
+          Last, because it is the one card that describes the run rather than
+          the article: everything above is an input to the six stages, this is
+          what those stages will do with it.
+        */}
+        <PipelineGatesCard profile={selectedProfile} />
 
         <Separator />
 
