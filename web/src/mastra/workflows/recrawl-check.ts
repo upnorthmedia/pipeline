@@ -17,9 +17,16 @@
  * Only the worker process runs the scheduler: `SchedulerWorker` starts inside
  * `startWorkers()`, which the `web` service never calls, so a Next.js server
  * cannot fire the nightly sweep.
+ *
+ * `retryConfig` is ARQ's `WorkerSettings.max_tries = MAX_ATTEMPTS`, which
+ * applied to a cron job as much as to an enqueued one (ledger item P2.94a). It
+ * matters more here than anywhere else: this step has no catch of its own, and
+ * the next attempt after an unretried failure is the next midnight, so a single
+ * database blip costs a day of re-crawls for every profile at once.
  */
 import { createWorkflow } from "@mastra/core/workflows/evented"
 
+import { MAX_ATTEMPTS } from "../state"
 import {
   recrawlCheckInputSchema,
   recrawlCheckOutputSchema,
@@ -38,6 +45,7 @@ export const recrawlCheckWorkflow = createWorkflow({
   inputSchema: recrawlCheckInputSchema,
   outputSchema: recrawlCheckOutputSchema,
   schedule: { cron: RECRAWL_CHECK_CRON, inputData: {} },
+  retryConfig: { attempts: MAX_ATTEMPTS - 1 },
 })
   .then(recrawlCheckStep)
   .commit()

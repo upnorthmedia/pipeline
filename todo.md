@@ -14,19 +14,13 @@
   and the generated entry is untouched, so this needs a seam of its own or a `mastra` release
   that registers the processor's logger.
 
-- [confirmed] 2026-08-24 The three non-pipeline workflows lost Python's job retry entirely:
-  `sitemapCrawlWorkflow`, `recrawlCheckWorkflow` and `wordpressPublishWorkflow` declare no
-  `retryConfig`, so each gets a single attempt where `WorkerSettings.max_tries =
-  MAX_ATTEMPTS` gave all four entries of `functions = [run_pipeline_stage,
-  crawl_profile_sitemap, publish_to_wordpress, publish_to_nextjs]` three. A WordPress
-  publish that meets one 502 therefore fails for good. `nextjsPublishWorkflow` did get the
-  policy. Found closing P2.39. Ledger item P2.94.
-
-- [confirmed] 2026-08-24 The retry pause added by P2.39 covers the eight pipeline stage
-  steps only, because it lives in `recordStageRetry()` and nothing else calls it.
-  `nextjsPublishWorkflow` retries three times with no gap between them, where Python's
-  `retry_delay = 10` was a `WorkerSettings` key and spaced every job function's retries
-  equally. Ledger item P2.95.
+- [confirmed] 2026-08-24 `wordpressPublishWorkflow` declares no `retryConfig`, so a raise
+  from the band outside its own `catch` (the row read, the `publishing` write, the trail entry
+  and the start event, all of which Python raised from too) fails the run on its first attempt
+  and leaves `wp_publish_status` reading `publishing` for good. Its two siblings got the policy
+  at P2.94a; this one is held back because the fourth escape path, a raise from `fail()` after
+  the uploads have run, would re-upload every image on a retry. It needs the guard first.
+  Ledger item P2.94b.
 
 - [investigate] 2026-08-24 One full `pnpm test` run in four reported
   `1 failed | 5262 passed` in `src/app/api/posts/create.test.ts`, about thirty seconds after the

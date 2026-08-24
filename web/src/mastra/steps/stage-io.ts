@@ -509,6 +509,29 @@ function pauseBeforeRetry(signal?: AbortSignal): Promise<void> {
 }
 
 /**
+ * The gap between attempts for a hook workflow (ledger item P2.95).
+ *
+ * `recordStageRetry()` below is the pipeline's version and cannot serve the
+ * hooks: it writes a `retry` entry into a post's execution log, and only a
+ * pipeline stage has both a `Stage` and a `postId` to write one under. The
+ * nightly re-crawl check has neither. So the hooks get the pause on its own,
+ * held before the error is rethrown for exactly the same reason, and under the
+ * same gate: `MAX_ATTEMPTS` is the total, `retryCount` counts retries after the
+ * first execution, so the pause is skipped on the attempt no retry follows.
+ *
+ * ARQ spent this wait in the queue for every registered job function, the four
+ * hooks included, because `retry_delay` was a `WorkerSettings` field rather
+ * than a per-job one.
+ */
+export async function pauseBeforeHookRetry(
+  retryCount: number | undefined,
+  signal?: AbortSignal,
+): Promise<void> {
+  if ((retryCount ?? 0) + 1 >= MAX_ATTEMPTS) return
+  await pauseBeforeRetry(signal)
+}
+
+/**
  * The `warning` / `retry` entry from Python's exception branch
  * (`api/src/worker.py:334`), written when a stage throws and the engine still
  * has attempts left for it.

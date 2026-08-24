@@ -26,6 +26,7 @@ import { z } from "zod"
 
 import { getDb, internalLinks, websiteProfiles } from "../../db"
 import { crawlSitemap, type SitemapEntry } from "../sitemap"
+import { pauseBeforeHookRetry } from "./stage-io"
 
 export const sitemapCrawlInputSchema = z.object({
   profileId: z.uuid(),
@@ -145,71 +146,79 @@ export const sitemapCrawlStep = createStep({
   id: "sitemap-crawl",
   inputSchema: sitemapCrawlInputSchema,
   outputSchema: sitemapCrawlOutputSchema,
-  execute: async ({ inputData, mastra }) => {
-    const { profileId } = inputData
-    const logger = mastra?.getLogger()
-    const db = getDb()
-
-    const [profile] = await db
-      .select({
-        id: websiteProfiles.id,
-        name: websiteProfiles.name,
-        websiteUrl: websiteProfiles.websiteUrl,
-      })
-      .from(websiteProfiles)
-      .where(eq(websiteProfiles.id, profileId))
-      .limit(1)
-
-    if (!profile) {
-      logger?.error(`Profile ${profileId} not found`)
-      return { profileId, status: "missing" as const, entries: 0, upserted: 0, error: null }
-    }
-
-    await db
-      .update(websiteProfiles)
-      .set({ crawlStatus: "crawling" })
-      .where(eq(websiteProfiles.id, profileId))
-
+  execute: async ({ inputData, mastra, retryCount, abortSignal }) => {
     try {
-      const entries = await crawlSitemap(profile.websiteUrl)
-      logger?.info(
-        `Crawled ${entries.length} URLs for profile ${profile.name} (${profile.websiteUrl})`,
-      )
+      const { profileId } = inputData
+      const logger = mastra?.getLogger()
+      const db = getDb()
 
-      const rows = foldEntries(profileId, entries)
-      // One transaction for the links and the status, because Python committed
-      // them together: a crawl that dies partway leaves the profile `crawling`
-      // and the table untouched rather than half-written and `complete`.
-      await db.transaction(async (tx) => {
-        await upsertLinks(tx, rows)
-        await tx
-          .update(websiteProfiles)
-          .set({ crawlStatus: "complete", lastCrawledAt: new Date() })
-          .where(eq(websiteProfiles.id, profileId))
-      })
+      const [profile] = await db
+        .select({
+          id: websiteProfiles.id,
+          name: websiteProfiles.name,
+          websiteUrl: websiteProfiles.websiteUrl,
+        })
+        .from(websiteProfiles)
+        .where(eq(websiteProfiles.id, profileId))
+        .limit(1)
 
-      logger?.info(`Sitemap crawl complete for profile ${profile.name}`)
-      return {
-        profileId,
-        status: "complete" as const,
-        entries: entries.length,
-        upserted: rows.length,
-        error: null,
+      if (!profile) {
+        logger?.error(`Profile ${profileId} not found`)
+        return { profileId, status: "missing" as const, entries: 0, upserted: 0, error: null }
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      logger?.error(`Sitemap crawl failed for profile ${profileId}`, { error: message })
+
       await db
         .update(websiteProfiles)
-        .set({ crawlStatus: "failed" })
+        .set({ crawlStatus: "crawling" })
         .where(eq(websiteProfiles.id, profileId))
-      return {
-        profileId,
-        status: "failed" as const,
-        entries: 0,
-        upserted: 0,
-        error: message,
+
+      try {
+        const entries = await crawlSitemap(profile.websiteUrl)
+        logger?.info(
+          `Crawled ${entries.length} URLs for profile ${profile.name} (${profile.websiteUrl})`,
+        )
+
+        const rows = foldEntries(profileId, entries)
+        // One transaction for the links and the status, because Python committed
+        // them together: a crawl that dies partway leaves the profile `crawling`
+        // and the table untouched rather than half-written and `complete`.
+        await db.transaction(async (tx) => {
+          await upsertLinks(tx, rows)
+          await tx
+            .update(websiteProfiles)
+            .set({ crawlStatus: "complete", lastCrawledAt: new Date() })
+            .where(eq(websiteProfiles.id, profileId))
+        })
+
+        logger?.info(`Sitemap crawl complete for profile ${profile.name}`)
+        return {
+          profileId,
+          status: "complete" as const,
+          entries: entries.length,
+          upserted: rows.length,
+          error: null,
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        logger?.error(`Sitemap crawl failed for profile ${profileId}`, { error: message })
+        await db
+          .update(websiteProfiles)
+          .set({ crawlStatus: "failed" })
+          .where(eq(websiteProfiles.id, profileId))
+        return {
+          profileId,
+          status: "failed" as const,
+          entries: 0,
+          upserted: 0,
+          error: message,
+        }
       }
+    } catch (error) {
+      // Ledger item P2.94a. Not the crawl's own failure, which the inner
+      // `catch` above has already turned into a `failed` status and a return:
+      // this is the band around it, and the engine retries what escapes here.
+      await pauseBeforeHookRetry(retryCount, abortSignal)
+      throw error
     }
   },
 })

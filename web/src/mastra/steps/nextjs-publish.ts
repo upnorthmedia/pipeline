@@ -66,6 +66,7 @@ import { signPayload } from "../../lib/hmac-signing"
 import { mediaRoot } from "../images/media-dir"
 import { buildNextjsPayload, isoformatUtc } from "../nextjs/payload"
 import { publishPipelineEvent } from "../pipeline-events"
+import { pauseBeforeHookRetry } from "./stage-io"
 
 import type { PubSub } from "@mastra/core/events"
 
@@ -164,118 +165,126 @@ export const nextjsPublishStep = createStep({
   id: "nextjs-publish",
   inputSchema: nextjsPublishInputSchema,
   outputSchema: nextjsPublishOutputSchema,
-  execute: async ({ inputData, mastra }) => {
-    const { postId } = inputData
-    const logger = mastra?.getLogger()
-    const pubsub = mastra.pubsub
-    const db = getDb()
+  execute: async ({ inputData, mastra, retryCount, abortSignal }) => {
+    try {
+      const { postId } = inputData
+      const logger = mastra?.getLogger()
+      const pubsub = mastra.pubsub
+      const db = getDb()
 
-    const [post] = await db.select().from(posts).where(eq(posts.id, postId)).limit(1)
-    if (!post) {
-      logger?.error(`Post ${postId} not found for Next.js publish`)
-      return {
-        postId,
-        status: "missing" as const,
-        publishedAt: null,
-        error: null,
+      const [post] = await db.select().from(posts).where(eq(posts.id, postId)).limit(1)
+      if (!post) {
+        logger?.error(`Post ${postId} not found for Next.js publish`)
+        return {
+          postId,
+          status: "missing" as const,
+          publishedAt: null,
+          error: null,
+        }
       }
-    }
 
-    const [profile] = post.profileId
-      ? await db
-          .select()
-          .from(websiteProfiles)
-          .where(eq(websiteProfiles.id, post.profileId))
-          .limit(1)
-      : []
-    if (!profile) return fail(pubsub, logger, postId, NO_PROFILE_MESSAGE)
+      const [profile] = post.profileId
+        ? await db
+            .select()
+            .from(websiteProfiles)
+            .where(eq(websiteProfiles.id, post.profileId))
+            .limit(1)
+        : []
+      if (!profile) return fail(pubsub, logger, postId, NO_PROFILE_MESSAGE)
 
-    // `if not profile.nextjs_webhook_url or ...`: an empty string is as missing
-    // as a null, and the profile form saves an empty string for a cleared field.
-    if (!profile.nextjsWebhookUrl || !profile.nextjsWebhookSecret) {
-      return fail(pubsub, logger, postId, NOT_CONFIGURED_MESSAGE)
-    }
+      // `if not profile.nextjs_webhook_url or ...`: an empty string is as missing
+      // as a null, and the profile form saves an empty string for a cleared field.
+      if (!profile.nextjsWebhookUrl || !profile.nextjsWebhookSecret) {
+        return fail(pubsub, logger, postId, NOT_CONFIGURED_MESSAGE)
+      }
 
-    let secret: string
-    try {
-      secret = decrypt(profile.nextjsWebhookSecret)
-    } catch {
-      return fail(pubsub, logger, postId, "Failed to decrypt webhook secret")
-    }
+      let secret: string
+      try {
+        secret = decrypt(profile.nextjsWebhookSecret)
+      } catch {
+        return fail(pubsub, logger, postId, "Failed to decrypt webhook secret")
+      }
 
-    await db.update(posts).set({ nextjsPublishStatus: "publishing" }).where(eq(posts.id, postId))
-    await appendExecutionLog(postId, {
-      stage: "",
-      level: "info",
-      event: "publish_start",
-      message: "Publishing to Next.js...",
-      data: { target: "nextjs" },
-    })
-    await publishPipelineEvent(pubsub, postId, "publish_start", { target: "nextjs" })
-
-    // Deliberately outside the `try` below, exactly as Python has it: see the
-    // header. A manifest or a mapping that raises leaves the row `publishing`.
-    const payload = await buildNextjsPayload({
-      post: {
-        id: post.id,
-        slug: post.slug,
-        readyContent: post.readyContent,
-        finalMdContent: post.finalMdContent,
-        imageManifest: post.imageManifest,
-      },
-      frontmatterMap: profile.nextjsFrontmatterMap,
-      postId,
-      mediaDir: mediaRoot(),
-      deliveryId: randomUUID(),
-      timestamp: isoformatUtc(new Date()),
-      onMissing: (path) => logger?.error(`Image file not found: ${path}`),
-    })
-    const signature = signPayload(payload, secret)
-
-    let response: Response
-    try {
-      response = await fetch(profile.nextjsWebhookUrl, {
-        method: "POST",
-        body: payload,
-        headers: {
-          "Content-Type": "application/json",
-          "X-Jena-Signature": signature,
-        },
-        signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+      await db.update(posts).set({ nextjsPublishStatus: "publishing" }).where(eq(posts.id, postId))
+      await appendExecutionLog(postId, {
+        stage: "",
+        level: "info",
+        event: "publish_start",
+        message: "Publishing to Next.js...",
+        data: { target: "nextjs" },
       })
-    } catch (error) {
-      // `except httpx.RequestError`: every transport failure, which is what
-      // `fetch` rejects with too. A non-transport failure would have been
-      // raised before the request was made and is not caught here either.
-      const detail = error instanceof Error ? error.message : String(error)
-      return fail(pubsub, logger, postId, `Webhook request failed: ${detail}`)
-    }
+      await publishPipelineEvent(pubsub, postId, "publish_start", { target: "nextjs" })
 
-    if (response.status !== 200) {
-      const body = await response.text()
-      return fail(
-        pubsub,
-        logger,
+      // Deliberately outside the `try` below, exactly as Python has it: see the
+      // header. A manifest or a mapping that raises leaves the row `publishing`.
+      const payload = await buildNextjsPayload({
+        post: {
+          id: post.id,
+          slug: post.slug,
+          readyContent: post.readyContent,
+          finalMdContent: post.finalMdContent,
+          imageManifest: post.imageManifest,
+        },
+        frontmatterMap: profile.nextjsFrontmatterMap,
         postId,
-        `Webhook returned ${response.status}: ${sliceCodePoints(body, 200)}`,
-      )
+        mediaDir: mediaRoot(),
+        deliveryId: randomUUID(),
+        timestamp: isoformatUtc(new Date()),
+        onMissing: (path) => logger?.error(`Image file not found: ${path}`),
+      })
+      const signature = signPayload(payload, secret)
+
+      let response: Response
+      try {
+        response = await fetch(profile.nextjsWebhookUrl, {
+          method: "POST",
+          body: payload,
+          headers: {
+            "Content-Type": "application/json",
+            "X-Jena-Signature": signature,
+          },
+          signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+        })
+      } catch (error) {
+        // `except httpx.RequestError`: every transport failure, which is what
+        // `fetch` rejects with too. A non-transport failure would have been
+        // raised before the request was made and is not caught here either.
+        const detail = error instanceof Error ? error.message : String(error)
+        return fail(pubsub, logger, postId, `Webhook request failed: ${detail}`)
+      }
+
+      if (response.status !== 200) {
+        const body = await response.text()
+        return fail(
+          pubsub,
+          logger,
+          postId,
+          `Webhook returned ${response.status}: ${sliceCodePoints(body, 200)}`,
+        )
+      }
+
+      const publishedAt = new Date()
+      await db
+        .update(posts)
+        .set({ nextjsPublishStatus: "published", nextjsPublishedAt: publishedAt })
+        .where(eq(posts.id, postId))
+      await appendExecutionLog(postId, {
+        stage: "",
+        level: "info",
+        event: "publish_complete",
+        message: "Published to Next.js",
+        data: { target: "nextjs" },
+      })
+      await publishPipelineEvent(pubsub, postId, "publish_complete", { target: "nextjs" })
+      logger?.info(`Published post ${postId} to Next.js at ${profile.nextjsWebhookUrl}`)
+
+      return { postId, status: "published" as const, publishedAt, error: null }
+    } catch (error) {
+      // Ledger item P2.95. The retry itself is ARQ's `max_tries`, already
+      // declared on the workflow; this is `retry_delay`, which the port left
+      // behind in `recordStageRetry()` where only a pipeline stage reaches it.
+      await pauseBeforeHookRetry(retryCount, abortSignal)
+      throw error
     }
-
-    const publishedAt = new Date()
-    await db
-      .update(posts)
-      .set({ nextjsPublishStatus: "published", nextjsPublishedAt: publishedAt })
-      .where(eq(posts.id, postId))
-    await appendExecutionLog(postId, {
-      stage: "",
-      level: "info",
-      event: "publish_complete",
-      message: "Published to Next.js",
-      data: { target: "nextjs" },
-    })
-    await publishPipelineEvent(pubsub, postId, "publish_complete", { target: "nextjs" })
-    logger?.info(`Published post ${postId} to Next.js at ${profile.nextjsWebhookUrl}`)
-
-    return { postId, status: "published" as const, publishedAt, error: null }
   },
 })

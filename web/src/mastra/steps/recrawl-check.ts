@@ -18,6 +18,7 @@ import { and, isNotNull, ne } from "drizzle-orm"
 import { z } from "zod"
 
 import { getDb, websiteProfiles } from "../../db"
+import { pauseBeforeHookRetry } from "./stage-io"
 
 export const recrawlCheckInputSchema = z.object({})
 
@@ -78,45 +79,52 @@ export const recrawlCheckStep = createStep({
   id: "recrawl-check",
   inputSchema: recrawlCheckInputSchema,
   outputSchema: recrawlCheckOutputSchema,
-  execute: async ({ mastra }) => {
-    if (!mastra) {
-      throw new Error("recrawl-check needs a Mastra instance to start crawl runs")
+  execute: async ({ mastra, retryCount, abortSignal }) => {
+    try {
+      if (!mastra) {
+        throw new Error("recrawl-check needs a Mastra instance to start crawl runs")
+      }
+      const logger = mastra.getLogger()
+      const db = getDb()
+
+      /**
+       * `ne()` renders `crawl_status <> 'crawling'`, which is NULL and therefore
+       * false for a NULL `crawl_status`, exactly as SQLAlchemy's
+       * `WebsiteProfile.crawl_status != "crawling"` was. A profile whose status
+       * was never set is skipped by both stacks.
+       */
+      const profiles = await db
+        .select({
+          id: websiteProfiles.id,
+          recrawlInterval: websiteProfiles.recrawlInterval,
+          lastCrawledAt: websiteProfiles.lastCrawledAt,
+        })
+        .from(websiteProfiles)
+        .where(
+          and(
+            isNotNull(websiteProfiles.recrawlInterval),
+            ne(websiteProfiles.crawlStatus, "crawling"),
+          ),
+        )
+
+      const crawl = mastra.getWorkflow("sitemapCrawl")
+      const now = new Date()
+      const started: RecrawlCheckOutput["started"] = []
+
+      for (const profile of profiles) {
+        if (!isDue(profile.recrawlInterval ?? "", profile.lastCrawledAt, now)) continue
+        const run = await crawl.createRun()
+        const { runId } = await run.startAsync({ inputData: { profileId: profile.id } })
+        started.push({ profileId: profile.id, runId })
+      }
+
+      logger.info(`Re-crawl check: ${started.length} profiles enqueued out of ${profiles.length}`)
+      return { considered: profiles.length, started }
+    } catch (error) {
+      // Ledger item P2.94a. The whole step is this band: it has no catch of
+      // its own, so every failure reaching here is one ARQ would have retried.
+      await pauseBeforeHookRetry(retryCount, abortSignal)
+      throw error
     }
-    const logger = mastra.getLogger()
-    const db = getDb()
-
-    /**
-     * `ne()` renders `crawl_status <> 'crawling'`, which is NULL and therefore
-     * false for a NULL `crawl_status`, exactly as SQLAlchemy's
-     * `WebsiteProfile.crawl_status != "crawling"` was. A profile whose status
-     * was never set is skipped by both stacks.
-     */
-    const profiles = await db
-      .select({
-        id: websiteProfiles.id,
-        recrawlInterval: websiteProfiles.recrawlInterval,
-        lastCrawledAt: websiteProfiles.lastCrawledAt,
-      })
-      .from(websiteProfiles)
-      .where(
-        and(
-          isNotNull(websiteProfiles.recrawlInterval),
-          ne(websiteProfiles.crawlStatus, "crawling"),
-        ),
-      )
-
-    const crawl = mastra.getWorkflow("sitemapCrawl")
-    const now = new Date()
-    const started: RecrawlCheckOutput["started"] = []
-
-    for (const profile of profiles) {
-      if (!isDue(profile.recrawlInterval ?? "", profile.lastCrawledAt, now)) continue
-      const run = await crawl.createRun()
-      const { runId } = await run.startAsync({ inputData: { profileId: profile.id } })
-      started.push({ profileId: profile.id, runId })
-    }
-
-    logger.info(`Re-crawl check: ${started.length} profiles enqueued out of ${profiles.length}`)
-    return { considered: profiles.length, started }
   },
 })
