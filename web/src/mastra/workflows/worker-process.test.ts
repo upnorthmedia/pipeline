@@ -56,6 +56,7 @@ import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, getPool, posts } from "../../db"
+import { isolatedRedisUrl } from "../../test/redis-databases"
 import { STAGES, STATUS_COMPLETE, STATUS_REVIEW } from "../state"
 import { imagesWorkflow } from "./images"
 import { pipelineWorkflow } from "./pipeline"
@@ -65,14 +66,8 @@ const run = promisify(execFile)
 const WEB_ROOT = path.resolve(__dirname, "../../..")
 const BUNDLE_DIR = path.join(WEB_ROOT, ".mastra", "worker")
 
-/** Redis database 9, whatever host the repo `.env` points at. */
-function isolatedRedisUrl(): string {
-  const url = new URL(process.env.REDIS_URL!)
-  url.pathname = "/9"
-  return url.toString()
-}
-
-const REDIS_URL = isolatedRedisUrl()
+/** This file's own Redis database, whatever host the repo `.env` points at. */
+const REDIS_URL = isolatedRedisUrl("src/mastra/workflows/worker-process.test.ts")
 
 const SKIPPED_POST_ID = "00000000-0000-4000-8000-0000000004d1"
 const GATED_POST_ID = "00000000-0000-4000-8000-0000000004d2"

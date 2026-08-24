@@ -52,19 +52,14 @@ import type { Readable } from "node:stream"
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
+import { isolatedRedisUrl } from "../../test/redis-databases"
 import { createProbeMastra, readProbeRecords } from "./crash-probe.fixture.mjs"
 
 const WEB_ROOT = path.resolve(__dirname, "../../..")
 const FIXTURE = path.join(WEB_ROOT, "src", "mastra", "workflows", "crash-probe.fixture.mjs")
 
-/** Redis database 11, whatever host the repo `.env` points at. */
-function isolatedRedisUrl(): string {
-  const url = new URL(process.env.REDIS_URL!)
-  url.pathname = "/11"
-  return url.toString()
-}
-
-const REDIS_URL = isolatedRedisUrl()
+/** This file's own Redis database, whatever host the repo `.env` points at. */
+const REDIS_URL = isolatedRedisUrl("src/mastra/workflows/crash-probe.test.ts")
 const MARKER_FILE = path.join(tmpdir(), `crash-probe-${randomUUID()}.jsonl`)
 
 /**

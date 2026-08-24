@@ -72,9 +72,10 @@ move on. A split is not an iteration on its own: split and complete the first ch
         reaching for are asserted on `/monitor` instead. The file now drives the real profile
         and post forms end to end rather than duplicating `navigation.test.ts`. 3/8 -> 0/6,
         whole suite 34 passed. [evidence](evidence/p0.md#p05c)
-- [ ] **P0.6** CI. Add `.github/workflows` running tsc, lint, test, build and e2e on push and
+- [x] **P0.6** CI. Add `.github/workflows` running tsc, lint, test, build and e2e on push and
       PR with Postgres and Redis services. Green on a real run, URL in the evidence. This is
-      the acceptance criterion for all of P0.
+      the acceptance criterion for all of P0, and it is met:
+      [run 32693869900](https://github.com/upnorthmedia/pipeline/actions/runs/32693869900).
   - [x] **P0.6a** What a machine that has never run this repo needs. Measured with a fresh
         clone against a fresh Postgres and Redis: `pnpm db:migrate` could not reach the
         database at all (drizzle-kit has no env loader), seven suites died on
@@ -82,9 +83,11 @@ move on. A split is not an iteration on its own: split and complete the first ch
         built from this repo's own migrations carried no `alembic_version` row. Virgin-run
         `9 failed (146)` -> `148 passed (148)`, twice, plus tsc, lint and build in the same
         clone. [evidence](evidence/p0.md#p06a)
-  - [ ] **P0.6b** `.github/workflows/ci.yml` itself: tsc, lint, test, build and e2e on
-        `ubuntu-latest` with Postgres and Redis service containers, green on a real run with
-        the URL in the evidence.
+  - [x] **P0.6b** `.github/workflows/ci.yml` itself: tsc, lint, test, build and e2e on
+        `ubuntu-latest` with Postgres and Redis service containers. Green on a real run with
+        nothing flaky: [run 32693869900](https://github.com/upnorthmedia/pipeline/actions/runs/32693869900),
+        8m25s, `150 passed`, tree clean, build, `34 passed` e2e under
+        `--fail-on-flaky-tests`.
     - [x] **P0.6b-i** The workflow file, and everything about it provable without GitHub.
           One `gates` job with health-gated `postgres:17-alpine` and `redis:7-alpine`,
           following `web/README.md`'s own setup; `actionlint` clean; all four action major
@@ -95,10 +98,16 @@ move on. A split is not an iteration on its own: split and complete the first ch
           `src/test/wait-budgets.test.ts` keep the two in step, and the `webServer` block is
           hardened for CI. Whole sequence on Linux: `149 passed`, build, `34 passed` e2e.
           [evidence](evidence/p0.md#p06b-i)
-    - [ ] **P0.6b-ii** The real run: push the branch, watch the workflow, fix what only the
-          Actions runner can show (`pnpm/action-setup`, the pnpm cache, service-container
-          health gating, two x64 cores), and paste the green run URL. Needs P0.6b-i's commit
-          to exist on the remote first.
+    - [x] **P0.6b-ii** The real run. First push failed on one test the runner could show
+          and macOS could not: `worker-healthcheck.test.ts` and `reclaim-duplication.test.ts`
+          both claimed Redis database 14, so a real probe worker answered the healthcheck's
+          "no worker is consuming" claim. `src/test/redis-databases.ts` is now the one owner
+          table and `redis-databases.test.ts` fails on a second claim or an unregistered one.
+          The green run then reported `1 flaky` on `full-pipeline.test.ts`, a `toHaveURL`
+          against Playwright's 5s default after a `Create Post` that starts a run, so
+          `expect.timeout` is 15s and the e2e step runs `--fail-on-flaky-tests`: a run that
+          is green by retry cannot be the acceptance criterion for all of P0. Three
+          consecutive green runs. [evidence](evidence/p0.md#p06b-ii)
 
 ## P1. The three things a user sees immediately
 
@@ -256,7 +265,11 @@ explicitly out of scope.
 - [ ] `pnpm test:e2e` passes. True as measured at P0.5c
       ([evidence](evidence/p0.md#p05c)); left unchecked because it is an acceptance condition
       for the finished run and has to be re-measured at the end.
-- [ ] CI green on a real run, URL in the evidence.
+- [ ] CI green on a real run, URL in the evidence. Met at P0.6b-ii:
+      [run 32693869900](https://github.com/upnorthmedia/pipeline/actions/runs/32693869900),
+      all five gates plus the clean-tree check, nothing flaky
+      ([evidence](evidence/p0.md#p06b-ii)); left unchecked like its siblings because the
+      condition is about the finished run and every later commit has to stay green.
 - [ ] `pnpm test` leaves the working tree clean. True as measured at P0.4
       ([evidence](evidence/p0.md#p04)); left unchecked because it is an acceptance condition
       for the finished run and has to be re-measured at the end.

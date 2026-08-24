@@ -23,6 +23,7 @@ import { promisify } from "node:util"
 import { createClient } from "redis"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
+import { isolatedRedisUrl } from "../../test/redis-databases"
 import {
   ORCHESTRATION_GROUP,
   ORCHESTRATION_TOPIC,
@@ -44,6 +45,9 @@ import {
 const run = promisify(execFile)
 const scriptPath = fileURLToPath(new URL("./worker-healthcheck.mjs", import.meta.url))
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379"
+
+/** This file's own Redis database, claimed in `src/test/redis-databases.ts`. */
+const OWNER = "src/mastra/scripts/worker-healthcheck.test.ts"
 
 /** Its own keys, so a real worker on the default topic cannot answer for it. */
 const TEST_STREAM = `mastra:topic:worker-healthcheck-test-${process.pid}`
@@ -178,11 +182,12 @@ describe("worker-healthcheck.mjs as a container healthcheck", () => {
   it("exits non-zero, naming the group, when no worker is consuming", async () => {
     // The script reads the default stream key, so this points it at a Redis
     // database no worker uses rather than deleting the real orchestration
-    // stream out from under one.
-    const emptyDb = new URL(redisUrl)
-    emptyDb.pathname = "/14"
+    // stream out from under one. "No worker uses it" is only true because the
+    // database is claimed in `src/test/redis-databases.ts`: this test spent one
+    // CI run on database 14, which `reclaim-duplication.test.ts` runs a real
+    // worker on, and read that worker as this claim's disproof.
     const failure = await run("node", [scriptPath], {
-      env: { ...process.env, REDIS_URL: emptyDb.href },
+      env: { ...process.env, REDIS_URL: isolatedRedisUrl(OWNER) },
     }).catch((error: { code?: number; stderr?: string }) => error)
 
     expect((failure as { code?: number }).code).toBe(1)

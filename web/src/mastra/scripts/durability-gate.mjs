@@ -65,7 +65,11 @@ const BUNDLE_MASTRA = path.join(BUNDLE_DIR, "mastra.mjs")
 const WEB_FIXTURE = path.join(WEB_ROOT, "src", "mastra", "workflows", "web-service.fixture.mjs")
 const OUT_DIR = path.join(WEB_ROOT, ".mastra", "durability-gate")
 
-/** Its own Redis database: 9, 10 and 11 belong to the three suites. */
+/**
+ * Claimed in `web/src/test/redis-databases.ts`, which fails if another suite
+ * takes it. This script cannot import that table: it runs as bare `node`,
+ * outside the TypeScript build, so the number is checked against it instead.
+ */
 const REDIS_DB = "12"
 
 /** A throwaway Fernet key, so the real `WP_ENCRYPTION_KEY` is never needed. */

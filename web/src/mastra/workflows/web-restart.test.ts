@@ -53,6 +53,7 @@ import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, getPool, posts } from "../../db"
+import { isolatedRedisUrl } from "../../test/redis-databases"
 import { STAGES, STATUS_COMPLETE, STATUS_REVIEW } from "../state"
 import { imagesWorkflow } from "./images"
 import { pipelineWorkflow } from "./pipeline"
@@ -64,14 +65,8 @@ const BUNDLE_DIR = path.join(WEB_ROOT, ".mastra", "worker-restart")
 const BUNDLE_MASTRA = path.join(BUNDLE_DIR, "mastra.mjs")
 const WEB_FIXTURE = path.join(WEB_ROOT, "src", "mastra", "workflows", "web-service.fixture.mjs")
 
-/** Redis database 10, whatever host the repo `.env` points at. */
-function isolatedRedisUrl(): string {
-  const url = new URL(process.env.REDIS_URL!)
-  url.pathname = "/10"
-  return url.toString()
-}
-
-const REDIS_URL = isolatedRedisUrl()
+/** This file's own Redis database, whatever host the repo `.env` points at. */
+const REDIS_URL = isolatedRedisUrl("src/mastra/workflows/web-restart.test.ts")
 
 /** Every stage complete: six skipped steps and a `success` run. */
 const SKIPPED_POST_ID = "00000000-0000-4000-8000-0000000004e1"

@@ -36,10 +36,10 @@
  *      observed in a real run.
  *
  * The probe workflow touches no provider, no post row and no media directory,
- * so this stays in the suite as a regression test. Redis databases 14 and 15
- * isolate the two cases from each other and from the suites on 9, 10 and 11:
- * all of them share the `workflows` topic name, and a stray consumer on the
- * same database would take these runs.
+ * so this stays in the suite as a regression test. Two Redis databases from
+ * `src/test/redis-databases.ts` isolate the two cases from each other and from
+ * every other suite that starts a worker: all of them share the `workflows`
+ * topic name, and a stray consumer on the same database would take these runs.
  *
  * Requires `docker compose up -d db redis`.
  */
@@ -53,9 +53,13 @@ import { RedisStreamsPubSub } from "@mastra/redis-streams"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { z } from "zod"
 
+import { isolatedRedisUrl, redisDatabaseFor } from "../../test/redis-databases"
 import { RECLAIM_IDLE_MS } from "../index"
 
 const WORKFLOW_ID = "reclaim-probe"
+
+/** This file's two Redis databases, claimed in `src/test/redis-databases.ts`. */
+const OWNER = "src/mastra/workflows/reclaim-duplication.test.ts"
 
 /**
  * The step body's duration. Everything else is sized off it: the short window
@@ -67,11 +71,6 @@ const STEP_MS = 6_000
 /** How long to keep watching after the run settles, for a late duplicate. */
 const SETTLE_MS = 4_000
 
-function redisUrlForDatabase(database: number): string {
-  const url = new URL(process.env.REDIS_URL!)
-  url.pathname = `/${database}`
-  return url.toString()
-}
 
 /** `pg` understands neither of the driver prefixes the repo `.env` carries. */
 function nodePostgresUrl(): string {
@@ -96,7 +95,8 @@ interface Probe {
  * because both executions happen in this process: the point of the probe is
  * that no second process is needed to get a second execution.
  */
-async function createProbe(database: number, reclaimIdleMs: number): Promise<Probe> {
+async function createProbe(slot: number, reclaimIdleMs: number): Promise<Probe> {
+  const database = redisDatabaseFor(OWNER, slot)
   const executions: string[] = []
 
   const slowStep = createStep({
@@ -119,7 +119,7 @@ async function createProbe(database: number, reclaimIdleMs: number): Promise<Pro
     .commit()
 
   const pubsub = new RedisStreamsPubSub({
-    url: redisUrlForDatabase(database),
+    url: isolatedRedisUrl(OWNER, slot),
     reclaimIdleMs,
     // The default 30s tick would outlast the whole probe. This only decides how
     // often the claim is attempted, not what is eligible for it.
@@ -165,7 +165,7 @@ describe("a step that outlives reclaimIdleMs", () => {
   beforeAll(async () => {
     // 2s window against a 6s step: the entry is eligible for reclaim while the
     // first execution is still inside the body.
-    probe = await createProbe(14, 2_000)
+    probe = await createProbe(0, 2_000)
     await probe.run()
   }, 60_000)
 
@@ -190,7 +190,7 @@ describe("a step that finishes inside reclaimIdleMs", () => {
   beforeAll(async () => {
     // 60s window against the same 6s step: the shape of the run is identical,
     // only the window differs.
-    probe = await createProbe(15, 60_000)
+    probe = await createProbe(1, 60_000)
     await probe.run()
   }, 60_000)
 

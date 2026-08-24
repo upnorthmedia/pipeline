@@ -82,7 +82,11 @@ const MEDIA_DIR = path.join(OUT_DIR, "media")
 const RULES_DIR = path.join(REPO_ROOT, "rules")
 const TEXTSTAT_DATA_DIR = path.join(WEB_ROOT, "src", "mastra", "textstat", "data")
 
-/** Its own Redis database: 9 to 12 belong to the suites and the durability gate. */
+/**
+ * Claimed in `web/src/test/redis-databases.ts`, which fails if another suite
+ * takes it. This script cannot import that table: it runs as bare `node`,
+ * outside the TypeScript build, so the number is checked against it instead.
+ */
 const REDIS_DB = "13"
 
 /** A throwaway Fernet key, so the real `WP_ENCRYPTION_KEY` is never needed. */

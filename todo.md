@@ -630,3 +630,12 @@
   does, and it means the mock key in `web/src/lib/auth.ts` is reaching Stripe's API rather than
   short-circuiting. Either skip customer creation when the key is the mock, or make the failure a
   debug line. Found at polish ledger P0.6b-i, in the CI dry run's e2e log.
+
+- [investigate] 2026-08-24 CI skips 10 tests where a local run skips 7. The three extra are the
+  suites gated on a provider key (`ANTHROPIC_API_KEY`, `PERPLEXITY_API_KEY`, `GEMINI_API_KEY`),
+  which `.github/workflows/ci.yml` generates no value for, so the real Perplexity, Anthropic and
+  Gemini call paths are the one part of the suite CI cannot certify. Worth deciding deliberately:
+  either accept it and say so in `docs/polish/SUMMARY.md`, or give CI repository secrets and let
+  the three run on `push` to the default branch only. Found at polish ledger P0.6b-ii, comparing
+  the green run's summary (`4661 passed | 10 skipped`) with the local one (`4664 passed |
+  7 skipped`).

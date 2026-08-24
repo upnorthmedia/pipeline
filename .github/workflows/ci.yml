@@ -136,8 +136,14 @@ jobs:
 
       # `playwright.config.ts` starts `pnpm dev` itself through its `webServer`
       # block and waits for :3000 to answer.
+      # `--fail-on-flaky-tests` because a test that only passes on its second
+      # attempt exits 0 without it, and the whole point of this workflow is to
+      # be able to believe a green run. `retries: 2` stays in
+      # `playwright.config.ts` for the trace and the diagnosis, not for the
+      # verdict. The first green run here reported `1 flaky` and hid a real
+      # 5s-budget defect behind it (`docs/polish/evidence/p0.md#p06b-ii`).
       - name: e2e
-        run: pnpm test:e2e
+        run: pnpm test:e2e --fail-on-flaky-tests
 
       - uses: actions/upload-artifact@v7
         if: failure()
