@@ -2,12 +2,16 @@
 
 import { useSSE, type SSEEvent } from "@/hooks/use-sse";
 import { authClient } from "@/lib/auth-client";
+import { stageLabel } from "@/lib/stages";
 import { toast } from "sonner";
 import { useCallback } from "react";
 
 export const GlobalNotifications = () => {
   const handleEvent = useCallback((event: SSEEvent) => {
-    const stage = event.stage || "unknown";
+    // The stage the event names, in the words every other surface uses. A
+    // frame that carries no stage is not attributed to one: "unknown complete"
+    // said less than saying nothing.
+    const stage = event.stage ? stageLabel(event.stage) : "Stage";
     const postId = event.post_id;
 
     switch (event.event) {

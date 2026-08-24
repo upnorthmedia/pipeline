@@ -282,7 +282,8 @@ describe("the images workflow, executed by the evented engine", () => {
         stage: "images",
         level: "info",
         event: "image_generated",
-        message: `Image ${image.index} generated (${image.size_bytes} bytes)`,
+        // The prose counts from one; `data.index` stays the manifest position.
+        message: `Image ${Number(image.index) + 1} generated (${image.size_bytes} bytes)`,
         data: { index: image.index, bytes: image.size_bytes, path: image.url },
       })),
     )
@@ -405,7 +406,9 @@ describe("the images workflow, executed by the evented engine", () => {
         stage: "images",
         level: "error",
         event: "image_failed",
-        message: "Image 2 failed: no prompt",
+        // The prose counts from one; `data.index` and the operator's logger
+        // line below stay on the manifest position.
+        message: "Image 3 failed: no prompt",
         data: { index: 2, error: "no prompt" },
       },
     ])

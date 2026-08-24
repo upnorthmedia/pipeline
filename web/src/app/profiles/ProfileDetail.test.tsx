@@ -183,12 +183,21 @@ describe("ProfileDetailPage", () => {
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it("shows crawl status", async () => {
-    mockGet.mockResolvedValue(makeProfile({ crawl_status: "crawling" }));
+  // `/profiles` has named all four `crawl_status` values since it was written;
+  // this page printed the stored value, so the two surfaces showed a different
+  // word for the same row.
+  it.each([
+    ["crawling", "Crawling"],
+    ["complete", "Complete"],
+    ["failed", "Failed"],
+    ["pending", "Pending"],
+  ])("names crawl status %s as %s", async (stored, shown) => {
+    mockGet.mockResolvedValue(makeProfile({ crawl_status: stored }));
     await renderOnTab("Internal links");
     await waitFor(() => {
-      expect(screen.getByText("crawling")).toBeInTheDocument();
+      expect(screen.getByText(shown)).toBeInTheDocument();
     });
+    expect(screen.queryByText(stored)).toBeNull();
   });
 
   it("crawl button starts crawl", async () => {

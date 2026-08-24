@@ -153,10 +153,6 @@
   (exit 0). Item 9.1 has to paste every gate command, so it needs the `exec` form or a
   `typecheck` script in `web/package.json`. Ledger item P2.79.
 
-- [confirmed] 2026-08-23 `ImagePreview` renders `placement.location` as the raw enum the model
-  writes, so a featured image's placement reads `featured_image` in the UI. Belongs to polish
-  ledger item P3.3, which carries it. Ledger item P2.112.
-
 - [confirmed] 2026-08-23 The global `stage_models` row is borrowed the way `api_keys` used to
   be: `src/mastra/stage-models.test.ts`, `src/app/api/settings/stage-models/route.test.ts` and
   `src/app/settings/stage-models-to-provider.test.tsx` each hold the pre-borrow value in a
@@ -321,11 +317,3 @@
   next load or the next refetch from another cause. Check whether the optimistic write should
   simply be a refetch before adding a fourth refetch trigger. Found at polish ledger P3.2b-ii.
 
-- [confirmed] 2026-08-24 The `images` fan-out interpolates its 0-based index straight into
-  the line a person reads: `Image 0 generated (123360 bytes)`, `Image 2 failed: ...`
-  (`publishImageOutcome()` in `web/src/mastra/steps/images-generate.ts`, both
-  `publishStageLog` calls). It is Python's own wording, ported value for value, and it was
-  invisible until ledger item P3.2c put those
-  lines in the Debug Logs panel, where the first image of five now reads as image zero. The
-  stored `data.index` is a manifest position and should stay 0-based; only the message needs
-  the ordinal. Ledger item P3.3.

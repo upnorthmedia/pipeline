@@ -355,11 +355,25 @@ explicitly out of scope.
         the column is `NOT NULL DEFAULT '[]'`, `serializePost()` coalesces it anyway and the
         client type is not optional, so it is deleted rather than fixed. Closes P2.96.
         `ui/p33a-*.png`. [evidence](evidence/p3.md#p33a)
-  - [ ] **P3.3b** Raw enum values in the UI. Carries P2.112 (`ImagePreview` renders
-        `placement.location` as the raw enum, so a featured image reads `featured_image`) and
-        the images fan-out's 0-based ordinal (`Image 0 generated`, now visible in the Debug
-        Logs panel, filed at P3.2c). Sweep the rest of the UI for the same class before
-        closing: anything a model or a column writes that reaches the screen unmapped.
+  - [x] **P3.3b** Raw enum values in the UI. Five sites reached the screen with a stored
+        value, three of them found by the sweep. `ImagePreview` printed `featured_image` for
+        the featured entry and a bare heading for a content one, so neither half of the
+        manifest's placement said what it meant; `placementLabel()` now reads
+        `After "<heading>"` or a humanised location, with only `after_heading` needing copy of
+        its own because the generic humaniser already spells `featured_image` correctly.
+        `pipeline-progress.tsx` said "Awaiting review" in its `aria-label` and "Review" in the
+        tooltip body a mouse user reads. `/profiles/[id]` printed `crawl_status` where
+        `/profiles` had named all four values since it was written; both now read one shared
+        `CrawlStatusBadge`. `GlobalNotifications` titled its toasts "research complete", and
+        "unknown complete" on a frame carrying no stage. The images fan-out's message counts
+        from one while `data.index` and the operator's logger line stay on the manifest
+        position. Three more sites produce the right string by coincidence and were recorded
+        rather than changed. Closes P2.112. `ui/p33b-*.png`. [evidence](evidence/p3.md#p33b)
+  - [ ] **P3.3c** The rest of P3.3: no `undefined` in the UI, and buttons and errors in the
+        user's terms. Not swept. P3.3a covered stack traces and P3.3b covered raw enum values;
+        neither looked for a nullable field interpolated into a sentence, nor read the button
+        labels and the server-composed error strings that reach the screen through
+        `apiErrorMessage()`.
 - [ ] **P3.4** Speed where it is felt: layout shift, avoidable spinners on cached data, lists
       that refetch everything on a single-row change.
 - [ ] **P3.5** One screen per iteration, verified with `npx -y chrome-devtools-axi`, before and
@@ -554,9 +568,8 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       `Pipeline` card that names what each of the six stages will do and links to the profile
       that owns the gates; a per-post editor is not possible while P2.114 stands.
       [evidence](evidence/p3.md#p31a)
-- [ ] **P2.112** `[confirmed 2026-08-23]` `ImagePreview` renders `placement.location` as the
-      raw enum the model writes, so a featured image's placement reads `featured_image`.
-      Belongs with P3.3.
+- [x] **P2.112** `ImagePreview` renders `placement.location` as the raw enum. Fixed at P3.3b
+      along with the rest of that class. [evidence](evidence/p3.md#p33b)
 - [ ] **P2.113** `[confirmed 2026-08-24]` `both` is the `output_format` column default on both
       `website_profiles` and `posts` but is not one of the three options `OUTPUT_FORMATS`
       offers, so a row holding the default renders the picker with no label and saving the

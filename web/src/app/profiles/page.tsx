@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { CrawlStatusBadge } from "@/components/crawl-status-badge";
 import {
   profiles,
   apiErrorMessage,
@@ -62,28 +62,6 @@ function timeAgo(dateStr: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
-}
-
-function CrawlStatusBadge({ status }: { status: string }) {
-  switch (status) {
-    case "crawling":
-      return (
-        <Badge variant="outline" className="text-amber-600 border-amber-300">
-          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-          Crawling
-        </Badge>
-      );
-    case "complete":
-      return (
-        <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-green-300">
-          Complete
-        </Badge>
-      );
-    case "failed":
-      return <Badge variant="destructive">Failed</Badge>;
-    default:
-      return <Badge variant="secondary">Pending</Badge>;
-  }
 }
 
 export default function ProfilesPage() {

@@ -168,7 +168,9 @@ export const PipelineProgress = ({
               </TooltipTrigger>
               <TooltipContent>
                 <p className="text-xs font-medium">{STAGE_LABELS[stage]}</p>
-                <p className="text-[10px] text-muted-foreground capitalize">{status}</p>
+                <p className="text-[10px] text-muted-foreground">
+                  {stageStatusLabel(status)}
+                </p>
               </TooltipContent>
             </Tooltip>
           </div>

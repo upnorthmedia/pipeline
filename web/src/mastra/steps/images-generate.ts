@@ -110,9 +110,9 @@ interface ImageLogContext {
  *
  * They are the only two lines in the pipeline published under an event name
  * other than `log`, and two of the only three that carry a `data` payload.
- * Neither name is in `use-sse.ts`'s `NAMED_EVENTS`, so a browser drops both
- * today exactly as it dropped Python's; they are ported as Python wrote them
- * and the gap is item 5.5d's to close, not this one's to invent a fix for.
+ * Both names are in `use-sse.ts`'s `NAMED_EVENTS` and both reach the run trace
+ * and the Debug Logs panel, which is what put their wording in front of a
+ * reader and cost them the one place they no longer match Python: the ordinal.
  *
  * The no-prompt branch publishes nothing. Python returns from it before the
  * semaphore and before either call, so an entry the model gave no prompt leaves
@@ -131,12 +131,19 @@ async function publishImageOutcome(
   outcome: ImageOutcome,
 ): Promise<void> {
   if (outcome.kind === "no-prompt") return
+  // Python interpolated the fan-out's 0-based index straight into the
+  // sentence, so the first of five images announced itself as image zero. That
+  // was invisible until the two lines reached the Debug Logs panel. `index`
+  // stays as it is everywhere it addresses the manifest, which is `data.index`
+  // (what `buildRunTrace()` keys its per-image counts on) and the operator's
+  // logger line beside the publish; only the prose counts from one.
+  const ordinal = index + 1
   if (outcome.kind === "generated") {
     await publishStageLog(
       mastra,
       postId,
       "images",
-      `Image ${index} generated (${outcome.bytes} bytes)`,
+      `Image ${ordinal} generated (${outcome.bytes} bytes)`,
       {
         event: "image_generated",
         data: { index, bytes: outcome.bytes, path: outcome.url },
@@ -145,7 +152,7 @@ async function publishImageOutcome(
     return
   }
   mastra.getLogger?.()?.error(`Failed to generate image ${index}: ${outcome.error}`)
-  await publishStageLog(mastra, postId, "images", `Image ${index} failed: ${outcome.error}`, {
+  await publishStageLog(mastra, postId, "images", `Image ${ordinal} failed: ${outcome.error}`, {
     level: "error",
     event: "image_failed",
     data: { index, error: outcome.error },

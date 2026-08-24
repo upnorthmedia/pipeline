@@ -92,6 +92,56 @@ function entryLabel(entry: ImageEntry, index: number): string {
   return entry.id || entry.type || `image-${index}`;
 }
 
+/**
+ * The `placement.location` values that need copy of their own.
+ *
+ * `rules/blog-images.md` documents two: `featured_image` on the featured entry
+ * and `after_heading` on a content entry that also names the H2 it follows in
+ * `after_section`. Only one is here, because the generic humanising below
+ * already turns `featured_image` into exactly "Featured image", where it turns
+ * `after_heading` into "After heading", which is not a sentence.
+ */
+const PLACEMENT_LOCATION_LABELS: Record<string, string> = {
+  after_heading: "After a heading",
+};
+
+/**
+ * A location said as well as it can be said.
+ *
+ * A value the rule file does not document is humanised and shown rather than
+ * hidden, on the rule `stageLabel()` follows: something the UI does not
+ * recognise is worth seeing, and the model writes this field.
+ */
+function humanisePlacement(value: string): string | null {
+  const known = PLACEMENT_LOCATION_LABELS[value.trim()];
+  if (known) return known;
+  const words = value.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!words) return null;
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * Where this image goes, in the reader's terms, or `null` if the entry says
+ * nothing about it.
+ *
+ * Both halves of the manifest's placement reached the screen unmapped: the
+ * featured entry read `featured_image`, and a content entry read the bare
+ * heading text with nothing saying what its relationship to that heading was.
+ * The bare-string form is tolerated because `generateOneImage`'s featured
+ * check tolerates it (`placement: "featured"`).
+ */
+function placementLabel(placement: unknown): string | null {
+  if (typeof placement === "string") return humanisePlacement(placement);
+  if (typeof placement !== "object" || placement === null) return null;
+  const { location, after_section: afterSection } = placement as {
+    location?: unknown;
+    after_section?: unknown;
+  };
+  const section = typeof afterSection === "string" ? afterSection.trim() : "";
+  if (section) return `After "${section}"`;
+  return typeof location === "string" ? humanisePlacement(location) : null;
+}
+
 /** The reason shown for an entry whose file the media route cannot serve. */
 const MISSING_FILE_REASON =
   "The image file is missing from the server, so there is nothing to show.";
@@ -252,9 +302,7 @@ export function ImagePreview({ manifest, className, onRetry }: ImagePreviewProps
         {images.map((entry, i) => {
           const label = entryLabel(entry, i);
           const reason = reasons[i];
-          const placement = typeof entry.placement === "object"
-            ? entry.placement?.after_section || entry.placement?.location
-            : entry.placement;
+          const placement = placementLabel(entry.placement);
 
           return (
             <Card key={label}>
@@ -271,7 +319,7 @@ export function ImagePreview({ manifest, className, onRetry }: ImagePreviewProps
                 </div>
                 {placement && (
                   <CardDescription className="text-xs">
-                    {String(placement)}
+                    {placement}
                   </CardDescription>
                 )}
               </CardHeader>

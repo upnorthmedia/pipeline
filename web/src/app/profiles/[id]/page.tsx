@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { CrawlStatusBadge } from "@/components/crawl-status-badge";
 import {
   Table,
   TableBody,
@@ -197,13 +198,6 @@ function ConnectionMessage({
           : unconfigured;
   return <p className="text-xs text-muted-foreground">{text}</p>;
 }
-
-const CRAWL_STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
-  idle: "secondary",
-  crawling: "default",
-  complete: "outline",
-  failed: "destructive",
-};
 
 export default function ProfileDetailPage() {
   const params = useParams();
@@ -1321,10 +1315,7 @@ export default function ProfileDetailPage() {
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground">Status:</span>
-                  <Badge variant={CRAWL_STATUS_VARIANT[profile.crawl_status] || "secondary"}>
-                    {isCrawling && <Loader2 className="h-3 w-3 animate-spin" />}
-                    {profile.crawl_status}
-                  </Badge>
+                  <CrawlStatusBadge status={profile.crawl_status} />
                 </div>
                 {profile.last_crawled_at && (
                   <span className="text-xs text-muted-foreground">

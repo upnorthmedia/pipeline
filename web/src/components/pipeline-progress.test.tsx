@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { PipelineProgress } from "./pipeline-progress";
 import { renderWithProviders } from "@/test/render";
 import type { StageStatusMap } from "@/lib/api";
@@ -157,6 +158,24 @@ describe("PipelineProgress", () => {
       );
       expect(screen.getByLabelText("Research: Awaiting review")).toBeInTheDocument();
       expect(screen.queryByLabelText("Research: review")).toBeNull();
+    });
+
+    // The aria-label above went through `stageStatusLabel`; the tooltip body a
+    // sighted mouse user actually reads printed the stored value with a
+    // `capitalize` class over it, so a parked stage read "Review" there and
+    // "Awaiting review" one line up in the same component.
+    it("names the status in the tooltip body too", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(
+        <PipelineProgress stageStatus={{ research: "review" }} currentStage="research" />
+      );
+
+      await user.hover(screen.getByLabelText("Research: Awaiting review"));
+
+      // Radix renders the content twice: once on screen and once in the
+      // visually-hidden live region it announces through.
+      expect(await screen.findAllByText("Awaiting review")).not.toHaveLength(0);
+      expect(screen.queryAllByText("review")).toHaveLength(0);
     });
 
     it("applies spin animation to running icon", () => {

@@ -38,6 +38,21 @@ if (typeof Element !== "undefined") {
   }
 }
 
+// jsdom implements no ResizeObserver, and Radix measures its trigger through
+// one the moment a Tooltip or a Popover opens. The failure surfaces as an
+// unhandled `ReferenceError` from inside a layout effect rather than as a
+// failing assertion, so the test that opened the tooltip passes and the run
+// reports an error nobody can attribute.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  Object.assign(globalThis, {
+    ResizeObserver: class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  });
+}
+
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
   useRouter: () => ({

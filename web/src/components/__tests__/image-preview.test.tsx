@@ -64,20 +64,63 @@ describe("ImagePreview", () => {
     expect(screen.getByText(/Beautiful landscape/)).toBeInTheDocument();
   });
 
-  it("displays placement info", () => {
-    // `placement` is an object in every real manifest, and the heading an image
-    // follows is the part of it worth showing.
-    const manifest = {
-      images: [
-        {
-          id: "content-1",
-          placement: { location: "after_heading", after_section: "Choosing A Router" },
-          prompt: "A photo",
-        },
-      ],
-    };
-    renderWithProviders(<ImagePreview manifest={manifest} />);
-    expect(screen.getByText("Choosing A Router")).toBeInTheDocument();
+  // `placement` is written by the images model against `rules/blog-images.md`,
+  // which documents exactly two `location` values. Both reached the screen
+  // unmapped: the featured entry read `featured_image`, and a content entry
+  // read the bare heading text with nothing saying what its relationship to
+  // that heading was.
+  describe("placement copy", () => {
+    // `placement` is typed on the component as the object the rule file
+    // documents, but the manifest is model-written JSON: the bare-string form
+    // and an undocumented location both arrive in practice, so the fixtures
+    // are cast rather than narrowed.
+    function placementOf(placement: unknown) {
+      const images = [{ id: "content-1", prompt: "A photo", placement }];
+      renderWithProviders(
+        <ImagePreview manifest={{ images } as Record<string, unknown>} />,
+      );
+    }
+
+    it("names the heading an image follows", () => {
+      placementOf({ location: "after_heading", after_section: "Choosing A Router" });
+      expect(screen.getByText('After "Choosing A Router"')).toBeInTheDocument();
+    });
+
+    it("calls the featured entry a featured image, not `featured_image`", () => {
+      placementOf({ location: "featured_image", after_section: null });
+      expect(screen.getByText("Featured image")).toBeInTheDocument();
+      expect(screen.queryByText("featured_image")).not.toBeInTheDocument();
+    });
+
+    it("names a heading placement that carries no heading", () => {
+      placementOf({ location: "after_heading", after_section: null });
+      expect(screen.getByText("After a heading")).toBeInTheDocument();
+    });
+
+    it("humanises a location the rule file does not document", () => {
+      placementOf({ location: "inline_sidebar" });
+      expect(screen.getByText("Inline sidebar")).toBeInTheDocument();
+    });
+
+    // `generateOneImage`'s featured check tolerates a bare-string placement, so
+    // the preview has to render one rather than print `[object Object]`-grade
+    // nonsense or the raw token.
+    it("humanises a bare-string placement", () => {
+      placementOf("featured");
+      expect(screen.getByText("Featured")).toBeInTheDocument();
+    });
+
+    it("shows no placement line when the entry has none", () => {
+      placementOf(undefined);
+      expect(screen.queryByText(/^After/)).not.toBeInTheDocument();
+      expect(screen.queryByText("Featured image")).not.toBeInTheDocument();
+    });
+
+    it("shows no placement line for an empty location", () => {
+      placementOf({ location: "   ", after_section: "  " });
+      expect(screen.queryByText("Featured image")).not.toBeInTheDocument();
+      expect(screen.queryByText(/^After/)).not.toBeInTheDocument();
+    });
   });
 
   it("displays prompt text", () => {

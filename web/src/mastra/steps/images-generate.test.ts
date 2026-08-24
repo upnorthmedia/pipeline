@@ -354,19 +354,23 @@ describe("the per-image lines the fan-out publishes", () => {
     expect(published).toHaveLength(2)
   })
 
-  it("interpolates Python's message and carries its three data keys", () => {
+  // Python interpolated the 0-based fan-out index straight into the sentence,
+  // so the first of five images announced itself as image zero. `data.index`
+  // is a manifest position and stays 0-based; the ordinal in the message is
+  // what a person reads and is 1-based.
+  it("counts images from one in the message and from zero in the data", () => {
     const [first, second] = publishedOf("image_generated")
 
     expect(first).toEqual({
       event: "image_generated",
       post_id: POST_ID,
       stage: "images",
-      message: `Image 0 generated (${content.spec.size_bytes} bytes)`,
+      message: `Image 1 generated (${content.spec.size_bytes} bytes)`,
       level: "info",
       timestamp: expect.any(String),
       data: { index: 0, bytes: content.spec.size_bytes, path: content.spec.url },
     })
-    expect(second.message).toBe(`Image 1 generated (${featured.spec.size_bytes} bytes)`)
+    expect(second.message).toBe(`Image 2 generated (${featured.spec.size_bytes} bytes)`)
     expect(second.data).toEqual({
       index: 1,
       bytes: featured.spec.size_bytes,
@@ -402,7 +406,7 @@ describe("the per-image lines the fan-out publishes", () => {
         stage: "images",
         level: "info",
         event: "image_generated",
-        message: `Image 0 generated (${content.spec.size_bytes} bytes)`,
+        message: `Image 1 generated (${content.spec.size_bytes} bytes)`,
         data: { index: 0, bytes: content.spec.size_bytes, path: content.spec.url },
       },
       {
@@ -410,7 +414,7 @@ describe("the per-image lines the fan-out publishes", () => {
         stage: "images",
         level: "info",
         event: "image_generated",
-        message: `Image 1 generated (${featured.spec.size_bytes} bytes)`,
+        message: `Image 2 generated (${featured.spec.size_bytes} bytes)`,
         data: { index: 1, bytes: featured.spec.size_bytes, path: featured.spec.url },
       },
     ])
@@ -527,7 +531,7 @@ describe("an image whose provider call fails", () => {
         event: "image_failed",
         post_id: POST_ID,
         stage: "images",
-        message: `Image 7 failed: ${error}`,
+        message: `Image 8 failed: ${error}`,
         level: "error",
         timestamp: expect.any(String),
         data: { index: 7, error },
@@ -548,7 +552,7 @@ describe("an image whose provider call fails", () => {
       stage: "images",
       level: "error",
       event: "image_failed",
-      message: `Image 7 failed: ${String(failed.spec.error)}`,
+      message: `Image 8 failed: ${String(failed.spec.error)}`,
       data: { index: 7, error: String(failed.spec.error) },
     })
   })
