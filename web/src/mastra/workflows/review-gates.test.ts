@@ -165,15 +165,6 @@ async function readPost(postId: string) {
 }
 
 /**
- * Wait for a resumed run to actually finish.
- *
- * `EventedRun.resume()` cannot be awaited for this: it resolves off the shared
- * `workflows-finish` topic, and the Redis stream still holds this run's earlier
- * `workflow.suspend` event, so the resume returns that stale snapshot the
- * moment it subscribes while the run carries on executing behind it. The
- * persisted run state is the only honest answer, so poll that.
- */
-/**
  * Wait for the suspend to reach storage.
  *
  * `start()` resolves on the run's `workflow.suspend` event, which the engine
@@ -189,6 +180,16 @@ async function suspendedRun(runId: string) {
   throw new Error(`run ${runId} never suspended`)
 }
 
+/**
+ * Wait for a resumed run to actually finish.
+ *
+ * `EventedRun.resume()` cannot be awaited for this: it resolves off the shared
+ * `workflows-finish` topic, and the Redis stream still holds this run's earlier
+ * `workflow.suspend` event, so the resume returns that stale snapshot the
+ * moment it subscribes while the run carries on executing behind it. The
+ * persisted run state is the only honest answer, so poll that.
+ * `evented-resume.test.ts` pins that behaviour and its cause.
+ */
 async function settledRun(runId: string) {
   for (let attempt = 0; attempt < 600; attempt += 1) {
     const state = await pipelineWorkflow.getWorkflowRunById(runId)

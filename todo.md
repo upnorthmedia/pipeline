@@ -1,12 +1,5 @@
 # todo
 
-- [confirmed] 2026-08-22 `EventedRun.resume()` resolves with a stale snapshot. It subscribes to
-  the shared `workflows-finish` topic and the Redis stream still holds the run's earlier
-  `workflow.suspend` event, so the promise resolves with that event the moment it subscribes
-  while the resumed run carries on executing behind it. `resumeStream()`'s `.result` has the
-  same problem and its `fullStream` replays the pre-suspend events too. Only
-  `workflow.getWorkflowRunById(runId)` reports the truth. Anything in Phase 5 that awaits a
-  resume (a gate-approval route, the SSE trace) has to poll the persisted state instead.
 - [confirmed] 2026-08-22 `web/src/lib/api.ts` types `StageMode` as `"auto"` and `StageStatus`
   without `"review"`, so the dashboard cannot express a gated stage. Item 4.3 writes
   `stage_status[stage] = "review"` when a run parks. Phase 5.3 / Phase 8 must widen both unions
@@ -532,3 +525,32 @@
   resolve there by accident rather than by declaration, which item P2.7 pinned down instead of
   relying on. Worth narrowing once there is a build gate that would catch the regression.
 
+
+- [confirmed] 2026-08-24 A run parked at a review gate can never be resumed: nothing in the app
+  calls `run.resume()`. `stage-io.ts` suspends the run and writes `stage_status[stage] =
+  "review"`, and the only way forward the UI offers is `POST /api/posts/{id}/run` or
+  `/run-all`, which start a *new* run. So the suspended run stays suspended in
+  `mastra_workflow_snapshot` forever while a second run redoes the chain from the stage the
+  first one had already reached, and the trace view shows a run stuck at "Awaiting review"
+  beside the one that actually finished. The port's own comment on `reviewGate` says the point
+  of suspending rather than returning is that "approving it continues into the remaining stages
+  instead of starting a second run"; nothing exercises that outside `review-gates.test.ts`. A
+  gate approval route has to poll `getWorkflowRunById` rather than await the resume, for the
+  reason `evented-resume.test.ts` pins. Found at polish ledger P2.16.
+
+- [confirmed] 2026-08-24 Five of the seven workflow registration keys in
+  `web/src/mastra/index.ts` differ from the workflow's own `id`, and a resume resolves by id.
+  `EventedExecutionEngine.resolveWorkflow` calls `Mastra.getWorkflow(workflowId)`, and
+  `getWorkflow` looks its argument up by registration *key*, so `scaffoldCheck` /
+  `sitemapCrawl` / `recrawlCheck` / `wordpressPublish` / `nextjsPublish` would answer
+  `MASTRA_GET_WORKFLOW_BY_ID_NOT_FOUND` on any resume of `scaffold-check`, `sitemap-crawl`,
+  `recrawl-check`, `wordpress-publish` or `nextjs-publish`. Latent today: none of those five
+  suspends, and the two that can (`pipeline`, `images`) are the two whose key matches. The
+  failure mode is a workflow that starts, runs and then 404s the moment a step in it suspends,
+  which is the least obvious time to find out. Reproduced under polish ledger P2.16, where the
+  probe was registered under a camelCase key and its `start()` succeeded while its `resume()`
+  threw. Renaming the keys also renames what Mastra Studio lists and what the
+  `mastra.getWorkflow(...)` call sites pass, so it is a small change with a wide surface. The
+  same constraint is already known for *nested* workflows and honoured there
+  (`nested-retry.test.ts` keys its five registrations by id, and `images`, the one nested
+  workflow the app registers, matches); the resume path is the second place it bites.
