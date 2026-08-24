@@ -17,7 +17,6 @@ import { apiRequest, createTestSession, deleteTestSessions, type TestSession } f
 
 import { GET as getPost } from "./[id]/route"
 import { GET as listPosts } from "./route"
-import { toPydanticIso } from "../pydantic"
 import { serializePost } from "./serialize"
 
 const PREFIX = "posts-route-test-"
@@ -386,12 +385,27 @@ describe("PostRead serialization", () => {
     })
   })
 
-  it("formats timestamps the way pydantic 2.12 does", () => {
-    // Right-hand sides pasted from `jsonable_encoder(PostRead.model_validate(...))`.
-    expect(toPydanticIso(new Date("2026-08-22T12:34:56.789Z"))).toBe("2026-08-22T12:34:56.789Z")
-    expect(toPydanticIso(new Date("2026-08-22T12:34:56.000Z"))).toBe("2026-08-22T12:34:56Z")
-    expect(toPydanticIso(new Date("2026-08-22T12:34:56.700Z"))).toBe("2026-08-22T12:34:56.7Z")
-    expect(toPydanticIso(null)).toBeNull()
+  it("serves every timestamp through toPydanticIso", async () => {
+    // The format itself is pinned against a measured pydantic in
+    // `src/app/api/pydantic.test.ts`. This asserts the route reaches it, for
+    // both branches of the rule and for the null a nullable column carries.
+    const profileId = await insertProfile(user.userId)
+    const wholeSecond = new Date("2026-08-22T12:34:56.000Z")
+    const withMillis = new Date("2026-08-22T12:34:56.700Z")
+    const row = await insertPost({
+      slug: `${PREFIX}timestamps`,
+      profileId,
+      createdAt: wholeSecond,
+      updatedAt: withMillis,
+      completedAt: withMillis,
+      nextjsPublishedAt: null,
+    })
+
+    const body = (await (await getById(row.id, user.cookie)).json()) as Record<string, unknown>
+    expect(body.created_at).toBe("2026-08-22T12:34:56Z")
+    expect(body.updated_at).toBe("2026-08-22T12:34:56.700000Z")
+    expect(body.completed_at).toBe("2026-08-22T12:34:56.700000Z")
+    expect(body.nextjs_published_at).toBeNull()
   })
 
   it("carries a stored image_manifest and stage_status through unchanged", async () => {

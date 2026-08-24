@@ -233,21 +233,28 @@ export function unprocessableRequest(issues: ValidationErrorDetail[]): Response 
 }
 
 /**
- * Pydantic 2.12 renders an aware datetime with a `Z` suffix and trims trailing
- * zeros off the fractional second, dropping the fraction entirely when it is
- * zero: `2026-08-22T12:34:56.789012Z` and `2026-08-22T12:34:56Z`. JavaScript's
- * `toISOString()` instead always writes exactly three fractional digits, so it
- * is reformatted here.
+ * Pydantic renders an aware datetime with a `Z` suffix, six fractional digits,
+ * and no fractional part at all when the microsecond is zero:
+ * `2026-08-22T12:34:56.700000Z` and `2026-08-22T12:34:56Z`. It never trims a
+ * trailing zero. JavaScript's `toISOString()` instead always writes exactly
+ * three fractional digits and never omits them, so it is reformatted here.
+ *
+ * Every column this is applied to is `timestamptz`, which SQLAlchemy read back
+ * as an aware datetime, so `Z` rather than a naive `...T12:34:56` is the right
+ * suffix. Measured against pydantic 2.12.5 and FastAPI 0.141.1 rather than
+ * assumed; the transcript is in `docs/polish/evidence/p2.md#p230`, and
+ * `pydantic.test.ts` pins each case.
  *
  * Sub-millisecond precision is lost regardless: `pg` parses a Postgres
  * timestamp into a `Date`, which has no microseconds. A value stored as
- * `...789012` therefore reads back as `...789`. Nothing in the dashboard does
- * more than hand these strings to `new Date()`, which parses both.
+ * `...789012` therefore reads back as `...789000`. Nothing in the dashboard
+ * does more than hand these strings to `new Date()`, which parses both.
  */
 export function toPydanticIso(value: Date | null): string | null {
   if (value === null) return null
-  const iso = value.toISOString()
-  return iso.replace(/\.(\d*[1-9])?0*Z$/, (_match, kept: string | undefined) =>
-    kept ? `.${kept}Z` : "Z",
+  // `toISOString()` always writes exactly three fractional digits, so the
+  // pattern always matches and the padding to six is a constant `000`.
+  return value.toISOString().replace(/\.(\d{3})Z$/, (_match, millis: string) =>
+    millis === "000" ? "Z" : `.${millis}000Z`,
   )
 }

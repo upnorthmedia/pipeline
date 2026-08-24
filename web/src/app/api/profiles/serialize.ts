@@ -20,6 +20,8 @@
  */
 import type { StageSettingsJson, websiteProfiles } from "@/db"
 
+import { toPydanticIso } from "../pydantic"
+
 type ProfileRow = typeof websiteProfiles.$inferSelect
 
 /**
@@ -103,7 +105,7 @@ export function serializeProfile(row: ProfileRow): ProfileResponse {
     recrawl_interval: row.recrawlInterval,
     id: row.id,
     sitemap_urls: row.sitemapUrls ?? [],
-    last_crawled_at: row.lastCrawledAt?.toISOString() ?? null,
+    last_crawled_at: toPydanticIso(row.lastCrawledAt),
     crawl_status: row.crawlStatus ?? "pending",
     wp_url: row.wpUrl,
     wp_username: row.wpUsername,
@@ -116,7 +118,7 @@ export function serializeProfile(row: ProfileRow): ProfileResponse {
     nextjs_webhook_url: row.nextjsWebhookUrl,
     nextjs_webhook_secret_set: !!row.nextjsWebhookSecret,
     nextjs_frontmatter_map: row.nextjsFrontmatterMap,
-    created_at: row.createdAt?.toISOString() ?? null,
-    updated_at: row.updatedAt?.toISOString() ?? null,
+    created_at: toPydanticIso(row.createdAt),
+    updated_at: toPydanticIso(row.updatedAt),
   }
 }

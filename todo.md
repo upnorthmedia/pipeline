@@ -1,5 +1,12 @@
 # todo
 
+- [investigate] 2026-08-24 One unidentified single-test failure in a full `pnpm test` run
+  during P2.30: `Test Files 1 failed | 163 passed`, `Tests 1 failed | 4932 passed`, with the
+  output piped through `tail -8` so the failing name was discarded. The five runs after it were
+  identical and clean (164 files, 4933 tests), as were the two before once the links assertion
+  that change corrected was fixed. Either a residual flake P0.3 did not reach or an artefact of
+  that one run; nothing about it can be established from what was kept. Next full-suite run
+  should `tee` to a file, and if a single failure recurs, name it here.
 - [confirmed] 2026-08-24 A worker redeploy parks any in-flight post for over fifteen minutes
   and then re-bills the stage. `Mastra.stopWorkers()` drains the reader, not the work:
   `RedisStreamsPubSub.#deliverMessage` never awaits the step callback, so unsubscribing and
@@ -10,15 +17,6 @@
   plus up to one 30s tick, and the reclaiming worker re-runs the stage from the beginning.
   The fix has to drain in-flight steps before exiting, which means owning the worker entry
   rather than using the one `mastra worker build` generates. Ledger item P2.91.
-- [confirmed] 2026-08-22 `web/src/app/api/profiles/serialize.ts` formats timestamps with a plain
-  `Date.toISOString()`, which always writes exactly three fractional digits. Pydantic 2.12 trims
-  trailing zeros and drops the fraction entirely when it is zero, so a profile whose
-  `created_at` landed on a whole second is served as `...T12:34:56.000Z` where FastAPI served
-  `...T12:34:56Z`. Found while porting `PostRead` for item 5.3a, which added
-  `toPydanticIso()` in `web/src/app/api/posts/serialize.ts` to reproduce the pydantic rule.
-  Nothing in the dashboard does more than hand these strings to `new Date()`, so this is
-  cosmetic, but the two ported serializers should agree: move `toPydanticIso()` somewhere
-  shared and use it for profiles too.
 - [confirmed] 2026-08-22 `POST /api/posts/{post_id}/duplicate` silently drops `article_type` and
   `additional_info`. `duplicate_post`'s `config_fields` list in `api/src/api/posts.py` names
   eighteen columns and was never extended when those two were added, so a duplicated post loses

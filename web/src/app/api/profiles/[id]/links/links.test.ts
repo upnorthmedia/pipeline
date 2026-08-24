@@ -198,7 +198,9 @@ describe("GET /api/profiles/{profile_id}/links", () => {
       profile_id: profileId,
       source: "sitemap",
       post_id: null,
-      created_at: "2026-01-02T03:04:05.678Z",
+      // Six fractional digits, not three: pydantic pads, and `.678` is the
+      // most a `Date` can carry. Pinned in `src/app/api/pydantic.test.ts`.
+      created_at: "2026-01-02T03:04:05.678000Z",
     })
   })
 

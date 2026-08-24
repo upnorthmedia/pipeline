@@ -4,9 +4,11 @@
  *
  * The response is `SettingRead` from `api/src/models/schemas.py`, which is the
  * `Setting` interface in `web/src/lib/api.ts`: `key`, `value`, `updated_at`.
- * The one representational difference is that FastAPI serialised the timestamp
- * as `+00:00` and `Date.toISOString()` writes `Z`; both are the same instant in
- * RFC 3339 and no caller parses the field.
+ * The timestamp goes through `toPydanticIso()`, the same helper the post and
+ * profile serializers use: `Setting.updated_at` is a `DateTime(timezone=True)`
+ * behind a plain `datetime` field, so pydantic wrote a `Z` suffix and six
+ * fractional digits or none, exactly as it did for every other timestamp in
+ * the API. `Date.toISOString()` writes neither shape.
  *
  * Rows are scoped to the authenticated user by `settings.user_id`, matching
  * Alembic 010. Note that the `api_keys` row is written with a null `user_id`
@@ -30,6 +32,8 @@ import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import { withServerError } from "@/lib/route-error"
 import { parseStageModelSettings, STAGE_MODELS_SETTING_KEY } from "@/mastra/stage-models"
 
+import { toPydanticIso } from "../pydantic"
+
 /** The wire shape of one row, matching `SettingRead`. */
 interface SettingResponse {
   key: string
@@ -47,7 +51,7 @@ async function listForUser(userId: string): Promise<SettingResponse[]> {
   return rows.map((row) => ({
     key: row.key,
     value: row.value,
-    updated_at: row.updatedAt?.toISOString() ?? null,
+    updated_at: toPydanticIso(row.updatedAt),
   }))
 }
 

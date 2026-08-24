@@ -165,6 +165,25 @@ describe("GET /api/profiles", () => {
     expect(body.map((row: { name: string }) => row.name)).toEqual(["Newer", "Older"])
   })
 
+  it("serves every timestamp through toPydanticIso", async () => {
+    // ProfileRead's three datetime fields used to go out through a bare
+    // `Date.toISOString()`, which always writes exactly three fractional
+    // digits, where pydantic writes six or none. The format itself is pinned
+    // against a measured pydantic in `src/app/api/pydantic.test.ts`; this
+    // asserts the route reaches it, for both branches and for a null column.
+    const id = await insertProfile(user.userId, {
+      createdAt: new Date("2026-08-22T12:34:56.000Z"),
+      updatedAt: new Date("2026-08-22T12:34:56.700Z"),
+      lastCrawledAt: null,
+    })
+
+    const body = (await (await getById(id, user.cookie)).json()) as Record<string, unknown>
+
+    expect(body.created_at).toBe("2026-08-22T12:34:56Z")
+    expect(body.updated_at).toBe("2026-08-22T12:34:56.700000Z")
+    expect(body.last_crawled_at).toBeNull()
+  })
+
   it("never returns another user's profile", async () => {
     await insertProfile(other.userId, { name: "Not yours" })
 

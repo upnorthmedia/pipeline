@@ -84,6 +84,36 @@ describe("GET /api/settings", () => {
     expect(new Date(body[0].updated_at).getTime()).toBeGreaterThan(0)
   })
 
+  it("serves updated_at through toPydanticIso", async () => {
+    // Not `Date.toISOString()`: `Setting.updated_at` is a `timestamptz` behind
+    // a plain `datetime` field, so pydantic wrote six fractional digits or
+    // none. The format is pinned in `src/app/api/pydantic.test.ts`.
+    await db.insert(settings).values([
+      {
+        key: `${PREFIX}whole-second`,
+        userId: user.userId,
+        value: {},
+        updatedAt: new Date("2026-08-22T12:34:56.000Z"),
+      },
+      {
+        key: `${PREFIX}with-millis`,
+        userId: user.userId,
+        value: {},
+        updatedAt: new Date("2026-08-22T12:34:56.700Z"),
+      },
+    ])
+
+    const body = (await (await GET(apiRequest(URL, { cookie: user.cookie }))).json()) as {
+      key: string
+      updated_at: string
+    }[]
+
+    expect(Object.fromEntries(body.map((row) => [row.key, row.updated_at]))).toEqual({
+      [`${PREFIX}whole-second`]: "2026-08-22T12:34:56Z",
+      [`${PREFIX}with-millis`]: "2026-08-22T12:34:56.700000Z",
+    })
+  })
+
   it("never returns another user's settings", async () => {
     await db
       .insert(settings)
