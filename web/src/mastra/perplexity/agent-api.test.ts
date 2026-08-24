@@ -26,13 +26,17 @@ import path from "node:path"
 import { Agent } from "@mastra/core/agent"
 import { describe, expect, it } from "vitest"
 
+import { stageCostUsd } from "../execution-log"
+
 import {
   PERPLEXITY_AGENT_PROVIDER,
   PERPLEXITY_AGENT_URL,
   PerplexityAgentError,
   agentErrorMessage,
   buildAgentRequest,
+  agentReportedCostUsd,
   mapAgentContent,
+  mapAgentProviderMetadata,
   mapAgentUsage,
   mapFinishReason,
   perplexityAgentModel,
@@ -195,6 +199,33 @@ describe("the recorded grounded response", () => {
       outputTokens: usage.output_tokens,
     })
   })
+
+  /**
+   * `MODEL_COSTS` prices tokens only, and this endpoint bills `web_search`
+   * separately, so the token estimate is short of the bill by whatever the
+   * searches cost. The provider reports its own total, which is what the stage
+   * records instead; these cases pin the channel it travels through.
+   */
+  it("carries the provider's own cost breakdown as provider metadata", () => {
+    const cost = (recorded.usage as { cost: Record<string, unknown> }).cost
+    expect(mapAgentProviderMetadata(recorded)).toEqual({
+      [PERPLEXITY_AGENT_PROVIDER]: { cost },
+    })
+  })
+
+  it("reports no cost metadata for a response that priced nothing", () => {
+    expect(mapAgentProviderMetadata({ usage: { input_tokens: 1 } })).toBeUndefined()
+    expect(mapAgentProviderMetadata({})).toBeUndefined()
+  })
+
+  it("reads the reported total back off provider metadata, and nothing else", () => {
+    expect(agentReportedCostUsd(mapAgentProviderMetadata(recorded))).toBe(
+      (recorded.usage as { cost: { total_cost: number } }).cost.total_cost,
+    )
+    expect(agentReportedCostUsd(undefined)).toBeUndefined()
+    // Another provider's metadata is not this provider's bill.
+    expect(agentReportedCostUsd({ openai: { cost: { total_cost: 9 } } })).toBeUndefined()
+  })
 })
 
 describe("the run verdict, which arrives inside a 200 body", () => {
@@ -297,6 +328,25 @@ describe("the model as Mastra sees it", () => {
     expect(parts.filter((part) => part.type === "text-delta")).toHaveLength(1)
   })
 
+  it("puts the reported cost on doGenerate and on the stream's finish part", async () => {
+    const { impl } = servingRecorded(recorded)
+    const model = perplexityAgentModel({ modelId: MODEL_ID, apiKey: "k", fetchImpl: impl })
+    const expected = mapAgentProviderMetadata(recorded)
+
+    const generated = await model.doGenerate({ prompt: SIMPLE_PROMPT })
+    expect(generated.providerMetadata).toEqual(expected)
+
+    const { stream } = await model.doStream({ prompt: SIMPLE_PROMPT })
+    const reader = stream.getReader()
+    const parts: Record<string, unknown>[] = []
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      parts.push(value)
+    }
+    expect(parts.at(-1)).toMatchObject({ type: "finish", providerMetadata: expected })
+  })
+
   it("drives a real Mastra Agent, which is the only compatibility check that counts", async () => {
     const { impl } = servingRecorded(recorded)
     const agent = new Agent({
@@ -311,6 +361,11 @@ describe("the model as Mastra sees it", () => {
     expect(result.text).toContain("Reykjav")
     expect(result.usage?.inputTokens).toBe((recorded.usage as { input_tokens: number }).input_tokens)
     expect(result.sources?.length).toBeGreaterThan(0)
+    // The channel the `research` step reads the bill off: the metadata has to
+    // survive Mastra's own wrapping, not just leave this adapter.
+    expect(agentReportedCostUsd(result.providerMetadata)).toBe(
+      (recorded.usage as { cost: { total_cost: number } }).cost.total_cost,
+    )
   })
 })
 
@@ -332,5 +387,14 @@ describe.skipIf(!LIVE_KEY)("live Agent API call", () => {
     expect(result.text.length).toBeGreaterThan(1000)
     expect(result.sources?.length).toBeGreaterThan(0)
     expect(result.usage?.outputTokens ?? 0).toBeGreaterThan(0)
+
+    // The bill is real and the per-token table cannot reach it: a grounded
+    // call always spends at least one `web_search` invocation, which
+    // `MODEL_COSTS` prices at nothing. Measured once at $0.016587 estimated
+    // against $0.01909 billed, the whole $0.0025 gap being one search.
+    const reported = agentReportedCostUsd(result.providerMetadata) ?? 0
+    expect(reported).toBeGreaterThan(
+      stageCostUsd(result.usage?.inputTokens ?? 0, result.usage?.outputTokens ?? 0, MODEL_ID),
+    )
   }, 300_000)
 })

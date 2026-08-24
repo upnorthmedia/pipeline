@@ -6,7 +6,8 @@
  *
  * The numbers are Mastra's own usage accounting. Each step reads `usage` off
  * the agent's answer and `announceStageComplete()` writes the model, the token
- * counts, the measured duration and the priced estimate onto the post row;
+ * counts, the measured duration and the cost onto the post row (a per-token
+ * estimate, or the provider's own price where it reports one);
  * `buildRunTrace()` folds that column back into per-stage rows. See
  * `web/src/lib/run-trace.ts` for why the trace reads the row rather than
  * subscribing to Mastra's per-run stream directly.
@@ -77,8 +78,9 @@ function formatDuration(seconds: number): string {
 }
 
 /**
- * Priced by the pipeline at the model each stage reported (see `stageCostUsd`),
- * so sub-cent stages are common and `$0.00` would tell an operator nothing.
+ * Priced by the pipeline at the model each stage reported, or at what the
+ * provider said the call cost where it reports one (see `stageCostUsd`), so
+ * sub-cent stages are common and `$0.00` would tell an operator nothing.
  * Four decimal places until a run is worth more than a cent.
  */
 function formatCost(usd: number): string {

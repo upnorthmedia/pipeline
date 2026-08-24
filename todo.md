@@ -38,27 +38,6 @@
   `retry_delay = 10` was a `WorkerSettings` key and spaced every job function's retries
   equally. Ledger item P2.95.
 
-- [confirmed] 2026-08-23 Perplexity's Sonar Chat Completions endpoint is deprecated with
-  support ending 2026-09-27, per `docs.perplexity.ai/getting-started/models`. The
-  `research` stage reaches `sonar-pro` through Mastra's model router, which uses the
-  OpenAI-compatible `/chat/completions` shape, so research calls stop working after that
-  date unless the stage moves to Perplexity's Agent API. Found while verifying model IDs
-  for ledger item 6.1; out of scope there, but it has a hard deadline. Ledger item P2.71.
-  Closed at P2.71b-i: P2.71a added `web/src/mastra/perplexity/agent-api.ts`, a
-  `LanguageModelV2` over `POST /v1/agent`, and P2.71b-i pointed the stage at it. The
-  `research` allowlist and default are `perplexity/sonar`, which `GET /v1/models` says is the
-  only Perplexity search model the endpoint accepts. What is left is one accounting gap, not
-  a deadline: ledger item P2.71b-ii.
-
-- [confirmed] 2026-08-24 `MODEL_COSTS` cannot express the Agent API's per-search fee, so a
-  research run is under-reported by it. Measured on a real call: token cost $0.0167 and
-  `usage.cost.total_cost` $0.0242, the $0.0075 gap being three `web_search` invocations at
-  $0.0025 each. Not a regression, the same shape existed for `sonar-pro` (a $0.006
-  `request_cost` against a $0.0353 token cost), but it is larger as a fraction now, and the
-  Agent API is the first provider here that reports its own cost in the response, so the fix
-  is to carry `usage.cost.total_cost` through the step rather than to add a fee column. Found
-  closing P2.71b-i. Ledger item P2.71b-ii.
-
 - [confirmed] 2026-08-23 Nothing runs database migrations on deploy. `deploy.preDeployCommand`
   is the documented Railway hook, but neither runtime image carries `drizzle-kit` or the
   `drizzle/` folder, so a fresh Railway environment needs `pnpm -C web db:migrate` and

@@ -61,6 +61,15 @@ export const stageStepOutputSchema = z.object({
   tokensOut: z.number().int().nonnegative(),
   durationS: z.number().nonnegative(),
   /**
+   * What the provider itself said the call cost, in USD, when it says so.
+   *
+   * Only Perplexity's Agent API does, and it is the only stage whose bill the
+   * per-token table cannot reconstruct: `web_search` is billed per invocation
+   * on top of the tokens. Absent for every other stage, which keeps the
+   * estimate. Ledger item P2.71b-ii.
+   */
+  reportedCostUsd: z.number().nonnegative().optional(),
+  /**
    * True when the step returned without calling its provider, which is the
    * `continue` in Python's stage loop. A skipped stage bills nothing, writes
    * nothing and reports no meta, so the zeroed fields below are not a
@@ -407,7 +416,12 @@ export async function announceStageComplete(
       tokens_in: output.tokensIn,
       tokens_out: output.tokensOut,
       duration_s: durationS,
-      cost_usd: stageCostUsd(output.tokensIn, output.tokensOut, output.model),
+      cost_usd: stageCostUsd(
+        output.tokensIn,
+        output.tokensOut,
+        output.model,
+        output.reportedCostUsd,
+      ),
     },
   })
   await publishPipelineEvent(mastra.pubsub, output.postId, "stage_complete", {

@@ -145,8 +145,26 @@ export async function appendExecutionLog(
  *
  * Historical entries are untouched: this column is append-only and every row
  * already in it keeps the number it was written with.
+ *
+ * `reportedCostUsd` is a price the provider itself put on the call, and it
+ * wins when there is one. Only Perplexity's Agent API reports one today, and
+ * it is the only provider here whose bill this table cannot reconstruct:
+ * `web_search` is charged per invocation on top of the tokens, so on the
+ * recorded grounded call the table's $0.001553 is a 2.6x understatement of a
+ * $0.00405 bill. Adding a per-invocation fee column instead would mean
+ * counting tool calls here and guessing a rate, when the answer is in the
+ * response. A reported `0` is a measurement and is used; only `undefined`
+ * means nothing was reported. Ledger item P2.71b-ii.
  */
-export function stageCostUsd(tokensIn: number, tokensOut: number, model: string): number {
+export function stageCostUsd(
+  tokensIn: number,
+  tokensOut: number,
+  model: string,
+  reportedCostUsd?: number,
+): number {
+  // Rounded like the estimate rather than passed through, so one stage cannot
+  // carry more decimal places into a run total than the others.
+  if (reportedCostUsd !== undefined) return pythonRound(reportedCostUsd, 6)
   const cost = MODEL_COSTS[model] ?? { input: 0, output: 0 }
   // Python's `round(..., 6)` over the same two terms in the same order.
   return pythonRound(

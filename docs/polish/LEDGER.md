@@ -563,7 +563,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [x] **P2.68** `[confirmed]` `POST /api/posts/{post_id}/publish` cannot publish a post whose `output_format` is `both`, which is the column's default value. `publish_post()` ... Fixed by closing the vocabulary rather than widening the dispatch: `both` was already gone from the defaults and the picker (`drizzle/0003`, P3.5a), so the residue was that both write boundaries took the field as `z.string()`. `src/app/api/output-format.ts` now refuses anything outside the three formats on all four post and profile write endpoints, and the publish refusal is three sentences that name neither the column nor a raw enum. The parity corpus keeps its two recorded `both` bodies and a test asserts they are now refused. Closes the copy entry that was waiting on this decision; both entries removed from `todo.md`. [evidence](evidence/p2.md#p268)
 - [x] **P2.69** `[confirmed]` `web/src/mastra/pipeline-events.test.ts > a run that executes every stage > carries Python's log payload and nothing else` is flaky: it reads ... Fixed by P0.3b; entry removed from `todo.md`. [evidence](evidence/p0.md#p03b)
 - [x] **P2.70** `[confirmed]` The vitest suites that borrow the global `settings.api_keys` row can destroy live credentials. `web/src/mastra/api-keys.test.ts` deletes the row ... Fixed by P0.3a; entry removed from `todo.md`. [evidence](evidence/p0.md#p03a)
-- [ ] **P2.71** `[confirmed]` Perplexity's Sonar Chat Completions endpoint is deprecated with support ending 2026-09-27, per `docs.perplexity.ai/getting-started/models`. The ...
+- [x] **P2.71** `[confirmed]` Perplexity's Sonar Chat Completions endpoint is deprecated with support ending 2026-09-27, per `docs.perplexity.ai/getting-started/models`. The ... Closed across P2.71a (the client), P2.71b-i (the stage swap) and P2.71b-ii (the accounting); both entries removed from `todo.md`.
   - [x] **P2.71a** Reach the replacement at all. Nothing installed could: `@ai-sdk/perplexity`
         4.0.31 still builds `${baseURL}/chat/completions`, Mastra's own `perplexity-agent`
         registry entry builds an OpenAI *chat* model and 404s, and `@ai-sdk/openai`'s Responses
@@ -572,7 +572,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
         `web/src/mastra/perplexity/agent-api.ts`, a `LanguageModelV2` over `POST /v1/agent`,
         with a recorded live response as the mapping oracle and a live case that drives a real
         Mastra `Agent` end to end. [evidence](evidence/p2.md#p271a)
-  - [ ] **P2.71b** Move the `research` stage onto it. Split, because the swap is not a
+  - [x] **P2.71b** Move the `research` stage onto it. Split, because the swap is not a
         transport change: the Agent API accepts exactly one Perplexity search model and it is
         not `sonar-pro`.
     - [x] **P2.71b-i** The swap. `GET /v1/models` lists `perplexity/sonar` and no other
@@ -585,14 +585,15 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
           line and the analytics model picker all moved; `storedSettings()` now falls back per
           stage so retiring an allowlist entry cannot silently discard another stage's stored
           override. [evidence](evidence/p2.md#p271b-i)
-    - [ ] **P2.71b-ii** The accounting gap the swap leaves. `MODEL_COSTS` prices tokens only,
-          and the Agent API bills `web_search` separately at $0.0025 an invocation: a measured
-          call's token cost was $0.0167 against a reported `usage.cost.total_cost` of $0.0242.
-          Not a regression (`sonar-pro` had a $0.006 per-request fee this table never saw
-          either) but larger as a fraction, and the Agent API is the first provider here that
-          reports its own cost in the response, so the fix is to carry
-          `usage.cost.total_cost` through the step rather than to add a fee column to a
-          per-token table.
+    - [x] **P2.71b-ii** The accounting gap the swap leaves. `MODEL_COSTS` prices tokens only,
+          and the Agent API bills `web_search` separately at $0.0025 an invocation. Fixed by
+          carrying the provider's own price rather than by adding a fee column: the adapter
+          puts `usage.cost` on `providerMetadata` (both `doGenerate` and the stream's `finish`
+          part), `researchStep` sums it across attempts onto a new optional `reportedCostUsd`,
+          and `stageCostUsd()` prices a stage at a reported number when it has one. Measured
+          live at $0.016587 estimated against a $0.01909 bill, the whole $0.0025 gap being one
+          search. Four Claude stages and the Gemini stage still estimate, because their
+          providers report no price. [evidence](evidence/p2.md#p271b-ii)
 - [x] **P2.72** `[confirmed]` The Playwright suite (`pnpm -C web test:e2e`) is stale. A full run during ledger item 7.1b ended `4 passed (7.4m)` with failures listed across ... Fixed across P0.5a, P0.5b and P0.5c: 34 passed / 0 failed, twice; entry removed from `todo.md`. [evidence](evidence/p0.md#p05c)
 - [x] **P2.73** `[confirmed]` `src/mastra/workflows/scaffold-check.test.ts` fails intermittently under a full `pnpm -C web test` run with `Error: Hook timed out in 60000ms` ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [x] **P2.74** `[confirmed]` A worker process running outside the test suite breaks the suite. While a `jena-worker` container was up against the shared dev Redis, a full ... Contradicted: three worker-up runs are identical to three worker-down runs; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)

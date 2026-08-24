@@ -26,6 +26,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { closeDb, getDb, posts } from "../../db"
 import { ABSENT_POST_ID } from "../../test/absent-ids"
+import { stageCostUsd } from "../execution-log"
+import { PERPLEXITY_AGENT_PROVIDER } from "../perplexity/agent-api"
 import { STATUS_COMPLETE } from "../state"
 import { stageStepOutputSchema } from "./stage-io"
 import {
@@ -97,7 +99,22 @@ function replayOf(fixture: Fixture) {
   }
 }
 
-type Replay = ReturnType<typeof replayOf>
+type Replay = ReturnType<typeof replayOf> & { providerMetadata?: Record<string, unknown> }
+
+/**
+ * The same replay with a Perplexity Agent API bill attached, in the shape
+ * `mapAgentProviderMetadata` writes and Mastra passes through untouched.
+ */
+function billedAt(replay: Replay, totalCost: number): Replay {
+  return {
+    ...replay,
+    providerMetadata: {
+      [PERPLEXITY_AGENT_PROVIDER]: {
+        cost: { total_cost: totalCost, tool_calls_cost: 0.0025, currency: "USD" },
+      },
+    },
+  }
+}
 
 /**
  * A stand-in for the Mastra instance that records the prompts the step sends
@@ -517,5 +534,65 @@ describe("research step progress lines", () => {
       // call sites passes `data`, so no entry carries the key at all.
       expect(Object.keys(entry).sort()).toEqual(["event", "level", "message", "stage", "ts"])
     }
+  })
+})
+
+
+/**
+ * Ledger item P2.71b-ii. `MODEL_COSTS` prices tokens, and the Agent API bills
+ * `web_search` per invocation on top of them, so the table is short of the
+ * actual bill on every grounded call. The provider reports its own total in
+ * the response; these cases pin that it is what the run's record says the
+ * stage cost, summed over the attempts the stage actually paid for.
+ */
+describe("research step cost accounting", () => {
+  /** The `data` on the stage's own `stage_complete` execution log entry. */
+  async function stageCompleteMeta(postId: string) {
+    const [row] = await db
+      .select({ logs: posts.executionLogs })
+      .from(posts)
+      .where(eq(posts.id, postId))
+    const entry = ((row?.logs ?? []) as Record<string, unknown>[]).find(
+      (item) => item.event === "stage_complete",
+    )
+    return entry?.data as Record<string, number | string> | undefined
+  }
+
+  it("records the price the provider reported rather than the token estimate", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { output } = await runStep(fixtureIds[0], [billedAt(replayOf(fixture), 0.00405)])
+
+    expect(output.reportedCostUsd).toBe(0.00405)
+    const meta = await stageCompleteMeta(fixtureIds[0])
+    expect(meta?.cost_usd).toBe(0.00405)
+    // The estimate the table would have written, which the bill replaces.
+    expect(meta?.cost_usd).not.toBe(
+      stageCostUsd(output.tokensIn, output.tokensOut, output.model),
+    )
+  })
+
+  it("sums the bill over every attempt, the way it sums the tokens", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    await runStep(fixtureIds[0], [billedAt(REFUSAL, 0.001), billedAt(replayOf(fixture), 0.00405)])
+
+    // A retried stage is billed for both calls, so reporting only the
+    // surviving one would understate what the run cost.
+    expect((await stageCompleteMeta(fixtureIds[0]))?.cost_usd).toBe(0.00505)
+  })
+
+  it("falls back to the table when the provider reported no price", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { output } = await runStep(fixtureIds[0], [replayOf(fixture)])
+
+    expect(output.reportedCostUsd).toBeUndefined()
+    expect((await stageCompleteMeta(fixtureIds[0]))?.cost_usd).toBe(
+      stageCostUsd(output.tokensIn, output.tokensOut, output.model),
+    )
   })
 })

@@ -21,14 +21,17 @@
  * from the `stage_start` frame rather than waiting for a refetch to reveal the
  * matching row entry.
  *
- * **Cost is an estimate and is not this module's arithmetic.** `cost_usd` is
- * stored per entry by the pipeline, priced at the reported model's published
- * per-million-token rate (see `stageCostUsd`, and note that a model with no
- * published rate prices at zero). The trace sums what is stored rather than
- * repricing, so the run total and the per-stage lines cannot disagree with the
- * analytics endpoints. Entries written before ledger item P2.38 carry an
- * Opus-rate number for every stage, which for `research` and `images` is an
- * overestimate the trace faithfully sums.
+ * **Cost is mostly an estimate and is never this module's arithmetic.**
+ * `cost_usd` is stored per entry by the pipeline. For four of the six stages it
+ * is priced at the reported model's published per-million-token rate (see
+ * `stageCostUsd`, and note that a model with no published rate prices at zero);
+ * for `research` it is the price Perplexity's Agent API put on the call itself,
+ * which is the only stage whose bill a per-token table cannot reconstruct
+ * (P2.71b-ii). The trace sums what is stored rather than repricing, so the run
+ * total and the per-stage lines cannot disagree with the analytics endpoints.
+ * Entries written before ledger item P2.38 carry an Opus-rate number for every
+ * stage, which for `research` and `images` is an overestimate the trace
+ * faithfully sums.
  */
 import { STAGES, type PipelineStage, type StageStatus, type StageStatusMap } from "./api"
 import { publishFailureReason, publishTargetOfMessage } from "./publish-report"

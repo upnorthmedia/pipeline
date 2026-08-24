@@ -16,6 +16,7 @@
  */
 import { createStep } from "@mastra/core/workflows/evented"
 
+import { agentReportedCostUsd } from "../perplexity/agent-api"
 import { loadPipelineState, saveStageOutput } from "../post-state"
 import { buildStagePrompt, loadRules } from "../prompts"
 import { STATUS_COMPLETE } from "../state"
@@ -129,6 +130,11 @@ export const researchStep = createStep({
       let tokensIn = 0
       let tokensOut = 0
       let durationMs = 0
+      // Undefined until a response carries a price, so a provider that reports
+      // none leaves the stage on the per-token estimate rather than on a
+      // confident $0.00. Summed once it does, for the same reason the tokens
+      // are: a retried stage paid for every attempt.
+      let reportedCostUsd: number | undefined
 
       for (let attempt = 1; attempt <= MAX_RESEARCH_ATTEMPTS; attempt += 1) {
         // Python's ternary: the bare form on the first call, the counted form
@@ -159,6 +165,10 @@ export const researchStep = createStep({
         // and reported for all of its calls rather than only the surviving one.
         tokensIn += result.usage?.inputTokens ?? 0
         tokensOut += result.usage?.outputTokens ?? 0
+        // The Agent API bills web_search per invocation on top of the tokens,
+        // so its own total is the only number that is the bill (P2.71b-ii).
+        const attemptCost = agentReportedCostUsd(result.providerMetadata)
+        if (attemptCost !== undefined) reportedCostUsd = (reportedCostUsd ?? 0) + attemptCost
 
         if (isValidResearch(text)) break
 
@@ -215,6 +225,7 @@ export const researchStep = createStep({
         tokensIn,
         tokensOut,
         durationS,
+        ...(reportedCostUsd === undefined ? {} : { reportedCostUsd }),
       }
       await announceStageComplete(mastra, output)
       return output

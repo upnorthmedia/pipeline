@@ -217,4 +217,24 @@ describe("stageCostUsd", () => {
     expect(stageCostUsd(1, 0, "claude-opus-5")).toBe(0.000005)
     expect(stageCostUsd(1, 1, "claude-opus-5")).toBe(0.00003)
   })
+
+  /**
+   * Perplexity's Agent API bills `web_search` per invocation on top of tokens,
+   * so its own total is the only number that is the bill. A stage that reports
+   * one is priced at it; every other stage keeps the table.
+   */
+  it("prefers a price the provider reported over the table's estimate", () => {
+    // The recorded grounded call: 5043 in / 117 out prices at $0.001553 from
+    // the table, against a reported bill of $0.00405, of which $0.0025 is one
+    // `web_search` invocation and $0.00112 is cache creation. The table can see
+    // neither term, so it is short by a factor of 2.6 on a real call.
+    expect(stageCostUsd(5043, 117, "perplexity/sonar")).toBe(0.001553)
+    expect(stageCostUsd(5043, 117, "perplexity/sonar", 0.00405)).toBe(0.00405)
+    // Rounded like every other cost, so one stage cannot carry more places
+    // than the run total it is summed into.
+    expect(stageCostUsd(0, 0, "perplexity/sonar", 0.00405123456)).toBe(0.004051)
+    // A reported zero is a measurement; only `undefined` means "not reported".
+    expect(stageCostUsd(100, 20, "claude-opus-5", 0)).toBe(0)
+    expect(stageCostUsd(100, 20, "claude-opus-5", undefined)).toBe(0.001)
+  })
 })

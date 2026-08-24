@@ -107,6 +107,13 @@ type SourceContent = {
 }
 type ResponseContent = TextContent | SourceContent
 
+/**
+ * `JSONValue`, which is what the AI SDK constrains `providerMetadata` values
+ * to. Transcribed for the same reason the rest of these types are: the package
+ * that declares it is bundled by `@mastra/core` and exported by nothing.
+ */
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
+
 /** `LanguageModelV2FinishReason`. */
 type FinishReason = "stop" | "length" | "content-filter" | "tool-calls" | "error" | "other" | "unknown"
 
@@ -235,6 +242,18 @@ interface AgentResponse {
     total_tokens?: number
     input_tokens_details?: { cached_tokens?: number }
     output_tokens_details?: { reasoning_tokens?: number }
+    /**
+     * What Perplexity billed for this call, in USD, broken into its terms.
+     * This is the only provider here that reports its own price, and it is the
+     * only one whose price a per-token table cannot reconstruct: `web_search`
+     * is billed per invocation under `tool_calls_cost`, on top of the tokens.
+     *
+     * Typed as JSON rather than as the recorded keys because it travels
+     * through `providerMetadata`, whose values the AI SDK constrains to
+     * `JSONValue`. New terms Perplexity adds ride along instead of being
+     * dropped by a closed shape.
+     */
+    cost?: Record<string, JsonValue>
   }
 }
 
@@ -302,6 +321,48 @@ export function mapAgentUsage(response: AgentResponse) {
     reasoningTokens: usage?.output_tokens_details?.reasoning_tokens,
     cachedInputTokens: usage?.input_tokens_details?.cached_tokens,
   }
+}
+
+/** The key `providerMetadata` is namespaced under, which is the provider name. */
+type AgentProviderMetadata = Record<string, Record<string, JsonValue>>
+
+/**
+ * `usage.cost`, verbatim, under this provider's namespace.
+ *
+ * `LanguageModelV2Usage` has token fields and no money field, so the bill has
+ * nowhere else to travel: `providerMetadata` is the channel the AI SDK reserves
+ * for exactly this, a provider-specific fact the shared shape cannot hold. The
+ * whole breakdown is carried rather than the total alone, because
+ * `tool_calls_cost` is what explains the gap against the token estimate and a
+ * reader of a run trace is entitled to see it.
+ *
+ * `undefined` for a response that priced nothing, so a caller falls back to the
+ * token estimate rather than recording a confident $0.00.
+ */
+export function mapAgentProviderMetadata(
+  response: AgentResponse,
+): AgentProviderMetadata | undefined {
+  const cost = response.usage?.cost
+  if (!cost || typeof cost.total_cost !== "number") return undefined
+  return { [PERPLEXITY_AGENT_PROVIDER]: { cost } }
+}
+
+/**
+ * The reported total off a generate result's `providerMetadata`, or
+ * `undefined` when this provider did not write one.
+ *
+ * Takes `unknown` because it is called on whatever Mastra hands back, which is
+ * typed as the union of every provider's metadata. Another provider's numbers
+ * are ignored rather than read: a `cost` key under a different namespace is a
+ * different provider's units.
+ */
+export function agentReportedCostUsd(providerMetadata: unknown): number | undefined {
+  const namespaced = (providerMetadata as AgentProviderMetadata | undefined)?.[
+    PERPLEXITY_AGENT_PROVIDER
+  ]
+  const cost = namespaced?.cost as Record<string, unknown> | undefined
+  const total = cost?.total_cost
+  return typeof total === "number" ? total : undefined
 }
 
 /** The message a non-200 body carries, or the raw body when it is not JSON. */
@@ -391,6 +452,7 @@ export function perplexityAgentModel(options: PerplexityAgentModelOptions) {
         content: mapAgentContent(parsed),
         finishReason: mapFinishReason(parsed),
         usage: mapAgentUsage(parsed),
+        providerMetadata: mapAgentProviderMetadata(parsed),
         warnings,
         request: { body: requestBody },
         response: {
@@ -428,6 +490,7 @@ export function perplexityAgentModel(options: PerplexityAgentModelOptions) {
             type: "finish",
             finishReason: mapFinishReason(parsed),
             usage: mapAgentUsage(parsed),
+            providerMetadata: mapAgentProviderMetadata(parsed),
           })
           controller.close()
         },
