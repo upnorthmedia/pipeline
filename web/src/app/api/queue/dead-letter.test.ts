@@ -37,6 +37,8 @@ import { pubsub as productionPubsub } from "@/mastra/index"
 import { MAX_ATTEMPTS } from "@/mastra/state"
 import { imagesWorkflow } from "@/mastra/workflows/images"
 import { pipelineWorkflow } from "@/mastra/workflows/pipeline"
+import type { EngineStepErrors } from "@/test/engine-step-errors"
+import { captureEngineStepErrors } from "@/test/engine-step-errors"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { GET } from "./dead-letter/route"
@@ -109,7 +111,7 @@ let otherProfileId: string
 /** The post the real failing run is started for. */
 let realPostId: string
 /** What the engine printed while the run failed, so it is asserted on and not left on stderr. */
-let logged: string[]
+let engineErrors: EngineStepErrors
 
 async function createProfile(userId: string): Promise<string> {
   const [profile] = await db
@@ -232,10 +234,7 @@ function forPost(entries: Entry[], postId: string): Entry[] {
 }
 
 beforeAll(async () => {
-  logged = []
-  vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
-    logged.push(args.map(String).join(" "))
-  })
+  engineErrors = captureEngineStepErrors()
   vi.spyOn(researchAgent, "generate").mockImplementation((async () => ({
     text: RESEARCH,
     response: { modelId: "stub-research" },
@@ -328,7 +327,7 @@ describe("GET /api/queue/dead-letter, a real failed run", () => {
 
   it("reports the failing step and its error", () => {
     expect(
-      logged.some((line) => line.includes("Error executing step write") && line.includes(BOOM)),
+      engineErrors.failuresOf("write").some((line) => line.includes(BOOM)),
     ).toBe(true)
   })
 })

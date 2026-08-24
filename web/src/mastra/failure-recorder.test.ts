@@ -31,6 +31,8 @@ import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, getPool, posts } from "../db"
+import type { EngineStepErrors } from "../test/engine-step-errors"
+import { captureEngineStepErrors } from "../test/engine-step-errors"
 import { inDeliveryOrder } from "../test/in-delivery-order"
 import { editAgent } from "./agents/edit"
 import { imagesAgent } from "./agents/images"
@@ -128,15 +130,11 @@ let runId: string
 let failedRow: typeof posts.$inferSelect
 /**
  * What the engine printed while the run failed, captured so the expected stage
- * error is asserted on rather than left on stderr.
- *
- * It has to come off `console.error` rather than off the instance logger:
- * `MastraBase` gives every primitive its own `ConsoleLogger` in its constructor
- * and only adopts the Mastra instance's logger in `__registerMastra`, which the
- * engine never calls on its `StepExecutor`. So the failing step's line is
- * written by a logger no test can reach by spying on `testMastra.getLogger()`.
+ * error is asserted on rather than left on stderr. `engine-step-errors.ts`
+ * records why it has to come off `console.error` and not off the instance
+ * logger.
  */
-let logged: string[]
+let engineErrors: EngineStepErrors
 
 async function insertPost(id: string, stageLogs: Record<string, unknown>) {
   await db.delete(posts).where(eq(posts.id, id))
@@ -256,10 +254,7 @@ function failEvent(overrides: {
 }
 
 beforeAll(async () => {
-  logged = []
-  vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
-    logged.push(args.map(String).join(" "))
-  })
+  engineErrors = captureEngineStepErrors()
 
   vi.spyOn(researchAgent, "generate").mockImplementation((async () => ({
     text: RESEARCH,
@@ -395,7 +390,7 @@ describe("a pipeline run that fails", () => {
 
   it("reports the failing step and its error", () => {
     expect(
-      logged.some((line) => line.includes("Error executing step write") && line.includes(BOOM)),
+      engineErrors.failuresOf("write").some((line) => line.includes(BOOM)),
     ).toBe(true)
   })
 

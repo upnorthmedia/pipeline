@@ -17,30 +17,18 @@
   plus up to one 30s tick, and the reclaiming worker re-runs the stage from the beginning.
   The fix has to drain in-flight steps before exiting, which means owning the worker entry
   rather than using the one `mastra worker build` generates. Ledger item P2.91.
-- [confirmed] 2026-08-22 `retry_dead_letter()` in `api/src/api/queue.py` looks the post up with
-  an unscoped `session.get(Post, post_id)`, so any authenticated user can reset another user's
-  post to `pending`, strip its `_error` log and re-enqueue it. The other two dead-letter
-  endpoints (`GET /api/queue/dead-letter`, `DELETE /api/queue/dead-letter`) take a `user`
-  dependency and then ignore it entirely, returning and clearing the whole shared list.
-  `GET /api/queue/worker-status` had a milder version, its `active_jobs` count querying every
-  post in the database rather than the caller's; that one is closed, the ported handler scopes
-  it through `website_profiles.user_id` (item 5.4c-ii). `GET /api/queue/dead-letter` is closed
-  too: the ported handler joins each failed run's post through `website_profiles.user_id`
-  (item 5.4d-ii), which is the user dimension the Redis list never had. `retry_dead_letter()`
-  is closed as well: the ported handler looks the post up through the same join, so another
-  user's post answers 404 (item 5.4d-iii-a). `DELETE /api/queue/dead-letter` is closed last:
-  the ported handler pops `_error` only off the posts the caller's own entries name, so a
-  clear can no longer wipe another tenant's queue (item 5.4d-iii-b). Found while splitting
-  item 5.4; recorded there too. All four holes in this router are now closed.
-- [investigate] 2026-08-22 Mastra's engine logs step failures to a logger the app cannot
-  configure. `MastraBase`'s constructor gives every primitive its own `ConsoleLogger`
-  (`base-BeUQ6mLP.js:12`) and only adopts the Mastra instance's logger in
-  `__registerMastra`, which the workflow event processor never calls on its `StepExecutor`.
-  So `Error executing step <id>: <stack>` goes to `console.error` and never reaches the
-  configured `PinoLogger`, which in the `worker` service means step failures are outside
-  the app's structured logs. Found in item 5.4d-i, where capturing that line in a test
-  needed a `console.error` spy. Worth checking whether a later `@mastra/core` wires it, or
-  whether the worker entry should install a console bridge.
+- [optimization] 2026-08-24 Mastra's engine logs step failures to a logger the app cannot
+  configure, still true at `@mastra/core` 1.61.0. `StepExecutor.__registerMastra` would adopt
+  the instance logger, but neither construction site calls it: `Mastra.handleWorkflowEvent`
+  builds the processor lazily, and `OrchestrationWorker.init` builds it after the one
+  `__registerMastra` pass over workers has already run. So `Error executing step <id>` is
+  written by a `ConsoleLogger`. Demoted from `[investigate]`: the line still reaches stderr,
+  so it is a log-format loss (no JSON, no level control, `trackException` a no-op) rather
+  than a lost failure, and `recordRunFailure` records the failure for the UI regardless.
+  No seam exists from here (the processor is private on both owners, `OrchestrationWorker`
+  is not exported), so the fix is a console bridge in a worker entry this repo owns, which
+  is the prerequisite the entry above already carries. Mechanism documented at
+  `web/src/test/engine-step-errors.ts`. Ledger item P2.35.
 - [confirmed] 2026-08-22 The `cost_usd` on every `stage_complete` execution log entry is
   priced at Anthropic Opus rates regardless of provider. `api/src/worker.py:244` hardcodes
   15.0 / 75.0 per million tokens and ignores `MODEL_COSTS` in

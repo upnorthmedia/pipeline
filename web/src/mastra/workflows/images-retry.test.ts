@@ -32,6 +32,8 @@ import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, getPool, posts } from "../../db"
+import type { EngineStepErrors } from "../../test/engine-step-errors"
+import { captureEngineStepErrors } from "../../test/engine-step-errors"
 import { imagesAgent } from "../agents/images"
 import { MAX_ATTEMPTS } from "../state"
 import { imagesStageOutputSchema } from "../steps/images-assemble"
@@ -92,13 +94,10 @@ async function readLogs(): Promise<Record<string, unknown>[]> {
 let result: { status: string }
 let agentGenerate: ReturnType<typeof vi.spyOn>
 /** The engine's stderr, captured so the expected step errors are asserted on. */
-let logged: string[]
+let engineErrors: EngineStepErrors
 
 beforeAll(async () => {
-  logged = []
-  vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
-    logged.push(args.map(String).join(" "))
-  })
+  engineErrors = captureEngineStepErrors()
 
   agentGenerate = vi.spyOn(imagesAgent, "generate").mockImplementation((async () => {
     throw new Error(BOOM)
@@ -149,9 +148,7 @@ describe("the images stage under the pipeline's retry policy", () => {
 
   it("calls the manifest provider once per attempt Python's max_tries allowed", () => {
     expect(agentGenerate).toHaveBeenCalledTimes(MAX_ATTEMPTS)
-    expect(logged.filter((line) => line.startsWith("Error executing step images-manifest:"))).toHaveLength(
-      MAX_ATTEMPTS,
-    )
+    expect(engineErrors.failuresOf("images-manifest")).toHaveLength(MAX_ATTEMPTS)
   })
 
   it("fails the parent run once those attempts are spent", () => {

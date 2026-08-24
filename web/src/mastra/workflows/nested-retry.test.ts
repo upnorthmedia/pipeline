@@ -36,6 +36,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { z } from "zod"
 
 import { closeDb, getPool } from "../../db"
+import type { EngineStepErrors } from "../../test/engine-step-errors"
+import { captureEngineStepErrors } from "../../test/engine-step-errors"
 
 /** Retries after the first execution, so three executions in total. */
 const ATTEMPTS = 2
@@ -137,14 +139,11 @@ type RunResult = { status: string }
 
 /**
  * What the engine printed while the three runs failed, captured so the expected
- * step errors are asserted on rather than left on stderr.
- *
- * It has to come off `console.error` rather than off the instance logger, for
- * the reason `failure-recorder.test.ts` records: the engine's `StepExecutor`
- * never adopts the Mastra instance's logger, so its line is written by a logger
- * no spy on `testMastra.getLogger()` can reach.
+ * step errors are asserted on rather than left on stderr. `engine-step-errors.ts`
+ * records why it has to come off `console.error` and not off the instance
+ * logger.
  */
-let logged: string[]
+let engineErrors: EngineStepErrors
 
 let plainResult: RunResult
 let nestedNoPolicyResult: RunResult
@@ -158,10 +157,7 @@ async function runToCompletion(workflow: {
 }
 
 beforeAll(async () => {
-  logged = []
-  vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
-    logged.push(args.map(String).join(" "))
-  })
+  engineErrors = captureEngineStepErrors()
 
   await storage.init()
   await testMastra.startWorkers()
@@ -180,11 +176,6 @@ afterAll(async () => {
   vi.restoreAllMocks()
 })
 
-/** Lines the engine printed naming a given step's thrown error. */
-function loggedFailuresOf(id: string) {
-  return logged.filter((line) => line.startsWith(`Error executing step ${id}:`))
-}
-
 describe("the engine's retry policy on a plain step (control)", () => {
   it("executes the failing step once per attempt the parent allows", () => {
     expect(executionsOf("plain-leaf")).toEqual([
@@ -198,7 +189,7 @@ describe("the engine's retry policy on a plain step (control)", () => {
     expect(plainResult.status).toBe("failed")
     // The three executions are three thrown errors, and this is the only place
     // they are accounted for: an unasserted one would just be stderr noise.
-    expect(loggedFailuresOf("plain-leaf")).toHaveLength(3)
+    expect(engineErrors.failuresOf("plain-leaf")).toHaveLength(3)
   })
 })
 
@@ -215,7 +206,7 @@ describe("the engine's retry policy across a nested workflow boundary", () => {
 
   it("still fails the parent run when the nested run fails", () => {
     expect(nestedNoPolicyResult.status).toBe("failed")
-    expect(loggedFailuresOf("inner-no-policy-leaf")).toHaveLength(1)
+    expect(engineErrors.failuresOf("inner-no-policy-leaf")).toHaveLength(1)
   })
 
   // Question 2, answered: the question does not arise. There is only ever one
@@ -232,6 +223,6 @@ describe("the engine's retry policy across a nested workflow boundary", () => {
 
   it("fails the parent run once the nested workflow's attempts are spent", () => {
     expect(nestedOwnPolicyResult.status).toBe("failed")
-    expect(loggedFailuresOf("inner-own-policy-leaf")).toHaveLength(3)
+    expect(engineErrors.failuresOf("inner-own-policy-leaf")).toHaveLength(3)
   })
 })
