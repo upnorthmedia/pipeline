@@ -18,3 +18,11 @@ export const E2E_USER = {
 
 /** Where `auth.setup.ts` writes the signed-in cookie jar. Gitignored. */
 export const STORAGE_STATE = "e2e/.auth/user.json"
+
+/**
+ * Where the suite points. `playwright.config.ts` uses it for both `baseURL` and
+ * the `webServer` health check, and the seed helpers use it for the API
+ * contexts they build outside a browser, so there is one value to override when
+ * the app is not on :3000.
+ */
+export const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000"

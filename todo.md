@@ -449,6 +449,10 @@
   `post-editor.test.ts`, `profile-flow.test.ts` (both stub the app's own API with
   `page.route`, so they need real seeded rows) and `full-pipeline.test.ts` (asserts on a
   `/queue` route that no longer exists). Stays open until P0.5b and P0.5c close.
+  Update 2026-08-24 (polish ledger P0.5b): both mock-driven files now seed real rows through
+  the app's own API (`web/e2e/seed.ts`) and their stale assertions are repaired against the
+  source. 3 failed / 35 passed / 34.8s, identical twice in a row. Everything left is
+  `full-pipeline.test.ts`, which P0.5c owns.
 
 - [investigate] 2026-08-23 `next build` inside the web image prints seven
   `[Error [BetterAuthError]: You are using the default secret...]` lines plus a matching
@@ -575,3 +579,16 @@
   and nothing consumed them. Nothing fails over it, because the tests that publish do not await
   execution, but the topic never reaches zero and the next process to join the group pays for it
   with a burst of error-shaped stderr against rows that are gone. Found during polish item P0.3e.
+
+- [confirmed] 2026-08-24 The route error boundaries print a raw JavaScript exception message as
+  user-facing copy. `web/src/app/posts/[id]/error.tsx:24` and
+  `web/src/app/profiles/[id]/error.tsx` render `{error.message}` verbatim under "Failed to load
+  post" / "Failed to load profile", so a render-time `TypeError` reaches the screen as written by
+  V8. Seen while measuring polish ledger P0.5b: the two screens showed "input.entries is not
+  iterable" and "Cannot read properties of undefined (reading 'length')". Two things behind it,
+  both worth fixing: the boundary needs copy of its own with the raw message kept for the console,
+  and `buildRunTrace()` (`web/src/lib/run-trace.ts:176`) throws on a post payload with no
+  `execution_logs` instead of treating it as empty, which takes the whole post page down rather
+  than the one panel that needs the column. The live API always sends the field, so the trigger
+  today is a client-side shape mismatch, not a server response. Belongs to P3.3 ("no stack traces,
+  no `undefined` in the UI").

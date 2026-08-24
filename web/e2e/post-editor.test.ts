@@ -1,177 +1,156 @@
-import { test, expect } from "@playwright/test";
+/**
+ * The post detail screen, against a real post owned by the e2e account.
+ *
+ * Every row here is created through the app's own API in `beforeAll` (see
+ * `seed.ts`); nothing is stubbed with `page.route`, so a change to the post
+ * serializer or to `computeAnalytics` fails these tests instead of passing
+ * against a hand-written fixture.
+ */
+import { test, expect } from "@playwright/test"
 
-const mockPost = {
-  id: "test-post-1",
-  slug: "test-post",
-  topic: "Test Blog Post Topic",
-  profile_id: null,
-  target_audience: "developers",
-  niche: "technology",
-  intent: "informational",
-  word_count: 2000,
-  tone: "Conversational",
-  output_format: "both",
-  website_url: null,
-  related_keywords: ["test keyword"],
-  competitor_urls: [],
-  image_style: null,
-  image_brand_colors: [],
-  image_exclude: [],
-  brand_voice: null,
-  avoid: null,
-  required_mentions: null,
-  stage_settings: {
-    research: "review",
-    outline: "review",
-    write: "review",
-    edit: "review",
-    images: "review",
-  },
-  current_stage: "edit",
-  stage_status: {
-    research: "complete",
-    outline: "complete",
-    write: "complete",
-    edit: "review",
-  },
-  stage_logs: {},
-  thread_id: null,
-  priority: 5,
-  research_content: "# Research Output\n\nKeyword analysis here.",
-  outline_content:
-    "# Outline\n\n## Introduction\n## Section 1\n## Conclusion",
-  draft_content:
-    "# Test Blog Post\n\nThis is the draft content.\n\n## Section One\n\nBody text.",
-  final_md_content: "# Final Post\n\nFinal markdown content here.",
-  final_html_content: "<h1>Final Post</h1><p>Final HTML content</p>",
-  image_manifest: null,
-  created_at: "2025-01-15T10:00:00Z",
-  updated_at: "2025-01-15T12:00:00Z",
-  completed_at: null,
-};
+import { BASE_URL, STORAGE_STATE } from "./e2e-user"
+import { seedPost, seedProfile, type SeededPost } from "./seed"
 
-const mockAnalytics = {
-  word_count: 1250,
-  sentence_count: 58,
-  paragraph_count: 12,
-  avg_sentence_length: 18.5,
-  flesch_reading_ease: 65.2,
-  keyword_density: { "test keyword": 1.4 },
-  seo_checklist: {
-    title_contains_keyword: true,
-    meta_description: false,
-    h1_keyword: true,
-  },
-};
+const RESEARCH = "# Research Output\n\nKeyword analysis for the post editor spec.\n"
+const OUTLINE = "# Outline\n\n## Introduction\n\nWhat the article opens with.\n\n## Conclusion\n"
+const DRAFT = "# Draft\n\nThe first pass at the body copy.\n"
+const FINAL_MD = "# Final Post\n\nThe edited body copy, which is what analytics measures.\n"
+const READY = "# Ready Post\n\nThe assembled article, images and all.\n"
+
+/** The post every test but the export kill check loads. */
+let post: SeededPost
+/** A post with no stage output, which is what makes the export assertion mean something. */
+let emptyPost: SeededPost
+
+test.beforeAll(async ({ playwright }) => {
+  const request = await playwright.request.newContext({
+    baseURL: BASE_URL,
+    storageState: STORAGE_STATE,
+  })
+
+  const profile = await seedProfile(request, {
+    name: "E2E Post Editor Site",
+    website_url: "https://post-editor.jena.test",
+  })
+
+  post = await seedPost(
+    request,
+    {
+      slug: "e2e-post-editor",
+      topic: "E2E Post Editor Topic",
+      profile_id: profile.id,
+      related_keywords: ["post editor"],
+      website_url: "https://post-editor.jena.test",
+    },
+    {
+      research_content: RESEARCH,
+      outline_content: OUTLINE,
+      draft_content: DRAFT,
+      final_md_content: FINAL_MD,
+      final_html_content: "<h1>Final Post</h1>",
+      ready_content: READY,
+    },
+  )
+
+  emptyPost = await seedPost(request, {
+    slug: "e2e-post-editor-empty",
+    topic: "E2E Post Editor Empty Topic",
+    profile_id: profile.id,
+  })
+
+  await request.dispose()
+})
 
 test.describe("Post Editor", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.route("**/api/posts/test-post-1", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(mockPost),
-      });
-    });
+  test("post detail page loads with the topic and one tab per stage", async ({ page }) => {
+    await page.goto(`/posts/${post.id}`)
 
-    await page.route("**/api/posts/test-post-1/analytics", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(mockAnalytics),
-      });
-    });
+    await expect(page.getByRole("heading", { name: post.topic })).toBeVisible()
 
-    await page.route("**/api/events/**", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "text/event-stream",
-        body: "",
-      });
-    });
-  });
+    // STAGE_LABELS in src/app/posts/[id]/page.tsx, one per entry of STAGES.
+    for (const label of ["Research", "Outline", "Draft", "Editing", "Images", "Ready"]) {
+      await expect(page.getByRole("tab", { name: label })).toBeVisible()
+    }
+  })
 
-  test("post detail page loads with editor and stage tabs", async ({
-    page,
-  }) => {
-    await page.goto("/posts/test-post-1");
+  test("editor pane renders CodeMirror holding the stage content", async ({ page }) => {
+    await page.goto(`/posts/${post.id}`)
 
-    await expect(page.getByText("Test Blog Post Topic")).toBeVisible({
-      timeout: 10000,
-    });
+    await expect(page.locator("[data-testid='markdown-editor']")).toBeVisible()
+    await expect(page.locator(".cm-editor")).toBeVisible()
+    await expect(page.locator(".cm-content")).toContainText(
+      "Keyword analysis for the post editor spec.",
+    )
+  })
 
-    // Stage tabs use STAGE_LABELS: Research, Outline, Draft, Final, Images
-    await expect(page.getByRole("tab", { name: "Research" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Outline" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Draft" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Final" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Images" })).toBeVisible();
-  });
+  test("the ready tab renders the preview pane", async ({ page }) => {
+    await page.goto(`/posts/${post.id}`)
 
-  test("editor pane renders CodeMirror", async ({ page }) => {
-    await page.goto("/posts/test-post-1");
+    // `content-preview` is only mounted for the ready stage: every other tab
+    // shows the editor alone.
+    await expect(page.locator("[data-testid='content-preview']")).toHaveCount(0)
 
-    await expect(page.locator("[data-testid='markdown-editor']")).toBeVisible({
-      timeout: 10000,
-    });
-    await expect(page.locator(".cm-editor")).toBeVisible();
-  });
-
-  test("preview pane renders", async ({ page }) => {
-    await page.goto("/posts/test-post-1");
-
-    await expect(page.locator("[data-testid='content-preview']")).toBeVisible({
-      timeout: 10000,
-    });
-  });
+    await page.getByRole("tab", { name: "Ready" }).click()
+    await expect(page.locator("[data-testid='content-preview']")).toBeVisible()
+  })
 
   test("stage tabs switch content", async ({ page }) => {
-    await page.goto("/posts/test-post-1");
+    await page.goto(`/posts/${post.id}`)
 
-    await expect(page.locator("[data-testid='markdown-editor']")).toBeVisible({
-      timeout: 10000,
-    });
+    // The card title, not the same words inside the markdown the editor holds.
+    const cardTitle = page.locator("[data-slot='card-title']")
+    await expect(cardTitle.filter({ hasText: "Research Output" })).toBeVisible()
+    await expect(page.locator(".cm-content")).toContainText("Keyword analysis")
 
-    // Switch to Research tab
-    await page.getByRole("tab", { name: "Research" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Research Output" })
-    ).toBeVisible();
+    await page.getByRole("tab", { name: "Outline" }).click()
+    await expect(cardTitle.filter({ hasText: "Outline Output" })).toBeVisible()
+    await expect(page.locator(".cm-content")).toContainText("What the article opens with.")
+  })
 
-    // Switch to Outline tab
-    await page.getByRole("tab", { name: "Outline" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Introduction" })
-    ).toBeVisible();
-  });
+  test("analytics bar displays the numbers the API computed", async ({ page }) => {
+    const measured = await (await page.request.get(`/api/posts/${post.id}/analytics`)).json()
 
-  test("analytics bar displays metrics", async ({ page }) => {
-    await page.goto("/posts/test-post-1");
+    await page.goto(`/posts/${post.id}`)
 
-    await expect(page.getByText("1,250")).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("65.2")).toBeVisible();
-    await expect(page.getByText("Words", { exact: true })).toBeVisible();
-    await expect(page.getByText("Flesch Score")).toBeVisible();
-  });
+    const bar = page.locator("[data-testid='analytics-bar']")
+    await expect(bar).toBeVisible()
 
-  test("export button is present when final content exists", async ({
-    page,
-  }) => {
-    await page.goto("/posts/test-post-1");
+    // Each Stat is a div holding a label paragraph then a value paragraph, so
+    // the value is read per stat rather than as a substring of the whole bar:
+    // "target: 2,000" and the other three stats would otherwise satisfy almost
+    // any number.
+    const statValue = (label: string) =>
+      bar
+        .locator("div")
+        .filter({ has: page.getByText(label, { exact: true }) })
+        .last()
+        .locator("p")
+        .nth(1)
 
-    await expect(page.locator("[data-testid='export-button']")).toBeVisible({
-      timeout: 10000,
-    });
-  });
+    // AnalyticsBar's own formatting: toLocaleString() and toFixed(1).
+    await expect(statValue("Words")).toHaveText(measured.word_count.toLocaleString())
+    await expect(statValue("Flesch Score")).toHaveText(
+      measured.flesch_reading_ease.toFixed(1),
+    )
+  })
+
+  test("export button is present only when there is content to export", async ({ page }) => {
+    await page.goto(`/posts/${post.id}`)
+    await expect(page.locator("[data-testid='export-button']")).toBeVisible()
+
+    // Same screen, no stage output: `POST /api/posts` starts a run, so this
+    // post is not `neverRan`, it simply has nothing exportable in it yet.
+    await page.goto(`/posts/${emptyPost.id}`)
+    await expect(page.getByRole("heading", { name: emptyPost.topic })).toBeVisible()
+    await expect(page.locator("[data-testid='export-button']")).toHaveCount(0)
+  })
 
   test("back button navigates to posts list", async ({ page }) => {
-    await page.goto("/posts/test-post-1");
+    await page.goto(`/posts/${post.id}`)
+    await expect(page.getByRole("heading", { name: post.topic })).toBeVisible()
 
-    await expect(page.getByText("Test Blog Post Topic")).toBeVisible({
-      timeout: 10000,
-    });
-
-    await page.locator("a[href='/']").first().click();
-    await expect(page).toHaveURL("/");
-  });
-});
+    // Scoped to `main`, because the sidebar's Posts link is also href="/".
+    await page.locator("main a[href='/']").first().click()
+    await expect(page).toHaveURL("/")
+  })
+})

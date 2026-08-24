@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-import { STORAGE_STATE } from "./e2e/e2e-user";
+import { BASE_URL, STORAGE_STATE } from "./e2e/e2e-user";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -10,7 +10,7 @@ export default defineConfig({
   workers: 1,
   reporter: "list",
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: BASE_URL,
     trace: "on-first-retry",
   },
   projects: [
@@ -26,7 +26,7 @@ export default defineConfig({
   ],
   webServer: {
     command: "pnpm dev",
-    url: "http://localhost:3000",
+    url: BASE_URL,
     reuseExistingServer: true,
     timeout: 30000,
   },

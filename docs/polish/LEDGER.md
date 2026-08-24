@@ -61,9 +61,11 @@ move on. A split is not an iteration on its own: split and complete the first ch
         assertions in `navigation.test.ts` repaired against the source. 31/4 -> 12/26, and
         `navigation.test.ts` is 14/14 in 9.6s. Closes P2.86.
         [evidence](evidence/p0.md#p05a)
-  - [ ] **P0.5b** `post-editor.test.ts` (7) and `profile-flow.test.ts` (2). Both stub the
-        app's own API with `page.route`, which `CLAUDE.md` forbids, so this means seeding
-        real rows rather than re-pointing mocks.
+  - [x] **P0.5b** `post-editor.test.ts` (7) and `profile-flow.test.ts` (2). Both stubbed the
+        app's own API with `page.route`, which `CLAUDE.md` forbids, and both fixtures had
+        drifted far enough to crash the page they fed. `e2e/seed.ts` now creates the rows over
+        the real API and six stale assertions are repaired against the source. 12/26 -> 3/35,
+        2.4m -> 34.8s. [evidence](evidence/p0.md#p05b)
   - [ ] **P0.5c** `full-pipeline.test.ts` (3), including a `/queue` route that no longer
         exists and several tests whose body asserts nothing.
 - [ ] **P0.6** CI. Add `.github/workflows` running tsc, lint, test, build and e2e on push and
@@ -174,7 +176,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [x] **P2.69** `[confirmed]` `web/src/mastra/pipeline-events.test.ts > a run that executes every stage > carries Python's log payload and nothing else` is flaky: it reads ... Fixed by P0.3b; entry removed from `todo.md`. [evidence](evidence/p0.md#p03b)
 - [x] **P2.70** `[confirmed]` The vitest suites that borrow the global `settings.api_keys` row can destroy live credentials. `web/src/mastra/api-keys.test.ts` deletes the row ... Fixed by P0.3a; entry removed from `todo.md`. [evidence](evidence/p0.md#p03a)
 - [ ] **P2.71** `[confirmed]` Perplexity's Sonar Chat Completions endpoint is deprecated with support ending 2026-09-27, per `docs.perplexity.ai/getting-started/models`. The ...
-- [ ] **P2.72** `[confirmed]` The Playwright suite (`pnpm -C web test:e2e`) is stale. A full run during ledger item 7.1b ended `4 passed (7.4m)` with failures listed across ... Reproduced exactly at P0.5a and reduced to 12 failed / 26 passed; stays open until P0.5b and P0.5c close. [evidence](evidence/p0.md#p05a)
+- [ ] **P2.72** `[confirmed]` The Playwright suite (`pnpm -C web test:e2e`) is stale. A full run during ledger item 7.1b ended `4 passed (7.4m)` with failures listed across ... Reproduced exactly at P0.5a, reduced to 12 failed / 26 passed there and to 3 failed / 35 passed at P0.5b; stays open until P0.5c closes. [evidence](evidence/p0.md#p05b)
 - [x] **P2.73** `[confirmed]` `src/mastra/workflows/scaffold-check.test.ts` fails intermittently under a full `pnpm -C web test` run with `Error: Hook timed out in 60000ms` ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [x] **P2.74** `[confirmed]` A worker process running outside the test suite breaks the suite. While a `jena-worker` container was up against the shared dev Redis, a full ... Contradicted: three worker-up runs are identical to three worker-down runs; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.75** `[investigate]` `next build` inside the web image prints seven `[Error [BetterAuthError]: You are using the default secret...]` lines plus a matching BetterAuth ...
