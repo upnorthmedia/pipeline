@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Plus,
@@ -187,6 +188,20 @@ export default function ProfilesPage() {
               : error
                 ? "Profile list unavailable"
                 : `${profileList.length} total profile${profileList.length === 1 ? "" : "s"}`}
+          </p>
+          {/* The whole boundary in one sentence, on the page a user reaches
+              first when they go looking for a setting. */}
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            A profile owns one site: its voice, publishing connection, internal
+            links and the defaults new posts start from. API keys, stage models
+            and rule files are account-wide:{" "}
+            <Link
+              href="/settings"
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+            >
+              Account
+            </Link>
+            .
           </p>
         </div>
         <div className="flex items-center gap-2">

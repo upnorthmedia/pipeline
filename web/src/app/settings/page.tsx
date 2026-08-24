@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Save,
   Settings,
@@ -261,12 +262,27 @@ export default function SettingsPage() {
 
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
-        <Settings className="h-6 w-6 text-muted-foreground" />
+      <div className="flex items-start gap-3">
+        <Settings className="mt-0.5 h-6 w-6 shrink-0 text-muted-foreground" />
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Account</h1>
           <p className="text-sm text-muted-foreground">
-            API keys, stage models, and rule file editor
+            Provider API keys, the model each stage runs on, and the rule files
+            every stage prompts from. These apply to every site.
+          </p>
+          {/* The boundary this page shares with the profile editor, said on
+              the page rather than left to the reader: nothing here varies per
+              site, and everything that does is one click away. */}
+          <p className="mt-1 text-sm text-muted-foreground">
+            A site&apos;s voice, publishing connection and new post defaults
+            live on its profile:{" "}
+            <Link
+              href="/profiles"
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+            >
+              Website profiles
+            </Link>
+            .
           </p>
         </div>
       </div>

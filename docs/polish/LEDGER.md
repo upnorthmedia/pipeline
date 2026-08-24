@@ -246,11 +246,13 @@ Not a repaint: the shadcn and Tailwind v4 foundation stays. Simple, fast, legibl
 organised so the next action is obvious. Dark mode and the accessibility checklist are
 explicitly out of scope.
 
-- [ ] **P3.1** Information architecture. Settings, profiles and per-post configuration overlap
+- [x] **P3.1** Information architecture. Settings, profiles and per-post configuration overlap
       and nothing says which owns what. Decide, move things, write the reasoning in the
       evidence file. Publishing configuration drives this. Carried P2.111 (`/posts/new` has
       no per-post gate editor while `/profiles/[id]` and `/posts/batch` both do), closed at
-      P3.1a.
+      P3.1a. All three children are done: the decision (a), the profile editor (b) and the
+      settings boundary (c). `/posts/[id]`'s per-post configuration is untouched and belongs
+      to P3.2, which owns the post surface.
   - [x] **P3.1a** The decision, and the surface it settles first. Three owners, one concern
         each: the account owns keys, stage models and rules; the site profile owns identity,
         voice, publishing connections and the defaults new posts start from; the post owns the
@@ -273,10 +275,16 @@ explicitly out of scope.
         `Re-crawl Schedule` saves from the tab it lives on. `?tab=` is read and written with
         the History API, and the new-post gate link now points at `?tab=defaults`.
         `ui/p31b-profile-*.png`. [evidence](evidence/p3.md#p31b)
-  - [ ] **P3.1c** `/settings` against `/profiles/[id]`: the boundary is right but invisible.
+  - [x] **P3.1c** `/settings` against `/profiles/[id]`: the boundary is right but invisible.
         Neither page links to the other, "Settings" is the sidebar label for the account-wide
         page while every per-site setting lives under "Profiles", and `Default Stage Settings`
-        on the profile is the only editor for a value four other surfaces read.
+        on the profile is the only editor for a value four other surfaces read. The nav item
+        is now `Account`, because the page holds the three things that do not vary per site.
+        Five sentences state the boundary and carry the link across it: both page headers, the
+        `Stage Models` card, the `Default Stage Settings` card and the profiles list. The
+        fourth reader of `default_stage_settings`, `/posts/batch`, gains the `Pipeline` card
+        with a `subject` prop, because "This run" is a lie on a page that creates twenty.
+        `ui/p31c-*.png`. [evidence](evidence/p3.md#p31c)
 - [ ] **P3.2** The pipeline is the product: make its state readable at a glance. What stage a
       post is in, what is blocked and why, what a review gate waits for, what a failure was
       and how to retry it. Make the run-trace view the thing you would actually watch.

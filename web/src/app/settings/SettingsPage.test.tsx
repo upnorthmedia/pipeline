@@ -65,14 +65,35 @@ beforeEach(() => {
 });
 
 describe("SettingsPage", () => {
-  it("renders settings heading", async () => {
+  it("renders the account heading and says what an account owns", async () => {
     renderWithProviders(<SettingsPage />);
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Account" })).toBeInTheDocument();
       expect(
-        screen.getByText("API keys, stage models, and rule file editor")
+        screen.getByText(
+          "Provider API keys, the model each stage runs on, and the rule files every stage prompts from. These apply to every site."
+        )
       ).toBeInTheDocument();
     });
+  });
+
+  it("points at the other side of the boundary", async () => {
+    renderWithProviders(<SettingsPage />);
+    const link = await screen.findByRole("link", {
+      name: "Website profiles",
+    });
+    expect(link).toHaveAttribute("href", "/profiles");
+    expect(
+      screen.getByText(/voice, publishing connection and new post defaults/i)
+    ).toBeInTheDocument();
+  });
+
+  it("says on the stage models card that review gates are per site", async () => {
+    renderWithProviders(<SettingsPage />);
+    const link = await screen.findByRole("link", {
+      name: "set per site, on the website profile",
+    });
+    expect(link).toHaveAttribute("href", "/profiles");
   });
 
   it("calls apiKeys.get on mount", async () => {

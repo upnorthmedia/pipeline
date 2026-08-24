@@ -69,6 +69,39 @@ describe("BatchCreatePage", () => {
     expect(screen.getByText("Manual Entry")).toBeInTheDocument();
   });
 
+  it("names what the batch's gates will do", async () => {
+    mockProfilesList.mockResolvedValue([makeProfile({ name: "Test Site" })]);
+    renderWithProviders(<BatchCreatePage />);
+    // No profile picked yet: the six stages still have an effective mode.
+    expect(await screen.findByTestId("gate-research")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-ready")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-summary")).toHaveTextContent(
+      /^Every post in this batch will /
+    );
+  });
+
+  it("says the gates apply to the batch, not to one run", async () => {
+    mockProfilesList.mockResolvedValue([makeProfile({ name: "Test Site" })]);
+    renderWithProviders(<BatchCreatePage />);
+    expect(
+      await screen.findByText(
+        "Where every post in this batch will pause and wait for you"
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("links the batch gates at the profile that owns them once one is picked", async () => {
+    const user = userEvent.setup();
+    mockProfilesList.mockResolvedValue([makeProfile({ id: "prof-1", name: "Test Site" })]);
+    renderWithProviders(<BatchCreatePage />);
+    await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+    await user.click(await screen.findByRole("option", { name: "Test Site" }));
+    const link = await screen.findByRole("link", {
+      name: /Edit gates in the Test Site profile/,
+    });
+    expect(link).toHaveAttribute("href", "/profiles/prof-1?tab=defaults");
+  });
+
   it("renders profile selector", async () => {
     mockProfilesList.mockResolvedValue([makeProfile()]);
     renderWithProviders(<BatchCreatePage />);

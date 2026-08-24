@@ -18,6 +18,11 @@ import {
   stageModeStopsRun,
 } from "@/lib/stages";
 
+/** "This run" reads as a sentence subject in the title, mid-sentence below it. */
+function lowerFirst(text: string): string {
+  return text.charAt(0).toLowerCase() + text.slice(1);
+}
+
 /** "Outline", "Outline and Ready", "Outline, Images and Ready". */
 function joinStageNames(names: string[]): string {
   if (names.length <= 1) return names.join("");
@@ -34,8 +39,18 @@ function joinStageNames(names: string[]): string {
  * over them without a word. Until that rule changes, the honest surface is one
  * that says what the run will do and points at the profile where it is
  * decided, rather than one that offers an edit the server discards.
+ *
+ * `subject` names what the gates apply to, because `/posts/batch` copies the
+ * same profile value onto up to twenty posts at once and "this run" would be a
+ * lie there.
  */
-export const PipelineGatesCard = ({ profile }: { profile: Profile | null }) => {
+export const PipelineGatesCard = ({
+  profile,
+  subject = "This run",
+}: {
+  profile: Profile | null;
+  subject?: string;
+}) => {
   const settings = profile?.default_stage_settings;
   const modes = STAGES.map((stage) => ({
     stage,
@@ -48,7 +63,7 @@ export const PipelineGatesCard = ({ profile }: { profile: Profile | null }) => {
       <CardHeader>
         <CardTitle className="text-base">Pipeline</CardTitle>
         <CardDescription>
-          Where this run will pause and wait for you
+          Where {lowerFirst(subject)} will pause and wait for you
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -80,10 +95,10 @@ export const PipelineGatesCard = ({ profile }: { profile: Profile | null }) => {
 
         <p data-testid="gate-summary" className="text-sm text-muted-foreground">
           {stopping.length > 0
-            ? `This run will stop at ${joinStageNames(
+            ? `${subject} will stop at ${joinStageNames(
                 stopping.map(({ stage }) => STAGE_LABELS[stage])
               )} and wait for you.`
-            : `This run will go from ${STAGE_LABELS[STAGES[0]]} to ${
+            : `${subject} will go from ${STAGE_LABELS[STAGES[0]]} to ${
                 STAGE_LABELS[STAGES[STAGES.length - 1]]
               } without stopping.`}
         </p>

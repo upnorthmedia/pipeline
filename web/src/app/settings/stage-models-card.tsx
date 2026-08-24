@@ -23,6 +23,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { AlertCircle, Cpu, Loader2, RefreshCw, RotateCcw, Save } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -176,7 +177,15 @@ export function StageModelsCard() {
         </CardTitle>
         <CardDescription>
           Model and reasoning effort per pipeline stage. Only verified model ids
-          are selectable.
+          are selectable. Whether a stage pauses for review is a different
+          setting,{" "}
+          <Link
+            href="/profiles"
+            className="font-medium text-foreground underline-offset-4 hover:underline"
+          >
+            set per site, on the website profile
+          </Link>
+          .
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

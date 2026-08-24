@@ -16,7 +16,7 @@ test.describe("Navigation", () => {
     await expect(sidebar.getByText("Posts", { exact: true })).toBeVisible();
     await expect(sidebar.getByText("Profiles", { exact: true })).toBeVisible();
     await expect(sidebar.getByText("Observability", { exact: true })).toBeVisible();
-    await expect(sidebar.getByText("Settings", { exact: true })).toBeVisible();
+    await expect(sidebar.getByText("Account", { exact: true })).toBeVisible();
   });
 
   test("navigates to profiles page", async ({ page }) => {
@@ -33,11 +33,20 @@ test.describe("Navigation", () => {
     await expect(page.getByRole("heading", { name: "Observability" })).toBeVisible();
   });
 
-  test("navigates to settings page", async ({ page }) => {
+  test("navigates to the account page", async ({ page }) => {
     await page.goto("/");
-    await page.locator("aside").getByText("Settings", { exact: true }).click();
+    await page.locator("aside").getByText("Account", { exact: true }).click();
     await expect(page).toHaveURL("/settings");
-    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Account" })).toBeVisible();
+    // The boundary the page states, checked in a real browser: the account
+    // page names where per-site settings live and links straight to them.
+    await page.getByRole("link", { name: "Website profiles" }).click();
+    await expect(page).toHaveURL("/profiles");
+    // Scoped to `main`, because the sidebar's own Account link is also
+    // href="/settings".
+    await expect(
+      page.locator("main").getByRole("link", { name: "Account" })
+    ).toBeVisible();
   });
 
   test("navigates to new post page via button", async ({ page }) => {

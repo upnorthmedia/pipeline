@@ -775,6 +775,19 @@ export default function ProfileDetailPage() {
             </a>
             <ExternalLink className="h-3 w-3 shrink-0" />
           </div>
+          {/* This page owns one site. The three things it does not own are
+              named here rather than left for a user to hunt for under a nav
+              item called Settings. */}
+          <p className="mt-1 text-sm text-muted-foreground">
+            API keys, stage models and rule files are account-wide:{" "}
+            <Link
+              href="/settings"
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+            >
+              Account settings
+            </Link>
+            .
+          </p>
         </div>
       </div>
 
@@ -1240,7 +1253,16 @@ export default function ProfileDetailPage() {
               <CardHeader>
                 <CardTitle className="text-base">Default Stage Settings</CardTitle>
                 <CardDescription>
-                  Default pipeline mode for new posts using this profile
+                  Where a run pauses for review. Copied onto every post created
+                  from this profile, in New Post and Batch Create. The model
+                  each stage runs on is a different setting,{" "}
+                  <Link
+                    href="/settings"
+                    className="font-medium text-foreground underline-offset-4 hover:underline"
+                  >
+                    set once for the account
+                  </Link>
+                  .
                 </CardDescription>
               </CardHeader>
               <CardContent>

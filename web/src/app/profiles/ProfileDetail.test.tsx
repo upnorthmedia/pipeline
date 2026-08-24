@@ -862,3 +862,23 @@ describe("ProfileDetailPage", () => {
     });
   });
 });
+
+describe("ProfileDetailPage ownership boundary", () => {
+  it("names the account-wide settings and links to them", async () => {
+    renderWithProviders(<ProfileDetailPage />);
+    const link = await screen.findByRole("link", { name: "Account settings" });
+    expect(link).toHaveAttribute("href", "/settings");
+    expect(
+      screen.getByText(/API keys, stage models and rule files are account-wide/)
+    ).toBeInTheDocument();
+  });
+
+  it("says which surfaces read the default stage settings", async () => {
+    await renderOnTab("New post defaults");
+    expect(
+      await screen.findByText(
+        /Copied onto every post created from this profile, in New Post and Batch Create\./
+      )
+    ).toBeInTheDocument();
+  });
+});

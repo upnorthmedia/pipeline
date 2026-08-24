@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 import { ProfileSelectCard } from "@/components/profile-select-card";
+import { PipelineGatesCard } from "@/components/pipeline-gates-card";
 import {
   Tabs,
   TabsContent,
@@ -451,6 +452,15 @@ export default function BatchCreatePage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Last, for the reason it is last on `/posts/new`: everything above is
+          an input to the six stages, this is what those stages will do with it.
+          The batch copies the profile's gates onto every row it creates, so
+          the card that names them belongs on this page too. */}
+      <PipelineGatesCard
+        profile={selectedProfile}
+        subject="Every post in this batch"
+      />
 
       <Separator />
 

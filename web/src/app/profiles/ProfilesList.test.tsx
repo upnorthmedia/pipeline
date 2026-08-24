@@ -60,6 +60,20 @@ beforeEach(() => {
 });
 
 describe("ProfilesPage", () => {
+  it("says what a profile owns and what the account owns", async () => {
+    renderWithProviders(<ProfilesPage />);
+    expect(
+      await screen.findByText(
+        /A profile owns one site: its voice, publishing connection, internal links and the defaults new posts start from\./
+      )
+    ).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "Account" });
+    expect(link).toHaveAttribute("href", "/settings");
+    expect(
+      screen.getByText(/API keys, stage models and rule files are account-wide/)
+    ).toBeInTheDocument();
+  });
+
   it("renders profiles in table", async () => {
     renderWithProviders(<ProfilesPage />);
     await waitFor(() => {

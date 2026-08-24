@@ -124,7 +124,7 @@ test.describe("Full pipeline journey", () => {
 
   test("the settings page shows one field per provider", async ({ page }) => {
     await page.goto("/settings");
-    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Account" })).toBeVisible();
     await expect(page.getByText("API Keys", { exact: true })).toBeVisible();
     for (const provider of ["anthropic", "perplexity", "gemini"]) {
       await expect(page.locator(`#key-${provider}`)).toBeVisible();
