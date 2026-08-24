@@ -1,14 +1,15 @@
 # todo
 
-- [investigate] 2026-08-22 `mastra worker start` prints `[mastra] Shutting down workers...`
-  twice under a process-group signal, because the CLI and the worker it spawns each handle
-  their own SIGTERM and the CLI's handler forwards a second one. Cosmetic locally; worth
-  checking that Railway's shutdown does not double-run `stopWorkers()` before Phase 7 ships.
-- [investigate] 2026-08-22 Item 4.5a only covers `SIGKILL`. A Railway redeploy sends `SIGTERM`,
-  which the `mastra worker` entry handles by calling `stopWorkers()`, and `stopWorkers()`
-  unsubscribes the transport while a step may still be executing. Whether the in-flight step's
-  message is left pending for reclaim, acked, or nacked decides whether a routine worker deploy
-  loses or duplicates a stage. Worth answering in 4.5b or Phase 7, not assumed.
+- [confirmed] 2026-08-24 A worker redeploy parks any in-flight post for over fifteen minutes
+  and then re-bills the stage. `Mastra.stopWorkers()` drains the reader, not the work:
+  `RedisStreamsPubSub.#deliverMessage` never awaits the step callback, so unsubscribing and
+  `process.exit(0)` truncate a running step exactly as a `SIGKILL` would. The step's
+  `workflow.step.run` message is left pending in `mastra-orchestration`, neither acked nor
+  nacked (proven in `web/src/mastra/workflows/sigterm-shutdown.test.ts`), so nothing is lost
+  or duplicated, but recovery is the `XAUTOCLAIM` timer at `RECLAIM_IDLE_MS` (15 minutes)
+  plus up to one 30s tick, and the reclaiming worker re-runs the stage from the beginning.
+  The fix has to drain in-flight steps before exiting, which means owning the worker entry
+  rather than using the one `mastra worker build` generates. Ledger item P2.91.
 - [confirmed] 2026-08-22 The worker bundle resolves `rules/` from its own output directory, so
   it needs `RULES_DIR` set explicitly. `prompts.ts` falls back to
   `path.resolve(process.cwd(), "..", "rules")` and `mastra worker start` runs with cwd set to

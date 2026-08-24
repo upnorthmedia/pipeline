@@ -29,6 +29,7 @@ export const REDIS_TEST_DATABASES: Readonly<Record<string, readonly number[]>> =
   "src/mastra/workflows/worker-process.test.ts": [9],
   "src/mastra/workflows/web-restart.test.ts": [10],
   "src/mastra/workflows/crash-probe.test.ts": [11],
+  "src/mastra/workflows/sigterm-shutdown.test.ts": [7],
   "src/mastra/scripts/durability-gate.mjs": [12],
   "src/mastra/scripts/full-pipeline.mjs": [13],
   "src/mastra/workflows/reclaim-duplication.test.ts": [14, 15],

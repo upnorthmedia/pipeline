@@ -34,6 +34,8 @@
  *   PROBE_REDIS_URL    Redis URL, including the isolating database number
  *   PROBE_MARKER_FILE  path of the JSONL record file
  *   PROBE_SLEEP_MS     how long `probe-slow` sleeps
+ *   PROBE_GRACEFUL_SIGTERM  `"1"` installs the SIGTERM handler the generated
+ *                      worker entry carries, for `sigterm-shutdown.test.ts`
  *   DATABASE_URL_SYNC / DATABASE_URL   Postgres, for run state
  */
 import { appendFileSync, readFileSync } from "node:fs"
@@ -147,7 +149,23 @@ if (invokedDirectly) {
     sleepMs: Number(process.env.PROBE_SLEEP_MS),
   })
   await mastra.startWorkers()
+  // `sigterm-shutdown.test.ts` asks what a *graceful* stop does to an in-flight
+  // step, so it needs the worker to handle SIGTERM the way the deployed one
+  // does. This is the handler `mastra worker build` writes into its generated
+  // entry verbatim (`WorkerBundler.getEntry()` in `mastra/dist/index.js`), and
+  // `.mastra/worker/index.mjs` is what the Railway `worker` service starts.
+  //
+  // Opt-in rather than always on: `crash-probe.test.ts` uses SIGTERM to stop a
+  // worker it is finished with and wants that to be immediate.
+  if (process.env.PROBE_GRACEFUL_SIGTERM === "1") {
+    process.on("SIGTERM", async () => {
+      console.log("[crash-probe] shutting down workers")
+      await mastra.stopWorkers()
+      process.exit(0)
+    })
+  }
   // The line the test waits for before it starts a run, so "nothing consumed
-  // it" can never mean "the consumer had not subscribed yet".
+  // it" can never mean "the consumer had not subscribed yet". Printed after the
+  // handler is installed, so a signal that arrives on this line is handled.
   console.log(`[crash-probe] workers started pid=${process.pid}`)
 }
