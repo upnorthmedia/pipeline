@@ -279,16 +279,6 @@
   text while `wp_app_password` is Fernet-encrypted. Found at polish ledger item P1.3b.
   Ledger item P2.107.
 
-- [confirmed] 2026-08-24 The run trace does not render publish events. `RunTrace`
-  (`web/src/components/run-trace.tsx`) builds its table from the six pipeline stages and reads
-  `execution_logs` entries by `stage`, and both publish steps write their entries with
-  `stage: ""`, so `publish_start`, `publish_complete` and `publish_error` are invisible there.
-  A publish is the last thing a run does and the thing most likely to fail on something
-  outside this app, and the view built for watching a run says nothing about it. The post
-  header now carries a failure panel (polish ledger P1.3d-iii), so the reason is reachable;
-  this is about the trace being the complete account it presents itself as. Found at polish
-  ledger P1.3d-iii. Ledger item P2.108.
-
 - [confirmed] 2026-08-24 A run parked at a review gate can never be resumed: nothing in the app
   calls `run.resume()`. `stage-io.ts` suspends the run and writes `stage_status[stage] =
   "review"`, and the only way forward the UI offers is `POST /api/posts/{id}/run` or
@@ -339,3 +329,21 @@
   the pause overwrites `current_stage` while leaving a stale `running` entry behind, so a paused
   post reads `Paused` over a stage that is still billing. Either make the pause reach the worker
   or say what it actually does. Found at polish ledger P3.2a. Ledger item P2.115.
+
+- [confirmed] 2026-08-24 A publish that dies with its worker is reported as still publishing,
+  forever. `wp_publish_status` / `nextjs_publish_status` move to `publishing` before the step
+  touches the destination and only the step itself writes them again, so a worker killed mid
+  publish leaves the column there with nothing to reconcile it. The post header says
+  `Publishing...` and, since polish ledger P3.2b-ii, the run trace shows a `Publish to
+  <target>` row whose elapsed clock counts up from the `publish_start` entry indefinitely. It
+  is the same shape as the stage case in this file's `stopWorkers()` entry (a `SIGTERM`
+  truncates the running step), except that no `XAUTOCLAIM` recovers it, because the publish
+  workflows declare no `retryConfig` either. Found at polish ledger P3.2b-ii.
+
+- [investigate] 2026-08-24 The run trace does not update during a publish. `use-sse.ts`
+  refetches the post on `stage_complete`, `stage_error` and `pipeline_complete`;
+  `posts/[id]/page.tsx` handles `publish_start`, `publish_complete` and `publish_error` itself,
+  writing the status column optimistically and raising a toast, and does not refetch. So the
+  publish row added at polish ledger P3.2b-ii shows its status live and its timing only on the
+  next load or the next refetch from another cause. Check whether the optimistic write should
+  simply be a refetch before adding a fourth refetch trigger. Found at polish ledger P3.2b-ii.

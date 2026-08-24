@@ -33,6 +33,29 @@ export function outputFormatLabel(value: string): string {
   return OUTPUT_FORMATS.find((f) => f.value === value)?.label ?? value;
 }
 
+/**
+ * The two formats that name a destination outside this app, and so the two a
+ * publish step can run against. `markdown` is an export and `both` is the
+ * column default that no publish step handles (`todo.md` P2.113), so neither
+ * is a target.
+ */
+export type PublishTarget = "wordpress" | "nextjs";
+
+/**
+ * The destination's name on its own, for a sentence that already says what is
+ * being done to it. `outputFormatLabel` answers a different question, which is
+ * which format to pick in a form, and its labels say how each one works.
+ */
+export const PUBLISH_TARGET_LABELS: Record<PublishTarget, string> = {
+  wordpress: "WordPress",
+  nextjs: "Next.js",
+};
+
+/** The destination an `output_format` names, or null when it names none. */
+export function publishTargetOf(outputFormat: string | null | undefined): PublishTarget | null {
+  return outputFormat === "wordpress" || outputFormat === "nextjs" ? outputFormat : null;
+}
+
 /** Why a format cannot be picked, in the words of whatever screen is asking. */
 export type FormatAvailability = { available: true } | { available: false; reason: string };
 

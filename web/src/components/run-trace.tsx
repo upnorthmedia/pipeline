@@ -40,7 +40,8 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import type { PipelineStage, StageStatusMap } from "@/lib/api";
-import { buildRunTrace, type StageTrace, type TraceStatus } from "@/lib/run-trace";
+import { buildRunTrace, type PublishTrace, type StageTrace, type TraceStatus } from "@/lib/run-trace";
+import { PUBLISH_TARGET_LABELS, type PublishTarget } from "@/lib/publishing";
 import { STAGE_LABELS, STAGE_STATUS_LABELS } from "@/lib/stages";
 
 /**
@@ -166,18 +167,81 @@ function StageRow({ row, now }: { row: StageTrace; now: number }) {
   );
 }
 
+/**
+ * The publish leg, on the same table as the stages because it is part of the
+ * same account: a user watching a run wants to know it reached its
+ * destination, and a publish is the step most likely to fail on something
+ * outside this app.
+ *
+ * It carries no model, tokens or cost, and those cells say so rather than
+ * being left blank, for the same reason a stage that has not run does: an
+ * empty cell reads as a value that failed to load.
+ */
+function PublishRow({ row, now }: { row: PublishTrace; now: number }) {
+  const elapsed = row.status === "running" ? elapsedSeconds(row.startedAt, now) : null;
+
+  return (
+    <>
+      <TableRow className={cn(row.error !== null && "border-b-0")}>
+        <TableCell className="font-medium">
+          Publish to {PUBLISH_TARGET_LABELS[row.target]}
+        </TableCell>
+        <TableCell>
+          <StatusCell status={row.status} />
+        </TableCell>
+        <TableCell className="font-mono text-xs text-muted-foreground">
+          <span aria-hidden>&mdash;</span>
+        </TableCell>
+        <TableCell className="text-right font-mono text-xs tabular-nums">
+          {row.durationS !== null ? (
+            formatDuration(row.durationS)
+          ) : elapsed !== null ? (
+            <span className="text-amber-500">{formatDuration(elapsed)}</span>
+          ) : (
+            <span aria-hidden>&mdash;</span>
+          )}
+        </TableCell>
+        <TableCell className="text-right font-mono text-xs tabular-nums text-muted-foreground">
+          <span aria-hidden>&mdash;</span>
+        </TableCell>
+        <TableCell className="text-right font-mono text-xs tabular-nums">
+          <span aria-hidden>&mdash;</span>
+        </TableCell>
+      </TableRow>
+      {row.error !== null && (
+        <TableRow className="hover:bg-transparent">
+          <TableCell colSpan={6} className="pt-0">
+            <p className="flex items-start gap-1.5 pl-1 text-xs text-red-500">
+              <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+              <span className="break-all">{row.error}</span>
+            </p>
+          </TableCell>
+        </TableRow>
+      )}
+    </>
+  );
+}
+
 export function RunTrace({
   executionLogs,
   stageStatus,
   liveStart,
+  publish,
 }: {
   executionLogs: readonly unknown[];
   stageStatus: StageStatusMap;
   /** The stage of the latest `stage_start` SSE frame, so the clock starts before the refetch. */
   liveStart?: { stage: PipelineStage; at: string } | null;
+  /**
+   * The destination this post's `output_format` names and its status column,
+   * or nothing for a format that publishes nowhere. The post page owns that
+   * decision: the format is on the row it already holds.
+   */
+  publish?: { target: PublishTarget; status: string } | null;
 }) {
-  const trace = buildRunTrace({ entries: executionLogs, stageStatus, liveStart });
-  const running = trace.stages.some((row) => row.status === "running");
+  const trace = buildRunTrace({ entries: executionLogs, stageStatus, liveStart, publish });
+  const running =
+    trace.stages.some((row) => row.status === "running") || trace.publish?.status === "running";
 
   // One tick a second, and only while something is actually running: the
   // elapsed column is the only thing on this card that changes without an
@@ -192,7 +256,11 @@ export function RunTrace({
     return () => clearInterval(timer);
   }, [running]);
 
-  const started = trace.stages.some((row) => row.status !== "pending");
+  // A publish that has not been queued yet is not a run: a post whose format
+  // names WordPress carries `pending` from the moment it is created.
+  const started =
+    trace.stages.some((row) => row.status !== "pending") ||
+    (trace.publish !== null && trace.publish.status !== "pending");
 
   return (
     <Card className="gap-0 py-0">
@@ -208,7 +276,7 @@ export function RunTrace({
           )}
         </div>
         {started && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" role="group" aria-label="Run totals">
             <Badge variant="secondary" className="font-mono text-[10px]">
               {formatTokens(trace.totals.tokensIn + trace.totals.tokensOut)} tokens
             </Badge>
@@ -242,6 +310,7 @@ export function RunTrace({
               {trace.stages.map((row) => (
                 <StageRow key={row.stage} row={row} now={now} />
               ))}
+              {trace.publish !== null && <PublishRow row={trace.publish} now={now} />}
             </TableBody>
           </Table>
         )}

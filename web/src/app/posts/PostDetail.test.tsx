@@ -453,11 +453,12 @@ describe("PostDetailPage publishing", () => {
     );
     renderWithProviders(<PostDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Publishing to WordPress failed")).toBeInTheDocument();
-    });
+    // Scoped to the banner: the run trace's publish row carries the same
+    // reason, read out of the same entry, and that duplication is the point.
+    const banner = await screen.findByRole("alert");
+    expect(within(banner).getByText("Publishing to WordPress failed")).toBeInTheDocument();
     expect(
-      screen.getByText("Error: Invalid application password.")
+      within(banner).getByText("Error: Invalid application password.")
     ).toBeInTheDocument();
   });
 
@@ -473,10 +474,49 @@ describe("PostDetailPage publishing", () => {
     );
     renderWithProviders(<PostDetailPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText("Publishing to Next.js failed")).toBeInTheDocument();
-    });
-    expect(screen.getByText("Webhook returned 401: bad signature")).toBeInTheDocument();
+    const banner = await screen.findByRole("alert");
+    expect(within(banner).getByText("Publishing to Next.js failed")).toBeInTheDocument();
+    expect(
+      within(banner).getByText("Webhook returned 401: bad signature")
+    ).toBeInTheDocument();
+  });
+
+  /**
+   * The trace is the view built for watching a run, and a publish is the last
+   * thing a run does. It ended at `ready` because every publish entry carries
+   * `stage: ""` (polish ledger P3.2b-ii).
+   */
+  it("shows the publish leg on the run trace, with the reason it failed", async () => {
+    mockGet.mockResolvedValue(
+      makeCompletedPost({
+        output_format: "wordpress",
+        wp_publish_status: "failed",
+        execution_logs: [
+          {
+            ts: "2026-08-24T00:00:00Z",
+            stage: "",
+            level: "info",
+            event: "publish_start",
+            message: "Publishing to WordPress...",
+            data: { target: "wordpress" },
+          },
+          logEntry("publish_error", "WordPress publish failed: 401 Unauthorized"),
+        ],
+      })
+    );
+    renderWithProviders(<PostDetailPage />);
+
+    const table = within(await screen.findByRole("table"));
+    expect(table.getByText("Publish to WordPress")).toBeInTheDocument();
+    expect(table.getByText("401 Unauthorized")).toBeInTheDocument();
+  });
+
+  it("shows no publish row for a post exported as markdown", async () => {
+    mockGet.mockResolvedValue(makeCompletedPost({ output_format: "markdown" }));
+    renderWithProviders(<PostDetailPage />);
+
+    await screen.findByRole("table");
+    expect(screen.queryByText(/^Publish to/)).not.toBeInTheDocument();
   });
 
   it("says so plainly when a failed publish left no reason behind", async () => {

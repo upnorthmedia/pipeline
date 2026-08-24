@@ -110,6 +110,7 @@ async function fail(
     level: "error",
     event: "publish_error",
     message: `WordPress publish failed: ${error}`,
+    data: { target: "wordpress" },
   })
   await publishPipelineEvent(pubsub, postId, "publish_error", {
     error,
@@ -177,6 +178,18 @@ export const wordpressPublishStep = createStep({
     }
 
     await db.update(posts).set({ wpPublishStatus: "publishing" }).where(eq(posts.id, postId))
+    // The row, then the trail, then the bus, which is `_fail`'s order and for
+    // the same reason. The trail entry is a divergence from
+    // `wordpress_publish.py`, which announced the start on the bus only: the
+    // event is gone the moment it is delivered, so the run trace, which reads
+    // the row, could neither time a finished publish nor show one in flight.
+    await appendExecutionLog(postId, {
+      stage: "",
+      level: "info",
+      event: "publish_start",
+      message: "Publishing to WordPress...",
+      data: { target: "wordpress" },
+    })
     await publishPipelineEvent(pubsub, postId, "publish_start", {
       message: "Publishing to WordPress...",
     })
@@ -239,6 +252,7 @@ export const wordpressPublishStep = createStep({
         level: "info",
         event: "publish_complete",
         message: `Published to WordPress: ${wpPostUrl}`,
+        data: { target: "wordpress" },
       })
       await publishPipelineEvent(pubsub, postId, "publish_complete", {
         wp_post_url: wpPostUrl,

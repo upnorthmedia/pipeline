@@ -409,14 +409,33 @@ describe("a post the blog accepts", () => {
   })
 
   /**
-   * Python's success branch wrote the column and the bus and nothing else, and
-   * that is kept: `nextjs_published_at` is on the row, so a page loaded later
-   * can still say when the post went out. Only the failure path diverges, and
-   * only because nothing else records why it failed. See its own test below.
+   * Deliberate divergence from `nextjs_publish.py`, which wrote the column and
+   * the bus and nothing else on the way through. Both events are gone the
+   * moment they are delivered, so the run trace, which reads the row, had no
+   * account of a Next.js publish at all: not that one started, not that one
+   * succeeded, and no time for it (polish ledger P3.2b-ii, `todo.md` P2.108).
+   * `nextjs_published_at` says when the last successful one finished and
+   * nothing says when it began. The entries match the WordPress hook's shape
+   * and carry `data.target`, which is what tells the trace which destination
+   * a row's entries belong to when it holds both.
    */
-  it("writes no execution log entry", async () => {
-    const row = await readPost(POST_OK)
-    expect(row.executionLogs ?? []).toEqual([])
+  it("writes the start and the completion to the row's own trail", async () => {
+    const entries = (await readPost(POST_OK)).executionLogs ?? []
+    expect(entries).toHaveLength(2)
+    expect(entries[0]).toMatchObject({
+      stage: "",
+      level: "info",
+      event: "publish_start",
+      message: "Publishing to Next.js...",
+      data: { target: "nextjs" },
+    })
+    expect(entries[1]).toMatchObject({
+      stage: "",
+      level: "info",
+      event: "publish_complete",
+      message: "Published to Next.js",
+      data: { target: "nextjs" },
+    })
   })
 })
 
@@ -524,12 +543,15 @@ describe("the guards", () => {
       [POST_BAD_SECRET, "Failed to decrypt webhook secret"],
     ] as const) {
       const entries = (await readPost(postId)).executionLogs ?? []
+      // Every one of these three refuses before the row moves to
+      // `publishing`, so there is no `publish_start` in front of the failure.
       expect(entries).toHaveLength(1)
       expect(entries[0]).toMatchObject({
         stage: "",
         level: "error",
         event: "publish_error",
         message: `Next.js publish failed: ${reason}`,
+        data: { target: "nextjs" },
       })
     }
   })

@@ -289,7 +289,7 @@ explicitly out of scope.
       post is in, what is blocked and why, what a review gate waits for, what a failure was
       and how to retry it. Make the run-trace view the thing you would actually watch.
       Carries P2.98 (no surface lists the posts waiting at a gate, closed at P3.2b-i), P2.108
-      (the trace renders no publish events), P2.106 (a run with a failed stage still reads
+      (the trace renders no publish events, closed at P3.2b-ii), P2.106 (a run with a failed stage still reads
       "complete", closed at P3.2a) and P2.47 (the SSE hook drops `image_generated` and
       `image_failed`).
   - [x] **P3.2a** The one line every surface shows about a run was not true. Both the posts
@@ -315,10 +315,19 @@ explicitly out of scope.
         `StageStatusJson` was missing `review`, which no writer had caught because
         `mergeStageStatus()` builds raw SQL. Closes P2.98. `ui/p32b-*.png`.
         [evidence](evidence/p3.md#p32b-i)
-  - [ ] **P3.2b-ii** The publish leg of the trace: P2.108 (both publish steps write their
-        `execution_logs` entries with `stage: ""`, so `publish_start`, `publish_complete` and
-        `publish_error` are invisible in the one view built for watching a run, and
-        `nextjs-publish.ts` writes no `publish_complete` entry at all).
+  - [x] **P3.2b-ii** The publish leg of the trace. The reading side dropped every publish
+        entry, because `buildRunTrace()` keys on the six pipeline stages and both steps write
+        `stage: ""`. The writing side was thinner than P2.108 says: neither step wrote a
+        `publish_start` entry at all (the start went to the bus only, and an SSE frame is gone
+        on delivery) and `nextjs-publish.ts` wrote nothing on success, so nothing could time a
+        publish or show one in flight. Both steps now append `publish_start`, Next.js appends
+        `publish_complete`, and every entry carries `data.target`; `publish-report.ts` owns
+        the message prefixes that identify a historic entry's destination. `buildRunTrace()`
+        returns a `PublishTrace` read the way a stage is: status off the row's publish column,
+        timing and reason off the log, attributed only to the destination on screen, with the
+        reason dropped once a later attempt succeeded. It stays out of the run totals, which
+        are stage measurements. Closes P2.108. `ui/p32bii-*.png`.
+        [evidence](evidence/p3.md#p32b-ii)
   - [ ] **P3.2c** Live image events: P2.47 (`NAMED_EVENTS` in `src/hooks/use-sse.ts` lists
         eight names and neither `image_generated` nor `image_failed` is among them, so the
         images stage is the one stage whose progress never reaches an open page).
@@ -500,10 +509,12 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [ ] **P2.107** `[confirmed 2026-08-24]` `wp_url` accepts a URL carrying credentials
       (`https://user:pass@example.com`), so a password can land in `website_profiles.wp_url`,
       which is stored in plain text while `wp_app_password` is Fernet-encrypted.
-- [ ] **P2.108** `[confirmed 2026-08-24]` The run trace does not render publish events.
+- [x] **P2.108** `[confirmed 2026-08-24]` The run trace does not render publish events.
       `RunTrace` reads `execution_logs` by `stage` and both publish steps write theirs with
       `stage: ""`, so `publish_start`, `publish_complete` and `publish_error` are invisible in
-      the one view built for watching a run. Belongs with P3.2.
+      the one view built for watching a run. Closed at P3.2b-ii, which also found that neither
+      step wrote a `publish_start` entry and that Next.js wrote none on success.
+      [evidence](evidence/p3.md#p32b-ii)
 - [ ] **P2.109** `[confirmed 2026-08-24]` A run parked at a review gate can never be resumed:
       nothing in the app calls `run.resume()`. The only way forward the UI offers starts a
       *new* run, so the suspended run stays in `mastra_workflow_snapshot` forever while a

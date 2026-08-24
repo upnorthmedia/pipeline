@@ -176,4 +176,132 @@ describe("RunTrace", () => {
     );
     expect(within(screen.getByRole("table")).getByText("$0.0001")).toBeInTheDocument();
   });
+
+  /**
+   * The publish leg (ledger P3.2b-ii). Every publish entry carries `stage: ""`,
+   * so before this the one view built for watching a run ended at `ready` and
+   * said nothing about the step most likely to fail on something outside this
+   * app.
+   */
+  describe("publish leg", () => {
+    const wpStart = {
+      ts: "2026-08-23T11:00:00.000Z",
+      stage: "",
+      level: "info",
+      event: "publish_start",
+      message: "Publishing to WordPress...",
+      data: { target: "wordpress" },
+    };
+
+    it("shows no publish row for a post whose format publishes nowhere", () => {
+      renderWithProviders(
+        <RunTrace executionLogs={[complete("ready")]} stageStatus={{ ready: "complete" }} />
+      );
+      expect(screen.queryByText(/^Publish to/)).not.toBeInTheDocument();
+    });
+
+    it("names the destination and times the attempt", () => {
+      renderWithProviders(
+        <RunTrace
+          executionLogs={[
+            complete("ready"),
+            wpStart,
+            {
+              ts: "2026-08-23T11:00:09.000Z",
+              stage: "",
+              level: "info",
+              event: "publish_complete",
+              message: "Published to WordPress: https://example.com/?p=900",
+              data: { target: "wordpress" },
+            },
+          ]}
+          stageStatus={{ ready: "complete" }}
+          publish={{ target: "wordpress", status: "published" }}
+        />
+      );
+      const table = within(screen.getByRole("table"));
+      expect(table.getByText("Publish to WordPress")).toBeInTheDocument();
+      expect(table.getByText("9.0s")).toBeInTheDocument();
+    });
+
+    it("shows a failed publish with the reason, without its destination prefix", () => {
+      renderWithProviders(
+        <RunTrace
+          executionLogs={[
+            complete("ready"),
+            wpStart,
+            {
+              ts: "2026-08-23T11:00:04.000Z",
+              stage: "",
+              level: "error",
+              event: "publish_error",
+              message: "WordPress publish failed: 401 Unauthorized",
+              data: { target: "wordpress" },
+            },
+          ]}
+          stageStatus={{ ready: "complete" }}
+          publish={{ target: "wordpress", status: "failed" }}
+        />
+      );
+      const table = within(screen.getByRole("table"));
+      expect(table.getByText("Failed")).toBeInTheDocument();
+      expect(table.getByText("401 Unauthorized")).toBeInTheDocument();
+    });
+
+    it("counts elapsed time for a publish that is still running", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-08-23T11:00:06.000Z"));
+      renderWithProviders(
+        <RunTrace
+          executionLogs={[complete("ready"), wpStart]}
+          stageStatus={{ ready: "complete" }}
+          publish={{ target: "nextjs", status: "publishing" }}
+        />
+      );
+      expect(screen.getByText("Publish to Next.js")).toBeInTheDocument();
+      expect(screen.getByText("Running")).toBeInTheDocument();
+    });
+
+    it("keeps the publish out of the run totals, which are stage measurements", () => {
+      renderWithProviders(
+        <RunTrace
+          executionLogs={[
+            complete("ready", { duration_s: 41.2, cost_usd: 0.44, tokens_in: 12_000, tokens_out: 3_400 }),
+            wpStart,
+            {
+              ts: "2026-08-23T11:00:09.000Z",
+              stage: "",
+              event: "publish_complete",
+              message: "Published to WordPress: https://example.com/?p=900",
+              data: { target: "wordpress" },
+            },
+          ]}
+          stageStatus={{ ready: "complete" }}
+          publish={{ target: "wordpress", status: "published" }}
+        />
+      );
+      // Scoped to the header badges: the `ready` stage's own 41.2s is the same
+      // string in the table, and the point here is which of the two the totals
+      // are, not that the string exists.
+      const totals = within(screen.getByRole("group", { name: "Run totals" }));
+      expect(totals.getByText("41.2s")).toBeInTheDocument();
+      expect(totals.getByText("15,400 tokens")).toBeInTheDocument();
+      expect(within(screen.getByRole("table")).getByText("9.0s")).toBeInTheDocument();
+    });
+
+    it("shows the queued publish of a post whose run has not started", () => {
+      renderWithProviders(
+        <RunTrace
+          executionLogs={[]}
+          stageStatus={{}}
+          publish={{ target: "wordpress", status: "pending" }}
+        />
+      );
+      expect(
+        screen.getByText(
+          "No run yet. Start the pipeline to see per-step status, timing, tokens and cost."
+        )
+      ).toBeInTheDocument();
+    });
+  });
 });

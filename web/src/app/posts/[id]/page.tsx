@@ -52,6 +52,7 @@ import { STAGE_LABELS } from "@/lib/stages";
 import { deriveRunState } from "@/lib/run-state";
 import { buildRunTrace } from "@/lib/run-trace";
 import { lastPublishError } from "@/lib/publish-report";
+import { PUBLISH_TARGET_LABELS, publishTargetOf } from "@/lib/publishing";
 import { plainMessage } from "@/lib/plain-message";
 import { useSSE, type SSEEvent } from "@/hooks/use-sse";
 import { toast } from "sonner";
@@ -432,12 +433,15 @@ export default function PostDetailPage() {
   // publish step clears the other, so a post that changed format can still
   // carry its old destination's status; the format is what decides which one
   // this page speaks about.
-  const publishTarget =
-    post.output_format === "wordpress"
-      ? { label: "WordPress", status: post.wp_publish_status }
-      : post.output_format === "nextjs"
-        ? { label: "Next.js", status: post.nextjs_publish_status }
-        : null;
+  const target = publishTargetOf(post.output_format);
+  const publishTarget = target
+    ? {
+        target,
+        label: PUBLISH_TARGET_LABELS[target],
+        status:
+          target === "wordpress" ? post.wp_publish_status : post.nextjs_publish_status,
+      }
+    : null;
   // Gated on the status column, not on the presence of an entry: a retry that
   // succeeded leaves the earlier failure's entry on the row forever.
   const publishFailure =
@@ -674,6 +678,11 @@ export default function PostDetailPage() {
         executionLogs={post.execution_logs}
         stageStatus={post.stage_status}
         liveStart={liveStart}
+        publish={
+          publishTarget
+            ? { target: publishTarget.target, status: publishTarget.status ?? "pending" }
+            : null
+        }
       />
 
       {/* Stage Content Tabs */}

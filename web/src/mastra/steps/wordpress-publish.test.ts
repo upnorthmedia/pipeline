@@ -466,14 +466,26 @@ describe("a post published for the first time", () => {
     expect(row.wpPostUrl).toBe(`${base}/?p=900`)
   })
 
-  it("writes one publish_complete entry to the row's own trail", async () => {
+  it("writes the start and the completion to the row's own trail", async () => {
     const entries = await publishLogEntries(POST_CREATE)
-    expect(entries).toHaveLength(1)
+    // The start entry is a divergence from `wordpress_publish.py`, which
+    // announced the start on the bus only. The event is gone the moment it is
+    // delivered, so the run trace had no start time for the publish leg and
+    // could not time it or show one in flight (polish ledger P3.2b-ii).
+    expect(entries).toHaveLength(2)
     expect(entries[0]).toMatchObject({
+      stage: "",
+      level: "info",
+      event: "publish_start",
+      message: "Publishing to WordPress...",
+      data: { target: "wordpress" },
+    })
+    expect(entries[1]).toMatchObject({
       stage: "",
       level: "info",
       event: "publish_complete",
       message: `Published to WordPress: ${base}/?p=900`,
+      data: { target: "wordpress" },
     })
   })
 

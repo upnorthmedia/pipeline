@@ -141,6 +141,7 @@ async function fail(
     level: "error",
     event: "publish_error",
     message: `Next.js publish failed: ${message}`,
+    data: { target: "nextjs" },
   })
   await publishPipelineEvent(pubsub, postId, "publish_error", {
     error: message,
@@ -203,6 +204,13 @@ export const nextjsPublishStep = createStep({
     }
 
     await db.update(posts).set({ nextjsPublishStatus: "publishing" }).where(eq(posts.id, postId))
+    await appendExecutionLog(postId, {
+      stage: "",
+      level: "info",
+      event: "publish_start",
+      message: "Publishing to Next.js...",
+      data: { target: "nextjs" },
+    })
     await publishPipelineEvent(pubsub, postId, "publish_start", { target: "nextjs" })
 
     // Deliberately outside the `try` below, exactly as Python has it: see the
@@ -258,6 +266,13 @@ export const nextjsPublishStep = createStep({
       .update(posts)
       .set({ nextjsPublishStatus: "published", nextjsPublishedAt: publishedAt })
       .where(eq(posts.id, postId))
+    await appendExecutionLog(postId, {
+      stage: "",
+      level: "info",
+      event: "publish_complete",
+      message: "Published to Next.js",
+      data: { target: "nextjs" },
+    })
     await publishPipelineEvent(pubsub, postId, "publish_complete", { target: "nextjs" })
     logger?.info(`Published post ${postId} to Next.js at ${profile.nextjsWebhookUrl}`)
 

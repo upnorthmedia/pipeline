@@ -31,6 +31,8 @@
  * overestimate the trace faithfully sums.
  */
 import { STAGES, type PipelineStage, type StageStatus, type StageStatusMap } from "./api"
+import { publishFailureReason, publishTargetOfMessage } from "./publish-report"
+import type { PublishTarget } from "./publishing"
 
 /**
  * The five states a stage can be in on the trace, which are the five
@@ -68,6 +70,38 @@ export interface StageTrace {
   error: string | null
 }
 
+/**
+ * The publish leg: the last thing a run does and the one most likely to fail
+ * on something outside this app.
+ *
+ * It is not a stage. It runs in its own workflow (`wordpress-publish` or
+ * `nextjs-publish`), it is started by hand from the post page, it has no
+ * agent behind it and so no model, no tokens and no cost, and its status
+ * lives in `posts.wp_publish_status` / `posts.nextjs_publish_status` rather
+ * than in `stage_status`. What it shares with a stage is the shape of its
+ * account: a status the row owns, and an `execution_logs` trail behind it
+ * saying when it started, how long it took and what went wrong.
+ */
+export interface PublishTrace {
+  target: PublishTarget
+  /**
+   * The four the two status columns hold, mapped onto the stage vocabulary so
+   * the table reads one set of words: `publishing` is `running`, `published`
+   * is `complete`.
+   */
+  status: Extract<TraceStatus, "pending" | "running" | "complete" | "failed">
+  /** ISO timestamp of the latest attempt's `publish_start` entry. */
+  startedAt: string | null
+  /** Wall clock across the latest finished attempt, since no step measures it. */
+  durationS: number | null
+  /**
+   * The reason the latest attempt failed, with the destination prefix off the
+   * front. Null unless the last publish entry on the row is that failure: a
+   * retry that succeeded leaves the earlier failure's entry in place forever.
+   */
+  error: string | null
+}
+
 export interface RunTrace {
   stages: StageTrace[]
   totals: {
@@ -77,6 +111,12 @@ export interface RunTrace {
     /** Sum of the stages' own durations, not wall clock: gates and queue time are not stage time. */
     durationS: number
   }
+  /**
+   * The publish leg, or null for a post whose `output_format` names no
+   * destination. The caller decides that, because the format is on the post
+   * row and this module is given the log.
+   */
+  publish: PublishTrace | null
   /**
    * A failure that named no stage. `recordRunFailure()` sends `""` when the
    * engine's terminal event does not identify the step that threw, and that
@@ -156,6 +196,36 @@ function restartStage(row: StageTrace, ts: string | null, keepRetries: boolean):
   if (!keepRetries) row.retries = []
 }
 
+/** The four values `wp_publish_status` and `nextjs_publish_status` hold. */
+const PUBLISH_COLUMN_STATUS: Record<string, PublishTrace["status"]> = {
+  pending: "pending",
+  publishing: "running",
+  published: "complete",
+  failed: "failed",
+}
+
+/** One attempt at a destination, as its `execution_logs` entries describe it. */
+interface PublishAttempt {
+  target: PublishTarget | null
+  startedAt: string | null
+  finishedAt: string | null
+  error: string | null
+}
+
+function publishTargetOf(entry: LogEntry, data: Record<string, unknown>): PublishTarget | null {
+  if (data.target === "wordpress" || data.target === "nextjs") return data.target
+  return publishTargetOfMessage(entry.message)
+}
+
+/** Whole seconds where the gap is whole, so a nine second publish reads `9.0s`. */
+function secondsBetween(from: string | null, to: string | null): number | null {
+  if (!from || !to) return null
+  const started = Date.parse(from)
+  const ended = Date.parse(to)
+  if (Number.isNaN(started) || Number.isNaN(ended) || ended < started) return null
+  return Number(((ended - started) / 1000).toFixed(2))
+}
+
 /**
  * Fold a post's `execution_logs` into one row per stage.
  *
@@ -171,11 +241,19 @@ export function buildRunTrace(input: {
   stageStatus: StageStatusMap
   /** The stage of the most recent `stage_start` SSE frame, before any refetch reveals its entry. */
   liveStart?: { stage: PipelineStage; at: string } | null
+  /**
+   * The destination this post's `output_format` names and what its status
+   * column says about the last attempt, or null for a format that publishes
+   * nowhere. Read off the row for the same reason `stageStatus` is: the column
+   * is the pipeline's own record and the log is the audit trail behind it.
+   */
+  publish?: { target: PublishTarget; status: string } | null
 }): RunTrace {
   const rows = new Map<PipelineStage, StageTrace>(
     STAGES.map((stage) => [stage, emptyStage(stage)]),
   )
   let runError: string | null = null
+  let publishAttempt: PublishAttempt | null = null
   const lastEventFor = new Map<PipelineStage, string>()
 
   for (const raw of input.entries) {
@@ -189,6 +267,29 @@ export function buildRunTrace(input: {
       // A failure the engine could not pin on a step. Its text is still the
       // only account of why the run stopped.
       if (event === "stage_error") runError = textOf(data.error) ?? textOf(entry.message)
+      // Both publish steps write `stage: ""`, so this is where their trail
+      // arrives. A `publish_start` opens a fresh attempt and discards the
+      // previous one's measurements, exactly as `stage_start` does.
+      if (event === "publish_start") {
+        publishAttempt = {
+          target: publishTargetOf(entry, data),
+          startedAt: ts,
+          finishedAt: null,
+          error: null,
+        }
+      } else if (event === "publish_complete" || event === "publish_error") {
+        const target = publishTargetOf(entry, data)
+        // A terminal entry with no start before it: every row stored before
+        // the steps began writing `publish_start` looks like this.
+        if (!publishAttempt || (target !== null && publishAttempt.target !== target)) {
+          publishAttempt = { target, startedAt: null, finishedAt: null, error: null }
+        }
+        publishAttempt.finishedAt = ts
+        publishAttempt.error =
+          event === "publish_error"
+            ? (publishFailureReason(entry.message) ?? textOf(data.error))
+            : null
+      }
       continue
     }
     const row = rows.get(entry.stage) as StageTrace
@@ -250,6 +351,7 @@ export function buildRunTrace(input: {
   const stages = STAGES.map((stage) => rows.get(stage) as StageTrace)
   return {
     stages,
+    publish: buildPublishTrace(input.publish, publishAttempt),
     totals: {
       tokensIn: stages.reduce((sum, row) => sum + row.tokensIn, 0),
       tokensOut: stages.reduce((sum, row) => sum + row.tokensOut, 0),
@@ -259,5 +361,34 @@ export function buildRunTrace(input: {
       durationS: Number(stages.reduce((sum, row) => sum + (row.durationS ?? 0), 0).toFixed(2)),
     },
     runError,
+  }
+}
+
+/**
+ * The publish row, from the column the page read and the trail this run left.
+ *
+ * An attempt is only attributed to the destination on screen: nothing clears
+ * the other destination's status column, so a post that changed format still
+ * carries the old one's entries and timing them against the new one would be
+ * a fabrication. An entry that names no destination (stored before the steps
+ * wrote `data.target`, with a message carrying no prefix either) is taken as
+ * this one's, since it is the only account there is.
+ */
+function buildPublishTrace(
+  column: { target: PublishTarget; status: string } | null | undefined,
+  attempt: PublishAttempt | null,
+): PublishTrace | null {
+  if (!column) return null
+  const status = PUBLISH_COLUMN_STATUS[column.status] ?? "pending"
+  const mine = attempt && (attempt.target === null || attempt.target === column.target)
+  if (!mine || !attempt) {
+    return { target: column.target, status, startedAt: null, durationS: null, error: null }
+  }
+  return {
+    target: column.target,
+    status,
+    startedAt: attempt.startedAt,
+    durationS: secondsBetween(attempt.startedAt, attempt.finishedAt),
+    error: attempt.error,
   }
 }

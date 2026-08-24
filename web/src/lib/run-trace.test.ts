@@ -286,3 +286,167 @@ describe("buildRunTrace", () => {
     expect(result.totals.costUsd).toBe(0)
   })
 })
+
+/**
+ * The publish leg. Both publish steps write their `execution_logs` entries
+ * with `stage: ""`, so every one of them fell through the `!isStage` branch
+ * above and the view built for watching a run said nothing about the last
+ * thing a run does (ledger P3.2b-ii, `todo.md` P2.108).
+ */
+describe("buildRunTrace publish leg", () => {
+  const WP_START = {
+    ts: "2026-08-23T11:00:00.000Z",
+    stage: "",
+    level: "info",
+    event: "publish_start",
+    message: "Publishing to WordPress...",
+    data: { target: "wordpress" },
+  }
+  const WP_COMPLETE = {
+    ts: "2026-08-23T11:00:09.000Z",
+    stage: "",
+    level: "info",
+    event: "publish_complete",
+    message: "Published to WordPress: https://example.com/?p=900",
+    data: { target: "wordpress" },
+  }
+  const WP_ERROR = {
+    ts: "2026-08-23T11:00:04.500Z",
+    stage: "",
+    level: "error",
+    event: "publish_error",
+    message: "WordPress publish failed: 401 Unauthorized",
+    data: { target: "wordpress" },
+  }
+
+  it("reports no publish leg for a post whose format names no destination", () => {
+    expect(trace([WP_START, WP_COMPLETE]).publish).toBeNull()
+  })
+
+  it("reads the destination's status off the row, as the stages do", () => {
+    const result = buildRunTrace({
+      entries: [],
+      stageStatus: {},
+      publish: { target: "wordpress", status: "pending" },
+    })
+    expect(result.publish).toEqual({
+      target: "wordpress",
+      status: "pending",
+      startedAt: null,
+      durationS: null,
+      error: null,
+    })
+  })
+
+  it("maps the publishing column onto a running leg with its start time", () => {
+    const result = buildRunTrace({
+      entries: [WP_START],
+      stageStatus: {},
+      publish: { target: "wordpress", status: "publishing" },
+    })
+    expect(result.publish).toMatchObject({
+      status: "running",
+      startedAt: "2026-08-23T11:00:00.000Z",
+      durationS: null,
+      error: null,
+    })
+  })
+
+  it("times a finished publish from its own two entries", () => {
+    const result = buildRunTrace({
+      entries: [WP_START, WP_COMPLETE],
+      stageStatus: {},
+      publish: { target: "wordpress", status: "published" },
+    })
+    expect(result.publish).toMatchObject({ status: "complete", durationS: 9, error: null })
+  })
+
+  it("carries the reason a failed publish recorded, stripped of its destination prefix", () => {
+    const result = buildRunTrace({
+      entries: [WP_START, WP_ERROR],
+      stageStatus: {},
+      publish: { target: "wordpress", status: "failed" },
+    })
+    expect(result.publish).toMatchObject({
+      status: "failed",
+      durationS: 4.5,
+      error: "401 Unauthorized",
+    })
+  })
+
+  it("drops a superseded failure once a later attempt succeeded", () => {
+    const result = buildRunTrace({
+      entries: [WP_START, WP_ERROR, WP_START, WP_COMPLETE],
+      stageStatus: {},
+      publish: { target: "wordpress", status: "published" },
+    })
+    expect(result.publish).toMatchObject({ status: "complete", error: null, durationS: 9 })
+  })
+
+  it("ignores entries belonging to the other destination", () => {
+    const result = buildRunTrace({
+      entries: [WP_START, WP_ERROR],
+      stageStatus: {},
+      publish: { target: "nextjs", status: "failed" },
+    })
+    expect(result.publish).toMatchObject({ target: "nextjs", startedAt: null, error: null })
+  })
+
+  it("attributes an entry stored before data.target by the prefix its message carries", () => {
+    // Both halves matter: the prefix is the only thing that identifies a
+    // historic entry's destination, so without it the WordPress failure below
+    // would be read as the Next.js leg's.
+    const historic = {
+      ts: "2026-08-23T11:00:00.000Z",
+      stage: "",
+      event: "publish_error",
+      message: "WordPress publish failed: 401 Unauthorized",
+    }
+    expect(
+      buildRunTrace({
+        entries: [historic],
+        stageStatus: {},
+        publish: { target: "wordpress", status: "failed" },
+      }).publish,
+    ).toMatchObject({ status: "failed", error: "401 Unauthorized" })
+    expect(
+      buildRunTrace({
+        entries: [historic],
+        stageStatus: {},
+        publish: { target: "nextjs", status: "failed" },
+      }).publish,
+    ).toMatchObject({ target: "nextjs", error: null })
+  })
+
+  it("does not carry the previous attempt's reason into a retry that is still running", () => {
+    const result = buildRunTrace({
+      entries: [WP_START, WP_ERROR, WP_START],
+      stageStatus: {},
+      publish: { target: "wordpress", status: "publishing" },
+    })
+    expect(result.publish).toMatchObject({ status: "running", error: null, durationS: null })
+  })
+
+  it("leaves the stage totals alone: a publish is not a stage and costs no tokens", () => {
+    const result = buildRunTrace({
+      entries: [start("ready"), complete("ready"), WP_START, WP_COMPLETE],
+      stageStatus: { ready: "complete" },
+      publish: { target: "wordpress", status: "published" },
+    })
+    expect(result.totals).toEqual({
+      tokensIn: 1000,
+      tokensOut: 500,
+      costUsd: 0.0525,
+      durationS: 12.5,
+    })
+  })
+
+  it("does not read a publish entry as the run-level failure", () => {
+    const result = buildRunTrace({
+      entries: [WP_ERROR],
+      stageStatus: {},
+      publish: { target: "wordpress", status: "failed" },
+    })
+    expect(result.runError).toBeNull()
+  })
+})
