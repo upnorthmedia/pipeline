@@ -709,14 +709,6 @@
   (exit 0). Item 9.1 has to paste every gate command, so it needs the `exec` form or a
   `typecheck` script in `web/package.json`.
 
-- [confirmed] 2026-08-23 The 6 failing tests in `web/src/components/__tests__/image-preview.test.tsx`
-  are UI expectation drift, not a runtime defect, and are now the whole of the standing
-  failure state of `pnpm -C web test` (`6 failed | 4550 passed`, plus the intermittent
-  `scaffold-check` entry above). The 3 `PostDetail.test.tsx` failures that used to sit
-  alongside them were resolved by ledger item 8.3 on 2026-08-23. Item 9.1 still needs
-  `image-preview.test.tsx` audited against the current component, the same way the Playwright
-  suite does.
-
 - [confirmed] 2026-08-23 The app has no theme switch: `web/src/app/layout.tsx:28` hardcodes
   `<html lang="en" className="dark">` and no `ThemeProvider` is mounted anywhere
   (`next-themes` is imported only by `web/src/components/ui/sonner.tsx`, whose `useTheme()`
@@ -781,3 +773,12 @@
   the likely cause is contention between parallel vitest workers rather than any single test.
   Item 9.1 cannot record a green `pnpm -C web test` until this is settled, so it needs either
   a `poolOptions` concurrency cap for those files or per-file isolation of the consumer group.
+
+- [confirmed] 2026-08-23 `ImagePreview` shows a failed image as a bare `Failed` badge and
+  nothing else. `generateOneImage` records the reason on the entry as `error`, and the
+  component never reads it, so the user sees that an image failed but not why, and has no way
+  to retry it. Belongs to polish ledger item P1.2.
+
+- [confirmed] 2026-08-23 `ImagePreview` renders `placement.location` as the raw enum the model
+  writes, so a featured image's placement reads `featured_image` in the UI. Belongs to polish
+  ledger item P3.3.

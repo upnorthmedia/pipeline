@@ -115,7 +115,22 @@ export function makeCompletedPost(): Post {
     draft_content: "# Draft\nDraft content here",
     final_md_content: "# Final\nFinal markdown content",
     final_html_content: "<p>Final HTML content</p>",
-    image_manifest: { featured: { prompt: "A test image" } },
+    image_manifest: {
+      style_brief: { overall_style: "photorealistic" },
+      images: [
+        {
+          id: "featured",
+          type: "featured",
+          prompt: "A test image",
+          alt_text: "A test image",
+          url: "/media/post-1/featured-022726-47.webp",
+          generated: true,
+          index: 0,
+        },
+      ],
+      total_generated: 1,
+      total_failed: 0,
+    },
     completed_at: "2025-01-16T12:00:00Z",
   });
 }

@@ -18,18 +18,30 @@ describe("ImagePreview", () => {
     expect(screen.getByText("No images generated yet")).toBeInTheDocument();
   });
 
+  // Every fixture below uses the manifest shape the pipeline actually stores:
+  // `rules/blog-images.md` asks the model for `{ style_brief, images: [...] }`
+  // and `generateOneImage` writes each entry back with `generated`, `index`,
+  // and either a served `url` or an `error`. The flat `{ featured: {...} }` map
+  // these tests used to carry has never been produced by any stage in this
+  // repo, which is why six of them could not find a rendered card.
   it("renders image cards from manifest", () => {
     const manifest = {
-      featured: {
-        prompt: "A landscape photo",
-        alt_text: "Beautiful landscape",
-        placement: "Featured image",
-      },
-      content_1: {
-        prompt: "A diagram",
-        alt_text: "Process diagram",
-        placement: "After section 2",
-      },
+      images: [
+        {
+          id: "featured",
+          type: "featured",
+          prompt: "A landscape photo",
+          alt_text: "Beautiful landscape",
+          placement: { location: "featured_image", after_section: null },
+        },
+        {
+          id: "content-1",
+          type: "content",
+          prompt: "A diagram",
+          alt_text: "Process diagram",
+          placement: { location: "after_heading", after_section: "After section 2" },
+        },
+      ],
     };
     renderWithProviders(<ImagePreview manifest={manifest} />);
     expect(screen.getByTestId("image-preview")).toBeInTheDocument();
@@ -39,31 +51,42 @@ describe("ImagePreview", () => {
 
   it("displays alt text", () => {
     const manifest = {
-      featured: {
-        alt_text: "Beautiful landscape",
-        prompt: "A photo",
-      },
+      images: [
+        {
+          id: "featured",
+          alt_text: "Beautiful landscape",
+          prompt: "A photo",
+        },
+      ],
     };
     renderWithProviders(<ImagePreview manifest={manifest} />);
     expect(screen.getByText(/Beautiful landscape/)).toBeInTheDocument();
   });
 
   it("displays placement info", () => {
+    // `placement` is an object in every real manifest, and the heading an image
+    // follows is the part of it worth showing.
     const manifest = {
-      featured: {
-        placement: "Featured image",
-        prompt: "A photo",
-      },
+      images: [
+        {
+          id: "content-1",
+          placement: { location: "after_heading", after_section: "Choosing A Router" },
+          prompt: "A photo",
+        },
+      ],
     };
     renderWithProviders(<ImagePreview manifest={manifest} />);
-    expect(screen.getByText("Featured image")).toBeInTheDocument();
+    expect(screen.getByText("Choosing A Router")).toBeInTheDocument();
   });
 
   it("displays prompt text", () => {
     const manifest = {
-      featured: {
-        prompt: "A beautiful mountain landscape at sunset",
-      },
+      images: [
+        {
+          id: "featured",
+          prompt: "A beautiful mountain landscape at sunset",
+        },
+      ],
     };
     renderWithProviders(<ImagePreview manifest={manifest} />);
     expect(
@@ -72,28 +95,35 @@ describe("ImagePreview", () => {
   });
 
   it("displays style metadata", () => {
+    // The style lives on the manifest's `style_brief`, not on an entry: it is
+    // one visual identity shared by every image in the set.
     const manifest = {
-      featured: {
-        prompt: "A photo",
-        style: "photorealistic",
-      },
+      images: [{ id: "featured", prompt: "A photo" }],
+      style_brief: { overall_style: "photorealistic" },
     };
     renderWithProviders(<ImagePreview manifest={manifest} />);
     expect(screen.getByText(/photorealistic/)).toBeInTheDocument();
   });
 
-  it("displays image with filename", () => {
+  it("does not render the model's declared filename as an image src", () => {
+    // `filename` is the name the model asked for, and the stage rewrites it for
+    // featured images before writing the file, so it is not a path this app
+    // serves. Only `url`, which the stage sets after the write, is.
     const manifest = {
-      featured: {
-        prompt: "A photo",
-        filename: "/images/featured.png",
-        alt_text: "Featured image alt",
-      },
+      images: [
+        {
+          id: "featured",
+          prompt: "A photo",
+          filename: "featured-022726-47.png",
+          alt_text: "Featured image alt",
+        },
+      ],
     };
-    renderWithProviders(<ImagePreview manifest={manifest} />);
-    const img = screen.getByAltText("Featured image alt");
-    expect(img).toBeInTheDocument();
-    expect(img).toHaveAttribute("src", "/images/featured.png");
+    const { container } = renderWithProviders(
+      <ImagePreview manifest={manifest} />
+    );
+    expect(screen.queryByAltText("Featured image alt")).not.toBeInTheDocument();
+    expect(container.querySelectorAll("img")).toHaveLength(0);
   });
 
   it("renders a generated image with an origin-relative src", () => {
@@ -135,11 +165,9 @@ describe("ImagePreview", () => {
     );
   });
 
-  it("shows placeholder when no filename", () => {
+  it("shows placeholder when an entry has no url", () => {
     const manifest = {
-      featured: {
-        prompt: "A photo",
-      },
+      images: [{ id: "featured", prompt: "A photo" }],
     };
     const { container } = renderWithProviders(
       <ImagePreview manifest={manifest} />
