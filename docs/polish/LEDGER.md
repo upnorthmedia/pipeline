@@ -2,8 +2,16 @@
 
 The worklist for the "make Jena AI work correctly and feel well made" run. One small
 verified committed change per iteration, working the topmost unchecked item. Sections are in
-priority order and do not get reordered: an earlier section done properly beats all of it
-half done.
+priority order: an earlier section done properly beats all of it half done.
+
+**Priority change, 2026-08-24.** P0 and P1 are done, so P3 now outranks the remaining P2
+items and sits above them here. The P2 tail was triaged in the same pass rather than worked
+entry by entry: `[optimization]` entries that touched neither correctness, data integrity,
+security nor anything a user can see were deleted, as were `[investigate]` entries that do
+not reproduce and `[confirmed]` entries whose subject was the deleted `api/` tree. Each
+deletion is a checked box below carrying its one-line reason, and the matching `todo.md`
+entry is gone. Trivial survivors are batched into **P2.C1** instead of one iteration apiece.
+Reasons in full: [evidence](evidence/p2.md#p2-triage).
 
 Evidence for every item goes in `docs/polish/evidence/<section>.md` under a `## <item-id>`
 heading. This file carries the link and nothing else, because it is re-read every iteration.
@@ -232,17 +240,41 @@ move on. A split is not an iteration on its own: split and complete the first ch
           Next.js publish with no reason on the row at all. Verified in a real browser,
           `ui/p13diii-*.png`. [evidence](evidence/p1.md#p13d-iii)
 
+## P3. UI and UX
+
+Not a repaint: the shadcn and Tailwind v4 foundation stays. Simple, fast, legible, and
+organised so the next action is obvious. Dark mode and the accessibility checklist are
+explicitly out of scope.
+
+- [ ] **P3.1** Information architecture. Settings, profiles and per-post configuration overlap
+      and nothing says which owns what. Decide, move things, write the reasoning in the
+      evidence file. Publishing configuration drives this. Carries P2.111 (`/posts/new` has
+      no per-post gate editor while `/profiles/[id]` and `/posts/batch` both do).
+- [ ] **P3.2** The pipeline is the product: make its state readable at a glance. What stage a
+      post is in, what is blocked and why, what a review gate waits for, what a failure was
+      and how to retry it. Make the run-trace view the thing you would actually watch.
+      Carries P2.98 (no surface lists the posts waiting at a gate), P2.108 (the trace renders
+      no publish events), P2.106 (a run with a failed stage still reads "complete") and P2.47
+      (the SSE hook drops `image_generated` and `image_failed`).
+- [ ] **P3.3** Naming and copy. Stage names, buttons and errors in the user's terms. No raw
+      enum values, no stack traces, no `undefined` in the UI. Carries P2.96 (the route error
+      boundaries print a raw V8 message) and P2.112 (`placement.location` renders as the raw
+      enum).
+- [ ] **P3.4** Speed where it is felt: layout shift, avoidable spinners on cached data, lists
+      that refetch everything on a single-row change.
+- [ ] **P3.5** One screen per iteration, verified with `npx -y chrome-devtools-axi`, before and
+      after PNGs committed under `docs/polish/ui/`, no new console errors.
+
 ## P2. Clear the backlog in `todo.md`
 
 Worked top to bottom against `todo.md`, one numbered entry per finding in that file's order.
-The numbering below is a snapshot of that file taken at the first iteration: findings appended
-to `todo.md` since then are unnumbered here and get worked from `todo.md` itself, because
-renumbering a list that is re-read every iteration costs more than it is worth. `todo.md` is
-the authority for what is left, not this list. For each: fix it, or delete it with a one-line
-reason in the evidence file if it is stale or wrong. Every `[confirmed]` item affecting
-correctness, data integrity, security or anything a user can see gets fixed. Every
-`[investigate]` item gets verified before it is acted on, and demoted or deleted when it does
-not reproduce.
+P2.1 to P2.95 are a snapshot of that file taken at the first iteration; P2.96 and up were
+appended at the 2026-08-24 triage from findings filed since, in `todo.md` order. Numbers are
+only ever appended, never reassigned. `todo.md` is the authority for what is left, not this
+list. For each: fix it, or delete it with a one-line reason in the evidence file if it is
+stale or wrong. Every `[confirmed]` item affecting correctness, data integrity, security or
+anything a user can see gets fixed. Every `[investigate]` item gets verified before it is
+acted on, and demoted or deleted when it does not reproduce.
 
 High value, done first within P2: P2.51 (`delete_link()` ownership check), P2.87
 (`POST /api/profiles` accepting any string as a website URL), P2.83 (`GET /api/posts`
@@ -289,22 +321,22 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [x] **P2.37** `[investigate]` `src/mastra/pipeline-events.test.ts > carries Python's log payload and nothing else` failed once on a full `vitest run` during item 5.5e-i, ... Fixed by P0.3b; entry removed from `todo.md`. [evidence](evidence/p0.md#p03b)
 - [x] **P2.38** `[confirmed]` The `cost_usd` on every `stage_complete` execution log entry is priced at Anthropic Opus rates regardless of provider. `api/src/worker.py:244` ... Fixed: `stageCostUsd()` takes the model and reads `MODEL_COSTS`, `announceStageComplete()` passes the id it already stored beside the cost, and `model-costs.test.ts` fails when an allowlisted model has no price. `research` was 5x over, `claude-fable-5` had no price at all. Entry removed from `todo.md`. [evidence](evidence/p2.md#p238)
 - [x] **P2.39** `[confirmed]` The port's stage retries are immediate where Python spaced them 10 seconds apart. `WorkerSettings.retry_delay = 10` (`api/src/worker.py:610`) ... Fixed: `RETRY_DELAY_MS` and an abortable pause in `recordStageRetry()`, held after the retry entry is written and before the error is rethrown, so the spacing is real where a `delay` on the workflow would have been ignored. All eight stage steps pass their `abortSignal`. The suite sets `STAGE_RETRY_DELAY_MS: "0"`. Entry removed from `todo.md`. [evidence](evidence/p2.md#p239)
-- [ ] **P2.40** `[investigate]` A step that is resumed from a review gate and then throws loses its `resumeData` on retry, so it re-suspends at the same gate instead of ...
+- [x] **P2.40** `[investigate]` A step that is resumed from a review gate and then throws loses its `resumeData` on retry, so it re-suspends at the same gate instead of ... Deleted at triage: unreachable until the app has a resume path at all, and the mechanism (the engine's retry branch does not carry `resumeData` forward) is carried into P2.109, which owns that path.
 - [x] **P2.41** `[confirmed, fixed 2026-08-22]` `images` stage did not retry at all, where Python's job retry re-ran it like any other stage. Measured under ledger item 5.5c-iii-b-2-b-i ...
 - [x] **P2.42** `[confirmed]` `received` in `web/src/mastra/pipeline-events.test.ts` is not in delivery order, so any assertion built on its ordering is unsound. Its ... Fixed by P0.3b; entry removed from `todo.md`. [evidence](evidence/p0.md#p03b)
 - [x] **P2.43** `[confirmed, fixed 2026-08-23]` test files shared post id `00000000-0000-4000-8000-0000000055d1`: `web/src/mastra/steps/stage-log.test.ts` and ...
 - [x] **P2.44** `[confirmed, fixed 2026-08-23]` in `web/src/mastra/failure-recorder.test.ts` returned as soon as `current_stage` read `failed`, which is a snapshot that can predate the ...
-- [ ] **P2.45** `[optimization 2026-08-23]` carries three literal U+2014 em dashes in source (the `em-dash(es)` warning message, the `ACTION REQUIRED` prompt line, and one comment), where ...
+- [x] **P2.45** `[optimization 2026-08-23]` carries three literal U+2014 em dashes in source (the `em-dash(es)` warning message, the `ACTION REQUIRED` prompt line, and one comment), where ... Deleted at triage: the two product strings are a wire contract and a prompt contract whose bytes must not change, the third is a comment, and none of the three touches correctness, security or anything a user can see.
 - [ ] **P2.46** `[confirmed]` `web/src/mastra/steps/images-manifest.ts` renders the manifest's `error` value into its parse-failure message with `String(...)` where Python's ...
 - [ ] **P2.47** `[confirmed]` `web/src/hooks/use-sse.ts` does not listen for `image_generated` or `image_failed`. `NAMED_EVENTS` lists eight names and neither is among them, ...
 - [x] **P2.48** `[investigate]` New sighting of the `received`-ordering defect recorded above: `pipeline-events.test.ts > carries Python's log payload and nothing else` failed ... Fixed by P0.3b; entry removed from `todo.md`. [evidence](evidence/p0.md#p03b)
 - [x] **P2.49** `[investigate]` Running `pnpm -C web test` leaves untracked WebP files in the repo's `media/test-123/` directory (six appeared during the 5.5c-iv-d-2 iteration, ... Explained and fixed by P0.4: the writer was the deleted pytest suite under `api/`, and the `MEDIA_DIR` default the entry proposed is now in place; entry removed from `todo.md`. [evidence](evidence/p0.md#p04)
-- [ ] **P2.50** `[optimization]` `GET /api/events/{post_id}` opens one `RedisStreamsPubSub` subscription per connected browser, and each one costs a dedicated Redis connection ...
+- [x] **P2.50** `[optimization]` `GET /api/events/{post_id}` opens one `RedisStreamsPubSub` subscription per connected browser, and each one costs a dedicated Redis connection ... Deleted at triage: connection count per open tab, teardown already proven by a test, nothing has hit a limit; `[optimization]` with no correctness, security or user-visible effect.
 - [x] **P2.51** `[confirmed]` `delete_link()` in `api/src/api/links.py` has no ownership check: unlike the other two endpoints in that router it never calls ... Stale: `api/` is gone from the repo and the port scopes the delete to the caller with two tests on it; entry removed from `todo.md`. [evidence](evidence/p2.md#p251)
-- [ ] **P2.52** `[confirmed]` `cost_analytics()` in `api/src/api/analytics.py` has never run. Its raw SQL puts the `website_profiles` join inside the second `FROM` item ...
+- [x] **P2.52** `[confirmed]` `cost_analytics()` in `api/src/api/analytics.py` has never run. Its raw SQL puts the `website_profiles` join inside the second `FROM` item ... Deleted at triage: `api/` was deleted at ledger item 7.1c (`f917348`), and the TypeScript replacement `web/src/app/api/analytics/costs/route.ts` puts the join on `posts` and has 30 tests.
 - [ ] **P2.53** `[confirmed]` `web/src/app/api/analytics/costs/route.ts` (ledger item 5.8b) reads its two optional query parameters with `url.searchParams.get("profile_id")` ...
 - [x] **P2.54** `[confirmed]` `npx next build` in `web/` prints 15 `[Error [BetterAuthError]: You are using the default secret. Please set BETTER_AUTH_SECRET ...]` lines ... Fixed with P2.28: the build imported `/api/auth/[...all]` once per page-data worker, so the 15 lines were 15 workers rather than 15 routes. Build is now clean, or fails naming the variable. [evidence](evidence/p2.md#p228-p254-p275)
-- [ ] **P2.55** `[confirmed]` `GET /api/analytics/logs` in `api/src/api/analytics.py` answers a 500 for any `since` or `until` that `datetime.fromisoformat()` rejects. The ...
+- [x] **P2.55** `[confirmed]` `GET /api/analytics/logs` in `api/src/api/analytics.py` answers a 500 for any `since` or `until` that `datetime.fromisoformat()` rejects. The ... Deleted at triage: same deleted `api/` tree, and the port already answers pydantic's `datetime_from_date_parsing` 422 for a malformed `since`/`until` (item 5.8d-ii).
 - [ ] **P2.56** `[confirmed]` The whole `/api/analytics/logs` result set is ordered and bounded by a *text* comparison on `log_entry->>'ts'`, in both stacks. That is only ...
 - [x] **P2.57** `[confirmed]` `WordPressClient.__init__` in `api/src/services/wordpress.py` appends its REST paths to the raw `wp_url` after nothing but a trailing-slash ...
 - [x] **P2.58** `[confirmed]` `GET /api/profiles/{profile_id}/wordpress/categories` and `/authors` answer a 500 for every failure the WordPress install reports, because ... Fixed by P1.3a: both handlers answer a 502 carrying the install's own message, or a sentence naming the key the payload is missing; entry removed from `todo.md`. [evidence](evidence/p1.md#p13a)
@@ -316,7 +348,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [ ] **P2.64** `[confirmed]` The local-to-remote image URL rewrite in `api/src/pipeline/publish.py` corrupts a media URL that is a prefix of another one. The loop is `for ...
 - [x] **P2.65** `[investigate]` `src/mastra/workflows/pipeline-completion.test.ts > ... (`Date.parse(recorded)` at line 328) failed once in a full `pnpm test` run during ledger ... 0 failures in six full runs; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.66** `[confirmed]` `pythonJsonDumps` in `web/src/mastra/prompts.ts` does not escape U+007F. Its regex is `[\u0080-\uffff]`, but Python's `ESCAPE_ASCII` is `[^\ ...
-- [ ] **P2.67** `[investigate]` The `pg` driver parses a JSONB column with `JSON.parse`, which erases Python's int/float distinction and loses digits past 2^53 before any port ...
+- [x] **P2.67** `[investigate]` The `pg` driver parses a JSONB column with `JSON.parse`, which erases Python's int/float distinction and loses digits past 2^53 before any port ... Deleted at triage: it reproduces mechanically, but the only thing the divergence broke was byte parity against the Python stack, which no longer exists; the eleven cases stay pinned in `PARSE_DIVERGENCES`.
 - [ ] **P2.68** `[confirmed]` `POST /api/posts/{post_id}/publish` cannot publish a post whose `output_format` is `both`, which is the column's default value. `publish_post()` ...
 - [x] **P2.69** `[confirmed]` `web/src/mastra/pipeline-events.test.ts > a run that executes every stage > carries Python's log payload and nothing else` is flaky: it reads ... Fixed by P0.3b; entry removed from `todo.md`. [evidence](evidence/p0.md#p03b)
 - [x] **P2.70** `[confirmed]` The vitest suites that borrow the global `settings.api_keys` row can destroy live credentials. `web/src/mastra/api-keys.test.ts` deletes the row ... Fixed by P0.3a; entry removed from `todo.md`. [evidence](evidence/p0.md#p03a)
@@ -330,40 +362,109 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [x] **P2.78** `[confirmed]` `scaffold-check.test.ts > emits the workflow lifecycle events the trace view will read` fails under a full parallel `pnpm -C web test` while ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.79** `[confirmed]` The objective's literal typecheck gate `pnpm -C web tsc --noEmit` does not run on the installed pnpm (10.26.2): it exits 254 with ...
 - [x] **P2.80** `[confirmed]` The 6 failing tests in `web/src/components/__tests__/image-preview.test.tsx`. The same finding as P0.1, removed from `todo.md`. [evidence](evidence/p0.md#p01)
-- [ ] **P2.81** `[confirmed]` The app has no theme switch: `web/src/app/layout.tsx:28` hardcodes `<html lang="en" className="dark">` and no `ThemeProvider` is mounted ...
-- [ ] **P2.82** `[investigate]` `pnpm -C web dev` serves the repo's own `media/` directory, but the item 7.6 end-to-end run executed in the compose stack and wrote its five ...
+- [x] **P2.81** `[confirmed]` The app has no theme switch: `web/src/app/layout.tsx:28` hardcodes `<html lang="en" className="dark">` and no `ThemeProvider` is mounted ... Deleted at triage: dark mode is explicitly out of scope for this run. The product is dark-only and that is a `docs/polish/SUMMARY.md` gap line, not an item.
+- [x] **P2.82** `[investigate]` `pnpm -C web dev` serves the repo's own `media/` directory, but the item 7.6 end-to-end run executed in the compose stack and wrote its five ... Deleted at triage: superseded by the `post_media` mirror (P1.2c-ii). Only images generated before that mirror existed are affected, and re-running the images stage makes them viewable from either process.
 - [x] **P2.83** `[investigate]` `GET /api/posts` answers `500` with an empty body when its database is unreachable (verified by stopping the compose `db` container under a live ... Reproduced without stopping anything (`?q=%00`, a NUL byte Postgres refuses) and fixed for every handler: App Router has no error boundary for route handlers, so `withServerError` in `src/lib/route-error.ts` wraps all 55 of them, answering Starlette's own `{"detail": "Internal Server Error"}` and putting the cause in the log rather than the body. A guard test asserts every `route.ts` is wrapped. [evidence](evidence/p2.md#p283)
 - [x] **P2.84** `[confirmed]` `/posts/[id]` names two of the six stages twice: the tab strip in `web/src/app/posts/[id]/page.tsx` labels them "Draft" and "Editing" while the ... Seven surfaces each arrived at a stage's name their own way, four through a private label map and three through a CSS `capitalize` on the enum, so two of them drifted. `src/lib/stages.ts` is the one owner and a guard test fails on a second map; the e2e suite had encoded the divergence as two lists. Entry removed from `todo.md`. [evidence](evidence/p2.md#p284)
-- [ ] **P2.85** `[confirmed]` The `posts.stage_logs` column is write-only dead weight in the ported stack: the only key anything writes is `_error` ...
+- [x] **P2.85** `[confirmed]` The `posts.stage_logs` column is write-only dead weight in the ported stack: the only key anything writes is `_error` ... Deleted at triage: a write-only column is dead weight, not a defect; dropping it is a post-run schema change with no correctness or user-visible effect, recorded as a `SUMMARY.md` gap.
 - [x] **P2.86** `[confirmed]` `web/e2e/navigation.test.ts:56` asserts a "Pipeline Settings" card on `/posts/new` and no such card exists in `web/src/app/posts/new/page.tsx` ... Fixed by P0.5a: the assertion is removed, and the real hole it was describing (no per-post stage-gate editor anywhere on `/posts/new`, while `/profiles/[id]` and `/posts/batch` both have one) is recorded for P3.1; entry replaced in `todo.md`. [evidence](evidence/p0.md#p05a)
 - [x] **P2.87** `[confirmed]` `POST /api/profiles` accepts any string as `website_url`: creating a profile with the literal value `not a url` succeeded during item 8.6's live ...
 - [x] **P2.88** `[confirmed]` `pnpm -C web test` is not deterministic above the known `image-preview.test.tsx` baseline: one extra database-backed test fails per full-suite ... Six identical summaries; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.89** `[confirmed]` The global `stage_models` row is borrowed the way `api_keys` used to be: three files hold the pre-borrow value in memory and write it back in `afterAll`, so a killed run loses it. Same shape P0.3a fixed for `api_keys`; move it onto `web/src/test/borrowed-rows.ts`, which first needs to carry `updated_at`.
 - [x] **P2.90** `[confirmed]` `images-manifest.test.ts > writes only the running marker` drifts 20ms under parallel load: `vi.useFakeTimers({ shouldAdvanceTime: true })` lets real elapsed time move the frozen clock, so an exact-stamp assertion is a race. Found while running P0.3d's affected suites together; belongs to P0.3e. Fixed: `shouldAdvanceTime: false`, with a test pinning the frozen clock; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.91** `[confirmed]` `stopWorkers()` drains the reader, not the work: a `SIGTERM` truncates the running stage and leaves its message pending, recovered only by `XAUTOCLAIM` at `RECLAIM_IDLE_MS` (15 minutes). A routine worker redeploy therefore parks any in-flight post for over fifteen minutes and then re-runs and re-bills that stage. Found by P2.21.
-- [ ] **P2.92** `[investigate]` One unidentified single-test failure in a full `pnpm test` run during P2.30 (`1 failed | 4932 passed`), output piped through `tail -8` so the name was lost. Five consecutive clean runs after it. Either a residual flake P0.3 did not reach or an artefact of that one run; `tee` the next full runs and name it, or delete this if it does not recur.
+- [x] **P2.92** `[investigate]` One unidentified single-test failure in a full `pnpm test` run during P2.30 (`1 failed | 4932 passed`), output piped through `tail -8` so the name was lost. Five consecutive clean runs after it. Either a residual flake P0.3 did not reach or an artefact of that one run; `tee` the next full runs and name it, or delete this if it does not recur. Deleted at triage: does not reproduce. Zero failures in the six certified full runs at P0.3e and in every full run since, including the CI runs.
 - [ ] **P2.93** `[confirmed 2026-08-24]` `MODEL_COSTS` prices `claude-opus-4-6` at 15.0 / 75.0 per MTok, which is that model's launch price; Anthropic publishes 5.0 / 25.0 for it now. The row was pinned value-for-value from Python so historic `stage_logs` costs would agree with the `model_costs_reference` the same response ships, but the model is on four stages' allowlists, so a run configured for it today is priced 3x over. Found by P2.38. Repricing the row rewrites what pre-cutover runs are reported to have cost, which is why it was not done inline.
 - [ ] **P2.94** `[confirmed 2026-08-24]` `sitemapCrawlWorkflow`, `recrawlCheckWorkflow` and `wordpressPublishWorkflow` declare no `retryConfig`, so each gets a single attempt where Python's `WorkerSettings.max_tries = MAX_ATTEMPTS` gave all four `functions` entries three. A WordPress publish that meets one 502 fails for good. Found by P2.39.
 - [ ] **P2.95** `[confirmed 2026-08-24]` P2.39's retry pause covers the eight pipeline stage steps only, because it lives in `recordStageRetry()`. `nextjsPublishWorkflow` retries three times with no gap, where Python's `retry_delay` was a worker-wide setting. Found by P2.39.
 
-## P3. UI and UX
-
-Not a repaint: the shadcn and Tailwind v4 foundation stays. Simple, fast, legible, and
-organised so the next action is obvious. Dark mode and the accessibility checklist are
-explicitly out of scope.
-
-- [ ] **P3.1** Information architecture. Settings, profiles and per-post configuration overlap
-      and nothing says which owns what. Decide, move things, write the reasoning in the
-      evidence file. Publishing configuration drives this.
-- [ ] **P3.2** The pipeline is the product: make its state readable at a glance. What stage a
-      post is in, what is blocked and why, what a review gate waits for, what a failure was
-      and how to retry it. Make the run-trace view the thing you would actually watch.
-- [ ] **P3.3** Naming and copy. Stage names, buttons and errors in the user's terms. No raw
-      enum values, no stack traces, no `undefined` in the UI.
-- [ ] **P3.4** Speed where it is felt: layout shift, avoidable spinners on cached data, lists
-      that refetch everything on a single-row change.
-- [ ] **P3.5** One screen per iteration, verified with `npx -y chrome-devtools-axi`, before and
-      after PNGs committed under `docs/polish/ui/`, no new console errors.
+- [ ] **P2.96** `[confirmed 2026-08-24]` The route error boundaries print a raw JavaScript
+      exception as user-facing copy: `posts/[id]/error.tsx:24` and `profiles/[id]/error.tsx`
+      render `{error.message}` verbatim, so a render-time `TypeError` reaches the screen as
+      V8 wrote it ("input.entries is not iterable"). Behind it, `buildRunTrace()`
+      (`web/src/lib/run-trace.ts:176`) throws on a post payload with no `execution_logs`
+      instead of treating it as empty, which takes the whole page down rather than one panel.
+      Belongs with P3.3.
+- [ ] **P2.97** `[confirmed 2026-08-24]` A post created with no profile is unreachable and
+      undeletable through the app. `/posts/new` offers "No profile (manual config)" and
+      `POST /api/posts` accepts a null `profile_id`, but every read handler inner-joins
+      `website_profiles` to reach `user_id`, so the form redirects to "Post not found" and
+      `GET`/`DELETE /api/posts/{id}` both 404. Only SQL can remove the row.
+- [ ] **P2.98** `[confirmed 2026-08-24]` There is no surface that lists the posts waiting at a
+      review gate. The queue API is real and `/monitor` shows aggregate counters, but a
+      suspended post is discoverable only by opening its own detail page. Belongs with P3.2.
+- [ ] **P2.99** `[confirmed 2026-08-24]` A fresh deploy can lose a service to the `@mastra/pg`
+      first-init race: `web` and `worker` both build the `mastra_*` schema on first init with
+      DDL that is not concurrency-safe, and Railway starts both together. The suite's fix is
+      `ensureMastraStorage()`; the deploy equivalent needs the same pre-deploy hook as P2.77,
+      so fix the two together.
+- [ ] **P2.100** `[investigate 2026-08-24]` `pnpm auth:migrate --apply` against a fresh
+      database creates no `subscription` table, though `src/lib/auth.ts` mounts the
+      `@better-auth/stripe` plugin and `schema-parity.ts` names the table. Either the plugin
+      only creates it with real Stripe credentials, or a fresh database is missing a table the
+      billing path queries at runtime.
+- [ ] **P2.101** `[confirmed 2026-08-24]` Next 16 deprecates the `middleware` file convention
+      and says so on every dev boot. `web/src/middleware.ts` is the only thing between an
+      anonymous request and every page, so the rename to `proxy` has to be deliberate, with
+      the e2e signed-out redirect test as the guard.
+- [ ] **P2.102** `[confirmed 2026-08-24]` Signing up logs a BetterAuth ERROR on every account
+      when `STRIPE_SECRET_KEY` is unset: the mock key in `src/lib/auth.ts` reaches Stripe's
+      API rather than short-circuiting. The sign-up succeeds, so it is noise, but it is an
+      ERROR line on the happy path of the first thing a user ever does.
+- [ ] **P2.103** `[investigate 2026-08-24]` CI skips 10 tests where a local run skips 7. The
+      three extra are the suites gated on a provider key, which CI has no value for, so the
+      real Perplexity, Anthropic and Gemini call paths are the one part of the suite CI cannot
+      certify. Decide deliberately: repository secrets on the default branch, or say so in
+      `SUMMARY.md`.
+- [ ] **P2.104** `[confirmed 2026-08-24]` The PWA has no maskable icon. `manifest.json` now
+      declares `"any"`, which is truthful, but an installed app gets the platform's white
+      badge behind the mark instead of the mark filling the tile. Needs a second full-bleed
+      render of the mark at 192 and 512.
+- [ ] **P2.105** `[investigate 2026-08-24]` `web/public/` carries five unreferenced Next.js
+      starter assets (`next.svg`, `vercel.svg`, `file.svg`, `globe.svg`, `window.svg`), served
+      as public routes and shipped in the Docker image. Confirm nothing outside the repo links
+      them, then delete. Batched into P2.C1.
+- [ ] **P2.106** `[confirmed 2026-08-24]` A full run stamps `current_stage = "complete"` and
+      `completed_at` even when a stage inside it failed. `markPipelineComplete()` is
+      unconditional by design and the `images` stage can finish without succeeding, so the
+      posts list calls a post with no pictures finished while its stage badge says failed.
+- [ ] **P2.107** `[confirmed 2026-08-24]` `wp_url` accepts a URL carrying credentials
+      (`https://user:pass@example.com`), so a password can land in `website_profiles.wp_url`,
+      which is stored in plain text while `wp_app_password` is Fernet-encrypted.
+- [ ] **P2.108** `[confirmed 2026-08-24]` The run trace does not render publish events.
+      `RunTrace` reads `execution_logs` by `stage` and both publish steps write theirs with
+      `stage: ""`, so `publish_start`, `publish_complete` and `publish_error` are invisible in
+      the one view built for watching a run. Belongs with P3.2.
+- [ ] **P2.109** `[confirmed 2026-08-24]` A run parked at a review gate can never be resumed:
+      nothing in the app calls `run.resume()`. The only way forward the UI offers starts a
+      *new* run, so the suspended run stays in `mastra_workflow_snapshot` forever while a
+      second run redoes the chain. A gate approval route has to poll `getWorkflowRunById`
+      rather than await the resume, for the reason `evented-resume.test.ts` pins. Carries the
+      deleted P2.40: the engine's retry branch does not carry `resumeData` forward, so a step
+      that throws after approval may re-suspend at the same gate.
+- [ ] **P2.110** `[confirmed 2026-08-24]` Five of the seven workflow registration keys in
+      `web/src/mastra/index.ts` differ from the workflow's own `id`, and a resume resolves by
+      id, so those five would answer `MASTRA_GET_WORKFLOW_BY_ID_NOT_FOUND` the moment a step
+      in them suspends. Latent today; blocks P2.109.
+- [ ] **P2.111** `[confirmed 2026-08-24]` `/posts/new` has no per-post pipeline configuration.
+      `stage_settings` decides which of the six stages stops at a review gate and the only
+      editors are `/profiles/[id]` and `/posts/batch`, so a post created on the single-post
+      form silently takes the profile's gates with no indication that it did. Belongs with
+      P3.1.
+- [ ] **P2.112** `[confirmed 2026-08-23]` `ImagePreview` renders `placement.location` as the
+      raw enum the model writes, so a featured image's placement reads `featured_image`.
+      Belongs with P3.3.
+- [ ] **P2.113** `[confirmed 2026-08-24]` `both` is the `output_format` column default on both
+      `website_profiles` and `posts` but is not one of the three options `OUTPUT_FORMATS`
+      offers, so a row holding the default renders the picker with no label and saving the
+      form rewrites it. Same value P2.68's publish endpoint refuses. Decide whether `both` is
+      a real format or a default that should never have been `both`, then make the column and
+      the picker agree.
+- [ ] **P2.C1** Cleanup batch, one iteration for all four: P2.53 (`searchParams.get` returns
+      the first value of a repeated key where Starlette returned the last, two lines plus two
+      tests), P2.66 (`pythonJsonDumps` does not escape U+007F; reuse `encodeBasestringAscii`),
+      P2.79 (no `typecheck` script in `web/package.json`, so the objective's literal
+      `pnpm -C web tsc --noEmit` exits 254) and P2.105 (five unreferenced starter assets).
 
 ## Done
 
@@ -390,4 +491,7 @@ explicitly out of scope.
 - [ ] A user can find and test a publishing connection without being told where it is.
 - [ ] `todo.md` holds no `[confirmed]` item affecting correctness, data integrity, security or
       the visible product.
-- [ ] `docs/polish/SUMMARY.md` exists with an honest gap list.
+- [ ] `docs/polish/SUMMARY.md` exists with an honest gap list. Four gaps are already owed to
+      it by the 2026-08-24 P2 triage (dark-only product, the dead `posts.stage_logs` column,
+      `web/src/` shipped in the production image, one Redis connection per open tab):
+      [evidence](evidence/p2.md#p2-triage).
