@@ -304,4 +304,95 @@ describe("RunTrace", () => {
       ).toBeInTheDocument();
     });
   });
+  /**
+   * The fan-out's counts (ledger P3.2c). `images` is the one stage whose
+   * "running" hides a count and whose "complete" can hide a failure, and its
+   * per-image lines never reached a browser at all before this.
+   */
+  describe("image progress", () => {
+    function imageLine(outcome: "generated" | "failed", index: number) {
+      return outcome === "generated"
+        ? {
+            ts: "2026-08-23T10:00:10.000Z",
+            stage: "images",
+            level: "info",
+            event: "image_generated",
+            message: `Image ${index} generated (91231 bytes)`,
+            data: { index, bytes: 91231, path: `/media/p1/image-${index}.png` },
+          }
+        : {
+            ts: "2026-08-23T10:00:10.000Z",
+            stage: "images",
+            level: "error",
+            event: "image_failed",
+            message: `Image ${index} failed: 429 RESOURCE_EXHAUSTED`,
+            data: { index, error: "429 RESOURCE_EXHAUSTED" },
+          };
+    }
+
+    it("counts the images a running stage has produced so far", () => {
+      renderWithProviders(
+        <RunTrace
+          executionLogs={[
+            { ts: "2026-08-23T10:00:00.000Z", stage: "images", event: "stage_start" },
+            imageLine("generated", 0),
+            imageLine("generated", 1),
+          ]}
+          stageStatus={{ images: "running" }}
+        />
+      );
+      expect(screen.getByText("2 images generated")).toBeInTheDocument();
+    });
+
+    it("says how many failed beside how many were generated", () => {
+      renderWithProviders(
+        <RunTrace
+          executionLogs={[
+            { ts: "2026-08-23T10:00:00.000Z", stage: "images", event: "stage_start" },
+            imageLine("generated", 0),
+            imageLine("failed", 1),
+          ]}
+          stageStatus={{ images: "complete" }}
+        />
+      );
+      expect(screen.getByText("1 image generated, 1 failed")).toBeInTheDocument();
+    });
+
+    it("says so when every image failed, which the stage status does not", () => {
+      renderWithProviders(
+        <RunTrace
+          executionLogs={[
+            { ts: "2026-08-23T10:00:00.000Z", stage: "images", event: "stage_start" },
+            imageLine("failed", 0),
+            imageLine("failed", 1),
+          ]}
+          stageStatus={{ images: "complete" }}
+        />
+      );
+      expect(screen.getByText("2 images failed")).toBeInTheDocument();
+    });
+
+    it("counts the live frames for a stage whose trail has not been refetched", () => {
+      renderWithProviders(
+        <RunTrace
+          executionLogs={[]}
+          stageStatus={{ images: "running" }}
+          liveStart={{ stage: "images", at: "2026-08-23T10:00:00.000Z" }}
+          liveImages={[
+            { index: 0, outcome: "generated" },
+            { index: 1, outcome: "generated" },
+            { index: 2, outcome: "failed" },
+          ]}
+        />
+      );
+      expect(screen.getByText("2 images generated, 1 failed")).toBeInTheDocument();
+    });
+
+    it("shows no count for a stage that has produced no image line", () => {
+      renderWithProviders(
+        <RunTrace executionLogs={[complete("research")]} stageStatus={{ research: "complete" }} />
+      );
+      expect(screen.queryByText(/images generated/)).not.toBeInTheDocument();
+    });
+  });
 });

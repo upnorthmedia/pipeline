@@ -50,20 +50,6 @@
   is its own item; left alone under ledger item 5.5c-iv-d-1 to keep that diff scoped. Ledger
   item P2.46.
 
-- [confirmed] 2026-08-23 `web/src/hooks/use-sse.ts` does not listen for `image_generated`
-  or `image_failed`. `NAMED_EVENTS` lists eight names and neither is among them, so the
-  two per-image lines the `images` fan-out publishes are delivered as named SSE events
-  and dropped by `EventSource` before any handler sees them. Verified with
-  `grep -n "image_generated\|image_failed" web/src/hooks/use-sse.ts
-  web/src/components/debug-log-panel.tsx`, which exits 1. This is Python's behaviour
-  reproduced, not a regression: the Python stack published the same two names onto the
-  same channel and the same hook dropped them there too, so a browser has never seen
-  per-image progress. Both lines do reach `posts.execution_logs`, so
-  `GET /api/posts/{id}/logs` shows them. Whether the hook should gain the two names is a
-  contract decision for ledger item 5.5d (the SSE route handlers), not a bug fix; left
-  alone under 5.5c-iv-d-2 because adding names to `NAMED_EVENTS` changes what
-  `debug-log-panel.tsx` renders mid-run. Ledger item P2.47.
-
 - [confirmed] 2026-08-23 `web/src/app/api/analytics/costs/route.ts` (ledger item 5.8b) reads
   its two optional query parameters with `url.searchParams.get("profile_id")` and
   `url.searchParams.get("model")`, which return the *first* value of a repeated key.
@@ -347,3 +333,12 @@
   publish row added at polish ledger P3.2b-ii shows its status live and its timing only on the
   next load or the next refetch from another cause. Check whether the optimistic write should
   simply be a refetch before adding a fourth refetch trigger. Found at polish ledger P3.2b-ii.
+
+- [confirmed] 2026-08-24 The `images` fan-out interpolates its 0-based index straight into
+  the line a person reads: `Image 0 generated (123360 bytes)`, `Image 2 failed: ...`
+  (`publishImageOutcome()` in `web/src/mastra/steps/images-generate.ts`, both
+  `publishStageLog` calls). It is Python's own wording, ported value for value, and it was
+  invisible until ledger item P3.2c put those
+  lines in the Debug Logs panel, where the first image of five now reads as image zero. The
+  stored `data.index` is a manifest position and should stay 0-based; only the message needs
+  the ordinal. Ledger item P3.3.

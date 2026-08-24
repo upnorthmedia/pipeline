@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import PostDetailPage from "./[id]/page";
 import { renderWithProviders } from "@/test/render";
@@ -81,6 +81,21 @@ vi.mock("remark-gfm", () => ({
 }));
 
 const { posts } = await import("@/lib/api");
+const { useSSE } = await import("@/hooks/use-sse");
+const mockUseSSE = vi.mocked(useSSE);
+
+/**
+ * Hand one frame to the page's own SSE handler, which is the second argument
+ * of the latest `useSSE` call. The hook itself is mocked in this suite, so
+ * this is the only way the page's live path is exercised at all.
+ */
+function emitSSE(event: Record<string, unknown>) {
+  const handler = mockUseSSE.mock.calls.at(-1)?.[1];
+  if (!handler) throw new Error("the page has not subscribed to the event feed");
+  act(() => {
+    handler({ post_id: "post-1", ...event } as Parameters<typeof handler>[0]);
+  });
+}
 const { toast } = await import("sonner");
 const mockGet = vi.mocked(posts.get);
 const mockAnalytics = vi.mocked(posts.analytics);
@@ -684,5 +699,96 @@ describe("PostDetailPage stage failures", () => {
     });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Re-run / })).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Item P3.2c. `images` is the one stage that reports its progress per item,
+ * and the two names it publishes were dropped by `EventSource` before they
+ * reached this page. Nothing refetches the row until the stage ends, so
+ * without the live frames the count only appears once it is too late to watch.
+ */
+describe("PostDetailPage live image progress", () => {
+  const runningImages = () =>
+    makePost({
+      current_stage: "images",
+      stage_status: {
+        research: "complete",
+        outline: "complete",
+        write: "complete",
+        edit: "complete",
+        images: "running",
+        ready: "pending",
+      },
+    });
+
+  it("counts the fan-out's frames onto the run trace before any refetch", async () => {
+    mockGet.mockResolvedValue(runningImages());
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    emitSSE({ event: "stage_start", stage: "images" });
+    emitSSE({ event: "image_generated", stage: "images", data: { index: 0, bytes: 91231 } });
+    emitSSE({ event: "image_generated", stage: "images", data: { index: 1, bytes: 88110 } });
+    emitSSE({
+      event: "image_failed",
+      stage: "images",
+      data: { index: 2, error: "429 RESOURCE_EXHAUSTED" },
+    });
+
+    expect(screen.getByText("2 images generated, 1 failed")).toBeInTheDocument();
+  });
+
+  it("puts each per-image line in the debug log with what it said", async () => {
+    mockGet.mockResolvedValue(runningImages());
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    emitSSE({
+      event: "image_failed",
+      stage: "images",
+      level: "error",
+      message: "Image 2 failed: 429 RESOURCE_EXHAUSTED",
+      data: { index: 2, error: "429 RESOURCE_EXHAUSTED" },
+    });
+
+    expect(screen.getByText("Image 2 failed: 429 RESOURCE_EXHAUSTED")).toBeInTheDocument();
+  });
+
+  it("starts the count again when the stage does, so a retry does not read as progress", async () => {
+    mockGet.mockResolvedValue(runningImages());
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    emitSSE({ event: "image_generated", stage: "images", data: { index: 0 } });
+    emitSSE({ event: "image_generated", stage: "images", data: { index: 1 } });
+    expect(screen.getByText("2 images generated")).toBeInTheDocument();
+
+    emitSSE({ event: "stage_start", stage: "images" });
+    emitSSE({ event: "image_failed", stage: "images", data: { index: 0 } });
+
+    expect(screen.getByText("1 image failed")).toBeInTheDocument();
+    expect(screen.queryByText("2 images generated")).not.toBeInTheDocument();
+  });
+
+  it("counts one image once when the fan-out retries it, which is what the index is for", async () => {
+    mockGet.mockResolvedValue(runningImages());
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    emitSSE({ event: "image_failed", stage: "images", data: { index: 1, error: "503" } });
+    emitSSE({ event: "image_generated", stage: "images", data: { index: 1, bytes: 4211 } });
+
+    expect(screen.getByText("1 image generated")).toBeInTheDocument();
+  });
+
+  it("ignores a frame for another post, which the global feed also carries", async () => {
+    mockGet.mockResolvedValue(runningImages());
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    emitSSE({ event: "image_generated", stage: "images", post_id: "post-2", data: { index: 0 } });
+
+    expect(screen.queryByText(/images? generated/)).not.toBeInTheDocument();
   });
 });

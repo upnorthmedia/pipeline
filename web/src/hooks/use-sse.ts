@@ -16,6 +16,17 @@ export interface SSEEvent {
 
 type SSECallback = (event: SSEEvent) => void;
 
+/**
+ * Every event name the pipeline publishes.
+ *
+ * `EventSource` delivers a frame carrying an `event:` field only to a listener
+ * registered for that exact name: it never reaches `onmessage`. So a name
+ * missing from this list is a frame the browser receives and discards, which
+ * is what happened to the two the `images` fan-out publishes
+ * (`web/src/mastra/steps/images-generate.ts`) for the whole of the port and
+ * the Python stack before it. They are the one stage's progress, one line per
+ * manifest entry, and nothing else reports it while the stage is running.
+ */
 const NAMED_EVENTS = [
   "stage_start",
   "stage_complete",
@@ -24,6 +35,8 @@ const NAMED_EVENTS = [
   "publish_start",
   "publish_complete",
   "publish_error",
+  "image_generated",
+  "image_failed",
   "log",
 ] as const;
 

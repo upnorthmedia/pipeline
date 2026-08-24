@@ -50,7 +50,7 @@ import {
 } from "@/lib/api";
 import { STAGE_LABELS } from "@/lib/stages";
 import { deriveRunState } from "@/lib/run-state";
-import { buildRunTrace } from "@/lib/run-trace";
+import { buildRunTrace, type LiveImage } from "@/lib/run-trace";
 import { lastPublishError } from "@/lib/publish-report";
 import { PUBLISH_TARGET_LABELS, publishTargetOf } from "@/lib/publishing";
 import { plainMessage } from "@/lib/plain-message";
@@ -93,6 +93,11 @@ export default function PostDetailPage() {
   // happen on terminal stage events, so without this the trace's elapsed clock
   // would sit blank for the whole of the stage it is timing.
   const [liveStart, setLiveStart] = useState<{ stage: PipelineStage; at: string } | null>(null);
+  // Every per-image outcome this page has seen since the `images` stage last
+  // started. The fan-out publishes one line per manifest entry and the row is
+  // not refetched until the stage ends, so this is the only account of the
+  // stage's progress while it is the stage in flight.
+  const [liveImages, setLiveImages] = useState<LiveImage[]>([]);
   const lastSavedRef = useRef<string>("");
 
   /**
@@ -169,7 +174,17 @@ export default function PostDetailPage() {
     (event: SSEEvent) => {
       if (event.post_id !== postId) return;
 
-      const debugEvents = ["stage_start", "stage_complete", "stage_error", "log", "pipeline_complete"];
+      const debugEvents = [
+        "stage_start",
+        "stage_complete",
+        "stage_error",
+        "log",
+        "pipeline_complete",
+        // The fan-out's own lines. They carry their message and their level
+        // with them, so they read in the panel the way the stored trail reads.
+        "image_generated",
+        "image_failed",
+      ];
       if (debugEvents.includes(event.event)) {
         const log: DebugLog = {
           event: event.event,
@@ -195,8 +210,22 @@ export default function PostDetailPage() {
         }
       }
 
+      if (event.event === "image_generated" || event.event === "image_failed") {
+        const index = (event.data as { index?: unknown } | undefined)?.index;
+        setLiveImages((prev) => [
+          ...prev,
+          {
+            index: typeof index === "number" ? index : null,
+            outcome: event.event === "image_generated" ? "generated" : "failed",
+          },
+        ]);
+      }
+
       if (event.event === "stage_start" && event.stage) {
         setLiveStart({ stage: event.stage as PipelineStage, at: new Date().toISOString() });
+        // A stage that starts again generates its images again, so the frames
+        // from the attempt before it are not this attempt's progress.
+        if (event.stage === "images") setLiveImages([]);
         // Optimistically show this stage as "running" in the progress UI
         setPost((prev) => {
           if (!prev) return prev;
@@ -678,6 +707,7 @@ export default function PostDetailPage() {
         executionLogs={post.execution_logs}
         stageStatus={post.stage_status}
         liveStart={liveStart}
+        liveImages={liveImages}
         publish={
           publishTarget
             ? { target: publishTarget.target, status: publishTarget.status ?? "pending" }

@@ -450,3 +450,155 @@ describe("buildRunTrace publish leg", () => {
     expect(result.runError).toBeNull()
   })
 })
+
+/** An `image_generated` / `image_failed` entry, in the shape the fan-out stores. */
+function image(
+  outcome: "generated" | "failed",
+  index: number,
+  ts = "2026-08-23T10:00:10.000Z",
+) {
+  return outcome === "generated"
+    ? {
+        ts,
+        stage: "images",
+        level: "info",
+        event: "image_generated",
+        message: `Image ${index} generated (91231 bytes)`,
+        data: { index, bytes: 91231, path: `/media/p1/image-${index}.png` },
+      }
+    : {
+        ts,
+        stage: "images",
+        level: "error",
+        event: "image_failed",
+        message: `Image ${index} failed: 429 RESOURCE_EXHAUSTED`,
+        data: { index, error: "429 RESOURCE_EXHAUSTED" },
+      }
+}
+
+/**
+ * Item P3.2c. The `images` stage is the only one whose work is a fan-out, so
+ * it is the only one where "running" hides a count: five images can be four
+ * successes and a failure and the stage still finishes.
+ */
+describe("buildRunTrace image progress", () => {
+  it("counts the fan-out's per-image entries onto the images row", () => {
+    const result = trace(
+      [start("images"), image("generated", 0), image("generated", 1), image("failed", 2)],
+      { images: "running" },
+    )
+    expect(result.stages[4].images).toEqual({ generated: 2, failed: 1 })
+  })
+
+  it("leaves every other stage's progress null, because only images fans out", () => {
+    const result = trace([start("images"), image("generated", 0)], { images: "running" })
+    expect(result.stages.filter((row) => row.stage !== "images").map((row) => row.images)).toEqual([
+      null,
+      null,
+      null,
+      null,
+      null,
+    ])
+  })
+
+  it("leaves images null when the stage has published no per-image line yet", () => {
+    expect(trace([start("images")], { images: "running" }).stages[4].images).toBeNull()
+  })
+
+  it("takes the last outcome for an index, so a retried image counts once", () => {
+    const result = trace(
+      [start("images"), image("failed", 1), image("generated", 1)],
+      { images: "complete" },
+    )
+    expect(result.stages[4].images).toEqual({ generated: 1, failed: 0 })
+  })
+
+  it("counts entries that carry no index separately rather than collapsing them", () => {
+    const result = trace(
+      [
+        start("images"),
+        { ts: "2026-08-23T10:00:10.000Z", stage: "images", event: "image_failed", message: "x" },
+        { ts: "2026-08-23T10:00:11.000Z", stage: "images", event: "image_failed", message: "y" },
+      ],
+      { images: "complete" },
+    )
+    expect(result.stages[4].images).toEqual({ generated: 0, failed: 2 })
+  })
+
+  it("drops a previous attempt's images when the stage starts again", () => {
+    const result = trace(
+      [
+        start("images", "2026-08-23T09:00:00.000Z"),
+        image("generated", 0, "2026-08-23T09:00:10.000Z"),
+        image("generated", 1, "2026-08-23T09:00:11.000Z"),
+        start("images", "2026-08-23T10:00:00.000Z"),
+        image("failed", 0, "2026-08-23T10:00:10.000Z"),
+      ],
+      { images: "running" },
+    )
+    expect(result.stages[4].images).toEqual({ generated: 0, failed: 1 })
+  })
+
+  it("drops the counts of a stage the row has since disowned", () => {
+    // `POST /rerun` resets the stage to `pending` and deletes its files, but
+    // `execution_logs` is append-only, so the finished attempt's per-image
+    // lines are still the last thing the log says about it.
+    const result = trace(
+      [start("images"), image("generated", 0), complete("images")],
+      { images: "pending" },
+    )
+    expect(result.stages[4].images).toBeNull()
+  })
+
+  it("folds the live frames in with the stored ones without counting an index twice", () => {
+    const result = buildRunTrace({
+      entries: [start("images"), image("generated", 0)],
+      stageStatus: { images: "running" },
+      liveImages: [
+        { index: 0, outcome: "generated" },
+        { index: 1, outcome: "failed" },
+      ],
+    })
+    expect(result.stages[4].images).toEqual({ generated: 1, failed: 1 })
+  })
+
+  it("shows live progress for a stage whose stored trail has not been refetched yet", () => {
+    const result = buildRunTrace({
+      entries: [],
+      stageStatus: { images: "running" },
+      liveStart: { stage: "images", at: "2026-08-23T10:00:00.000Z" },
+      liveImages: [{ index: 0, outcome: "generated" }],
+    })
+    expect(result.stages[4].images).toEqual({ generated: 1, failed: 0 })
+  })
+
+  it("drops the stored attempt when the live restart is newer than it", () => {
+    // The retry button re-runs one stage. The `stage_start` frame lands
+    // immediately; the row's log still describes the attempt before it, and
+    // nothing refetches until the stage ends.
+    const result = buildRunTrace({
+      entries: [
+        start("images", "2026-08-23T09:00:00.000Z"),
+        image("generated", 0, "2026-08-23T09:00:10.000Z"),
+        image("generated", 1, "2026-08-23T09:00:11.000Z"),
+      ],
+      stageStatus: { images: "running" },
+      liveStart: { stage: "images", at: "2026-08-23T10:00:00.000Z" },
+      liveImages: [{ index: 0, outcome: "generated" }],
+    })
+    expect(result.stages[4].images).toEqual({ generated: 1, failed: 0 })
+  })
+
+  it("keeps the stored attempt when the live start belongs to it", () => {
+    const result = buildRunTrace({
+      entries: [
+        start("images", "2026-08-23T10:00:00.000Z"),
+        image("generated", 0, "2026-08-23T10:00:10.000Z"),
+      ],
+      stageStatus: { images: "running" },
+      liveStart: { stage: "images", at: "2026-08-23T09:59:59.000Z" },
+      liveImages: [],
+    })
+    expect(result.stages[4].images).toEqual({ generated: 1, failed: 0 })
+  })
+})

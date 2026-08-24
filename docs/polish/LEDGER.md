@@ -285,13 +285,13 @@ explicitly out of scope.
         fourth reader of `default_stage_settings`, `/posts/batch`, gains the `Pipeline` card
         with a `subject` prop, because "This run" is a lie on a page that creates twenty.
         `ui/p31c-*.png`. [evidence](evidence/p3.md#p31c)
-- [ ] **P3.2** The pipeline is the product: make its state readable at a glance. What stage a
+- [x] **P3.2** The pipeline is the product: make its state readable at a glance. What stage a
       post is in, what is blocked and why, what a review gate waits for, what a failure was
       and how to retry it. Make the run-trace view the thing you would actually watch.
       Carries P2.98 (no surface lists the posts waiting at a gate, closed at P3.2b-i), P2.108
       (the trace renders no publish events, closed at P3.2b-ii), P2.106 (a run with a failed stage still reads
       "complete", closed at P3.2a) and P2.47 (the SSE hook drops `image_generated` and
-      `image_failed`).
+      `image_failed`, closed at P3.2c).
   - [x] **P3.2a** The one line every surface shows about a run was not true. Both the posts
         list and the post header rendered `current_stage` alone, uppercased, so a run whose
         `images` stage failed but which reached the end read `COMPLETE` beside its own red
@@ -328,13 +328,20 @@ explicitly out of scope.
         reason dropped once a later attempt succeeded. It stays out of the run totals, which
         are stage measurements. Closes P2.108. `ui/p32bii-*.png`.
         [evidence](evidence/p3.md#p32b-ii)
-  - [ ] **P3.2c** Live image events: P2.47 (`NAMED_EVENTS` in `src/hooks/use-sse.ts` lists
-        eight names and neither `image_generated` nor `image_failed` is among them, so the
-        images stage is the one stage whose progress never reaches an open page).
+  - [x] **P3.2c** Live image events. `EventSource` delivers a named frame only to a listener
+        for that exact name, so the two the fan-out publishes were received, parsed and
+        discarded; `buildRunTrace()` let both fall through its `default` as well, so the
+        stored copies were unread too. `images` is the only stage where that matters: it is
+        the only fan-out, so `running` hides how much is done and `complete` hides that some
+        of it failed. Both names join `NAMED_EVENTS` and the page's `debugEvents`;
+        `StageTrace` gains `images`, counted per manifest index so a retried image counts
+        once, cleared by an `images` `stage_start` and by a rerun the row has disowned; the
+        trace row reads `3 images generated, 2 failed`, live off `liveImages` before any
+        refetch. Closes P2.47. `ui/p32c-*.png`. [evidence](evidence/p3.md#p32c)
 - [ ] **P3.3** Naming and copy. Stage names, buttons and errors in the user's terms. No raw
       enum values, no stack traces, no `undefined` in the UI. Carries P2.96 (the route error
-      boundaries print a raw V8 message) and P2.112 (`placement.location` renders as the raw
-      enum).
+      boundaries print a raw V8 message), P2.112 (`placement.location` renders as the raw
+      enum) and the fan-out's 0-based ordinal (`Image 0 generated`, filed at P3.2c).
 - [ ] **P3.4** Speed where it is felt: layout shift, avoidable spinners on cached data, lists
       that refetch everything on a single-row change.
 - [ ] **P3.5** One screen per iteration, verified with `npx -y chrome-devtools-axi`, before and
@@ -403,7 +410,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [x] **P2.44** `[confirmed, fixed 2026-08-23]` in `web/src/mastra/failure-recorder.test.ts` returned as soon as `current_stage` read `failed`, which is a snapshot that can predate the ...
 - [x] **P2.45** `[optimization 2026-08-23]` carries three literal U+2014 em dashes in source (the `em-dash(es)` warning message, the `ACTION REQUIRED` prompt line, and one comment), where ... Deleted at triage: the two product strings are a wire contract and a prompt contract whose bytes must not change, the third is a comment, and none of the three touches correctness, security or anything a user can see.
 - [ ] **P2.46** `[confirmed]` `web/src/mastra/steps/images-manifest.ts` renders the manifest's `error` value into its parse-failure message with `String(...)` where Python's ...
-- [ ] **P2.47** `[confirmed]` `web/src/hooks/use-sse.ts` does not listen for `image_generated` or `image_failed`. `NAMED_EVENTS` lists eight names and neither is among them, ...
+- [x] **P2.47** Closed at P3.2c. `web/src/hooks/use-sse.ts` did not listen for `image_generated` or `image_failed`. `NAMED_EVENTS` listed eight names and neither was among them, ...
 - [x] **P2.48** `[investigate]` New sighting of the `received`-ordering defect recorded above: `pipeline-events.test.ts > carries Python's log payload and nothing else` failed ... Fixed by P0.3b; entry removed from `todo.md`. [evidence](evidence/p0.md#p03b)
 - [x] **P2.49** `[investigate]` Running `pnpm -C web test` leaves untracked WebP files in the repo's `media/test-123/` directory (six appeared during the 5.5c-iv-d-2 iteration, ... Explained and fixed by P0.4: the writer was the deleted pytest suite under `api/`, and the `MEDIA_DIR` default the entry proposed is now in place; entry removed from `todo.md`. [evidence](evidence/p0.md#p04)
 - [x] **P2.50** `[optimization]` `GET /api/events/{post_id}` opens one `RedisStreamsPubSub` subscription per connected browser, and each one costs a dedicated Redis connection ... Deleted at triage: connection count per open tab, teardown already proven by a test, nothing has hit a limit; `[optimization]` with no correctness, security or user-visible effect.

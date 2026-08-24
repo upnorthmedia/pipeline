@@ -23,6 +23,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Circle,
+  Images,
   Loader2,
   PauseCircle,
   RotateCw,
@@ -40,7 +41,14 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import type { PipelineStage, StageStatusMap } from "@/lib/api";
-import { buildRunTrace, type PublishTrace, type StageTrace, type TraceStatus } from "@/lib/run-trace";
+import {
+  buildRunTrace,
+  type ImageProgress,
+  type LiveImage,
+  type PublishTrace,
+  type StageTrace,
+  type TraceStatus,
+} from "@/lib/run-trace";
 import { PUBLISH_TARGET_LABELS, type PublishTarget } from "@/lib/publishing";
 import { STAGE_LABELS, STAGE_STATUS_LABELS } from "@/lib/stages";
 
@@ -90,6 +98,21 @@ function elapsedSeconds(startedAt: string | null, now: number): number | null {
   return Math.max(0, (now - started) / 1000);
 }
 
+/**
+ * The fan-out's count in words: `images` is the only stage where "running"
+ * hides how much is done and "complete" can hide that some of it failed.
+ *
+ * Both halves are counted rather than only the failures, because a run that
+ * generated four of five images and a run that generated none read the same
+ * without the successes beside them.
+ */
+function imageProgressText({ generated, failed }: ImageProgress): string {
+  const made = `${generated} ${generated === 1 ? "image" : "images"} generated`;
+  if (failed === 0) return made;
+  if (generated === 0) return `${failed} ${failed === 1 ? "image" : "images"} failed`;
+  return `${made}, ${failed} failed`;
+}
+
 function StatusCell({ status }: { status: TraceStatus }) {
   const meta = STATUS_META[status];
   const Icon = meta.icon;
@@ -104,7 +127,7 @@ function StatusCell({ status }: { status: TraceStatus }) {
 function StageRow({ row, now }: { row: StageTrace; now: number }) {
   const running = row.status === "running";
   const elapsed = running ? elapsedSeconds(row.startedAt, now) : null;
-  const hasDetail = row.retries.length > 0 || row.error !== null;
+  const hasDetail = row.retries.length > 0 || row.error !== null || row.images !== null;
 
   return (
     <>
@@ -140,6 +163,17 @@ function StageRow({ row, now }: { row: StageTrace; now: number }) {
         <TableRow className="hover:bg-transparent">
           <TableCell colSpan={6} className="pt-0">
             <div className="space-y-1 pl-1">
+              {row.images !== null && (
+                <p
+                  className={cn(
+                    "flex items-start gap-1.5 text-xs",
+                    row.images.failed > 0 ? "text-amber-600 dark:text-amber-500" : "text-muted-foreground"
+                  )}
+                >
+                  <Images className="mt-0.5 h-3 w-3 shrink-0" />
+                  <span>{imageProgressText(row.images)}</span>
+                </p>
+              )}
               {row.retries.map((retry) => (
                 <p
                   key={retry.attempt}
@@ -226,6 +260,7 @@ export function RunTrace({
   executionLogs,
   stageStatus,
   liveStart,
+  liveImages,
   publish,
 }: {
   executionLogs: readonly unknown[];
@@ -233,13 +268,25 @@ export function RunTrace({
   /** The stage of the latest `stage_start` SSE frame, so the clock starts before the refetch. */
   liveStart?: { stage: PipelineStage; at: string } | null;
   /**
+   * The per-image frames seen since the `images` stage started. The fan-out
+   * publishes one per manifest entry and nothing refetches the row until the
+   * stage ends, so without these the count only appears once it is over.
+   */
+  liveImages?: readonly LiveImage[];
+  /**
    * The destination this post's `output_format` names and its status column,
    * or nothing for a format that publishes nowhere. The post page owns that
    * decision: the format is on the row it already holds.
    */
   publish?: { target: PublishTarget; status: string } | null;
 }) {
-  const trace = buildRunTrace({ entries: executionLogs, stageStatus, liveStart, publish });
+  const trace = buildRunTrace({
+    entries: executionLogs,
+    stageStatus,
+    liveStart,
+    liveImages,
+    publish,
+  });
   const running =
     trace.stages.some((row) => row.status === "running") || trace.publish?.status === "running";
 

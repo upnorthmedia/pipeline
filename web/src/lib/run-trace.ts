@@ -46,6 +46,30 @@ import type { PublishTarget } from "./publishing"
  */
 export type TraceStatus = StageStatus
 
+/**
+ * What the `images` fan-out has produced so far, counted per manifest entry.
+ *
+ * The stage publishes one `image_generated` or `image_failed` line per entry
+ * (`web/src/mastra/steps/images-generate.ts`), and it is the only stage whose
+ * work is a fan-out: "running" hides how much of it is done, and "complete"
+ * hides that some of it failed. Counted by index rather than by entry, because
+ * a retried image publishes a failure and then a success for the same one.
+ */
+export interface ImageProgress {
+  generated: number
+  failed: number
+}
+
+/**
+ * One per-image outcome as it arrives on the event bus, before any refetch
+ * reveals the stored entry behind it. `index` is the manifest position the
+ * event carried, or null for an event that carried none.
+ */
+export interface LiveImage {
+  index: number | null
+  outcome: "generated" | "failed"
+}
+
 /** One `retry` entry: an attempt that threw while the engine still had attempts left. */
 export interface TraceRetry {
   attempt: number
@@ -68,6 +92,11 @@ export interface StageTrace {
   retries: TraceRetry[]
   /** The failure text recorded against this stage, if it failed. */
   error: string | null
+  /**
+   * Per-image counts for `images`, or null for every other stage and for an
+   * `images` stage that has published no per-image line yet.
+   */
+  images: ImageProgress | null
 }
 
 /**
@@ -171,6 +200,7 @@ function emptyStage(stage: PipelineStage): StageTrace {
     startedAt: null,
     retries: [],
     error: null,
+    images: null,
   }
 }
 
@@ -217,6 +247,24 @@ function publishTargetOf(entry: LogEntry, data: Record<string, unknown>): Publis
   return publishTargetOfMessage(entry.message)
 }
 
+/**
+ * The key a per-image outcome is stored under: its manifest position, or a
+ * fresh key for an event that carried none.
+ */
+function imageKey(index: unknown, nextKeyless: () => number): string {
+  const position = numberOf(index)
+  return position === null ? `unindexed:${nextKeyless()}` : `index:${position}`
+}
+
+/** True when `at` is a later instant than `than`, and when there is no `than` at all. */
+function isAfter(at: string, than: string | null): boolean {
+  if (than === null) return true
+  const left = Date.parse(at)
+  const right = Date.parse(than)
+  if (Number.isNaN(left) || Number.isNaN(right)) return false
+  return left > right
+}
+
 /** Whole seconds where the gap is whole, so a nine second publish reads `9.0s`. */
 function secondsBetween(from: string | null, to: string | null): number | null {
   if (!from || !to) return null
@@ -248,6 +296,12 @@ export function buildRunTrace(input: {
    * is the pipeline's own record and the log is the audit trail behind it.
    */
   publish?: { target: PublishTarget; status: string } | null
+  /**
+   * The per-image frames this page has seen since the `images` stage started,
+   * for the same reason `liveStart` exists: the fan-out's lines reach the
+   * browser one at a time and nothing refetches the row until the stage ends.
+   */
+  liveImages?: readonly LiveImage[]
 }): RunTrace {
   const rows = new Map<PipelineStage, StageTrace>(
     STAGES.map((stage) => [stage, emptyStage(stage)]),
@@ -255,6 +309,13 @@ export function buildRunTrace(input: {
   let runError: string | null = null
   let publishAttempt: PublishAttempt | null = null
   const lastEventFor = new Map<PipelineStage, string>()
+  // Manifest position -> its latest outcome, so a retried image counts once.
+  // An entry that carried no index gets a key of its own rather than
+  // overwriting the previous one: two failures with nothing to tell them apart
+  // are still two failures.
+  const imageOutcomes = new Map<string, LiveImage["outcome"]>()
+  let keylessImages = 0
+  let imagesStartedAt: string | null = null
 
   for (const raw of input.entries) {
     const entry = entryOf(raw)
@@ -297,6 +358,18 @@ export function buildRunTrace(input: {
     switch (event) {
       case "stage_start":
         restartStage(row, ts, lastEventFor.get(entry.stage) === "retry")
+        if (entry.stage === "images") {
+          imageOutcomes.clear()
+          keylessImages = 0
+          imagesStartedAt = ts
+        }
+        break
+      case "image_generated":
+      case "image_failed":
+        imageOutcomes.set(
+          imageKey(data.index, () => keylessImages++),
+          event === "image_generated" ? "generated" : "failed",
+        )
         break
       case "stage_complete":
         row.model = textOf(data.model)
@@ -340,12 +413,33 @@ export function buildRunTrace(input: {
       row.status !== "failed"
     ) {
       restartStage(row, null, true)
+      // The same argument for the fan-out's counts: they describe images whose
+      // files the rerun has already deleted.
+      if (stage === "images") imageOutcomes.clear()
     }
     // The `stage_start` frame arrives before the refetch that would reveal its
     // stored entry, so a stage that has just started has a status and no start
     // time. Taking the frame's own arrival time keeps the elapsed clock honest
     // to within one round trip instead of leaving it blank until the stage ends.
     if (row.startedAt === null && live?.stage === stage) row.startedAt = live.at
+  }
+
+  // The live frames land on top of the stored ones, keyed the same way, so an
+  // image that is in both counts once. They are dropped along with the stored
+  // trail only when the trail belongs to an attempt this page has already seen
+  // superseded: a `stage_start` frame for `images` that is newer than the last
+  // stored one is the retry button, whose earlier images are gone.
+  const imagesRow = rows.get("images") as StageTrace
+  if (live?.stage === "images" && isAfter(live.at, imagesStartedAt)) imageOutcomes.clear()
+  for (const item of input.liveImages ?? []) {
+    imageOutcomes.set(imageKey(item.index, () => keylessImages++), item.outcome)
+  }
+  if (imageOutcomes.size > 0) {
+    const outcomes = [...imageOutcomes.values()]
+    imagesRow.images = {
+      generated: outcomes.filter((outcome) => outcome === "generated").length,
+      failed: outcomes.filter((outcome) => outcome === "failed").length,
+    }
   }
 
   const stages = STAGES.map((stage) => rows.get(stage) as StageTrace)

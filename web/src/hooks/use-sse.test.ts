@@ -153,6 +153,34 @@ describe("useSSE", () => {
     );
   });
 
+  /**
+   * Item P3.2c. The `images` fan-out publishes these two names rather than
+   * `log`, so before this they were the one kind of progress `EventSource`
+   * dropped on the floor: an unlistened named event never reaches `onmessage`.
+   */
+  it.each(["image_generated", "image_failed"])(
+    "receives the fan-out's %s frames, which are named events too",
+    async (name) => {
+      const callback = vi.fn();
+      renderHook(() => useSSE("p1", callback));
+      await waitFor(() => expect(instances).toHaveLength(1));
+      await waitFor(() => expect(instances[0].readyState).toBe(1));
+
+      act(() => {
+        emitNamedEvent(instances[0], name, {
+          post_id: "p1",
+          stage: "images",
+          message: `Image 2 ${name === "image_generated" ? "generated" : "failed"}`,
+          data: { index: 2 },
+        });
+      });
+
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({ event: name, post_id: "p1", stage: "images" })
+      );
+    }
+  );
+
   it("calls onEvent callback for message events", async () => {
     const callback = vi.fn();
     const { result } = renderHook(() => useSSE(undefined, callback));
