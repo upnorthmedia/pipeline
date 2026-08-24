@@ -142,3 +142,18 @@ export function deriveRunState(post: {
     detail: null,
   }
 }
+
+/**
+ * The stage `POST /api/posts/{id}/rerun` will start the run from.
+ *
+ * Derived exactly the way the handler derives it, because the button that
+ * calls it names this stage: the first of the six that `stage_status` does not
+ * call complete, falling back to the last one when every stage is complete.
+ * That fallback is Python's and it is load-bearing rather than defensive: a
+ * finished post has no first incomplete stage, so "re-run" on one re-runs
+ * `ready` alone. Keys outside the six are ignored here for the same reason the
+ * handler ignores them, `STAGES` is the only list either side walks.
+ */
+export function resumeStage(stageStatus: StageStatusMap): PipelineStage {
+  return STAGES.find((stage) => stageStatus[stage] !== "complete") ?? STAGES[STAGES.length - 1]
+}

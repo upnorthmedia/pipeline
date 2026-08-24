@@ -19,12 +19,26 @@ import { decrypt } from "@/lib/crypto"
 import { WordPressClient, WordPressError } from "@/mastra/wordpress"
 
 /**
- * Both strings are copied byte for byte from the Python `HTTPException`
- * details, em dash included, because `/test` hands them to the dashboard as
- * `error` and `web/src/lib/api.ts` surfaces the `detail` of the other two.
+ * The two credential complaints, both of which reach the dashboard: `/test`
+ * hands them over as `error`, and `web/src/lib/api.ts` surfaces the `detail`
+ * of the other two on the profile's WordPress tab.
+ *
+ * `WP_CREDENTIALS_MISSING` is Python's byte for byte and says something the
+ * reader can act on. `WP_DECRYPT_FAILED` is not: Python's wording (kept below
+ * as `PY_WP_DECRYPT_FAILED`) told the reader to check `WP_ENCRYPTION_KEY`, a
+ * server environment variable nobody reading a profile page can see, let alone
+ * check, and the only thing that reaches this branch through the
+ * dashboard is a token written under a key this deployment no longer has. The
+ * fix for that is to type the application password in again, so that is what
+ * it now says. `wordpress.test.ts` keeps the oracle's record of Python's
+ * wording and maps it through `reworded()`.
  */
 export const WP_CREDENTIALS_MISSING = "WordPress credentials not configured on this profile"
 export const WP_DECRYPT_FAILED =
+  "The saved WordPress application password could not be read. Enter it again on this profile and save."
+
+/** What Python said, kept so the parity oracle can be mapped onto the above. */
+export const PY_WP_DECRYPT_FAILED =
   "Failed to decrypt WordPress app password — check WP_ENCRYPTION_KEY"
 
 export type WpClientResult =

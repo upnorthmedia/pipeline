@@ -29,6 +29,7 @@ import { apiRequest, createTestSession, deleteTestSessions, type TestSession } f
 
 import { GET as getAuthors } from "./authors/route"
 import { GET as getCategories } from "./categories/route"
+import { PY_WP_DECRYPT_FAILED, WP_DECRYPT_FAILED } from "./client"
 import { GET as getTest, WP_ROOT_NOT_WORDPRESS } from "./test/route"
 
 interface Route {
@@ -116,6 +117,25 @@ let seen: SeenRequest[] = []
  * asserts. Nothing reaches it today, and the guard under "the exported oracle"
  * is what keeps that fact visible.
  */
+/**
+ * The one detail the port deliberately rewords (polish ledger item P3.3c-ii).
+ *
+ * The oracle keeps recording what Python answered, because it is the record of
+ * what the deployed stack did. This maps that string onto what the port says
+ * instead, and it is applied to every place a scenario's expectation carries a
+ * message: the `detail` of a 400 and the `error` inside a 200 body. Anything it
+ * does not recognise is returned untouched, so a scenario added to the export
+ * is still compared byte for byte.
+ */
+function reworded<T>(value: T): T {
+  if (value === PY_WP_DECRYPT_FAILED) return WP_DECRYPT_FAILED as unknown as T
+  if (value && typeof value === "object" && "error" in value) {
+    const body = value as { error?: unknown }
+    if (body.error === PY_WP_DECRYPT_FAILED) return { ...body, error: WP_DECRYPT_FAILED } as T
+  }
+  return value
+}
+
 function divergentAnswer(scenario: Scenario): { status: number; body: unknown } | null {
   const { unhandled, message } = scenario.expected
   switch (unhandled) {
@@ -271,13 +291,13 @@ describe.each(oracle.scenarios)("$endpoint: $name", (scenario) => {
     it("answers 200 with the value Python returned", async () => {
       const { response } = await run()
       expect(response!.status).toBe(200)
-      expect(await response!.json()).toEqual(scenario.expected.returned)
+      expect(await response!.json()).toEqual(reworded(scenario.expected.returned))
     })
   } else if (scenario.expected.http_status !== undefined) {
     it(`answers ${scenario.expected.http_status} with Python's detail`, async () => {
       const { response } = await run()
       expect(response!.status).toBe(scenario.expected.http_status)
-      expect(await response!.json()).toEqual({ detail: scenario.expected.detail })
+      expect(await response!.json()).toEqual({ detail: reworded(scenario.expected.detail) })
     })
   } else if (divergentAnswer(scenario)) {
     const answer = divergentAnswer(scenario)!
@@ -368,6 +388,36 @@ describe("cases the oracle cannot reach", () => {
     expect(response.status).toBe(404)
     expect(await response.json()).toEqual({ detail: "Profile not found" })
   })
+
+  /**
+   * Polish ledger item P3.3c-ii. Python's wording for a Fernet token this
+   * server cannot open is `PY_WP_DECRYPT_FAILED`, and all three endpoints hand
+   * it straight to the dashboard, where it renders on the profile's WordPress
+   * tab. It names an environment variable the reader can neither see nor
+   * change. The oracle still records what Python said; `reworded()` above is
+   * where the port's answer is written down.
+   */
+  it.each(["test", "categories", "authors"] as const)(
+    "%s tells the reader what to do about a password it cannot decrypt",
+    async (endpoint) => {
+      const id = await insertProfile(user.userId, {
+        wpUrl: base,
+        wpUsername: "wp-user",
+        // A syntactically valid Fernet token written under a different key.
+        wpAppPassword: "gAAAAABmZm90YWtleXRoYXRkb2Vzbm90b3Blbg==",
+      })
+      const response = await call(endpoint, id, user.cookie)
+      const body = await response.json()
+      const shown = endpoint === "test" ? body.error : body.detail
+
+      expect(shown).toBe(
+        "The saved WordPress application password could not be read. Enter it again on this profile and save.",
+      )
+      expect(shown).not.toContain("WP_ENCRYPTION_KEY")
+      expect(shown).not.toContain("\u2014")
+      expect(seen, "nothing should be contacted with a credential we could not open").toEqual([])
+    },
+  )
 
   it("sends the Basic credential built from the decrypted app password", async () => {
     routes = { [routeKey("GET", "/wp-json")]: { status: 200, body: '{"name":"x"}', content_type: "application/json" } }

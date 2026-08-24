@@ -318,14 +318,6 @@
   simply be a refetch before adding a fourth refetch trigger. Found at polish ledger P3.2b-ii.
 
 
-- [confirmed] 2026-08-24 Three more UI sites name a stage by its stored value, the class polish
-  ledger P3.3b closed elsewhere. `web/src/app/settings/stage-models-card.tsx` toasts
-  `research model saved` / `research reverted to default` and falls back to
-  `Failed to save research` on error (lines 157, 158, 163); `web/src/app/profiles/[id]/page.tsx`
-  labels each per-stage mode control `aria-label={`${stage} stage mode`}` (line 1281). All four
-  have `stageLabel()` available and the rest of both screens already uses it. Found at polish
-  ledger P3.3c-i, left for P3.3c-ii.
-
 - [confirmed] 2026-08-24 `WordPressTestResponse.site_name` is typed `string` in
   `web/src/lib/api.ts` but `GET /api/profiles/{id}/wordpress/test` returns `siteName(info)`,
   which is `unknown`: it forwards `record.name` verbatim from the WordPress root response
@@ -341,3 +333,27 @@
   needs type-aware linting, which `web/eslint.config.mjs` does not turn on (it composes
   `eslint-config-next` only). Measure the cost of type-aware linting on this repo before
   deciding. Found at polish ledger P3.3c-i.
+
+- [confirmed] 2026-08-24 `POST /api/posts/{id}/publish` answers
+  `Publishing not supported for output_format '<value>'`, which puts a database column name
+  and a raw enum value into a string `apiErrorMessage()` shows the user. It is reachable only
+  through a race today (the one call site, `/posts/[id]`'s publish button, renders only for
+  `wordpress` and `nextjs`), so the copy was left alone rather than written twice: polish
+  ledger **P2.68** is the item that changes what that branch does for `both`, and the wording
+  should be written against whatever it decides. Found at polish ledger P3.3c-ii.
+
+- [investigate] 2026-08-24 `POST /api/posts/{id}/restart` clears `stage_logs`, which is where
+  the per-stage model, token and cost record lives, so starting a post over erases what its
+  earlier attempts cost. That is Python's behaviour and the new `Start Over` confirmation now
+  says so plainly, but the analytics endpoints read that column, so a restarted post
+  disappears from cost reporting entirely rather than showing two runs. Check whether the
+  column should be appended to instead. Found at polish ledger P3.3c-ii.
+
+- [confirmed] 2026-08-24 The two delete confirmations on `/` (`web/src/app/page.tsx`, the
+  single delete and the bulk delete) style their destructive action with
+  `className="bg-destructive text-destructive-foreground hover:bg-destructive/90"`, which does
+  nothing: `AlertDialogAction` renders a `Button` and passes the child's `className` to the
+  inner `Radix Action`, so the button's own `variant="default"` classes win the cascade and
+  the confirm button for "permanently delete the post and its generated images" renders in the
+  ordinary primary colour. `AlertDialogAction` takes a `variant` prop; both sites should pass
+  `variant="destructive"`. Found at polish ledger P3.3c-ii.

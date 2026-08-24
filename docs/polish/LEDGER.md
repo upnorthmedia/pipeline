@@ -338,7 +338,7 @@ explicitly out of scope.
         once, cleared by an `images` `stage_start` and by a rerun the row has disowned; the
         trace row reads `3 images generated, 2 failed`, live off `liveImages` before any
         refetch. Closes P2.47. `ui/p32c-*.png`. [evidence](evidence/p3.md#p32c)
-- [ ] **P3.3** Naming and copy. Stage names, buttons and errors in the user's terms. No raw
+- [x] **P3.3** Naming and copy. Stage names, buttons and errors in the user's terms. No raw
       enum values, no stack traces, no `undefined` in the UI.
   - [x] **P3.3a** The route error boundaries. All three printed the exception's own message as
         body copy, and that is always wrong here rather than merely ugly: every request goes
@@ -386,12 +386,23 @@ explicitly out of scope.
         duplicate toasts are gone, the `View` action is withheld on the post's own page, and
         `Re-running from write` reads `Re-running from Write`. `ui/p33ci-*.png`.
         [evidence](evidence/p3.md#p33c-i)
-  - [ ] **P3.3c-ii** Buttons and errors in the user's terms. Unswept: the button labels
-        ("Rerun Stage" reruns the pipeline from the first incomplete stage, "Force Restart"),
-        and the server-composed error strings that reach the screen through
-        `apiErrorMessage()`. Three raw stage names found on the way past P3.3c-i and filed in
-        `todo.md`: the `settings/stage-models-card.tsx` toasts and row errors, and
-        `/profiles/[id]`'s stage-mode `aria-label`.
+  - [x] **P3.3c-ii** Buttons and errors in the user's terms. `Rerun Stage` did not re-run a
+        stage: `POST /rerun` resumes the pipeline from the first stage `stage_status` does not
+        call complete, and the button sat two inches from `Re-run Edit`, which is the per-stage
+        retry and a different endpoint. It reads `Resume from Edit` now, off a `resumeStage()`
+        that derives the stage the way the handler does, fallback included. `Force Restart`
+        named the force and not the loss; it is `Start Over` behind a confirmation that names
+        the six stage outputs and the cost record it discards and the settings it keeps.
+        `handlePause`, `handleRerun` and `handleRestart` swallowed the server's reason where
+        every neighbour used `apiErrorMessage`. The upstream cause of that class was not on the
+        page: `apiErrorMessage()` preferred the 500 placeholder over every caller's fallback,
+        so a bare 500 read `Internal Server Error` instead of the action that failed, and
+        `withServerError()` writes that string precisely because it has no complaint to report.
+        `WP_DECRYPT_FAILED` told the reader to check `WP_ENCRYPTION_KEY`; it now tells them to
+        type the application password in again, with Python's wording kept as
+        `PY_WP_DECRYPT_FAILED` and mapped through a `reworded()` in the parity suite, the same
+        mechanism P1.3a used. Seven raw stage names gone from `stage-models-card.tsx` and
+        `/profiles/[id]`. `ui/p33cii-*.png`. [evidence](evidence/p3.md#p33c-ii)
 - [ ] **P3.4** Speed where it is felt: layout shift, avoidable spinners on cached data, lists
       that refetch everything on a single-row change.
 - [ ] **P3.5** One screen per iteration, verified with `npx -y chrome-devtools-axi`, before and

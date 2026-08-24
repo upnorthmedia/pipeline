@@ -687,7 +687,7 @@ describe("ProfileDetailPage", () => {
       await renderOnTab("New post defaults");
 
       await waitFor(() => {
-        expect(screen.getByLabelText("research stage mode")).toHaveTextContent(
+        expect(screen.getByLabelText("Research stage mode")).toHaveTextContent(
           "Run automatically"
         );
       });
@@ -712,11 +712,11 @@ describe("ProfileDetailPage", () => {
       await renderOnTab("New post defaults");
 
       await waitFor(() => {
-        expect(screen.getByLabelText("research stage mode")).toHaveTextContent(
+        expect(screen.getByLabelText("Research stage mode")).toHaveTextContent(
           "Wait for review"
         );
       });
-      expect(screen.getByLabelText("outline stage mode")).toHaveTextContent(
+      expect(screen.getByLabelText("Outline stage mode")).toHaveTextContent(
         "Run automatically"
       );
     });
@@ -730,9 +730,9 @@ describe("ProfileDetailPage", () => {
       await renderOnTab("New post defaults");
 
       await waitFor(() =>
-        expect(screen.getByLabelText("outline stage mode")).toBeInTheDocument()
+        expect(screen.getByLabelText("Outline stage mode")).toBeInTheDocument()
       );
-      expect(screen.getByLabelText("research stage mode")).toHaveTextContent(
+      expect(screen.getByLabelText("Research stage mode")).toHaveTextContent(
         "Run automatically"
       );
     });
@@ -757,10 +757,10 @@ describe("ProfileDetailPage", () => {
       await renderOnTab("New post defaults");
 
       await waitFor(() =>
-        expect(screen.getByLabelText("outline stage mode")).toBeInTheDocument()
+        expect(screen.getByLabelText("Outline stage mode")).toBeInTheDocument()
       );
 
-      await user.click(screen.getByLabelText("outline stage mode"));
+      await user.click(screen.getByLabelText("Outline stage mode"));
       await waitFor(() =>
         expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
           "Run automatically",

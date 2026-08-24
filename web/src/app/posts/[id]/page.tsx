@@ -15,6 +15,16 @@ import {
   Loader2,
   Upload,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -49,7 +59,7 @@ import {
   STAGES,
 } from "@/lib/api";
 import { STAGE_LABELS, stageLabel } from "@/lib/stages";
-import { deriveRunState } from "@/lib/run-state";
+import { deriveRunState, resumeStage } from "@/lib/run-state";
 import { buildRunTrace, type LiveImage } from "@/lib/run-trace";
 import { lastPublishError } from "@/lib/publish-report";
 import { PUBLISH_TARGET_LABELS, publishTargetOf } from "@/lib/publishing";
@@ -87,6 +97,7 @@ export default function PostDetailPage() {
   const [activeTab, setActiveTab] = useState<string>("research");
   const [editorContent, setEditorContent] = useState<string>("");
   const [saving, setSaving] = useState(false);
+  const [confirmingRestart, setConfirmingRestart] = useState(false);
   const [debugLogs, setDebugLogs] = useState<DebugLog[]>([]);
   // The stage of the most recent `stage_start` frame. The row entry that frame
   // announces is not on the client until the next refetch, and refetches only
@@ -308,8 +319,8 @@ export default function PostDetailPage() {
       await posts.pause(postId);
       toast.success("Paused");
       fetchPost();
-    } catch {
-      toast.error("Failed to pause");
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "The run could not be paused."));
     }
   };
 
@@ -329,13 +340,20 @@ export default function PostDetailPage() {
     }
   };
 
+  /**
+   * The header's resume. `POST /rerun` restarts the whole pipeline from the
+   * first stage `stage_status` does not call complete, which is why the button
+   * names that stage rather than saying "stage": the per-stage retry beside a
+   * failed stage is `handleRetryStage`, it is a different action, and the old
+   * "Rerun Stage" label read as that one.
+   */
   const handleRerun = async () => {
     try {
       const result = await posts.rerun(postId);
       toast.success(`Re-running from ${stageLabel(result.rerun_from)}`);
       fetchPost();
-    } catch {
-      toast.error("Failed to re-run stage");
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "The re-run could not be started."));
     }
   };
 
@@ -359,13 +377,20 @@ export default function PostDetailPage() {
 
   const handleRetryImages = () => handleRetryStage("images");
 
+  /**
+   * `POST /restart` clears all six content columns plus `final_html_content`
+   * and `stage_logs`, then runs from `research`. Nothing about that is
+   * recoverable, and the old "Force Restart" label named the force rather than
+   * the loss, so the confirmation below is what actually says it.
+   */
   const handleRestart = async () => {
+    setConfirmingRestart(false);
     try {
       await posts.restart(postId);
-      toast.success("Restarting pipeline from scratch");
+      toast.success("Starting over from Research");
       fetchPost();
-    } catch {
-      toast.error("Failed to restart pipeline");
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "The run could not be started over."));
     }
   };
 
@@ -479,6 +504,9 @@ export default function PostDetailPage() {
       ? (lastPublishError(post.execution_logs) ??
         "The run recorded no reason. The worker log has the detail.")
       : null;
+  // The stage the header's re-run will start from, derived the way the handler
+  // derives it so the button cannot promise a stage the run does not begin at.
+  const resumeFrom = resumeStage(post.stage_status);
   // A post nothing has ever executed against: no stage has moved off
   // `pending` and no stage column holds output. Posts normally start on
   // creation, so this is the state of a post whose run never reached the
@@ -587,11 +615,15 @@ export default function PostDetailPage() {
             <>
               <Button variant="outline" size="sm" onClick={handleRerun}>
                 <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                Rerun Stage
+                Resume from {STAGE_LABELS[resumeFrom]}
               </Button>
-              <Button variant="outline" size="sm" onClick={handleRestart}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmingRestart(true)}
+              >
                 <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
-                Force Restart
+                Start Over
               </Button>
             </>
           )}
@@ -902,6 +934,41 @@ export default function PostDetailPage() {
           </Card>
         )
       )}
+
+      {/*
+        The one destructive run control. Everything it clears is regenerable,
+        which is why it is a confirmation rather than a typed name, but it is
+        regenerable only by paying for six more model calls, so the sentence
+        names the output and the cost record it throws away and the settings it
+        keeps.
+      */}
+      <AlertDialog open={confirmingRestart} onOpenChange={setConfirmingRestart}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Start this post over?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The run begins again at Research. Everything the pipeline has
+              produced for this post is discarded first: the research notes, the
+              outline, the draft, the edited copy, the images and the final
+              article, along with this run&apos;s token and cost record. The
+              post&apos;s own settings and review gates are kept.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep this run</AlertDialogCancel>
+            {/*
+              `variant`, not a `className` override: `AlertDialogAction` renders
+              a `Button` and puts the child's class *inside* it, so a
+              `bg-destructive` class loses to the button's own `variant` classes
+              in the cascade. The two delete dialogs on `/` do it the other way
+              and are not actually red; filed in `todo.md`.
+            */}
+            <AlertDialogAction variant="destructive" onClick={handleRestart}>
+              Start over
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

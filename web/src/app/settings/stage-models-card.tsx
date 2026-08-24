@@ -152,15 +152,19 @@ export function StageModelsCard() {
         delete rest[row.stage];
         return rest;
       });
+      const name = STAGE_LABELS[row.stage];
       toast.success(
-        entry === null
-          ? `${row.stage} reverted to default`
-          : `${row.stage} model saved`
+        entry === null ? `${name} reverted to default` : `${name} model saved`
       );
     } catch (error) {
       // The server names the offending stage and the accepted values, so its
-      // wording is more useful than anything this component could invent.
-      const message = apiErrorMessage(error, `Failed to save ${row.stage}`);
+      // wording is more useful than anything this component could invent. Its
+      // wording is the column value, though, which is right in a message about
+      // an allowlist and wrong in this component's own fallback.
+      const message = apiErrorMessage(
+        error,
+        `The ${STAGE_LABELS[row.stage]} model could not be saved.`
+      );
       setRowErrors((prev) => ({ ...prev, [row.stage]: message }));
       toast.error(message);
     } finally {
@@ -245,7 +249,7 @@ export function StageModelsCard() {
                     >
                       <SelectTrigger
                         className="w-[230px]"
-                        aria-label={`${row.stage} model`}
+                        aria-label={`${STAGE_LABELS[row.stage]} model`}
                       >
                         <SelectValue />
                       </SelectTrigger>
@@ -265,7 +269,7 @@ export function StageModelsCard() {
                       >
                         <SelectTrigger
                           className="w-[110px]"
-                          aria-label={`${row.stage} effort`}
+                          aria-label={`${STAGE_LABELS[row.stage]} effort`}
                         >
                           <SelectValue />
                         </SelectTrigger>
@@ -304,7 +308,7 @@ export function StageModelsCard() {
                           (row.model_source !== "user" && row.effort_source !== "user")
                         }
                         onClick={() => write(row, null)}
-                        aria-label={`Revert ${row.stage} to default`}
+                        aria-label={`Revert ${STAGE_LABELS[row.stage]} to default`}
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
                         <span className="ml-1.5">Revert</span>

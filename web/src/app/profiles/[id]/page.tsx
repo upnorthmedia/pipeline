@@ -1278,7 +1278,7 @@ export default function ProfileDetailPage() {
                           // Wide enough for the longest mode name. At 140px
                           // `line-clamp-1` cut "Run automatically" mid-word.
                           className="w-[180px] h-8"
-                          aria-label={`${stage} stage mode`}
+                          aria-label={`${STAGE_LABELS[stage]} stage mode`}
                         >
                           <SelectValue />
                         </SelectTrigger>

@@ -1,3 +1,5 @@
+import { INTERNAL_SERVER_ERROR_DETAIL } from "./route-error";
+
 // --- Types ---
 
 // The three values `stage_settings` holds. `review` and `approve_only` are the
@@ -425,13 +427,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  * without one, which is thin but is still the server's actual complaint, and
  * every form that can produce one checks its required fields before it
  * submits.
+ *
+ * The one string detail that does not win is the 500 placeholder.
+ * `withServerError()` keeps the cause out of the body on purpose, so a throw
+ * nobody anticipated answers with Starlette's `Internal Server Error` and
+ * nothing else: that is the absence of a complaint rather than one, and it
+ * displaced every caller's fallback, which at least names the action that
+ * failed. The constant is imported from the module that writes it so the two
+ * cannot drift apart.
  */
 export function apiErrorMessage(error: unknown, fallback: string): string {
   if (!(error instanceof Error) || !error.message) return fallback;
   try {
     const body = JSON.parse(error.message);
     const detail = (body as { detail?: unknown }).detail;
-    if (typeof detail === "string" && detail) return detail;
+    if (typeof detail === "string" && detail && detail !== INTERNAL_SERVER_ERROR_DETAIL) {
+      return detail;
+    }
     if (Array.isArray(detail)) {
       const messages = detail
         .map((entry) => (entry as { msg?: unknown }).msg)

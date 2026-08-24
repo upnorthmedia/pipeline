@@ -179,8 +179,8 @@ describe("PostDetailPage", () => {
       expect(screen.getByText("This post has not run yet")).toBeInTheDocument();
     });
     // The two re-run controls are meaningless before a first run.
-    expect(screen.queryByText("Rerun Stage")).not.toBeInTheDocument();
-    expect(screen.queryByText("Force Restart")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /resume from/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start Over" })).not.toBeInTheDocument();
 
     await user.click(screen.getAllByText("Run Pipeline")[0]);
     expect(mockRun).toHaveBeenCalledWith("post-1");
@@ -376,7 +376,7 @@ describe("PostDetailPage", () => {
       expect(screen.getByText("Still here")).toBeInTheDocument();
     });
 
-    await user.click(screen.getByText("Rerun Stage"));
+    await user.click(screen.getByRole("button", { name: /resume from/i }));
     await waitFor(() => {
       expect(screen.getByText("This post is out of date")).toBeInTheDocument();
     });
@@ -831,7 +831,7 @@ describe("PostDetailPage stage notifications", () => {
     renderWithProviders(<PostDetailPage />);
     await screen.findByText("Test Post Topic");
 
-    await userEvent.click(screen.getByRole("button", { name: /rerun stage/i }));
+    await userEvent.click(screen.getByRole("button", { name: /resume from/i }));
 
     await waitFor(() =>
       expect(toast.success).toHaveBeenCalledWith("Re-running from Write"),
@@ -847,5 +847,142 @@ describe("PostDetailPage stage notifications", () => {
     emitSSE({ event: "stage_complete", stage: "research" });
 
     await waitFor(() => expect(mockGet.mock.calls.length).toBeGreaterThan(before));
+  });
+});
+
+/**
+ * The two run controls a post grows once it has run. Both were named after the
+ * mechanism rather than the outcome: "Rerun Stage" does not re-run a stage (the
+ * per-stage retry beside the failure banner does), it resumes the whole
+ * pipeline from the first stage `stage_status` does not call complete, and
+ * "Force Restart" says nothing about the six columns of output it throws away.
+ */
+describe("the run controls on a post that has already run", () => {
+  const mockRestart = vi.mocked(posts.restart);
+  const mockPause = vi.mocked(posts.pause);
+  /** The id the route mock answers with, so the handlers' argument is checkable. */
+  const completed = () => makeCompletedPost({ id: "post-1", topic: "Test Post Topic" });
+
+  it("names the stage the re-run will start from", async () => {
+    mockGet.mockResolvedValue(
+      makePost({
+        stage_status: { research: "complete", outline: "complete" },
+        research_content: "notes",
+      }),
+    );
+    renderWithProviders(<PostDetailPage />);
+    await screen.findByText("Test Post Topic");
+
+    expect(screen.getByRole("button", { name: "Resume from Write" })).toBeInTheDocument();
+  });
+
+  it("says Resume from Ready on a post whose every stage is complete", async () => {
+    mockGet.mockResolvedValue(completed());
+    renderWithProviders(<PostDetailPage />);
+    await screen.findByText("Test Post Topic");
+
+    expect(screen.getByRole("button", { name: "Resume from Ready" })).toBeInTheDocument();
+  });
+
+  it("asks before starting over, and names what is discarded", async () => {
+    mockGet.mockResolvedValue(completed());
+    mockRestart.mockResolvedValue({ status: "queued", mode: "restart" });
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+    await screen.findByText("Test Post Topic");
+
+    await user.click(screen.getByRole("button", { name: "Start Over" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText(/discard/i)).toBeInTheDocument();
+    expect(mockRestart).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole("button", { name: "Start over" }));
+    await waitFor(() => expect(mockRestart).toHaveBeenCalledWith("post-1"));
+  });
+
+  it("does not start over when the confirmation is cancelled", async () => {
+    mockGet.mockResolvedValue(completed());
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+    await screen.findByText("Test Post Topic");
+
+    await user.click(screen.getByRole("button", { name: "Start Over" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Keep this run" }));
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(mockRestart).not.toHaveBeenCalled();
+  });
+
+  it("shows the server's reason when a re-run is refused", async () => {
+    mockGet.mockResolvedValue(completed());
+    mockRerun.mockRejectedValue(
+      new Error(JSON.stringify({ detail: "Another run is already in flight" })),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+    await screen.findByText("Test Post Topic");
+
+    await user.click(screen.getByRole("button", { name: /resume from/i }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Another run is already in flight"),
+    );
+  });
+
+  it("shows the server's reason when starting over is refused", async () => {
+    mockGet.mockResolvedValue(completed());
+    mockRestart.mockRejectedValue(
+      new Error(JSON.stringify({ detail: "Another run is already in flight" })),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+    await screen.findByText("Test Post Topic");
+
+    await user.click(screen.getByRole("button", { name: "Start Over" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Start over" }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Another run is already in flight"),
+    );
+  });
+
+  it("shows the server's reason when a pause is refused", async () => {
+    mockGet.mockResolvedValue(
+      makePost({ current_stage: "research", stage_status: { research: "running" } }),
+    );
+    mockPause.mockRejectedValue(
+      new Error(JSON.stringify({ detail: "This post is not running" })),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+    await screen.findByText("Test Post Topic");
+
+    await user.click(screen.getByRole("button", { name: "Pause" }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("This post is not running"),
+    );
+  });
+
+  // `withServerError()` keeps the cause out of the body on purpose, so a 500
+  // carries Starlette's placeholder and nothing else. Saying which action
+  // failed beats repeating that.
+  it("falls back to its own wording when the server answers a bare 500", async () => {
+    mockGet.mockResolvedValue(completed());
+    mockRerun.mockRejectedValue(
+      new Error(JSON.stringify({ detail: "Internal Server Error" })),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+    await screen.findByText("Test Post Topic");
+
+    await user.click(screen.getByRole("button", { name: /resume from/i }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("The re-run could not be started."),
+    );
   });
 });

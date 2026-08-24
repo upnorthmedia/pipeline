@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 
 import { StageModelsCard } from "./stage-models-card";
 import { renderWithProviders } from "@/test/render";
-import { STAGE_LABELS } from "@/lib/stages";
+import { STAGE_LABELS, stageLabel } from "@/lib/stages";
 import type { PipelineStage, StageModelRow, StageModels } from "@/lib/api";
 
 vi.mock("@/lib/api", async () => {
@@ -74,7 +74,7 @@ function payload(overrides: Partial<StageModels> = {}): StageModels {
 
 /** The card that holds one stage's controls, found through its heading. */
 function stageCard(stage: string) {
-  return screen.getByLabelText(`${stage} model`).closest("div.rounded-md") as HTMLElement;
+  return screen.getByLabelText(`${stageLabel(stage)} model`).closest("div.rounded-md") as HTMLElement;
 }
 
 beforeEach(() => {
@@ -107,7 +107,7 @@ describe("StageModelsCard loading and error states", () => {
     // The settings page carries three retries now, so this one names itself.
     await userEvent.click(screen.getByRole("button", { name: "Retry stage models" }));
 
-    await waitFor(() => expect(screen.getByLabelText("write model")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Write model")).toBeInTheDocument());
   });
 });
 
@@ -119,16 +119,16 @@ describe("StageModelsCard table", () => {
       expect(screen.getByText(STAGE_LABELS.research)).toBeInTheDocument(),
     );
     expect(within(stageCard("research")).getByText("perplexity")).toBeInTheDocument();
-    expect(screen.getByLabelText("research model")).toHaveTextContent("sonar-pro");
-    expect(screen.getByLabelText("write model")).toHaveTextContent("claude-opus-5");
-    expect(screen.getByLabelText("write effort")).toHaveTextContent("high");
+    expect(screen.getByLabelText("Research model")).toHaveTextContent("sonar-pro");
+    expect(screen.getByLabelText("Write model")).toHaveTextContent("claude-opus-5");
+    expect(screen.getByLabelText("Write effort")).toHaveTextContent("high");
   });
 
   it("offers no effort control for a provider that has none", async () => {
     renderWithProviders(<StageModelsCard />);
 
-    await waitFor(() => expect(screen.getByLabelText("write effort")).toBeInTheDocument());
-    expect(screen.queryByLabelText("research effort")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Write effort")).toBeInTheDocument());
+    expect(screen.queryByLabelText("Research effort")).not.toBeInTheDocument();
     expect(within(stageCard("research")).getByText("no effort setting")).toBeInTheDocument();
   });
 
@@ -145,7 +145,7 @@ describe("StageModelsCard table", () => {
 
     renderWithProviders(<StageModelsCard />);
 
-    await waitFor(() => expect(screen.getByLabelText("write model")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Write model")).toBeInTheDocument());
     expect(within(stageCard("write")).getByText("Override")).toBeInTheDocument();
     expect(within(stageCard("edit")).getByText("Global")).toBeInTheDocument();
     expect(within(stageCard("ready")).getByText("Default")).toBeInTheDocument();
@@ -162,12 +162,12 @@ describe("StageModelsCard saving", () => {
     );
 
     renderWithProviders(<StageModelsCard />);
-    await waitFor(() => expect(screen.getByLabelText("write model")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Write model")).toBeInTheDocument());
 
     const save = within(stageCard("write")).getByRole("button", { name: /Save/ });
     expect(save).toBeDisabled();
 
-    await userEvent.click(screen.getByLabelText("write model"));
+    await userEvent.click(screen.getByLabelText("Write model"));
     await userEvent.click(await screen.findByRole("option", { name: "claude-fable-5" }));
 
     expect(save).toBeEnabled();
@@ -181,7 +181,7 @@ describe("StageModelsCard saving", () => {
         write: { model: "claude-fable-5", effort: "high" },
       })
     );
-    expect(toast.success).toHaveBeenCalledWith("write model saved");
+    expect(toast.success).toHaveBeenCalledWith("Write model saved");
   });
 
   it("omits effort from the write for a provider that has none", async () => {
@@ -206,9 +206,9 @@ describe("StageModelsCard saving", () => {
     mockUpdate.mockResolvedValue(payload());
 
     renderWithProviders(<StageModelsCard />);
-    await waitFor(() => expect(screen.getByLabelText("images model")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Images model")).toBeInTheDocument());
 
-    await userEvent.click(screen.getByLabelText("images model"));
+    await userEvent.click(screen.getByLabelText("Images model"));
     await userEvent.click(
       await screen.findByRole("option", { name: "gemini-3.1-flash-image-preview" })
     );
@@ -233,14 +233,35 @@ describe("StageModelsCard saving", () => {
     );
 
     renderWithProviders(<StageModelsCard />);
-    await waitFor(() => expect(screen.getByLabelText("write model")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Write model")).toBeInTheDocument());
 
-    await userEvent.click(screen.getByLabelText("write model"));
+    await userEvent.click(screen.getByLabelText("Write model"));
     await userEvent.click(await screen.findByRole("option", { name: "claude-fable-5" }));
     await userEvent.click(within(stageCard("write")).getByRole("button", { name: /Save/ }));
 
     const message =
       "Invalid model 'claude-fable-5' for stage 'write'. Verified values are claude-opus-5";
+    await waitFor(() =>
+      expect(within(stageCard("write")).getByText(message)).toBeInTheDocument()
+    );
+    expect(toast.error).toHaveBeenCalledWith(message);
+  });
+
+  // The heading one line above every one of these already reads "Write". The
+  // card was the last place on the screen still handing the reader the column
+  // value, and its own fallback wording was the worst of them, because it is
+  // what shows when the server says nothing useful.
+  it("names the stage its own way when the server offers no reason", async () => {
+    mockUpdate.mockRejectedValue(new Error("<html>502 Bad Gateway</html>"));
+
+    renderWithProviders(<StageModelsCard />);
+    await waitFor(() => expect(screen.getByLabelText("Write model")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByLabelText("Write model"));
+    await userEvent.click(await screen.findByRole("option", { name: "claude-fable-5" }));
+    await userEvent.click(within(stageCard("write")).getByRole("button", { name: /Save/ }));
+
+    const message = "The Write model could not be saved.";
     await waitFor(() =>
       expect(within(stageCard("write")).getByText(message)).toBeInTheDocument()
     );
@@ -252,8 +273,8 @@ describe("StageModelsCard reverting", () => {
   it("disables Revert on a stage with no override of its own", async () => {
     renderWithProviders(<StageModelsCard />);
 
-    await waitFor(() => expect(screen.getByLabelText("write model")).toBeInTheDocument());
-    expect(screen.getByLabelText("Revert write to default")).toBeDisabled();
+    await waitFor(() => expect(screen.getByLabelText("Write model")).toBeInTheDocument());
+    expect(screen.getByLabelText("Revert Write to default")).toBeDisabled();
   });
 
   it("drops the stage from the map rather than writing the fallback back", async () => {
@@ -273,12 +294,12 @@ describe("StageModelsCard reverting", () => {
     mockUpdate.mockResolvedValue(payload({ stages: [claudeStage("write")] }));
 
     renderWithProviders(<StageModelsCard />);
-    await waitFor(() => expect(screen.getByLabelText("write model")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Write model")).toBeInTheDocument());
 
     expect(screen.getByText("Reverts to claude-opus-4-6 / low")).toBeInTheDocument();
-    await userEvent.click(screen.getByLabelText("Revert write to default"));
+    await userEvent.click(screen.getByLabelText("Revert Write to default"));
 
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledWith({ edit: { effort: "max" } }));
-    expect(toast.success).toHaveBeenCalledWith("write reverted to default");
+    expect(toast.success).toHaveBeenCalledWith("Write reverted to default");
   });
 });

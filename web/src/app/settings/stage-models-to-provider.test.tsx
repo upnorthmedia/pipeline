@@ -58,6 +58,7 @@ import {
 } from "@/mastra/stage-models"
 import { imagesGenerateStep } from "@/mastra/steps/images-generate"
 import { stageAgentOptions } from "@/mastra/steps/stage-io"
+import { stageLabel } from "@/lib/stages"
 import { borrowApiKeysRow, returnApiKeysRow } from "@/test/api-keys-row"
 import {
   lockGlobalStageModelsRow,
@@ -174,12 +175,12 @@ swapFetchForSuite(routeRequest)
 
 /** The card that holds one stage's controls, found through its model selector. */
 function stageCard(stage: string) {
-  return screen.getByLabelText(`${stage} model`).closest("div.rounded-md") as HTMLElement
+  return screen.getByLabelText(`${stageLabel(stage)} model`).closest("div.rounded-md") as HTMLElement
 }
 
 /** Picks a value in one of a stage's two Radix selects. */
 async function choose(stage: string, control: "model" | "effort", value: string) {
-  await userEvent.click(screen.getByLabelText(`${stage} ${control}`))
+  await userEvent.click(screen.getByLabelText(`${stageLabel(stage)} ${control}`))
   await userEvent.click(await screen.findByRole("option", { name: value }))
 }
 
@@ -311,7 +312,7 @@ describe("a model chosen in the UI reaches Anthropic", () => {
 
   it("stores what the settings page saved, through the real handler", async () => {
     renderWithProviders(<StageModelsCard />)
-    await waitFor(() => expect(screen.getByLabelText("write model")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByLabelText("Write model")).toBeInTheDocument())
 
     await choose("write", "model", CHOSEN_WRITE_MODEL)
     await choose("write", "effort", CHOSEN_WRITE_EFFORT)
@@ -339,9 +340,9 @@ describe("a model chosen in the UI reaches Anthropic", () => {
 
   it("goes back to the default when the page reverts the stage", async () => {
     renderWithProviders(<StageModelsCard />)
-    await waitFor(() => expect(screen.getByLabelText("write model")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByLabelText("Write model")).toBeInTheDocument())
 
-    await userEvent.click(screen.getByLabelText("Revert write to default"))
+    await userEvent.click(screen.getByLabelText("Revert Write to default"))
     await waitFor(async () => expect(await storedOverrides()).toEqual({}))
 
     const body = await runWriteStage()
@@ -360,7 +361,7 @@ describe("a model chosen in the UI reaches Gemini", () => {
 
   it("carries the chosen model in the request path after the page saves it", async () => {
     renderWithProviders(<StageModelsCard />)
-    await waitFor(() => expect(screen.getByLabelText("images model")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByLabelText("Images model")).toBeInTheDocument())
 
     await choose("images", "model", CHOSEN_IMAGES_MODEL)
     await userEvent.click(within(stageCard("images")).getByRole("button", { name: /Save/ }))

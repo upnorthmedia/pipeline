@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { apiErrorMessage, posts, profiles, queue, settings, sseUrl } from "./api";
+import { INTERNAL_SERVER_ERROR_DETAIL } from "./route-error";
 
 // The dashboard and its route handlers are one Next.js app, so every request
 // the client makes is origin-relative. There is no base URL to configure.
@@ -372,5 +373,21 @@ describe("apiErrorMessage", () => {
 
   it("falls back for a body that is not JSON", () => {
     expect(apiErrorMessage(new Error("<html>502</html>"), "fallback")).toBe("fallback");
+  });
+
+  // `withServerError()` answers every unanticipated throw with Starlette's
+  // wording and deliberately keeps the cause out of the body, so the detail on
+  // a 500 names no complaint at all. The caller's fallback says which action
+  // failed, which is strictly more than "Internal Server Error" tells anyone.
+  it("falls back for the 500 placeholder, which names no complaint", () => {
+    expect(
+      apiErrorMessage(thrown({ detail: INTERNAL_SERVER_ERROR_DETAIL }), "The post could not be saved.")
+    ).toBe("The post could not be saved.");
+  });
+
+  it("still shows a handler's own wording that happens to mention the server", () => {
+    expect(
+      apiErrorMessage(thrown({ detail: "The internal server error log is empty" }), "fallback")
+    ).toBe("The internal server error log is empty");
   });
 });

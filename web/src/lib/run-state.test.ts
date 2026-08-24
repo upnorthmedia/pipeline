@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { PostStage, StageStatusMap } from "./api";
-import { deriveRunState } from "./run-state";
+import { STAGES, type PostStage, type StageStatusMap } from "./api";
+import { deriveRunState, resumeStage } from "./run-state";
 
 const state = (currentStage: PostStage, stageStatus: StageStatusMap = {}) =>
   deriveRunState({ currentStage, stageStatus });
@@ -113,5 +113,32 @@ describe("deriveRunState", () => {
       kind: "in_progress",
       label: "Edit",
     });
+  });
+});
+
+describe("resumeStage", () => {
+  it("names the first stage that is not complete", () => {
+    expect(resumeStage({ research: "complete", outline: "complete" })).toBe("write");
+  });
+
+  it("names the first stage on a post nothing has run", () => {
+    expect(resumeStage({})).toBe("research");
+  });
+
+  it("does not skip a stage that failed, or one parked for review", () => {
+    expect(resumeStage({ research: "complete", outline: "failed" })).toBe("outline");
+    expect(resumeStage({ research: "complete", outline: "review" })).toBe("outline");
+  });
+
+  // The handler's own fallback: `STAGES.find(...) ?? STAGES.at(-1)`. A finished
+  // post has no first incomplete stage, so "re-run" on one re-runs `ready`.
+  it("names the last stage when every stage is complete", () => {
+    const all = Object.fromEntries(STAGES.map((stage) => [stage, "complete"]));
+    expect(resumeStage(all)).toBe("ready");
+  });
+
+  // A key outside the six is not a stage, and the handler ignores it too.
+  it("ignores a key that is not one of the six stages", () => {
+    expect(resumeStage({ publish: "failed" } as StageStatusMap)).toBe("research");
   });
 });
