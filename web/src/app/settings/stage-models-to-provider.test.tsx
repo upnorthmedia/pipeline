@@ -58,7 +58,7 @@ import {
 } from "@/mastra/stage-models"
 import { imagesGenerateStep } from "@/mastra/steps/images-generate"
 import { stageAgentOptions } from "@/mastra/steps/stage-io"
-import { lockApiKeysRow, unlockApiKeysRow } from "@/test/api-keys-row"
+import { borrowApiKeysRow, returnApiKeysRow } from "@/test/api-keys-row"
 import {
   lockGlobalStageModelsRow,
   unlockGlobalStageModelsRow,
@@ -93,9 +93,7 @@ const db = getDb()
 
 let user: TestSession
 let mediaDir = ""
-let savedApiKeys: { value: unknown } | undefined
 let savedGlobalStageModels: { value: unknown } | undefined
-let savedEncryptionKey: string | undefined
 let restoreFetch: (() => void) | undefined
 
 /** Every request the router sent nowhere, in order. */
@@ -235,18 +233,9 @@ beforeAll(async () => {
   // Both rows are process-global singletons and both are read on every
   // resolution here, so the file owns them for its duration. Taken in the
   // order `row-lock.ts` documents, since no other file takes both.
-  await lockApiKeysRow()
+  await borrowApiKeysRow({ encryptionKey: TEST_KEY })
   await lockGlobalStageModelsRow()
-  savedEncryptionKey = process.env.WP_ENCRYPTION_KEY
-  process.env.WP_ENCRYPTION_KEY = TEST_KEY
 
-  savedApiKeys = (
-    await db
-      .select({ value: settings.value })
-      .from(settings)
-      .where(eq(settings.key, API_KEYS_SETTING_KEY))
-      .limit(1)
-  )[0]
   savedGlobalStageModels = (
     await db
       .select({ value: settings.value })
@@ -297,21 +286,15 @@ afterAll(async () => {
   await db.delete(settings).where(like(settings.userId, `${PREFIX}%`))
   await deleteTestSessions(PREFIX)
 
-  await db.delete(settings).where(eq(settings.key, API_KEYS_SETTING_KEY))
-  if (savedApiKeys) {
-    await db.insert(settings).values({ key: API_KEYS_SETTING_KEY, value: savedApiKeys.value })
-  }
   if (savedGlobalStageModels) {
     await db
       .insert(settings)
       .values({ key: STAGE_MODELS_SETTING_KEY, value: savedGlobalStageModels.value })
   }
 
-  if (savedEncryptionKey === undefined) delete process.env.WP_ENCRYPTION_KEY
-  else process.env.WP_ENCRYPTION_KEY = savedEncryptionKey
   if (mediaDir) await rm(mediaDir, { recursive: true, force: true })
   await unlockGlobalStageModelsRow()
-  await unlockApiKeysRow()
+  await returnApiKeysRow()
   await closeDb()
 })
 

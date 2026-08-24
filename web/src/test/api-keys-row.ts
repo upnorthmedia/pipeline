@@ -1,28 +1,40 @@
 /**
- * Cross-file mutual exclusion on the `settings.api_keys` row.
+ * The borrow of the `settings.api_keys` row.
  *
  * Nothing ever writes an `api_keys` row with a `user_id`, and Alembic 012's
  * NULLS NOT DISTINCT constraint allows only one row without one, so there is
  * exactly one `api_keys` row for the whole database and no column to isolate a
- * test file on. Eight test files swap it for a fixture encrypted under their
- * own throwaway `WP_ENCRYPTION_KEY` and restore it afterwards, and vitest runs
- * those files in parallel processes against that one shared database. See
- * `row-lock.ts` for the mechanics and for the lock ordering rule; this is the
- * first lock in that order.
+ * test file on. Nine test files swap it for a fixture encrypted under their
+ * own throwaway `WP_ENCRYPTION_KEY`, and vitest runs those files in parallel
+ * processes against that one shared database.
+ *
+ * `api_keys_validation` is a global singleton read by the same settings page
+ * and is borrowed alongside, so a file that touches only one of the two cannot
+ * leave the other behind.
+ *
+ * See `borrowed-rows.ts` for why the snapshot lives in the database rather
+ * than in the borrower's memory, and `row-lock.ts` for the lock ordering rule.
+ * This is the first lock in that order.
  */
-import { createRowLock } from "./row-lock"
+import { API_KEYS_SETTING_KEY, API_KEYS_VALIDATION_SETTING_KEY } from "@/mastra/api-keys"
 
-const apiKeysRow = createRowLock(510_120_261, "api_keys row")
+import { createBorrowedRows } from "./borrowed-rows"
+
+const apiKeysRow = createBorrowedRows({
+  lockKey: 510_120_261,
+  label: "api_keys row",
+  keys: [API_KEYS_SETTING_KEY, API_KEYS_VALIDATION_SETTING_KEY],
+  backupKey: "api_keys__test_borrow_backup",
+})
 
 /**
- * Blocks until this process owns the `api_keys` row. Call it first in
- * `beforeAll`, before reading the row to save it.
+ * Takes the `api_keys` row for this process. Call it first in `beforeAll`,
+ * passing the throwaway Fernet key the file's fixtures are encrypted under.
  */
-export const lockApiKeysRow = apiKeysRow.lock
+export const borrowApiKeysRow = apiKeysRow.borrow
 
 /**
- * Releases the row. Call it last in `afterAll`, after restoring the row and
- * before `closeDb()`, which would otherwise hang waiting on the checked-out
- * client.
+ * Puts the row back and releases it. Call it last in `afterAll`, before
+ * `closeDb()`, which would otherwise hang waiting on the checked-out client.
  */
-export const unlockApiKeysRow = apiKeysRow.unlock
+export const returnApiKeysRow = apiKeysRow.giveBack

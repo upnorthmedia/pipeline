@@ -50,12 +50,6 @@
   only ever 1-2 extra failures and always in the suites that swap `globalThis.fetch` or read
   `settings.api_keys`.
 
-- [confirmed] 2026-08-21 The agent test files' `beforeAll`/`afterAll` key save-and-restore
-  makes the placeholder key permanent: a run captures whatever is in `settings.api_keys`,
-  writes `sk-ant-not-a-real-key`, then restores what it captured, so once an interrupted run
-  leaves the placeholder behind every later run restores it. Found the row still present at
-  the start of iteration 31 and deleted it. The restore should skip rows it wrote itself.
-
 - [confirmed] 2026-08-22 `_generate_one` gives every featured image the same filename,
   `featured-<MMDDYY>-<randint(10,99)>.webp`, so two featured entries in one manifest collide:
   the later write overwrites the earlier file and both manifest entries record the same URL.
@@ -163,13 +157,6 @@
   IntegrityError from the same INSERT). Alembic 010 added `user_id` as an index only. The fix is
   a composite `(key, user_id)` primary key, which section 8 of the port objective forbids as part
   of the port. Asserted as-is in `web/src/app/api/settings/route.test.ts`.
-- [fixed] 2026-08-22 The six agent test files each rewrote and deleted the single global
-  `api_keys` settings row (`writeAnthropicKey` / `clearKeys` in
-  `web/src/mastra/agents/*.test.ts`), so `pnpm -C web test` flaked between 9 and 10 failures with
-  `anthropic API key not configured` when one file raced a sibling. Fixed in item 5.1b-i by
-  serialising the eight files that touch that row on a Postgres session advisory lock
-  (`web/src/test/api-keys-row.ts`); the suite now sits at a deterministic 9 failures with no
-  change in wall clock. Clear this entry once the fix is merged.
 - [investigate] 2026-08-22 BetterAuth has no `BETTER_AUTH_SECRET` in `.env` or `.env.example`, so
   it falls back to its built-in default secret and every session cookie in this deployment is
   signed with a publicly known key. Setting one invalidates existing sessions, which is free now
@@ -608,19 +595,10 @@
   test's `.find()` over a set it assumes is ordered or a real ordering gap in the Redis
   Streams fan-out; the second reading would matter to the Phase 8 trace view, so this needs
   a real diagnosis rather than a retry.
-- [confirmed] 2026-08-23 The vitest suites that borrow the global `settings.api_keys` row
-  can destroy live credentials. `web/src/mastra/api-keys.test.ts` deletes the row in
-  `afterEach` and only writes the developer's saved value back in `afterAll`, so any
-  throw in that restore leaves the row gone for good, and these suites run against the
-  dev database (`DATABASE_URL_SYNC`), not a scratch one.
-  `web/src/app/api/settings/api-keys/route.test.ts` has the same shape. This is not
-  hypothetical: it happened during ledger item 6.0, when the Alembic 012 primary-key
-  change made the restore's `ON CONFLICT (key)` invalid and the row was lost. It was
-  recovered in full from the Docker volume's WAL (Fernet tokens re-extracted with page
-  headers stripped, then matched against the row's pre-change md5), but that only worked
-  because the loss was noticed within the WAL retention window. The fix is for these
-  suites to hold their own row rather than borrowing the real one, or to restore per test
-  rather than per file.
+  2026-08-23: reproduced on two of three full runs during polish item P0.3a, with the same two
+  messages in the same order each time, against a clean full run immediately before that item's
+  change. That is a higher rate than the recorded one in four on a small sample. It is polish
+  ledger item P0.3b and the last known blocker on a repeatable full run.
 - [confirmed] 2026-08-23 Perplexity's Sonar Chat Completions endpoint is deprecated with
   support ending 2026-09-27, per `docs.perplexity.ai/getting-started/models`. The
   `research` stage reaches `sonar-pro` through Mastra's model router, which uses the
@@ -785,3 +763,13 @@
   stray worker or a `mastra dev`. It passed 3/3 with a real worker up, so it is exposure
   rather than a reproduced failure; recorded because P0.3 has to certify the whole suite with
   a worker running and this is where to look first if it does not.
+
+- [confirmed] 2026-08-23 The global `stage_models` row is borrowed the way `api_keys` used to
+  be: `src/mastra/stage-models.test.ts`, `src/app/api/settings/stage-models/route.test.ts` and
+  `src/app/settings/stage-models-to-provider.test.tsx` each hold the pre-borrow value in a
+  module-level variable and write it back in `afterAll`, so a killed run loses it and the next
+  run adopts whatever the dead one left. Polish item P0.3a fixed this shape for `api_keys` by
+  moving the snapshot into a backup row (`web/src/test/borrowed-rows.ts`), and this row can
+  move to the same helper. Lower stakes than `api_keys`, since it holds model ids rather than
+  credentials, which is why it was not done inline: `stage-models.test.ts` also restores the
+  row's `updated_at`, which the shared helper does not carry yet.

@@ -51,7 +51,7 @@ import {
   outlineAgent,
 } from "./outline"
 
-import { lockApiKeysRow, unlockApiKeysRow } from "@/test/api-keys-row"
+import { borrowApiKeysRow, returnApiKeysRow } from "@/test/api-keys-row"
 import { createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 const GOLDEN_DIR = path.resolve(process.cwd(), "..", "docs", "mastra-port", "golden")
@@ -80,9 +80,6 @@ const TEST_KEY = "wDnmGSXAn3lPzz0GDW0jgcpn7XMDrnxLoO4XQb4Zwss"
 
 const LIVE_KEY = process.env.ANTHROPIC_API_KEY
 
-let savedRow: { value: unknown } | undefined
-let savedEncryptionKey: string | undefined
-
 async function writeAnthropicKey(plaintext: string) {
   const value = { [CLAUDE_PROVIDER]: encryptWithKey(plaintext, TEST_KEY) }
   await getDb()
@@ -96,28 +93,12 @@ async function clearKeys() {
 }
 
 beforeAll(async () => {
-  await lockApiKeysRow()
-  savedEncryptionKey = process.env.WP_ENCRYPTION_KEY
-  process.env.WP_ENCRYPTION_KEY = TEST_KEY
-  const rows = await getDb()
-    .select({ value: settings.value })
-    .from(settings)
-    .where(eq(settings.key, API_KEYS_SETTING_KEY))
-    .limit(1)
-  savedRow = rows[0]
+  await borrowApiKeysRow({ encryptionKey: TEST_KEY })
 }, 30_000)
 
 afterAll(async () => {
-  await clearKeys()
-  if (savedRow) {
-    await getDb()
-      .insert(settings)
-      .values({ key: API_KEYS_SETTING_KEY, value: savedRow.value as object })
-  }
-  if (savedEncryptionKey === undefined) delete process.env.WP_ENCRYPTION_KEY
-  else process.env.WP_ENCRYPTION_KEY = savedEncryptionKey
+  await returnApiKeysRow()
   await pubsub.close()
-  await unlockApiKeysRow()
   await closeDb()
 })
 

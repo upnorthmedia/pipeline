@@ -9,8 +9,8 @@
  * `src/mastra/api-keys.test.ts`; what is left here is auth, the loopback gate,
  * the unknown-provider path, body validation and the wire shape.
  * `settings.api_keys` is a single global row with no `user_id` to isolate on,
- * so this file holds the cross-process lock in `src/test/api-keys-row.ts` for
- * its whole lifetime and restores the row in `afterAll`.
+ * so this file borrows it through `src/test/api-keys-row.ts` for its whole
+ * lifetime and gives it back in `afterAll`.
  *
  * Ported from `api/tests/phase11/test_api_keys.py`.
  *
@@ -30,7 +30,7 @@ import {
   PROVIDERS,
   type Provider,
 } from "@/mastra/api-keys"
-import { lockApiKeysRow, unlockApiKeysRow } from "@/test/api-keys-row"
+import { borrowApiKeysRow, returnApiKeysRow } from "@/test/api-keys-row"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { GET as GET_STATUS, PUT } from "./route"
@@ -57,44 +57,12 @@ const STORED: Partial<Record<Provider, string>> = {
 }
 
 let user: TestSession
-let savedRow: { value: unknown } | undefined
-let savedValidationRow: { value: unknown } | undefined
-let savedEncryptionKey: string | undefined
-
-/** Upsert one of the two rows this file owns, or delete it when it had none. */
-async function restoreRow(key: string, saved: { value: unknown } | undefined) {
-  if (!saved) {
-    await getDb().delete(settings).where(eq(settings.key, key))
-    return
-  }
-  const value = saved.value as Record<string, unknown>
-  await getDb()
-    .insert(settings)
-    .values({ key, value })
-    .onConflictDoUpdate({ target: [settings.key, settings.userId], set: { value } })
-}
 
 beforeAll(async () => {
-  await lockApiKeysRow()
+  await borrowApiKeysRow({ encryptionKey: TEST_KEY })
   await deleteTestSessions(PREFIX)
   user = await createTestSession(PREFIX)
 
-  savedEncryptionKey = process.env.WP_ENCRYPTION_KEY
-  process.env.WP_ENCRYPTION_KEY = TEST_KEY
-
-  const rows = await getDb()
-    .select({ value: settings.value })
-    .from(settings)
-    .where(eq(settings.key, API_KEYS_SETTING_KEY))
-    .limit(1)
-  savedRow = rows[0]
-
-  const validationRows = await getDb()
-    .select({ value: settings.value })
-    .from(settings)
-    .where(eq(settings.key, API_KEYS_VALIDATION_SETTING_KEY))
-    .limit(1)
-  savedValidationRow = validationRows[0]
   await getDb().delete(settings).where(eq(settings.key, API_KEYS_VALIDATION_SETTING_KEY))
 
   const value = Object.fromEntries(
@@ -107,13 +75,8 @@ beforeAll(async () => {
 }, 30_000)
 
 afterAll(async () => {
-  await restoreRow(API_KEYS_SETTING_KEY, savedRow)
-  await restoreRow(API_KEYS_VALIDATION_SETTING_KEY, savedValidationRow)
-  if (savedEncryptionKey === undefined) delete process.env.WP_ENCRYPTION_KEY
-  else process.env.WP_ENCRYPTION_KEY = savedEncryptionKey
-
+  await returnApiKeysRow()
   await deleteTestSessions(PREFIX)
-  await unlockApiKeysRow()
   await closeDb()
 })
 

@@ -16,7 +16,7 @@ import { eq } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, settings } from "../db"
-import { lockApiKeysRow, unlockApiKeysRow } from "../test/api-keys-row"
+import { borrowApiKeysRow, returnApiKeysRow } from "../test/api-keys-row"
 import { decryptWithKey, encryptWithKey } from "../lib/crypto"
 import {
   API_KEYS_SETTING_KEY,
@@ -34,11 +34,6 @@ import {
 /** A throwaway Fernet key: 32 random bytes, url-safe base64, exactly as Python generates. */
 const TEST_KEY = randomBytes(32).toString("base64url")
 
-/** Whatever the developer's database already held, restored on the way out. */
-let savedRow: { value: unknown } | undefined
-let savedValidationRow: { value: unknown } | undefined
-let savedEncryptionKey: string | undefined
-
 async function writeKeys(value: Record<string, string>) {
   await getDb()
     .insert(settings)
@@ -54,21 +49,7 @@ async function writeValidation(value: Record<string, unknown>) {
 }
 
 beforeAll(async () => {
-  await lockApiKeysRow()
-  savedEncryptionKey = process.env.WP_ENCRYPTION_KEY
-  process.env.WP_ENCRYPTION_KEY = TEST_KEY
-  const rows = await getDb()
-    .select({ value: settings.value })
-    .from(settings)
-    .where(eq(settings.key, API_KEYS_SETTING_KEY))
-    .limit(1)
-  savedRow = rows[0]
-  const validationRows = await getDb()
-    .select({ value: settings.value })
-    .from(settings)
-    .where(eq(settings.key, API_KEYS_VALIDATION_SETTING_KEY))
-    .limit(1)
-  savedValidationRow = validationRows[0]
+  await borrowApiKeysRow({ encryptionKey: TEST_KEY })
 }, 30_000)
 
 afterEach(async () => {
@@ -77,11 +58,7 @@ afterEach(async () => {
 })
 
 afterAll(async () => {
-  if (savedRow) await writeKeys(savedRow.value as Record<string, string>)
-  if (savedValidationRow) await writeValidation(savedValidationRow.value as Record<string, unknown>)
-  if (savedEncryptionKey === undefined) delete process.env.WP_ENCRYPTION_KEY
-  else process.env.WP_ENCRYPTION_KEY = savedEncryptionKey
-  await unlockApiKeysRow()
+  await returnApiKeysRow()
   await closeDb()
 })
 
