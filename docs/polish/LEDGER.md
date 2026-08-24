@@ -133,10 +133,15 @@ move on. A split is not an iteration on its own: split and complete the first ch
         named-stage rerun stamped the post finished. `imagesStageStatus()` now fails a stage
         that asked for images and got none back, while a partial failure and an empty manifest
         stay complete. [evidence](evidence/p1.md#p12a)
-  - [ ] **P1.2b** The UI: a manifest entry with an `error` renders as a bare `Failed` badge
+  - [x] **P1.2b** The UI: a manifest entry with an `error` rendered as a bare `Failed` badge
         with no reason and no retry, and an entry claiming `generated: true` whose file is gone
-        renders as a broken `<img>`. A failed image reads as a failure with its reason and a
-        retry, and no broken image is reachable.
+        rendered as a broken `<img>`; `content-preview.tsx` had the same hole for the ready
+        article. `failureReason()` is now the one rule for whether an entry has an image, a
+        failed entry renders its reason in place of the image, a banner counts the failures and
+        carries a `Retry images` button wired to `POST /run?stage=images`, and
+        `image-with-fallback.tsx` catches a 404 at both call sites so no broken glyph is
+        reachable. Verified in a real browser, before and after in `ui/p12b-images-tab-*.png`.
+        Closes the `todo.md` bare-badge finding. [evidence](evidence/p1.md#p12b)
   - [ ] **P1.2c** The two image gaps outside the dashboard: WordPress publishing uploads no
         images at all (P2.63), and generated images are unreachable from the `web` service on
         Railway (P2.76).

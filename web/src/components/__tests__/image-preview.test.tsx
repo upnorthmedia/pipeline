@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/render";
 import { ImagePreview } from "../image-preview";
 
@@ -175,5 +176,141 @@ describe("ImagePreview", () => {
     // Should show the placeholder icon instead of an img
     const imgs = container.querySelectorAll("img");
     expect(imgs).toHaveLength(0);
+  });
+});
+
+/**
+ * Item P1.2b. A manifest entry the images stage could not produce carries the
+ * reason on `error` (`generateOneImage` writes `generated: false` with the
+ * message on both of its failure exits), and an entry it did produce carries a
+ * `/media/<post_id>/<file>` url whose file can be gone: the two golden runs in
+ * this repo were captured with no Gemini quota, and `todo.md` records a run
+ * whose images went to the compose volume while the dashboard read the repo
+ * directory. Neither may reach the user as a broken image.
+ */
+describe("ImagePreview failures", () => {
+  const FAILED_MANIFEST = {
+    total_generated: 0,
+    total_failed: 1,
+    images: [
+      {
+        id: "featured",
+        prompt: "A photo",
+        generated: false,
+        error: "429 RESOURCE_EXHAUSTED: quota exceeded",
+      },
+    ],
+  };
+
+  it("shows the reason a failed image gives instead of a bare badge", () => {
+    renderWithProviders(<ImagePreview manifest={FAILED_MANIFEST} />);
+    expect(
+      screen.getByText(/429 RESOURCE_EXHAUSTED: quota exceeded/)
+    ).toBeInTheDocument();
+  });
+
+  it("renders no img element for a failed entry", () => {
+    const { container } = renderWithProviders(
+      <ImagePreview
+        manifest={{
+          images: [
+            {
+              id: "featured",
+              generated: false,
+              error: "boom",
+              // A failed entry can still carry the url the stage would have
+              // written, and that file does not exist.
+              url: "/media/post-1/featured.webp",
+              alt_text: "Featured image alt",
+            },
+          ],
+        }}
+      />
+    );
+    expect(container.querySelectorAll("img")).toHaveLength(0);
+  });
+
+  it("translates the no-prompt token into a sentence", () => {
+    renderWithProviders(
+      <ImagePreview
+        manifest={{
+          images: [{ id: "content-1", generated: false, error: "no prompt" }],
+        }}
+      />
+    );
+    expect(screen.queryByText("no prompt")).not.toBeInTheDocument();
+    expect(screen.getByText(/no prompt was written for it/i)).toBeInTheDocument();
+  });
+
+  it("offers a retry that re-runs the images stage", async () => {
+    const onRetry = vi.fn();
+    renderWithProviders(
+      <ImagePreview manifest={FAILED_MANIFEST} onRetry={onRetry} />
+    );
+    await userEvent.click(screen.getByRole("button", { name: /retry images/i }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers no retry when every image generated", () => {
+    renderWithProviders(
+      <ImagePreview
+        manifest={{
+          total_generated: 1,
+          total_failed: 0,
+          images: [
+            { id: "featured", generated: true, url: "/media/post-1/featured.webp" },
+          ],
+        }}
+        onRetry={vi.fn()}
+      />
+    );
+    expect(
+      screen.queryByRole("button", { name: /retry images/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it("counts how many of the set failed", () => {
+    renderWithProviders(
+      <ImagePreview
+        manifest={{
+          images: [
+            { id: "featured", generated: true, url: "/media/post-1/featured.webp" },
+            { id: "content-1", generated: false, error: "boom" },
+            { id: "content-2", generated: false, error: "boom" },
+          ],
+        }}
+      />
+    );
+    expect(screen.getByText(/2 of 3 images could not be generated/i)).toBeInTheDocument();
+  });
+
+  it("replaces an image whose file is gone with a failure and a retry", async () => {
+    const onRetry = vi.fn();
+    renderWithProviders(
+      <ImagePreview
+        manifest={{
+          total_generated: 1,
+          total_failed: 0,
+          images: [
+            {
+              id: "featured",
+              generated: true,
+              url: "/media/post-1/featured.webp",
+              alt_text: "Featured image alt",
+            },
+          ],
+        }}
+        onRetry={onRetry}
+      />
+    );
+    // jsdom never loads an image, so the browser's own `error` event is what
+    // this stands in for: the file 404s and the element paints the broken-image
+    // glyph unless something replaces it.
+    fireEvent.error(screen.getByAltText("Featured image alt"));
+
+    expect(screen.queryByAltText("Featured image alt")).not.toBeInTheDocument();
+    expect(screen.getByText(/file is missing/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /retry images/i }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });

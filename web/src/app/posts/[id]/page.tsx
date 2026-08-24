@@ -307,6 +307,23 @@ export default function PostDetailPage() {
     }
   };
 
+  /**
+   * The retry behind a failed image. `POST /run?stage=images` runs that stage
+   * alone, which is the only retry the API offers: there is no per-entry
+   * regeneration endpoint, so one failed image and five failed images take the
+   * same action. Item P1.2a is what makes it reach the worker at all, because a
+   * stage `stage_status` still called complete was skipped by `shouldRunStage`.
+   */
+  const handleRetryImages = async () => {
+    try {
+      await posts.run(postId, "images");
+      toast.success("Re-running images");
+      fetchPost();
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Failed to re-run the images stage"));
+    }
+  };
+
   const handleRestart = async () => {
     try {
       await posts.restart(postId);
@@ -663,6 +680,7 @@ export default function PostDetailPage() {
                 ) : stage === "images" ? (
                   <ImagePreview
                     manifest={content as Record<string, unknown> | null}
+                    onRetry={handleRetryImages}
                   />
                 ) : content ? (
                   <Card className="gap-0 py-0">

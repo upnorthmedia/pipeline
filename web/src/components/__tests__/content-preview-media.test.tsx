@@ -9,7 +9,7 @@
  * mapping that resolves the image source.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/render";
 import { ContentPreview } from "../content-preview";
 
@@ -50,5 +50,20 @@ describe("ContentPreview media sources", () => {
       "src",
       "https://cdn.example.com/x.png"
     );
+  });
+
+  it("replaces an image whose file is gone with a note, not a broken glyph", () => {
+    // Item P1.2b. The ready stage writes the images stage's `/media` urls into
+    // the article, so a post whose files never landed renders this preview full
+    // of broken-image glyphs. jsdom never loads an image, so the browser's own
+    // `error` event stands in for the 404.
+    const { container } = renderWithProviders(
+      <ContentPreview content="![a hero](/media/post-1/hero.webp)" />
+    );
+    fireEvent.error(screen.getByAltText("a hero"));
+
+    expect(container.querySelectorAll("img")).toHaveLength(0);
+    expect(screen.getByText(/image is missing/i)).toBeInTheDocument();
+    expect(screen.getByText(/a hero/)).toBeInTheDocument();
   });
 });

@@ -476,8 +476,9 @@
 
 - [investigate] 2026-08-23 `pnpm -C web dev` serves the repo's own `media/` directory, but the
   item 7.6 end-to-end run executed in the compose stack and wrote its five generated images to
-  the compose `media` volume. So the post detail page for that run shows four broken images
-  and four console 404s under a local dev server. Harmless for that post, but it means the
+  the compose `media` volume. So the post detail page for that run shows four images the dev
+  server cannot serve and four console 404s. Since polish item P1.2b those read as "the image
+  file is missing from the server" rather than as broken glyphs, but it means the
   compose volume and the repo directory are two different stores of the same namespace, and
   a run started in one is only fully viewable in the other's absence. Related to the already
   recorded Railway gap where `web` and `worker` cannot share `/media` at all.
@@ -519,11 +520,6 @@
   internal-link resolver both assume the field parses as a URL. Tightening it changes an API
   contract the dashboard and `packages/create-mdx-blog` both sit on, so it is a decision to
   take deliberately after the port rather than inside it.
-
-- [confirmed] 2026-08-23 `ImagePreview` shows a failed image as a bare `Failed` badge and
-  nothing else. `generateOneImage` records the reason on the entry as `error`, and the
-  component never reads it, so the user sees that an image failed but not why, and has no way
-  to retry it. Belongs to polish ledger item P1.2.
 
 - [confirmed] 2026-08-23 `ImagePreview` renders `placement.location` as the raw enum the model
   writes, so a featured image's placement reads `featured_image` in the UI. Belongs to polish
