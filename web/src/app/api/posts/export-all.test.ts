@@ -26,7 +26,7 @@ import { like } from "drizzle-orm"
 import { unzipSync } from "fflate"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
-import { closeDb, getDb, posts, websiteProfiles } from "@/db"
+import { closeDb, getDb, postMedia, posts, websiteProfiles } from "@/db"
 import { ABSENT_POST_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
@@ -234,6 +234,29 @@ describe("GET /api/posts/{post_id}/export/all: the archive", () => {
       "image-2.webp",
       `${post.slug}.mdx`,
     ])
+  })
+
+  it("adds the images the other service wrote, which this disk does not have", async () => {
+    const post = await insertPost(user.userId, { readyContent: "body" })
+    await db
+      .insert(postMedia)
+      .values({ postId: post.id, filename: "image-1.webp", bytes: Buffer.from("one") })
+
+    const entries = await entriesOf(await exportZip(post.id, user.cookie))
+    expect(Object.keys(entries).sort()).toEqual(["image-1.webp", `${post.slug}.mdx`])
+    expect(new TextDecoder().decode(entries["image-1.webp"])).toBe("one")
+  })
+
+  it("names a file once when both stores have it", async () => {
+    const post = await insertPost(user.userId, { readyContent: "body" })
+    await writeFile(path.join(await mediaDirFor(post.id), "image-1.webp"), "on disk")
+    await db
+      .insert(postMedia)
+      .values({ postId: post.id, filename: "image-1.webp", bytes: Buffer.from("stored") })
+
+    const entries = await entriesOf(await exportZip(post.id, user.cookie))
+    expect(Object.keys(entries).sort()).toEqual(["image-1.webp", `${post.slug}.mdx`])
+    expect(new TextDecoder().decode(entries["image-1.webp"])).toBe("on disk")
   })
 
   it("copies image bytes through unchanged, including bytes that are not valid utf-8", async () => {

@@ -118,7 +118,7 @@ move on. A split is not an iteration on its own: split and complete the first ch
       cause underneath it: `src/middleware.ts` 307ed six of the eight brand assets for a
       signed-out browser, including the SVG favicon and both manifest icons.
       [evidence](evidence/p1.md#p11)
-- [ ] **P1.2** Post images are broken. Two media directories hold 0 files while their manifests
+- [x] **P1.2** Post images are broken. Two media directories hold 0 files while their manifests
       claim 4 and 5 images, 4 manifest entries carry an `error`, and `stage_status.images`
       still reads `complete`. Both causes get fixed: the stage reporting success when every
       image failed, and the UI rendering entries as `<img>` without checking for an error or a
@@ -142,9 +142,9 @@ move on. A split is not an iteration on its own: split and complete the first ch
         `image-with-fallback.tsx` catches a 404 at both call sites so no broken glyph is
         reachable. Verified in a real browser, before and after in `ui/p12b-images-tab-*.png`.
         Closes the `todo.md` bare-badge finding. [evidence](evidence/p1.md#p12b)
-  - [ ] **P1.2c** The two image gaps outside the dashboard: WordPress publishing uploads no
+  - [x] **P1.2c** The two image gaps outside the dashboard: WordPress publishing uploads no
         images at all (P2.63), and generated images are unreachable from the `web` service on
-        Railway (P2.76).
+        Railway (P2.76). Both closed below.
     - [x] **P1.2c-i** WordPress publishing uploaded no images (P2.63). The media sweep typed
           files with the port of `mimetypes.guess_type` as `python:3.12-slim` runs it, and
           `.webp` only reached that table in 3.13, so every file the images stage writes was
@@ -152,9 +152,15 @@ move on. A split is not an iteration on its own: split and complete the first ch
           published HTML. `guessMediaType()` is the sweep's own resolver now, one entry over
           Python's answer; `guessTypeFromFilename()` keeps answering as the oracle recorded.
           [evidence](evidence/p1.md#p12c-i)
-    - [ ] **P1.2c-ii** Generated images are unreachable from the `web` service on Railway
-          (P2.76). The `/media` volume attaches to `worker`, which writes them, and Railway
-          allows one volume per service, so `web` serves 404s. Needs object storage.
+    - [x] **P1.2c-ii** Generated images were unreachable from the `web` service on Railway
+          (P2.76). One `MEDIA_DIR` is one store only while both processes share a disk, and
+          Railway attaches a volume to a single service. The images stage now mirrors every
+          file it writes into `post_media`, which both services already reach, and the
+          `/media` handler and the zip export read it when the local disk does not have the
+          file. Postgres rather than a bucket: no new dependency or credential, a few hundred
+          KB per post, and the filesystem stays exactly as the parity-pinned publish walks
+          need it. Verified in a real browser against two different disks,
+          `ui/p12cii-images-tab-*.png`. [evidence](evidence/p1.md#p12c-ii)
 - [ ] **P1.3** Publishing is incomprehensible. One obvious place to configure and test a
       connection, a visible connection status, output formats that disable themselves with an
       explanation when their target is not configured, and a publish action that reports what
@@ -253,7 +259,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [x] **P2.73** `[confirmed]` `src/mastra/workflows/scaffold-check.test.ts` fails intermittently under a full `pnpm -C web test` run with `Error: Hook timed out in 60000ms` ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [x] **P2.74** `[confirmed]` A worker process running outside the test suite breaks the suite. While a `jena-worker` container was up against the shared dev Redis, a full ... Contradicted: three worker-up runs are identical to three worker-down runs; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.75** `[investigate]` `next build` inside the web image prints seven `[Error [BetterAuthError]: You are using the default secret...]` lines plus a matching BetterAuth ...
-- [ ] **P2.76** `[confirmed]` Generated images are unreachable from the `web` service on Railway. The `/media` volume is mounted on `worker`, which writes them, but Railway ...
+- [x] **P2.76** `[confirmed]` Generated images are unreachable from the `web` service on Railway. The `/media` volume is mounted on `worker`, which writes them, but Railway ... Fixed by P1.2c-ii; entry removed from `todo.md`. [evidence](evidence/p1.md#p12c-ii)
 - [ ] **P2.77** `[confirmed]` Nothing runs database migrations on deploy. `deploy.preDeployCommand` is the documented Railway hook, but neither runtime image carries ...
 - [x] **P2.78** `[confirmed]` `scaffold-check.test.ts > emits the workflow lifecycle events the trace view will read` fails under a full parallel `pnpm -C web test` while ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.79** `[confirmed]` The objective's literal typecheck gate `pnpm -C web tsc --noEmit` does not run on the installed pnpm (10.26.2): it exits 254 with ...

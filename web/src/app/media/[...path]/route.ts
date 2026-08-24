@@ -16,7 +16,12 @@
  *    through the profile. A file belonging to another user answers exactly like
  *    a file that does not exist, matching `_get_user_post()`'s rule that an
  *    unowned post is indistinguishable from a missing one.
- * 2. **Content types come from the small table below, not from
+ * 2. **A file the local disk does not have is looked up in `post_media`.**
+ *    The images stage runs in the worker, and on Railway a volume attaches to
+ *    a single service, so the disk this handler can see is not the disk the
+ *    files were written to. `../../../mastra/images/media-store` is the copy
+ *    both services share; see its header for why the filesystem stays.
+ * 3. **Content types come from the small table below, not from
  *    `guessTypeFromFilename()`.** That function reproduces Python 3.12's
  *    builtin table, which has no `.webp` entry (see
  *    `mastra/wordpress/mimetypes.ts`), so Starlette labelled every generated
@@ -31,6 +36,7 @@ import { and, eq } from "drizzle-orm"
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import { mediaRoot } from "@/mastra/images/media-dir"
+import { readStoredMediaFile } from "@/mastra/images/media-store"
 
 import { isUuid } from "../../api/posts/params"
 
@@ -62,6 +68,34 @@ function etagFor(size: number, mtimeMs: number): string {
   return `"${size.toString(16)}-${Math.floor(mtimeMs).toString(16)}"`
 }
 
+/** The bytes and the moment they were last written, from whichever store has them. */
+interface ServedFile {
+  /**
+   * `Buffer<ArrayBuffer>` rather than `Buffer`: `BodyInit` only accepts a view
+   * over a real `ArrayBuffer`, and a `Buffer` from the driver is typed over
+   * `ArrayBufferLike`, which could be a `SharedArrayBuffer`.
+   */
+  bytes: Buffer<ArrayBuffer>
+  modifiedMs: number
+}
+
+/**
+ * The local disk first, then the shared store.
+ *
+ * Disk first because when the two processes do share it, which is every local
+ * and compose run, that is the whole answer and no bytes cross the database
+ * connection. The stored copy is what the `web` service on Railway has, and
+ * what a post generated before the mirror existed does not.
+ */
+async function readMedia(file: string, postId: string, filename: string): Promise<ServedFile | null> {
+  const info = await stat(file).catch(() => null)
+  if (info?.isFile()) return { bytes: await readFile(file), modifiedMs: info.mtimeMs }
+
+  const stored = await readStoredMediaFile(postId, filename)
+  if (!stored) return null
+  return { bytes: Buffer.from(stored.bytes), modifiedMs: stored.updatedAt.getTime() }
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ path: string[] }> },
@@ -89,14 +123,14 @@ export async function GET(
     .limit(1)
   if (owned.length === 0) return notFound()
 
-  const info = await stat(file).catch(() => null)
-  if (!info?.isFile()) return notFound()
+  const served = await readMedia(file, postId, filename)
+  if (!served) return notFound()
 
-  const etag = etagFor(info.size, info.mtimeMs)
+  const etag = etagFor(served.bytes.length, served.modifiedMs)
   const headers = new Headers({
     "Content-Type": CONTENT_TYPES[path.extname(filename).toLowerCase()] ?? "application/octet-stream",
-    "Content-Length": String(info.size),
-    "Last-Modified": new Date(info.mtimeMs).toUTCString(),
+    "Content-Length": String(served.bytes.length),
+    "Last-Modified": new Date(served.modifiedMs).toUTCString(),
     ETag: etag,
     // Owner-scoped, and rewritten in place by a re-run of the images stage, so
     // a shared cache must not hold it and a private one must revalidate.
@@ -111,5 +145,5 @@ export async function GET(
     return new Response(null, { status: 304, headers: revalidated })
   }
 
-  return new Response(await readFile(file), { status: 200, headers })
+  return new Response(served.bytes, { status: 200, headers })
 }

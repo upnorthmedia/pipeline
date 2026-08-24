@@ -40,6 +40,7 @@ import { zipSync } from "fflate"
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import { postMediaDir } from "@/mastra/images/media-dir"
+import { listStoredMediaFiles } from "@/mastra/images/media-store"
 
 import { rewriteMediaUrls, stripLeadingH1 } from "../../../export-content"
 import { isUuid, postNotFound, unprocessableUuid } from "../../../params"
@@ -117,7 +118,23 @@ export async function GET(
   const entries: Record<string, Uint8Array | [Uint8Array, { mtime: number }]> = {
     [`${post.slug}.mdx`]: new TextEncoder().encode(rewriteMediaUrls(stripLeadingH1(content), id)),
   }
+  // The images the other service wrote first, then the local directory over the
+  // top of them. On Railway the volume belongs to `worker`, so the stored copy
+  // is all this process has (`@/mastra/images/media-store`); locally the
+  // directory is the same bytes and the walk's behaviour, symlinks and all, is
+  // what has always decided what an export holds.
+  const media = new Map<string, MediaFile>()
+  for (const file of await listStoredMediaFiles(id.toLowerCase())) {
+    media.set(file.filename, {
+      name: file.filename,
+      body: new Uint8Array(file.bytes),
+      mtime: file.updatedAt.getTime(),
+    })
+  }
   for (const file of await readMediaFiles(postMediaDir(id.toLowerCase()))) {
+    media.set(file.name, file)
+  }
+  for (const file of media.values()) {
     entries[file.name] = [file.body, { mtime: file.mtime }]
   }
 

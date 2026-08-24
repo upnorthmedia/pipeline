@@ -114,16 +114,19 @@ through the settings UI.
 
 ## Known gaps
 
-- **`/media` is not shared between the services.** The volume is mounted on
-  `worker`, which is the process that writes generated images, so the bytes
-  survive. `web` serves `/media/<post_id>/<file>` off its own disk and will
-  answer 404 for them. Railway's caveat list says "Each service can only have a
-  single volume", and the IaC reference says "A volume can be attached to one
-  service", so there is no configuration that closes this. The fix is object
-  storage: Railway's `bucket()` resource exists in the same DSL, but pointing
-  the images stage and the `/media` route at it is a code change, logged in
-  `todo.md`. Until then a Railway deployment shows broken images in the
-  dashboard even though the pipeline completed.
+- **`/media` is still not shared between the services, and no longer needs to
+  be.** The volume is mounted on `worker`, which is the process that writes
+  generated images. Railway's caveat list says "Each service can only have a
+  single volume" and the IaC reference says "A volume can be attached to one
+  service", so no configuration gives `web` the same disk. Instead the images
+  stage mirrors every file it writes into the `post_media` table
+  (`web/src/mastra/images/media-store.ts`), which both services already reach,
+  and `GET /media/<post_id>/<file>` and the zip export read it when the local
+  disk does not have the file. The volume stays because the WordPress and
+  Next.js publish steps walk the directory, and they run in `worker`.
+  Consequence for an existing deployment: images generated before this exist
+  only on the worker's volume, so they keep answering 404 from `web` until
+  their stage is re-run.
 - **No automated migrations.** `deploy.preDeployCommand` is the documented hook,
   but neither runtime image carries `drizzle-kit` or the `drizzle/` folder, so
   there is nothing to run there yet. Step 3 above is manual.

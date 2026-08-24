@@ -6,6 +6,11 @@
  * `../images/generate-one`, ported and pinned against Python in item 3.5e; the
  * step is the Mastra shell around them.
  *
+ * The written file is also mirrored into `post_media` from here rather than
+ * from `generate-one.ts`, which is pinned byte for byte against Python and has
+ * no business knowing about a table. See `../images/media-store` for why a
+ * second copy exists at all.
+ *
  * The Gemini credential is resolved here, per image, rather than being carried
  * on the job. A job is serialised into the workflow snapshot Postgres persists
  * and into the Redis event that hands the step to the worker, so a key on the
@@ -13,12 +18,16 @@
  * price is one indexed single-row read per image, which is the same trade the
  * stage agents already make.
  */
+import { readFile } from "node:fs/promises"
+import path from "node:path"
+
 import type { PubSub } from "@mastra/core/events"
 import { createStep } from "@mastra/core/workflows/evented"
 import { z } from "zod"
 
 import { requireApiKey } from "../api-keys"
 import { generateOneImage } from "../images/generate-one"
+import { storeMediaFile } from "../images/media-store"
 import { resolveStageModelForPost } from "../stage-models"
 import type { ImageOutcome, ImageSpec } from "../images/generate-one"
 import { imageSpecSchema } from "./images-manifest"
@@ -163,6 +172,23 @@ export const imagesGenerateStep = createStep({
         apiKey,
         model,
       })
+      // The bytes reach the web service through the database, because the
+      // volume they were just written to belongs to this process alone on
+      // Railway. Read back rather than returned from `generateOneImage`, so
+      // the stored copy is provably the file the manifest url points at and
+      // the parity-pinned function keeps its signature.
+      //
+      // Before the publish, so nothing can learn the image exists from the bus
+      // before it is readable. A failure here fails the step and the engine
+      // retries it, the same as a failed publish.
+      if (outcome.kind === "generated") {
+        const filename = path.basename(outcome.url)
+        await storeMediaFile(
+          inputData.postId,
+          filename,
+          await readFile(path.join(inputData.mediaDir, filename)),
+        )
+      }
       // Python publishes from inside `_generate_one`, one statement before the
       // entry is returned. Here it is one statement after, because the publish
       // needs the `mastra` only the step is handed. Nothing runs between the

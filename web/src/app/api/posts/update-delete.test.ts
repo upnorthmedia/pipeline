@@ -26,10 +26,10 @@ import { existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
-import { eq, like } from "drizzle-orm"
+import { eq, inArray, like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
-import { closeDb, getDb, internalLinks, posts, websiteProfiles } from "@/db"
+import { closeDb, getDb, internalLinks, postMedia, posts, websiteProfiles } from "@/db"
 import { ABSENT_POST_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
@@ -425,6 +425,24 @@ describe("DELETE /api/posts/{post_id}", () => {
 
     expect(existsSync(path.join(mediaRootDir, post.id))).toBe(false)
     expect(await readdir(mediaRootDir)).toEqual([keep.id])
+  })
+
+  it("takes the post's stored images with it, the way removing the directory did", async () => {
+    const mine = await insertProfile(user.userId)
+    const post = await insertPost({ slug: `${PREFIX}stored-media`, profileId: mine })
+    const keep = await insertPost({ slug: `${PREFIX}stored-media-keep`, profileId: mine })
+
+    for (const id of [post.id, keep.id]) {
+      await db.insert(postMedia).values({ postId: id, filename: "hero.webp", bytes: Buffer.from("b") })
+    }
+
+    expect((await destroy(post.id, user.cookie)).status).toBe(204)
+
+    const rows = await db
+      .select({ postId: postMedia.postId })
+      .from(postMedia)
+      .where(inArray(postMedia.postId, [post.id, keep.id]))
+    expect(rows.map((row) => row.postId)).toEqual([keep.id])
   })
 
   it("succeeds when the post never generated images, matching the exists() guard", async () => {

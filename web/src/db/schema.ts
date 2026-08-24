@@ -7,6 +7,7 @@
  * constraints must stay byte-compatible with the live database.
  */
 import {
+  customType,
   foreignKey,
   index,
   integer,
@@ -20,6 +21,17 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core"
+
+/**
+ * `bytea`. drizzle-orm 0.45 has no builtin column for it, and node-postgres
+ * already reads and writes the type as a `Buffer`, so the custom type states
+ * the SQL name and nothing else.
+ */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return "bytea"
+  },
+})
 
 /** The six pipeline stages, in execution order (mirrors `STAGES` in api/src/pipeline/state.py). */
 export const PIPELINE_STAGES = [
@@ -240,6 +252,42 @@ export const settings = pgTable(
   ],
 )
 
+/**
+ * The bytes of one generated image, stored where both processes can read them.
+ *
+ * The images stage runs in the worker and writes each file to `MEDIA_DIR`;
+ * `GET /media/<post_id>/<file>` is served by the web process. Locally that is
+ * one directory (a compose volume), but on Railway a volume attaches to a
+ * single service, so the web process reads a different disk and every
+ * generated image 404s. Postgres is the one store both already share, and the
+ * whole corpus is a handful of optimized WebPs per post, so the bytes live
+ * here and the filesystem stays what it was: the worker's working copy, which
+ * the publish steps' directory walks still read.
+ *
+ * Keyed by `(post_id, filename)` because a re-run of the images stage rewrites
+ * the same names, and cascaded from `posts` so deleting a post takes its
+ * images with it the way removing the directory always did.
+ */
+export const postMedia = pgTable(
+  "post_media",
+  {
+    postId: uuid("post_id").notNull(),
+    filename: text().notNull(),
+    bytes: bytea().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.postId, table.filename], name: "post_media_pkey" }),
+    foreignKey({
+      columns: [table.postId],
+      foreignColumns: [posts.id],
+      name: "post_media_post_id_fkey",
+    }).onDelete("cascade"),
+  ],
+)
+
 export type Post = typeof posts.$inferSelect
 export type NewPost = typeof posts.$inferInsert
 export type WebsiteProfile = typeof websiteProfiles.$inferSelect
@@ -248,3 +296,5 @@ export type InternalLink = typeof internalLinks.$inferSelect
 export type NewInternalLink = typeof internalLinks.$inferInsert
 export type Setting = typeof settings.$inferSelect
 export type NewSetting = typeof settings.$inferInsert
+export type PostMedia = typeof postMedia.$inferSelect
+export type NewPostMedia = typeof postMedia.$inferInsert

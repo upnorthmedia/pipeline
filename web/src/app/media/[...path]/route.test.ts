@@ -17,7 +17,7 @@ import path from "node:path"
 import { like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
-import { closeDb, getDb, posts, websiteProfiles } from "@/db"
+import { closeDb, getDb, postMedia, posts, websiteProfiles } from "@/db"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { GET } from "./route"
@@ -65,6 +65,15 @@ async function writeMedia(postId: string, filename: string, bytes = BYTES): Prom
   const file = path.join(dir, filename)
   await writeFile(file, bytes)
   return file
+}
+
+/**
+ * The same file in the shared store and nowhere on this process's disk, which
+ * is exactly what the `web` service sees on Railway: the volume the images
+ * stage wrote to is attached to `worker`.
+ */
+async function storeMedia(postId: string, filename: string, bytes = BYTES): Promise<void> {
+  await db.insert(postMedia).values({ postId, filename, bytes: Buffer.from(bytes) })
 }
 
 function fetchMedia(segments: string[], init: RequestInit & { cookie?: string } = {}) {
@@ -182,6 +191,53 @@ describe("GET /media/{post_id}/{filename}: serving", () => {
 
     const response = await fetchMedia([postId, "a.webp"], { cookie: user.cookie })
     expect(response.headers.get("last-modified")).toBe(when.toUTCString())
+  })
+})
+
+describe("GET /media/{post_id}/{filename}: the shared store", () => {
+  it("serves a file the images stage wrote on the other service's disk", async () => {
+    const postId = await insertPost(user.userId)
+    await storeMedia(postId, "a.webp")
+
+    const response = await fetchMedia([postId, "a.webp"], { cookie: user.cookie })
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toBe("image/webp")
+    expect(response.headers.get("content-length")).toBe(String(BYTES.length))
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(BYTES)
+  })
+
+  it("revalidates a stored file against an entity tag of its own", async () => {
+    const postId = await insertPost(user.userId)
+    await storeMedia(postId, "a.webp")
+
+    const first = await fetchMedia([postId, "a.webp"], { cookie: user.cookie })
+    const etag = first.headers.get("etag")
+    expect(etag).toMatch(/^"[0-9a-f]+-[0-9a-f]+"$/)
+
+    const cached = await fetchMedia([postId, "a.webp"], {
+      cookie: user.cookie,
+      headers: { "if-none-match": etag as string },
+    })
+    expect(cached.status).toBe(304)
+    expect(cached.headers.get("content-length")).toBeNull()
+  })
+
+  it("still 404s another user's stored file", async () => {
+    const postId = await insertPost(user.userId)
+    await storeMedia(postId, "a.webp")
+
+    const response = await fetchMedia([postId, "a.webp"], { cookie: other.cookie })
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ detail: "Not Found" })
+  })
+
+  it("prefers the local file, so a shared disk never pays for the round trip", async () => {
+    const postId = await insertPost(user.userId)
+    await writeMedia(postId, "a.webp", new Uint8Array([1, 1, 1]))
+    await storeMedia(postId, "a.webp", new Uint8Array([2, 2, 2]))
+
+    const response = await fetchMedia([postId, "a.webp"], { cookie: user.cookie })
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([1, 1, 1]))
   })
 })
 

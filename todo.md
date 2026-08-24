@@ -424,15 +424,6 @@
   `DATABASE_URL_SYNC` and `REDIS_URL`, or whether `src/lib/auth.ts` should not be reachable
   from page-data collection at all.
 
-- [confirmed] 2026-08-23 Generated images are unreachable from the `web` service on Railway.
-  The `/media` volume is mounted on `worker`, which writes them, but Railway documents "Each
-  service can only have a single volume" and its IaC reference says "A volume can be attached
-  to one service", so `web` serving `/media/<post_id>/<file>` reads a different disk and
-  answers 404. No configuration closes this; the fix is object storage (Railway's `bucket()`
-  resource exists in the same DSL), which means changing where the images stage writes and
-  where `web/src/app/media/[...path]/route.ts` reads. Stated in `docs/mastra-port/railway.md`
-  and belongs in the SUMMARY.md gap list for item 9.3.
-
 - [confirmed] 2026-08-23 Nothing runs database migrations on deploy. `deploy.preDeployCommand`
   is the documented Railway hook, but neither runtime image carries `drizzle-kit` or the
   `drizzle/` folder, so a fresh Railway environment needs `pnpm -C web db:migrate` and
@@ -460,10 +451,11 @@
   item 7.6 end-to-end run executed in the compose stack and wrote its five generated images to
   the compose `media` volume. So the post detail page for that run shows four images the dev
   server cannot serve and four console 404s. Since polish item P1.2b those read as "the image
-  file is missing from the server" rather than as broken glyphs, but it means the
-  compose volume and the repo directory are two different stores of the same namespace, and
-  a run started in one is only fully viewable in the other's absence. Related to the already
-  recorded Railway gap where `web` and `worker` cannot share `/media` at all.
+  file is missing from the server" rather than as broken glyphs, and since polish item
+  P1.2c-ii a run started after the `post_media` mirror exists is viewable from either, because
+  neither disk is what the handler falls back to. Still open only for the images generated
+  before the mirror: those bytes exist on one disk and in no shared store, so re-running the
+  images stage is the only thing that makes them viewable from the other.
 
 - [investigate] 2026-08-23 `GET /api/posts` answers `500` with an empty body when its database
   is unreachable (verified by stopping the compose `db` container under a live page:

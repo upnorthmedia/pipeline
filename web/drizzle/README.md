@@ -6,6 +6,11 @@ port deleted, and it, with `0001_schema_version_row.sql`, is the only thing in
 this repo that can build an empty database. The second migration inserts the
 `alembic_version` row the first only makes room for; see below.
 
+Everything after those two is an ordinary change on top of the baseline.
+`0002_post_media.sql` adds `post_media`, the table the images stage mirrors its
+generated files into so the web process can serve them without sharing the
+worker's disk (`src/mastra/images/media-store.ts`).
+
 The baseline is a snapshot, not a translation. It does not replay those twelve
 revisions step by step, it creates the shape they end at. That shape is
 verified rather than asserted: `src/db/baseline-parity.test.ts` builds a scratch

@@ -111,6 +111,7 @@ describe("schema.ts against the live database", () => {
     expect(Object.keys(drizzle).sort()).toEqual([
       "alembic_version",
       "internal_links",
+      "post_media",
       "posts",
       "settings",
       "website_profiles",

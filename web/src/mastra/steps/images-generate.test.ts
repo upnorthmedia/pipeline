@@ -39,11 +39,11 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
-import { and, eq } from "drizzle-orm"
+import { and, asc, eq } from "drizzle-orm"
 import sharp from "sharp"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 
-import { closeDb, getDb, posts, settings, websiteProfiles } from "../../db"
+import { closeDb, getDb, postMedia, posts, settings, websiteProfiles } from "../../db"
 import { swapFetchForSuite } from "../../test/swapped-fetch"
 import { TOPIC_PIPELINE_EVENTS } from "../pipeline-events"
 import geminiCorpus from "../images/data/gemini-parity.json"
@@ -295,6 +295,28 @@ describe("imagesGenerateStep against a recorded Gemini success", () => {
     expect(meta.format).toBe("webp")
     expect(meta.width).toBe(FEATURED_MAX_WIDTH)
     expect(meta.height).toBe(Math.trunc((SOURCE_HEIGHT * FEATURED_MAX_WIDTH) / SOURCE_WIDTH))
+  })
+
+  it("mirrors both files into the store the web service reads", async () => {
+    const stored = await db
+      .select()
+      .from(postMedia)
+      .where(eq(postMedia.postId, POST_ID))
+      .orderBy(asc(postMedia.filename))
+
+    const names = [
+      path.basename(String(content.spec.url)),
+      path.basename(String(featured.spec.url)),
+    ].sort()
+    expect(stored.map((row) => row.filename)).toEqual(names)
+
+    // The stored bytes are the written bytes, not a re-encode of them: the
+    // handler serves these to a browser that was given the manifest's url.
+    for (const row of stored) {
+      expect(row.bytes).toEqual(await readFile(path.join(mediaDir, row.filename)))
+    }
+    // The entry the model gave no prompt for produced no file, so it has no row.
+    expect(stored).toHaveLength(2)
   })
 
   it("bills each generated image with the counts the response reported", () => {
