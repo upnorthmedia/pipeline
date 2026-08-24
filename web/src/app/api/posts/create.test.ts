@@ -321,7 +321,8 @@ describe("POST /api/posts", () => {
       profile_id: null,
       word_count: 2000,
       tone: "Conversational and friendly",
-      // The column default is "both" and the pydantic default is "markdown".
+      // The pydantic default, materialised on the row rather than left to
+      // the column default, which now agrees with it (drizzle/0003).
       output_format: "markdown",
       related_keywords: [],
       competitor_urls: [],

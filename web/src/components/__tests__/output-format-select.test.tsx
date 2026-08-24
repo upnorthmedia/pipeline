@@ -96,3 +96,41 @@ describe("OutputFormatSelect", () => {
     );
   });
 });
+
+// `output_format` is a bare `varchar(20)` and the two route validators take it
+// as `z.string()`, so a stored value the picker does not offer is reachable
+// through the API, not only through hand-written SQL. Radix renders no trigger
+// text at all for a value that matches no item, which is a picker that looks
+// empty on a row that has a value.
+describe("OutputFormatSelect with a stored value it does not offer", () => {
+  it("names the trigger rather than leaving it blank", () => {
+    renderWithProviders(
+      <OutputFormatSelect value="both" onValueChange={vi.fn()} availability={ALL_AVAILABLE} />
+    );
+
+    expect(screen.getByRole("combobox", { name: "Output Format" })).toHaveTextContent(
+      "Unrecognised format"
+    );
+  });
+
+  it("says what is stored and what to do about it", () => {
+    renderWithProviders(
+      <OutputFormatSelect value="both" onValueChange={vi.fn()} availability={ALL_AVAILABLE} />
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      '"both" is not a format this app can produce. Pick one below and save.'
+    );
+  });
+
+  it("leaves a format it does offer reading as itself", () => {
+    renderWithProviders(
+      <OutputFormatSelect value="nextjs" onValueChange={vi.fn()} availability={ALL_AVAILABLE} />
+    );
+
+    expect(screen.getByRole("combobox", { name: "Output Format" })).toHaveTextContent(
+      "Next.js (Webhook)"
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});

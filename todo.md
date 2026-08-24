@@ -120,18 +120,6 @@
   auto-publish half has the same shape, so a `both` post is not auto-published either.
   Ledger item P2.68.
 
-- [confirmed] 2026-08-24 `both` is the `output_format` column default on both
-  `website_profiles` and `posts` (`web/src/db/schema.ts:81` and `:138`) but is not one of
-  the three options `OUTPUT_FORMATS` in `web/src/lib/publishing.ts` offers, so a row that
-  took the column default renders the Output Format trigger with no label at all, and
-  saving the form silently rewrites the value to whatever the user then picks. It is the
-  same `both` the publish endpoint refuses with `Publishing not supported for output_format
-  'both'` (see the 2026-08-23 entry above). No row currently holds it, because every writer
-  in the app sends an explicit value; a row inserted by anything else would. Decide whether
-  `both` is a real format or a default that should never have been `both`, then make the
-  column and the picker agree. Found while doing ledger item P1.3d-ii, which is where the
-  picker's three options moved to. Ledger item P2.113.
-
 - [confirmed] 2026-08-23 Perplexity's Sonar Chat Completions endpoint is deprecated with
   support ending 2026-09-27, per `docs.perplexity.ai/getting-started/models`. The
   `research` stage reaches `sonar-pro` through Mastra's model router, which uses the
@@ -382,3 +370,27 @@
   while the placeholder introduced at polish ledger P3.4b keeps its three bars on one, which
   would put the height gap back on a phone. Measure `/settings` CLS at 390x844 before deciding
   whether the placeholder needs the same wrap. Found at polish ledger P3.4b.
+
+- [confirmed] 2026-08-24 `pnpm -C web db:migrate` cannot run against a dev database carried
+  over from the Python stack. `drizzle.__drizzle_migrations` is empty on it, because Alembic
+  built the schema, so `drizzle-kit migrate` starts at `0000_baseline` and dies on
+  `relation "alembic_version" already exists`. Every migration after the baseline therefore
+  has to be applied by hand locally, which is how `0003_output_format_default.sql` reached the
+  dev database. Either backfill the ledger with the migrations the baseline represents, or
+  document the hand-application in `web/drizzle/README.md`, which currently tells the reader
+  to run `db:migrate`. Compounds the entry above about nothing running migrations on deploy.
+  Found at polish ledger P3.5a.
+
+- [confirmed] 2026-08-24 `/auth/sign-in` and `/auth/sign-up` render the whole app sidebar,
+  including the four navigation links, to a visitor with no session. Every one of them
+  bounces straight back to the sign-in page, so the first thing the app shows a new user is
+  four controls that do nothing. `web/src/app/layout.tsx` mounts the sidebar around every
+  route including `/auth/[path]`. Found at polish ledger P3.5a.
+
+- [confirmed] 2026-08-24 `/monitor`'s Queue Controls line reads `Running: 11` for an account
+  whose posts list calls two of those posts `Not started` and one `Failed at Research`.
+  `GET /api/queue` sums every `current_stage` that is one of the six stage names, which is
+  the Python definition and is documented in `web/src/app/api/queue/route.ts`, but two
+  screens now give the same rows two different names. `deriveRunState()` is the one that
+  knows the difference; the count should either use it or the label should stop saying
+  Running. Found at polish ledger P3.5a.

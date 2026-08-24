@@ -431,6 +431,19 @@ explicitly out of scope.
         `ui/p34b-*.png`. [evidence](evidence/p3.md#p34b)
 - [ ] **P3.5** One screen per iteration, verified with `npx -y chrome-devtools-axi`, before and
       after PNGs committed under `docs/polish/ui/`, no new console errors.
+  - [x] **P3.5a** The app-wide sweep. Eleven screens opened, read for console messages and
+        captured full page: no errors and no warnings on any of them, the only two non-empty
+        readings being Next.js' own Fast Refresh log and a Chrome verbose DOM hint. One
+        defect, on `/profiles/[id]?tab=publishing`: the Output Format trigger rendered with no
+        text at all, because all three seeded profiles held `output_format = 'both'`, the
+        column default, which is not one of the three formats `OUTPUT_FORMATS` offers and so
+        matches no `SelectItem`. `both` names no destination any publish step handles, so
+        `drizzle/0003` moves both columns' default to `markdown` and rewrites the rows that
+        took the old one, which is behaviour-preserving: both values publish nowhere. The
+        column stays a bare `varchar(20)` and both validators still take `z.string()`, so the
+        picker also stopped rendering an unoffered value as nothing: it reads `Unrecognised
+        format` and says what is stored under the field. Closes P2.113. `ui/p35-*.png`.
+        [evidence](evidence/p3.md#p35a)
 
 ## P2. Clear the backlog in `todo.md`
 
@@ -623,12 +636,13 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       [evidence](evidence/p3.md#p31a)
 - [x] **P2.112** `ImagePreview` renders `placement.location` as the raw enum. Fixed at P3.3b
       along with the rest of that class. [evidence](evidence/p3.md#p33b)
-- [ ] **P2.113** `[confirmed 2026-08-24]` `both` is the `output_format` column default on both
-      `website_profiles` and `posts` but is not one of the three options `OUTPUT_FORMATS`
-      offers, so a row holding the default renders the picker with no label and saving the
-      form rewrites it. Same value P2.68's publish endpoint refuses. Decide whether `both` is
-      a real format or a default that should never have been `both`, then make the column and
-      the picker agree.
+- [x] **P2.113** `both` was the `output_format` column default on both `website_profiles` and
+      `posts` and not one of the three `OUTPUT_FORMATS` offers, so a row holding it rendered
+      the picker with no label at all. Observed in the browser at P3.5a on three real
+      profiles, not only in theory. `both` is a default that should never have been `both`:
+      it names no destination any publish step handles. `drizzle/0003` moves both defaults to
+      `markdown` and rewrites the rows; the picker also names an unoffered value rather than
+      rendering nothing, because the column takes any string. [evidence](evidence/p3.md#p35a)
 - [ ] **P2.115** `[confirmed 2026-08-24]` Pausing is a label, not a control signal: the pause
       route writes `current_stage = "paused"` and nothing else, and no worker reads it, so the
       running stage finishes and the next one starts. `deriveRunState()` puts `paused` above

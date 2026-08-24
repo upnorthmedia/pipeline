@@ -81,10 +81,11 @@ export const GET = withServerError(getHandler)
  *
  * The row is written with the full `model_dump()` of `PostCreate` folded
  * through `prefill.ts`, so every pydantic default is materialised rather than
- * left to the column default. The two disagree for `output_format` ("markdown"
- * against the column's "both") and for `stage_settings` (six "auto" stages
- * against the column's five "review" ones), and the pydantic value is the one
- * the Python stack wrote.
+ * left to the column default. The two still disagree for `stage_settings`
+ * (six "auto" stages against the column's five "review" ones), and the
+ * pydantic value is the one the Python stack wrote. They disagreed for
+ * `output_format` too until `drizzle/0003` moved the column default off
+ * `both`, a value no publish step handles and the picker cannot render.
  *
  * A `profile_id` the caller does not own is a 404, which is what keeps another
  * account's settings from being read through the prefill. A body with no

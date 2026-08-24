@@ -18,6 +18,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { closeDb, getDb, toNodePostgresUrl } from "./index"
 import { posts, websiteProfiles, type NewPost } from "./schema"
 
+import { OUTPUT_FORMATS } from "@/lib/publishing"
+
 /** Everything this test writes carries the prefix so cleanup can never miss a row. */
 const SLUG_PREFIX = "ts-roundtrip-"
 const slug = `${SLUG_PREFIX}${process.pid}-${Date.now()}`
@@ -106,7 +108,7 @@ describe("Post round-trip against the dev database", () => {
     const [read] = await db.select().from(posts).where(eq(posts.slug, slug))
 
     expect(read.currentStage).toBe("pending")
-    expect(read.outputFormat).toBe("both")
+    expect(read.outputFormat).toBe("markdown")
     expect(read.stageStatus).toEqual({})
     expect(read.stageLogs).toEqual({})
     expect(read.executionLogs).toEqual([])
@@ -139,6 +141,22 @@ describe("Post round-trip against the dev database", () => {
     expect(read.stageStatus).toEqual({ research: "complete", outline: "running" })
     expect(read.imageManifest).toEqual({ images: [{ filename: "hero.webp", alt: "Hero" }] })
     expect(read.completedAt?.toISOString()).toBe(completedAt.toISOString())
+  })
+
+  // The column default is what a row inserted by anything other than the two
+  // route validators takes, and the picker on `/posts/new` and the profile
+  // editor renders no trigger text at all for a value it does not offer. So
+  // the default has to be one of them, on both tables that carry the column.
+  it("defaults `output_format` to a format the picker offers, on both tables", async () => {
+    const [post] = await db.select().from(posts).where(eq(posts.slug, slug))
+    const [profile] = await db
+      .select()
+      .from(websiteProfiles)
+      .where(eq(websiteProfiles.id, profileId))
+
+    const offered = OUTPUT_FORMATS.map((f) => f.value)
+    expect(offered).toContain(post.outputFormat)
+    expect(offered).toContain(profile.outputFormat)
   })
 
   it("committed the row: a separate connection sees the native Postgres types", async () => {

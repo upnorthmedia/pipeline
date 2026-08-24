@@ -427,7 +427,8 @@ describe("POST /api/profiles", () => {
     const body = await response.json()
     expect(body.tone).toBe("Conversational and friendly")
     expect(body.word_count).toBe(2000)
-    // pydantic's default, not the column's, which is "both".
+    // pydantic's default, materialised on the row; the column default agrees
+    // with it since drizzle/0003.
     expect(body.output_format).toBe("markdown")
     expect(body.wp_default_status).toBe("publish")
     expect(body.default_stage_settings).toEqual({

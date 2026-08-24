@@ -37,9 +37,11 @@ export const GET = withServerError(getHandler)
  *
  * The row is written with the full `model_dump()` of `ProfileCreate`, so every
  * pydantic default is materialised rather than left to the column default. The
- * two differ for `output_format` ("markdown" against the column's "both") and
- * for `default_stage_settings` (six "auto" stages against the column's five
- * "review" ones), and the pydantic value is the one the Python stack wrote.
+ * two still differ for `default_stage_settings` (six "auto" stages against the
+ * column's five "review" ones), and the pydantic value is the one the Python
+ * stack wrote. They differed for `output_format` too until `drizzle/0003`
+ * moved the column default off `both`, a value no publish step handles and the
+ * picker cannot render.
  *
  * `user_id` comes from the session, never from the body, which is what makes
  * the row unreachable from another account.

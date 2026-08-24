@@ -138,9 +138,9 @@ const FIELDS = {
 /**
  * `ProfileCreate`: `name` and `website_url` are required, every other field
  * carries the pydantic default it would have been dumped with. `output_format`
- * defaults to "markdown" here even though the column defaults to "both",
- * because `model_dump()` always supplied a value and the column default never
- * applied on this path.
+ * defaults to "markdown" here because `model_dump()` always supplied a value
+ * and the column default never applied on this path; the column defaulted to
+ * "both" until `drizzle/0003` made the two agree.
  */
 export const profileCreateSchema = z.object({
   ...FIELDS,
