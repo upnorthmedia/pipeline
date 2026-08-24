@@ -25,13 +25,32 @@ export function rulesDir(): string {
 }
 
 /**
- * Read a stage's rule file. A missing file yields `""` rather than throwing,
- * matching Python: a stage still runs (badly) without its rules, and the
- * failure surfaces in the output instead of taking the run down.
+ * Read a stage's rule file.
+ *
+ * A missing file throws. Python's `load_rules` answered `""` and this port
+ * copied it, which is the one place the copy was wrong: `rules/*.md` are the
+ * product's prompt IP, and a stage that loses its rule file does not fail, it
+ * quietly bills a provider call for a prompt that is a configuration block and
+ * nothing else. Nothing downstream can tell that apart from a stage that ran
+ * properly, so six stages of a run can complete on stripped prompts with every
+ * status column reading `complete`.
+ *
+ * The default path is the failure: `rulesDir()` resolves against `cwd`, and the
+ * worker bundle runs with its own output directory as the cwd, so an unset
+ * `RULES_DIR` points at `web/.mastra/rules`, which no image creates. Throwing
+ * costs a failed `research` stage with a legible reason instead. The message
+ * names the variable as well as the resolved path, because the path alone
+ * reads as a packaging bug rather than as one variable away from correct.
  */
 export function loadRules(stage: Stage): string {
   const file = path.join(rulesDir(), STAGE_RULES_MAP[stage])
-  if (!existsSync(file)) return ""
+  if (!existsSync(file)) {
+    throw new Error(
+      `Rule file not found for the ${stage} stage: ${file}. ` +
+        "Set RULES_DIR to the directory holding rules/*.md; it defaults to a path " +
+        "relative to the working directory, which the worker bundle does not share.",
+    )
+  }
   return readFileSync(file, "utf8")
 }
 

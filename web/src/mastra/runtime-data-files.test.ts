@@ -26,11 +26,13 @@ import fs from "node:fs"
 import path from "node:path"
 
 import { describe, expect, it } from "vitest"
+import { parse as parseYaml } from "yaml"
 
 import { rulesDir } from "./prompts"
 import { textstatDataDir } from "./textstat/hyphenator"
 
 const DOCKERFILE = path.resolve(__dirname, "../../Dockerfile")
+const REPO_ROOT = path.resolve(__dirname, "../../..")
 
 interface Stage {
   name: string
@@ -155,6 +157,55 @@ describe("runtime data files", () => {
           const target = stage.env[variable]
           expect(target).toBeDefined()
           expect(stage.copies).toContain(target)
+        })
+      }
+    })
+  }
+})
+
+/**
+ * Ledger items P2.22 and P2.23, the compose half.
+ *
+ * The `worker` service is the one process in this repo whose working directory
+ * is not `web/`: `mastra worker start` runs the bundle with its own output
+ * directory as the cwd, so every default path in the app resolves somewhere
+ * inside `.mastra/`. All three directories the pipeline reads off disk have to
+ * be named for it explicitly, and neither compose file gets a build error or a
+ * boot error if one goes missing.
+ *
+ * A variable counts as set if the service declares it or if the image stage the
+ * service builds carries it as an `ENV`, which is how `docker-compose.prod.yml`
+ * gets `TEXTSTAT_DATA_DIR`: it builds the `worker` stage, which sets it next to
+ * the corpus it copies. The dev file builds `deps`, which carries none of them,
+ * so it has to declare all three itself.
+ */
+const WORKER_RUNTIME_VARIABLES = ["RULES_DIR", "TEXTSTAT_DATA_DIR", "MEDIA_DIR"] as const
+
+interface ComposeService {
+  environment?: Record<string, string>
+  build?: { target?: string }
+}
+
+const COMPOSE_FILES = ["docker-compose.yml", "docker-compose.prod.yml"] as const
+
+describe("the compose worker service", () => {
+  for (const file of COMPOSE_FILES) {
+    describe(file, () => {
+      const compose = parseYaml(
+        fs.readFileSync(path.join(REPO_ROOT, file), "utf8"),
+      ) as { services?: Record<string, ComposeService> }
+      const worker = compose.services?.worker
+
+      it("is a service that builds a stage of this Dockerfile", () => {
+        expect(worker).toBeDefined()
+        expect(STAGES.has(worker?.build?.target ?? "")).toBe(true)
+      })
+
+      for (const variable of WORKER_RUNTIME_VARIABLES) {
+        it(`names ${variable}, itself or through the stage it builds`, () => {
+          const fromService = worker?.environment?.[variable]
+          const fromImage = STAGES.get(worker?.build?.target ?? "")?.env[variable]
+          expect(fromService ?? fromImage).toBeDefined()
         })
       }
     })

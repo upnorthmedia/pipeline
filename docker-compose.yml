@@ -77,9 +77,8 @@ services:
       REDIS_URL: redis://redis:6379
       # The bundle runs with its own directory as the cwd, so every default
       # path in the app resolves somewhere inside `.mastra/`. All three are
-      # required, not conveniences: a missing RULES_DIR silently strips each
-      # stage's rule file out of its prompt and a missing TEXTSTAT_DATA_DIR
-      # kills the `edit` stage with ENOENT.
+      # required, not conveniences: a missing RULES_DIR fails every stage in
+      # `loadRules` and a missing TEXTSTAT_DATA_DIR kills the `edit` stage.
       RULES_DIR: /app/rules
       MEDIA_DIR: /app/media
       TEXTSTAT_DATA_DIR: /app/src/mastra/textstat/data

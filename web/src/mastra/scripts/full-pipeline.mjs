@@ -33,13 +33,13 @@
  *
  * `RULES_DIR` and `TEXTSTAT_DATA_DIR` are set explicitly, because the worker
  * bundle's cwd is its own output directory and both defaults are resolved from
- * `process.cwd()`. `rulesDir()` would point at `web/.mastra/rules`, and
- * `loadRules` returns `""` for a missing file rather than throwing, so every
- * stage would silently lose its rule file. `textstatDataDir()` would point at
- * `web/.mastra/<bundle>/src/mastra/textstat/data`, and the first run of this
- * script proved that one is fatal: `edit` died with `ENOENT ...
- * cmudict-syllables.txt.gz`. `docker-compose.yml` already sets `RULES_DIR` for
- * the Python worker; the Railway definitions in 7.2 have to set both.
+ * `process.cwd()`. `rulesDir()` would point at `web/.mastra/rules` and
+ * `textstatDataDir()` at `web/.mastra/<bundle>/src/mastra/textstat/data`, and
+ * the first run of this script proved the corpus one fatal: `edit` died with
+ * `ENOENT ... cmudict-syllables.txt.gz`. The rules one used to be worse than
+ * fatal, because `loadRules` answered `""` for a missing file and every stage
+ * silently lost its rule file; ledger item P2.22 made it throw, so both now
+ * fail the stage that needs them.
  *
  * The three provider keys are read from the environment, encrypted under a
  * throwaway Fernet key with the same `encryptWithKey` the app uses, and written

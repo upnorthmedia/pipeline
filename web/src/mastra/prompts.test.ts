@@ -220,15 +220,48 @@ describe("loadRules", () => {
     }
   })
 
-  it("honours RULES_DIR and yields an empty string when the file is absent", () => {
+  /**
+   * Ledger item P2.22. `loadRules` used to answer `""` for a missing file, the
+   * way Python's `load_rules` did, and nothing downstream noticed: the stage
+   * ran, the provider was billed, and the product's prompt IP was simply not in
+   * the prompt. That is the failure mode a wrong `RULES_DIR` produces, and the
+   * bundle's own cwd produces it by default, so it has to be loud.
+   *
+   * The message has to name the variable as well as the path: the resolved
+   * path alone reads as a packaging bug rather than as one environment variable
+   * away from correct.
+   */
+  it("refuses a rules directory that does not hold the stage's file", () => {
     const original = process.env.RULES_DIR
-    process.env.RULES_DIR = path.join(GOLDEN_DIR, "does-not-exist")
+    const missing = path.join(GOLDEN_DIR, "does-not-exist")
+    process.env.RULES_DIR = missing
     try {
-      expect(loadRules("research")).toBe("")
+      // A string matcher asserts substring inclusion in the message.
+      expect(() => loadRules("research")).toThrowError("RULES_DIR")
+      expect(() => loadRules("research")).toThrowError(
+        path.join(missing, "blog-research.md"),
+      )
     } finally {
       if (original === undefined) delete process.env.RULES_DIR
       else process.env.RULES_DIR = original
     }
+  })
+
+  /**
+   * What the throw replaces. Built with `""` rather than by reading a broken
+   * directory, so this case still says what a stripped rule file costs after
+   * `loadRules` stopped being able to produce one: the whole rules section
+   * disappears and the prompt is otherwise well-formed, which is why six
+   * stages could run on it without anything failing.
+   */
+  it("would have sent a prompt with no rules section at all", () => {
+    const context = emptyContext()
+    expect(buildStagePrompt("research", "", context, "2026-08-21")).not.toContain(
+      "## Rules",
+    )
+    expect(buildStagePrompt("research", "", context, "2026-08-21")).toBe(
+      "## Post Configuration\n\n- **TODAY_DATE**: 2026-08-21",
+    )
   })
 })
 

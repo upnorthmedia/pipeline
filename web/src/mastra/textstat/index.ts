@@ -26,9 +26,8 @@
  */
 import { gunzipSync } from "node:zlib"
 import { readFileSync } from "node:fs"
-import path from "node:path"
 
-import { englishHyphenator, textstatDataDir } from "./hyphenator"
+import { englishHyphenator, textstatDataFile } from "./hyphenator"
 
 /** Python's `\s` for `str` patterns, which is also `str.isspace()`'s set. */
 export const PY_WHITESPACE = "\\t\\n\\v\\f\\r\\x1c-\\x1f \\x85\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000"
@@ -141,7 +140,7 @@ let syllableTable: Map<string, number> | undefined
  */
 export function cmuSyllables(): Map<string, number> {
   if (!syllableTable) {
-    const raw = gunzipSync(readFileSync(path.join(textstatDataDir(), "cmudict-syllables.txt.gz")))
+    const raw = gunzipSync(readFileSync(textstatDataFile("cmudict-syllables.txt.gz")))
     const table = new Map<string, number>()
     for (const line of raw.toString("utf8").split("\n")) {
       if (!line) continue

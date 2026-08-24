@@ -21,7 +21,7 @@
  * equal to `int()`, so the positions are the same with or without the data that
  * rides on them. `hyph_en_US.dic` contains no such patterns today.
  */
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 
 /** Lines pyphen skips: comments and the hunspell hyphen-minimum directives. */
@@ -51,6 +51,28 @@ const RIGHT_HYPHEN_MIN = 2
  */
 export function textstatDataDir(): string {
   return process.env.TEXTSTAT_DATA_DIR ?? path.resolve(process.cwd(), "src/mastra/textstat/data")
+}
+
+/**
+ * Resolve one frozen data file, refusing a directory that does not hold it.
+ *
+ * Without this the miss is a bare `ENOENT` out of `readFileSync`, which names
+ * the resolved path and neither the variable that moves it nor the fact that a
+ * data file is what is absent. That is what the `edit` stage dies of in a
+ * worker bundle with no `TEXTSTAT_DATA_DIR`, after `research`, `outline` and
+ * `write` have already been billed, so it is worth a sentence.
+ */
+export function textstatDataFile(name: string): string {
+  const file = path.join(textstatDataDir(), name)
+  if (!existsSync(file)) {
+    throw new Error(
+      `Readability corpus file not found: ${file}. ` +
+        "Set TEXTSTAT_DATA_DIR to the directory holding the textstat data files; it " +
+        "defaults to a path relative to the working directory, which the worker " +
+        "bundle does not share.",
+    )
+  }
+  return file
 }
 
 function isDigit(char: string): boolean {
@@ -188,7 +210,7 @@ let cached: HyphenationDictionary | undefined
 /** The en_US hyphenator, read from disk once per process. */
 export function englishHyphenator(): HyphenationDictionary {
   if (!cached) {
-    const buffer = readFileSync(path.join(textstatDataDir(), "hyph_en_US.dic"))
+    const buffer = readFileSync(textstatDataFile("hyph_en_US.dic"))
     cached = new HyphenationDictionary(decodeDictionary(buffer))
   }
   return cached

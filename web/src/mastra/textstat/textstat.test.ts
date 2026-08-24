@@ -14,11 +14,17 @@
  */
 import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import path from "node:path"
 
 import { describe, expect, it } from "vitest"
 
-import { englishHyphenator, HyphenationDictionary, textstatDataDir } from "./hyphenator"
+import {
+  englishHyphenator,
+  HyphenationDictionary,
+  textstatDataDir,
+  textstatDataFile,
+} from "./hyphenator"
 import {
   cmuSyllables,
   countSentences,
@@ -82,6 +88,39 @@ describe("frozen data files", () => {
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([word, syllables]) => `${word} ${syllables}`)
     expect(sha256(`${lines.join("\n")}\n`)).toBe(fixture.cmudict.sha256)
+  })
+})
+
+/**
+ * Ledger item P2.23. The corpus is reached through a `path.resolve` on
+ * `process.cwd()`, and the worker bundle's cwd is its own output directory, so
+ * a deployment that does not set `TEXTSTAT_DATA_DIR` reaches the `edit` stage
+ * and dies there. The port shipped that as a bare `ENOENT` out of
+ * `readFileSync`, which names the resolved path and neither the variable that
+ * moves it nor the fact that a data file is what is missing.
+ */
+describe("textstatDataFile", () => {
+  it("resolves a file the corpus holds", () => {
+    expect(textstatDataFile("hyph_en_US.dic")).toBe(
+      path.join(textstatDataDir(), "hyph_en_US.dic"),
+    )
+  })
+
+  it("names TEXTSTAT_DATA_DIR and the file when the corpus is not there", () => {
+    const previous = process.env.TEXTSTAT_DATA_DIR
+    const missing = path.join(tmpdir(), "textstat-data-dir-that-does-not-exist")
+    process.env.TEXTSTAT_DATA_DIR = missing
+    try {
+      expect(() => textstatDataFile("cmudict-syllables.txt.gz")).toThrowError(
+        "TEXTSTAT_DATA_DIR",
+      )
+      expect(() => textstatDataFile("cmudict-syllables.txt.gz")).toThrowError(
+        path.join(missing, "cmudict-syllables.txt.gz"),
+      )
+    } finally {
+      if (previous === undefined) delete process.env.TEXTSTAT_DATA_DIR
+      else process.env.TEXTSTAT_DATA_DIR = previous
+    }
   })
 })
 
