@@ -590,26 +590,6 @@
   filter now call such a post finished while its stage badge says failed. Decide which of the two
   the list should read; a post with no pictures is not finished in any sense a user means. Found
   at polish ledger P1.2a.
-- [confirmed] 2026-08-24 WordPress's REST error messages carry HTML, and the dashboard
-  renders the tags as literal text. A real install answered `WordPress API error:
-  <strong>Error:</strong> Unknown username. Check again or try your email address.` and that
-  whole string, angle brackets included, is what the profile page shows under the category
-  and author pickers. Found while making those failures visible at all (polish ledger item
-  P1.3a). Stripping belongs in one display-layer place rather than in each handler, and
-  `/test`'s message is pinned by `wordpress-router-parity.json`, so it is a UI item: it
-  belongs with P1.3d, which owns how a connection reports itself.
-- [confirmed] 2026-08-24 The profile page's `Connected` badge is derived from `wp_url` and
-  `wp_username` both being non-empty, not from any test result, so it reads `Connected`
-  beside a category picker that just failed to load with an authentication error. Same
-  origin as the entry above; it is the "visible connection status" half of polish ledger
-  item P1.3d.
-- [confirmed] 2026-08-24 The WordPress Integration card on `/profiles/[id]` renders only when
-  `outputFormat === "wordpress" || wpConnected` (`web/src/app/profiles/[id]/page.tsx:777`), so
-  a profile that has not already picked WordPress as its output format has nowhere to enter or
-  test a connection, and the new-post form's `wordpress` option has nothing to check against.
-  Found while screenshotting polish ledger item P1.3b: reaching the card at all needed the
-  Output Format select changed first. This is the "one obvious place to configure and test a
-  connection" half of polish ledger item P1.3d.
 - [confirmed] 2026-08-24 `wp_url` accepts a URL carrying credentials
   (`https://user:pass@example.com`). `checkWpUrl` in `web/src/app/api/profiles/validation.ts`
   refuses a query string, a fragment and surrounding whitespace because those break the REST

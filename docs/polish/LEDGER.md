@@ -195,6 +195,21 @@ move on. A split is not an iteration on its own: split and complete the first ch
         status derived from a real test rather than from two fields being non-empty, output
         formats that disable themselves with an explanation, and a publish action that reports
         what happened.
+    - [x] **P1.3d-i** The connection is findable and its badge means something. Both
+          integration cards were conditional on the output format that their own fields
+          configure, so a profile that had never picked a target had nowhere to enter one;
+          `Connected` was derived from two non-empty strings rather than any test, so an
+          expired application password read Connected forever; and WordPress writes its REST
+          errors for a browser, so `<strong>Error:</strong>` reached the user as literal
+          angle brackets. Both cards now render always, a five-state `ConnectionStatus` is
+          set only by a real `/wordpress/test` (run on load, because it is a read of
+          `/wp-json`), the Next.js status stays `Not tested` until asked because testing it
+          POSTs to the customer's site, and `src/lib/plain-message.ts` turns an upstream
+          message into the sentence it was meant to be. Verified against a real WordPress
+          install, `ui/p13d-*.png`. [evidence](evidence/p1.md#p13d-i)
+    - [ ] **P1.3d-ii** Output formats that disable themselves with an explanation when their
+          target is not configured, in `/posts/new` and in the profile editor.
+    - [ ] **P1.3d-iii** A publish action that reports what happened.
 
 ## P2. Clear the backlog in `todo.md`
 

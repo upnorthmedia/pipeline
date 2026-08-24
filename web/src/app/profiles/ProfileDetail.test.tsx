@@ -35,6 +35,7 @@ vi.mock("@/lib/api", async () => {
       wpCategories: vi.fn(),
       wpAuthors: vi.fn(),
       wpTest: vi.fn(),
+      nextjsTest: vi.fn(),
     },
   };
 });
@@ -58,6 +59,7 @@ const mockDeleteLink = vi.mocked(profiles.deleteLink);
 const mockWpCategories = vi.mocked(profiles.wpCategories);
 const mockWpAuthors = vi.mocked(profiles.wpAuthors);
 const mockWpTest = vi.mocked(profiles.wpTest);
+const mockNextjsTest = vi.mocked(profiles.nextjsTest);
 
 /** A profile the page treats as WordPress-connected, so it loads the pickers. */
 const wpProfile = () =>
@@ -411,13 +413,158 @@ describe("ProfileDetailPage", () => {
       expect(screen.getByDisplayValue("https://wp.example")).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: /Test Connection/i }));
+    // The page tests the stored credentials on load, so what this asserts is
+    // that the button's own click never reached WordPress: the save it depends
+    // on was refused first.
+    const onLoad = mockWpTest.mock.calls.length;
+
+    await user.click(screen.getByRole("button", { name: /Test connection/i }));
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith(
         "WordPress URL should start with http:// or https://"
       );
     });
-    expect(mockWpTest).not.toHaveBeenCalled();
+    expect(mockWpTest).toHaveBeenCalledTimes(onLoad);
+  });
+
+  /**
+   * A connection nobody can find is a connection nobody configures, and a
+   * status derived from two non-empty fields says "Connected" beside a picker
+   * that just failed to load. Both halves of ledger item P1.3d.
+   */
+  describe("publishing connections", () => {
+    it("offers the WordPress fields on a profile that has never used WordPress", async () => {
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("Test Site")).toBeInTheDocument();
+      });
+      expect(screen.getByLabelText("WordPress URL")).toBeInTheDocument();
+      expect(screen.getByLabelText("Application Password")).toBeInTheDocument();
+    });
+
+    it("offers the Next.js webhook fields on the same profile", async () => {
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("Test Site")).toBeInTheDocument();
+      });
+      expect(screen.getByLabelText("Webhook URL")).toBeInTheDocument();
+    });
+
+    it("says a connection with no credentials is not configured, and tests nothing", async () => {
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("Test Site")).toBeInTheDocument();
+      });
+      expect(screen.getAllByText("Not configured")).toHaveLength(2);
+      expect(mockWpTest).not.toHaveBeenCalled();
+      expect(mockNextjsTest).not.toHaveBeenCalled();
+    });
+
+    it("reports the site a real test reached, not the fields that were filled in", async () => {
+      mockGet.mockResolvedValue(wpProfile());
+      mockWpTest.mockResolvedValue({ connected: true, site_name: "Editorial" });
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(screen.getByText("Connected")).toBeInTheDocument();
+      });
+      expect(screen.getByText("Connected to Editorial")).toBeInTheDocument();
+    });
+
+    it("does not call a WordPress connection connected when the test fails", async () => {
+      mockGet.mockResolvedValue(wpProfile());
+      mockWpTest.mockResolvedValue({
+        connected: false,
+        error: "Authentication failed. Check the username and application password.",
+      });
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(
+          screen.getByText(
+            "Authentication failed. Check the username and application password."
+          )
+        ).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+      expect(screen.getByText("Not connecting")).toBeInTheDocument();
+      // The pickers are read from the site, so there is nothing to show.
+      expect(
+        screen.queryByRole("combobox", { name: "Default Category" })
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows what WordPress said as a sentence, not as markup", async () => {
+      mockGet.mockResolvedValue(wpProfile());
+      mockWpTest.mockResolvedValue({
+        connected: false,
+        error:
+          "WordPress API error: <strong>Error:</strong> Unknown username. " +
+          "Check again or try your email address.",
+      });
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(
+          screen.getByText(
+            "WordPress API error: Error: Unknown username. " +
+              "Check again or try your email address."
+          )
+        ).toBeInTheDocument();
+      });
+    });
+
+    it("strips the same markup out of a failed picker load", async () => {
+      mockGet.mockResolvedValue(wpProfile());
+      mockWpAuthors.mockRejectedValue(
+        new Error(
+          JSON.stringify({
+            detail: "WordPress API error: <strong>Error:</strong> Not allowed.",
+          })
+        )
+      );
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(
+          screen.getByText("WordPress API error: Error: Not allowed.")
+        ).toBeInTheDocument();
+      });
+    });
+
+    it("does not call a stored webhook URL connected before it has answered", async () => {
+      // Testing the webhook POSTs to the customer's site, so the page cannot
+      // fire it on load the way it can read `/wp-json`.
+      mockGet.mockResolvedValue(
+        makeProfile({ nextjs_webhook_url: "https://blog.example/api/jena-webhook" })
+      );
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(
+          screen.getByDisplayValue("https://blog.example/api/jena-webhook")
+        ).toBeInTheDocument();
+      });
+      expect(screen.getByText("Not tested")).toBeInTheDocument();
+      expect(mockNextjsTest).not.toHaveBeenCalled();
+    });
+
+    it("reports a webhook test failure under the webhook fields", async () => {
+      const user = userEvent.setup();
+      mockGet.mockResolvedValue(
+        makeProfile({ nextjs_webhook_url: "https://blog.example/api/jena-webhook" })
+      );
+      mockUpdate.mockResolvedValue(makeProfile());
+      mockNextjsTest.mockResolvedValue({
+        connected: false,
+        error: "Webhook returned 401",
+      });
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("Test Site")).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole("button", { name: /Test webhook/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Webhook returned 401")).toBeInTheDocument();
+      });
+    });
   });
 });
