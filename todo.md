@@ -654,3 +654,14 @@
   any of them (grepped across `.ts`, `.tsx`, `.json`, `.md`, `.mjs`), so they are served as public
   routes and shipped in the Docker image for no reason. Confirm nothing outside the repo links
   them before deleting. Found at polish ledger P1.1.
+
+- [confirmed] 2026-08-24 A full run stamps `current_stage = "complete"` and `completed_at` even
+  when a stage inside it failed. `markPipelineComplete()` (`web/src/mastra/post-state.ts:275`) is
+  unconditional by design, ported that way so a run that finished has a finish time, and the
+  `images` stage is the one stage that can finish without succeeding: it writes
+  `stage_status.images = "failed"` and returns rather than raising, so the run carries on to
+  `ready` and ends. After polish ledger P1.2a that branch is reachable for an all-failed image
+  stage as well as for an unparseable manifest, so the posts list and `PostsList`'s status
+  filter now call such a post finished while its stage badge says failed. Decide which of the two
+  the list should read; a post with no pictures is not finished in any sense a user means. Found
+  at polish ledger P1.2a.

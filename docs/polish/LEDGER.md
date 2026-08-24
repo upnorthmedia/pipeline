@@ -125,6 +125,21 @@ move on. A split is not an iteration on its own: split and complete the first ch
       missing file. A failed image reads as a failure with its reason and a retry. Includes
       WordPress publishing uploading no images (P2.63) and generated images being unreachable
       from the `web` service on Railway (P2.76).
+  - [x] **P1.2a** The stage reporting success when every image failed. `STATUS_FAILED` reached
+        `stage_status.images` only when the *manifest* would not parse, so both golden
+        fixtures, captured with no Gemini quota, store five and six entries that all carry an
+        `error` under a stage the row calls complete. That is what made the stage unretryable:
+        `shouldRunStage` skipped it, `/rerun` and `/run` picked the stage after it, and a
+        named-stage rerun stamped the post finished. `imagesStageStatus()` now fails a stage
+        that asked for images and got none back, while a partial failure and an empty manifest
+        stay complete. [evidence](evidence/p1.md#p12a)
+  - [ ] **P1.2b** The UI: a manifest entry with an `error` renders as a bare `Failed` badge
+        with no reason and no retry, and an entry claiming `generated: true` whose file is gone
+        renders as a broken `<img>`. A failed image reads as a failure with its reason and a
+        retry, and no broken image is reachable.
+  - [ ] **P1.2c** The two image gaps outside the dashboard: WordPress publishing uploads no
+        images at all (P2.63), and generated images are unreachable from the `web` service on
+        Railway (P2.76).
 - [ ] **P1.3** Publishing is incomprehensible. One obvious place to configure and test a
       connection, a visible connection status, output formats that disable themselves with an
       explanation when their target is not configured, and a publish action that reports what

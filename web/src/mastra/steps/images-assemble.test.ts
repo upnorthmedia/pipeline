@@ -31,6 +31,7 @@ import { closeDb, getDb, posts } from "../../db"
 import { GEMINI_IMAGE_MODEL_ID } from "../images/gemini"
 import { NO_PROMPT_ERROR } from "../images/generate-one"
 import { mastra, pubsub } from "../index"
+import { STAGES } from "../state"
 import { imagesWorkflow } from "../workflows/images"
 import { foldManifest, imagesAssembleStep, imagesStageOutputSchema } from "./images-assemble"
 import type { GeneratedImageOutput } from "./images-generate"
@@ -209,6 +210,11 @@ async function runAssemble(manifestOutput: ImagesManifestOutput, results: Genera
   return { output: imagesStageOutputSchema.parse(output), seen, announced }
 }
 
+/** A `stage_status` map with the one stage item P1.2a diverges on taken out. */
+function withoutImages(status: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(status).filter(([stage]) => stage !== "images"))
+}
+
 async function readRow(postId: string) {
   const rows = await db.select().from(posts).where(inArray(posts.id, [postId]))
   return rows[0]
@@ -344,9 +350,15 @@ describe("images assemble step against the golden fixtures", () => {
       await runAssemble(manifestOutputOf(fixture, postId), fixtureResults(fixture))
 
       const row = await readRow(postId)
-      // "complete", even though every image failed: Python only reports the
-      // stage failed when the *manifest* could not be parsed.
-      expect(row.stageStatus).toEqual(fixture.stage_output.stage_status)
+      // Every stage but `images` is Python's map untouched. `images` is the one
+      // deliberate divergence (item P1.2a): Python wrote "complete" here
+      // because the manifest parsed, even though not one of these entries
+      // generated, and the assertion is inverted below rather than deleted so
+      // the fixture keeps stating what Python did.
+      expect(fixture.stage_output.stage_status.images).toBe("complete")
+      const rowStatus = row.stageStatus as Record<string, string>
+      expect(withoutImages(rowStatus)).toEqual(withoutImages(fixture.stage_output.stage_status))
+      expect(rowStatus.images).toBe("failed")
       expect(row.currentStage).toBe("images")
     })
   }
@@ -603,5 +615,91 @@ describe("images assemble step on the parse-failure branch", () => {
     expect(output.model).toBe(fixtures[0].stage_output._stage_meta.model)
     expect(output.tokensIn).toBe(fixtures[0].stage_output._stage_meta.tokens_in)
     expect(output.tokensOut).toBe(fixtures[0].stage_output._stage_meta.tokens_out)
+  })
+})
+
+describe("images assemble step when every image failed", () => {
+  /**
+   * The golden fixtures are the case itself: both were captured while the
+   * Gemini key had no image quota, so each stored five or six entries that all
+   * carry an `error` and Python still wrote `stage_status.images = "complete"`.
+   * Ledger item P1.2a diverges there, so these two assert the divergence on the
+   * same rows the parity test above reads.
+   */
+  for (const [index, slug] of FIXTURE_SLUGS.entries()) {
+    it(`marks the stage failed for ${slug}, where no image was generated`, async () => {
+      const fixture = fixtures[index]
+      const postId = fixtureIds[index]
+      expect(fixture.stage_output.image_manifest.total_generated).toBe(0)
+      expect(fixture.stage_output.image_manifest.images.length).toBeGreaterThan(0)
+
+      await runAssemble(manifestOutputOf(fixture, postId), fixtureResults(fixture))
+
+      const row = await readRow(postId)
+      expect((row.stageStatus as Record<string, string>).images).toBe("failed")
+      // Still the stage that ran, exactly as the parse-failure branch leaves it:
+      // the row has to say where the run got to, not only that it did not
+      // succeed.
+      expect(row.currentStage).toBe("images")
+    })
+  }
+
+  it("keeps the stage complete when even one image was generated", async () => {
+    // The 3.5e corpus: 12 of 16 entries generated, four failed, one of those
+    // billed. A partial failure is not a failed stage, and each failed entry
+    // carries its own `error` for the reader.
+    const manifestOutput = {
+      ...manifestOutputOf(fixtures[0], fixtureIds[0]),
+      manifest: corpus.input_manifest as unknown as ImagesManifestOutput["manifest"],
+      images: corpus.input_manifest.images as unknown as ImagesManifestOutput["images"],
+    }
+    expect(corpus.total_generated).toBeGreaterThan(0)
+    expect(corpus.total_failed).toBeGreaterThan(0)
+
+    await runAssemble(manifestOutput, corpusResults())
+
+    const row = await readRow(fixtureIds[0])
+    expect((row.stageStatus as Record<string, string>).images).toBe("complete")
+  })
+
+  it("keeps the stage complete when the manifest asked for no images at all", async () => {
+    // Zero generated out of zero asked for is not a failure: the model wrote a
+    // manifest with an empty `images`, so there is nothing that did not happen.
+    const postId = fixtureIds[0]
+    const manifestOutput = {
+      ...manifestOutputOf(fixtures[0], postId),
+      manifest: { style_brief: {}, images: [] } as unknown as ImagesManifestOutput["manifest"],
+      images: [] as unknown as ImagesManifestOutput["images"],
+    }
+
+    await runAssemble(manifestOutput, [])
+
+    const row = await readRow(postId)
+    expect((row.stageStatus as Record<string, string>).images).toBe("complete")
+  })
+
+  it("does not promote a rerun of the stage to a finished post", async () => {
+    // A named-stage rerun of `images` on an otherwise finished post: before the
+    // divergence this wrote `images: complete`, saw all six stages complete and
+    // stamped `current_stage = "complete"`, so a post whose every image failed
+    // read as finished.
+    const fixture = fixtures[0]
+    const postId = fixtureIds[0]
+    await db
+      .update(posts)
+      .set({
+        stageStatus: Object.fromEntries(STAGES.map((stage) => [stage, "complete"])),
+        currentStage: "complete",
+      })
+      .where(inArray(posts.id, [postId]))
+
+    await runAssemble(
+      { ...manifestOutputOf(fixture, postId), stages: ["images"] },
+      fixtureResults(fixture),
+    )
+
+    const row = await readRow(postId)
+    expect((row.stageStatus as Record<string, string>).images).toBe("failed")
+    expect(row.currentStage).toBe("images")
   })
 })

@@ -88,6 +88,27 @@ export function foldManifest(
   }
 }
 
+/**
+ * What `stage_status.images` reads once the stage has folded its entries in.
+ *
+ * **Deliberate divergence from Python**, ledger item P1.2a. `images_node` wrote
+ * `"complete"` whenever the *manifest* parsed, however many images failed, so
+ * the two golden fixtures, captured while the Gemini key had no image quota,
+ * store five and six entries that all carry an `error` under a stage the row
+ * calls complete. Nothing downstream could tell that run from one that
+ * generated every image: `shouldRunStage` skipped the stage on the next full
+ * run, `/rerun` picked the stage after it, and the dashboard drew a finished
+ * dot over a post with no pictures.
+ *
+ * A stage that asked for images and got none back is failed. A partial failure
+ * is not: some image did land, and every entry that did not carries its own
+ * `error` for the reader. Zero out of zero is not a failure either, because
+ * nothing was asked for.
+ */
+export function imagesStageStatus(imageCount: number, totalGenerated: number): string {
+  return imageCount > 0 && totalGenerated === 0 ? STATUS_FAILED : STATUS_COMPLETE
+}
+
 export const imagesAssembleStep = createStep({
   id: "images-assemble",
   inputSchema: z.array(generatedImageSchema),
@@ -152,9 +173,13 @@ export const imagesAssembleStep = createStep({
       const images = inputData.map((result) => result.spec)
       const manifest = imageManifestSchema.parse(foldManifest(manifestResult.manifest, images))
       const totalGenerated = Number(manifest.total_generated)
+      const status = imagesStageStatus(images.length, totalGenerated)
 
-      await saveStageOutput(postId, "images", manifest, { images: STATUS_COMPLETE })
-      await markRerunComplete({ postId, stages })
+      await saveStageOutput(postId, "images", manifest, { images: status })
+      // Skipped when the stage just marked itself failed, for the same reason
+      // the parse-failure branch skips it: the "every stage complete" it would
+      // ask about cannot be true.
+      if (status === STATUS_COMPLETE) await markRerunComplete({ postId, stages })
 
       // Python seeds `gemini_model` with the requested id and overwrites it with
       // whatever each successful call reported, so a stage that billed nothing
