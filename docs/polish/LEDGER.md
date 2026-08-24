@@ -288,9 +288,10 @@ explicitly out of scope.
 - [ ] **P3.2** The pipeline is the product: make its state readable at a glance. What stage a
       post is in, what is blocked and why, what a review gate waits for, what a failure was
       and how to retry it. Make the run-trace view the thing you would actually watch.
-      Carries P2.98 (no surface lists the posts waiting at a gate), P2.108 (the trace renders
-      no publish events), P2.106 (a run with a failed stage still reads "complete", closed at
-      P3.2a) and P2.47 (the SSE hook drops `image_generated` and `image_failed`).
+      Carries P2.98 (no surface lists the posts waiting at a gate, closed at P3.2b-i), P2.108
+      (the trace renders no publish events), P2.106 (a run with a failed stage still reads
+      "complete", closed at P3.2a) and P2.47 (the SSE hook drops `image_generated` and
+      `image_failed`).
   - [x] **P3.2a** The one line every surface shows about a run was not true. Both the posts
         list and the post header rendered `current_stage` alone, uppercased, so a run whose
         `images` stage failed but which reached the end read `COMPLETE` beside its own red
@@ -303,11 +304,21 @@ explicitly out of scope.
         (`failed`, `paused`) outrank the stage map, because they leave it stale: a browser
         pass caught a dead run reading `Running Research` forever. Closes P2.106, files
         P2.115. `ui/p32a-*.png`. [evidence](evidence/p3.md#p32a)
-  - [ ] **P3.2b** The gate queue and the publish leg of the trace: P2.98 (nothing lists the
-        posts waiting at a review gate, so a parked run is only findable by opening it) and
-        P2.108 (both publish steps write their `execution_logs` entries with `stage: ""`, so
-        `publish_start`, `publish_complete` and `publish_error` are invisible in the one view
-        built for watching a run).
+  - [x] **P3.2b-i** The gate queue. Every value in the posts list's state filter went to the
+        server as `status`, which filters `current_stage`, and that column cannot answer this:
+        `markStageForReview()` leaves it on the stage it suspended in, so a post waiting on a
+        person looks exactly like one waiting on a provider (`GET /api/queue` says as much in
+        its own docblock). `GET /api/posts` gains `awaiting_review=true`, an `OR` of six jsonb
+        containment tests over `stage_status`, and `/` gains `Waiting for review` as the
+        second entry in the filter, with the count and the empty state worded for the queue
+        and read off the filter the rows were fetched under rather than the live control.
+        `StageStatusJson` was missing `review`, which no writer had caught because
+        `mergeStageStatus()` builds raw SQL. Closes P2.98. `ui/p32b-*.png`.
+        [evidence](evidence/p3.md#p32b-i)
+  - [ ] **P3.2b-ii** The publish leg of the trace: P2.108 (both publish steps write their
+        `execution_logs` entries with `stage: ""`, so `publish_start`, `publish_complete` and
+        `publish_error` are invisible in the one view built for watching a run, and
+        `nextjs-publish.ts` writes no `publish_complete` entry at all).
   - [ ] **P3.2c** Live image events: P2.47 (`NAMED_EVENTS` in `src/hooks/use-sse.ts` lists
         eight names and neither `image_generated` nor `image_failed` is among them, so the
         images stage is the one stage whose progress never reaches an open page).
@@ -445,9 +456,11 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       `POST /api/posts` accepts a null `profile_id`, but every read handler inner-joins
       `website_profiles` to reach `user_id`, so the form redirects to "Post not found" and
       `GET`/`DELETE /api/posts/{id}` both 404. Only SQL can remove the row.
-- [ ] **P2.98** `[confirmed 2026-08-24]` There is no surface that lists the posts waiting at a
+- [x] **P2.98** `[confirmed 2026-08-24]` There is no surface that lists the posts waiting at a
       review gate. The queue API is real and `/monitor` shows aggregate counters, but a
-      suspended post is discoverable only by opening its own detail page. Belongs with P3.2.
+      suspended post is discoverable only by opening its own detail page. Fixed at P3.2b-i:
+      `GET /api/posts?awaiting_review=true` and the `Waiting for review` filter on `/`.
+      [evidence](evidence/p3.md#p32b-i)
 - [ ] **P2.99** `[confirmed 2026-08-24]` A fresh deploy can lose a service to the `@mastra/pg`
       first-init race: `web` and `worker` both build the `mastra_*` schema on first init with
       DDL that is not concurrency-safe, and Railway starts both together. The suite's fix is

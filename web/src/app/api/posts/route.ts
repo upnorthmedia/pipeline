@@ -7,7 +7,7 @@
  * `user_id` predicate rather than from the join strategy, since an unowned row
  * cannot match any user, but the join is kept inner to mirror the original.
  */
-import { and, asc, desc, eq, ilike, or, type SQL } from "drizzle-orm"
+import { and, asc, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
@@ -39,6 +39,22 @@ async function getHandler(request: Request): Promise<Response> {
   // `status or stage`: either name filters `current_stage`, `status` first.
   const stageFilter = query.status || query.stage
   if (stageFilter) conditions.push(eq(posts.currentStage, stageFilter))
+  // The gate queue. `current_stage` cannot answer this: the worker suspends
+  // the run and leaves the column on the stage it suspended in, so a post
+  // waiting on a person is indistinguishable there from one on the provider.
+  // `stage_status` is where `markStageForReview()` writes the gate, so the
+  // filter is a containment test per stage key rather than one over the whole
+  // object: the column is bare jsonb with no check constraint, and a key that
+  // is not one of the six carrying the word "review" is not a gate.
+  if (query.awaitingReview) {
+    conditions.push(
+      or(
+        ...STAGES.map(
+          (stage) => sql`${posts.stageStatus} @> ${JSON.stringify({ [stage]: "review" })}::jsonb`,
+        ),
+      ) as SQL,
+    )
+  }
   if (query.profileId) conditions.push(eq(posts.profileId, query.profileId))
   if (query.q) {
     const pattern = `%${query.q}%`

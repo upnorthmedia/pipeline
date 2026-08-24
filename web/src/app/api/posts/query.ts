@@ -6,6 +6,13 @@
  * carrying pydantic's `int_parsing` / `greater_than_equal` /
  * `less_than_equal` shapes. Those are reproduced here, including FastAPI's
  * habit of reporting every bad parameter in one response rather than the first.
+ *
+ * `awaiting_review` is the one parameter FastAPI never declared. It is the
+ * server side of the dashboard's gate queue: `status` and `stage` both filter
+ * `current_stage`, which says which stage a run reached and not whether it is
+ * parked in front of a person, so neither can answer "what is waiting for me".
+ * Only the literal string `true` turns it on, so a stray `awaiting_review=` or
+ * `awaiting_review=0` leaves the list as it was rather than emptying it.
  */
 import { posts } from "@/db"
 import type { PgColumn } from "drizzle-orm/pg-core"
@@ -17,6 +24,8 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 export interface ListPostsQuery {
   status: string | null
   stage: string | null
+  /** Only the posts holding at a review gate. Not a Python parameter: see the header. */
+  awaitingReview: boolean
   profileId: string | null
   q: string | null
   sort: PgColumn
@@ -110,6 +119,7 @@ export function parseListPostsQuery(url: URL): ListPostsQuery | Response {
   return {
     status: params.get("status"),
     stage: params.get("stage"),
+    awaitingReview: params.get("awaiting_review") === "true",
     profileId,
     q: params.get("q"),
     sort: SORT_COLUMNS.get(sort) ?? posts.createdAt,

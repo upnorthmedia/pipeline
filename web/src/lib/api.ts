@@ -505,6 +505,8 @@ export const profiles = {
 export const posts = {
   list: (params?: {
     status?: string;
+    /** `"true"` asks for the review-gate queue only. See `api/posts/query.ts`. */
+    awaiting_review?: string;
     profile_id?: string;
     q?: string;
     sort?: string;
@@ -514,6 +516,7 @@ export const posts = {
   }) => {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
+    if (params?.awaiting_review) search.set("awaiting_review", params.awaiting_review);
     if (params?.profile_id) search.set("profile_id", params.profile_id);
     if (params?.q) search.set("q", params.q);
     if (params?.sort) search.set("sort", params.sort);

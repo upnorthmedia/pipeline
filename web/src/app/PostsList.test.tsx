@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import PostsPage from "./page";
 import { renderWithProviders } from "@/test/render";
@@ -176,6 +176,89 @@ describe("PostsPage", () => {
     renderWithProviders(<PostsPage />);
     await waitFor(() => {
       expect(screen.getByText("All Posts")).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * The gate queue. `current_stage` stays on the stage the worker suspended
+   * in, so the `status` parameter every other option uses cannot ask for the
+   * posts holding in front of a person: this one option has to reach the
+   * server's `awaiting_review` filter instead.
+   */
+  describe("waiting for review filter", () => {
+    async function openStateFilter() {
+      const user = userEvent.setup();
+      renderWithProviders(<PostsPage />);
+      await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+      await user.click(screen.getByRole("combobox", { name: "Filter posts by state" }));
+      return user;
+    }
+
+    it("offers Waiting for review among the states", async () => {
+      await openStateFilter();
+      expect(
+        await screen.findByRole("option", { name: "Waiting for review" })
+      ).toBeInTheDocument();
+    });
+
+    it("asks the server for the gate queue rather than for a stage", async () => {
+      const user = await openStateFilter();
+      await user.click(await screen.findByRole("option", { name: "Waiting for review" }));
+
+      await waitFor(() =>
+        expect(mockPostsList).toHaveBeenLastCalledWith({ awaiting_review: "true" })
+      );
+    });
+
+    it("counts the queue rather than calling it a total", async () => {
+      mockPostsList.mockResolvedValue([testPosts[0]]);
+      const user = await openStateFilter();
+      await user.click(await screen.findByRole("option", { name: "Waiting for review" }));
+
+      expect(await screen.findByText("1 post waiting for your review")).toBeInTheDocument();
+      expect(screen.queryByText("1 total post")).not.toBeInTheDocument();
+    });
+
+    it("says nothing is waiting rather than blaming the filters", async () => {
+      const user = await openStateFilter();
+      mockPostsList.mockResolvedValue([]);
+      await user.click(await screen.findByRole("option", { name: "Waiting for review" }));
+
+      expect(await screen.findByText("Nothing is waiting for your review")).toBeInTheDocument();
+      expect(screen.queryByText("No posts match these filters")).not.toBeInTheDocument();
+    });
+
+    /**
+     * The count and the empty state describe the rows on screen, and a filter
+     * change does not clear them: `fetchPosts` only swaps in skeletons for the
+     * first load and an explicit refresh. So the wording has to follow the
+     * request that produced the list rather than the control the user has just
+     * moved, or the unfiltered count reads as a queue depth for one round trip.
+     */
+    it("does not count the old list under the new heading", async () => {
+      const user = await openStateFilter();
+      let release: (value: Post[]) => void = () => {};
+      mockPostsList.mockImplementation(
+        () =>
+          new Promise<Post[]>((resolve) => {
+            release = resolve;
+          })
+      );
+
+      await user.click(await screen.findByRole("option", { name: "Waiting for review" }));
+      expect(screen.getByText("3 total posts")).toBeInTheDocument();
+
+      await act(async () => {
+        release([testPosts[0]]);
+      });
+      expect(screen.getByText("1 post waiting for your review")).toBeInTheDocument();
+    });
+
+    it("still filters current_stage for every other state", async () => {
+      const user = await openStateFilter();
+      await user.click(await screen.findByRole("option", { name: "Queued" }));
+
+      await waitFor(() => expect(mockPostsList).toHaveBeenLastCalledWith({ status: "pending" }));
     });
   });
 

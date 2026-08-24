@@ -46,9 +46,16 @@ export type PipelineStage = (typeof PIPELINE_STAGES)[number]
 
 /** Per-stage gate mode, as written by the API today ("auto"; older rows carry "review"). */
 export type StageSettingsJson = Partial<Record<PipelineStage, string>>
-/** Per-stage status (mirrors STATUS_* in api/src/pipeline/state.py). */
+/**
+ * Per-stage status: the five `STATUS_*` constants in `src/mastra/state.ts`.
+ *
+ * `review` was missing here until the gate queue needed to insert one. Nothing
+ * caught it because `markStageForReview()` writes the column through
+ * `mergeStageStatus()`, which builds a `jsonb ||` fragment, so the value never
+ * passes through this type on its way to the row.
+ */
 export type StageStatusJson = Partial<
-  Record<PipelineStage, "pending" | "running" | "complete" | "failed">
+  Record<PipelineStage, "pending" | "running" | "review" | "complete" | "failed">
 >
 
 /**

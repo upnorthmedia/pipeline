@@ -12,7 +12,7 @@
 import { like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
-import { closeDb, getDb, posts, websiteProfiles } from "@/db"
+import { closeDb, getDb, posts, websiteProfiles, type StageStatusJson } from "@/db"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { GET as getPost } from "./[id]/route"
@@ -190,6 +190,95 @@ describe("GET /api/posts", () => {
       slug: string
     }[]
     expect(both.map((p) => p.slug)).toEqual([`${PREFIX}w`])
+  })
+
+  it("filters to the posts parked at a review gate with awaiting_review", async () => {
+    const profileId = await insertProfile(user.userId)
+    await insertPost({
+      slug: `${PREFIX}gated`,
+      profileId,
+      currentStage: "outline",
+      stageStatus: { research: "complete", outline: "review" },
+    })
+    await insertPost({
+      slug: `${PREFIX}running`,
+      profileId,
+      currentStage: "write",
+      stageStatus: { research: "complete", write: "running" },
+    })
+    await insertPost({ slug: `${PREFIX}untouched`, profileId })
+
+    const body = (await (await list("?awaiting_review=true", user.cookie)).json()) as {
+      slug: string
+    }[]
+    expect(body.map((p) => p.slug)).toEqual([`${PREFIX}gated`])
+  })
+
+  it("counts a gate at any of the six stages, and only at a stage key", async () => {
+    const profileId = await insertProfile(user.userId)
+    await insertPost({
+      slug: `${PREFIX}last`,
+      profileId,
+      currentStage: "ready",
+      stageStatus: { ready: "review" },
+    })
+    // `stage_status` is a bare jsonb column with no check constraint, so a key
+    // that is not one of the six can carry the word without being a gate.
+    await insertPost({
+      slug: `${PREFIX}lookalike`,
+      profileId,
+      currentStage: "write",
+      stageStatus: { publish: "review" } as unknown as StageStatusJson,
+    })
+
+    const body = (await (await list("?awaiting_review=true", user.cookie)).json()) as {
+      slug: string
+    }[]
+    expect(body.map((p) => p.slug)).toEqual([`${PREFIX}last`])
+  })
+
+  it("leaves the list alone unless awaiting_review asks for the gate queue", async () => {
+    const profileId = await insertProfile(user.userId)
+    await insertPost({
+      slug: `${PREFIX}gated`,
+      profileId,
+      stageStatus: { outline: "review" },
+    })
+    await insertPost({ slug: `${PREFIX}plain`, profileId })
+
+    for (const qs of ["", "?awaiting_review=false"]) {
+      const body = (await (await list(qs, user.cookie)).json()) as { slug: string }[]
+      expect(body.map((p) => p.slug).sort()).toEqual([`${PREFIX}gated`, `${PREFIX}plain`])
+    }
+  })
+
+  it("composes the gate queue with the other filters", async () => {
+    const mine = await insertProfile(user.userId)
+    const other = await insertProfile(user.userId)
+    await insertPost({
+      slug: `${PREFIX}wanted`,
+      profileId: mine,
+      topic: "Widgets",
+      stageStatus: { edit: "review" },
+    })
+    await insertPost({
+      slug: `${PREFIX}wrong-profile`,
+      profileId: other,
+      topic: "Widgets",
+      stageStatus: { edit: "review" },
+    })
+    await insertPost({
+      slug: `${PREFIX}wrong-topic`,
+      profileId: mine,
+      topic: "Sprockets",
+      stageStatus: { edit: "review" },
+    })
+    await insertPost({ slug: `${PREFIX}not-gated`, profileId: mine, topic: "Widgets" })
+
+    const body = (await (
+      await list(`?awaiting_review=true&profile_id=${mine}&q=widget`, user.cookie)
+    ).json()) as { slug: string }[]
+    expect(body.map((p) => p.slug)).toEqual([`${PREFIX}wanted`])
   })
 
   it("filters by profile_id", async () => {

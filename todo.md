@@ -208,16 +208,6 @@
   path. Found while repairing `full-pipeline.test.ts` for polish ledger P0.5c. Ledger item
   P2.97.
 
-- [confirmed] 2026-08-24 There is no surface that lists the posts waiting at a review gate.
-  `full-pipeline.test.ts` asserted on a `/queue` page with a "Review Queue" heading;
-  `git log --all -- 'web/src/app/queue*'` is empty, so that page never existed in this
-  repository and the test was written against something that was only ever planned. The queue
-  API is real (`/api/queue`, `/api/queue/dead-letter`, `/api/queue/worker-status`) and
-  `/monitor` shows the four aggregate counters, but a post suspended at a gate is discoverable
-  only by opening its own detail page, which means an operator has to already know which post is
-  blocked. Belongs to P3.2 ("what a review gate is waiting for"). Found at polish ledger
-  P0.5c. Ledger item P2.98.
-
 - [confirmed] 2026-08-24 A fresh deploy can lose a service to the same `@mastra/pg` first-init
   race the test suite hit at polish ledger P0.6a. `web` and `worker` both import
   `web/src/mastra/index.ts`, both start Mastra, and the adapter builds its own `mastra_*` schema

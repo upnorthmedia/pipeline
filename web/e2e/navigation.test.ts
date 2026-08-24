@@ -99,6 +99,19 @@ test.describe("Navigation", () => {
     await expect(searchInput).toHaveValue("test search");
   });
 
+  test("the waiting for review filter reaches the server", async ({ page }) => {
+    // The gate queue is the one filter that does not go out as `status`, so
+    // this is the case that proves the whole path: the option, the
+    // `awaiting_review` parameter and the jsonb predicate behind it. A filter
+    // the route handler choked on would render the "Could not load posts"
+    // panel instead. auth.setup.ts leaves the e2e account with no posts.
+    await page.goto("/");
+    await page.getByRole("combobox", { name: "Filter posts by state" }).click();
+    await page.getByRole("option", { name: "Waiting for review" }).click();
+    await expect(page.getByText("Nothing is waiting for your review")).toBeVisible();
+    await expect(page.getByText("0 posts waiting for your review")).toBeVisible();
+  });
+
   test("all pages load without errors", async ({ page }) => {
     const routes = ["/", "/profiles", "/monitor", "/settings", "/posts/new"];
     for (const route of routes) {

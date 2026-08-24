@@ -61,8 +61,19 @@ import {
 } from "@/lib/api";
 import { toast } from "sonner";
 
+/**
+ * The gate queue's filter value. Every other entry in `STATUS_FILTERS` is a
+ * `current_stage` value and goes to the server as `status`; this one is not.
+ * The worker suspends a run and leaves `current_stage` on the stage it
+ * suspended in, so a post waiting on a person looks exactly like one waiting
+ * on a provider there. `awaiting_review` reads `stage_status` instead, which
+ * is where the gate is actually recorded.
+ */
+const REVIEW_FILTER = "review";
+
 const STATUS_FILTERS = [
   { value: "all", label: "All Posts" },
+  { value: REVIEW_FILTER, label: "Waiting for review" },
   { value: "pending", label: "Queued" },
   { value: "complete", label: "Complete" },
   { value: "failed", label: "Failed" },
@@ -90,6 +101,13 @@ export default function PostsPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  /**
+   * The state filter the rows on screen were fetched under, which is not the
+   * one the control shows: a filter change leaves the previous list in place
+   * until its request answers, so the header and the empty state have to
+   * describe what was asked for, not what is about to be.
+   */
+  const [shownFilter, setShownFilter] = useState("all");
   const [profileFilter, setProfileFilter] = useState<string>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -105,11 +123,13 @@ export default function PostsPage() {
       if (skeletons) setLoading(true);
       try {
         const params: Record<string, string> = {};
-        if (statusFilter !== "all") params.status = statusFilter;
+        if (statusFilter === REVIEW_FILTER) params.awaiting_review = "true";
+        else if (statusFilter !== "all") params.status = statusFilter;
         if (profileFilter !== "all") params.profile_id = profileFilter;
         if (search) params.q = search;
         const data = await posts.list(params);
         setPostList(data);
+        setShownFilter(statusFilter);
         setError(null);
       } catch (e) {
         // A route handler that dies before it can answer sends an empty
@@ -203,7 +223,9 @@ export default function PostsPage() {
               ? "Loading posts..."
               : error
                 ? "Post list unavailable"
-                : `${postList.length} total post${postList.length === 1 ? "" : "s"}`}
+                : shownFilter === REVIEW_FILTER
+                  ? `${postList.length} post${postList.length === 1 ? "" : "s"} waiting for your review`
+                  : `${postList.length} total post${postList.length === 1 ? "" : "s"}`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -245,7 +267,7 @@ export default function PostsPage() {
             />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[140px]">
+            <SelectTrigger className="w-[170px]" aria-label="Filter posts by state">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -352,10 +374,14 @@ export default function PostsPage() {
                     {filtersActive ? (
                       <>
                         <p className="text-sm font-medium">
-                          No posts match these filters
+                          {shownFilter === REVIEW_FILTER
+                            ? "Nothing is waiting for your review"
+                            : "No posts match these filters"}
                         </p>
                         <p className="mt-1 text-sm text-muted-foreground">
-                          Widen the search or the status and profile filters.
+                          {shownFilter === REVIEW_FILTER
+                            ? "A run stops here when a stage is set to review. None are stopped right now."
+                            : "Widen the search or the status and profile filters."}
                         </p>
                         <Button
                           variant="outline"
