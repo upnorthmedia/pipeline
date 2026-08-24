@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import parity from "./data/wp-html-ref-link-parity.json";
 import {
-  MissingRendererError,
   markdownToWpHtml,
   parseRefLinks,
 } from "./wp-html";
@@ -67,8 +66,10 @@ describe("definitions the rule refuses", () => {
    * until ledger item 5.3c-iii-b-1-b-iii-d ported it, so the oracle carries
    * `python_html` rather than `html`; it is now compared, alongside the
    * `ref_links` this item ports, which every one of these must leave untouched
-   * by the definition it refused. One case leaves a tag in the paragraph, and
-   * `_GutenbergRenderer` has no `inline_html` method, so it raises instead.
+   * by the definition it refused. One case leaves a tag in the paragraph, which
+   * `_GutenbergRenderer` has no method for, so its `python_html` is null; that
+   * is the case ledger item P1.3c diverges from, and the expectation for it is
+   * written by hand below because there is no Python answer to generate.
    */
 
   it("covers every way a definition can be refused", () => {
@@ -86,8 +87,12 @@ describe("definitions the rule refuses", () => {
     "falls through to the paragraph Python rendered: %s",
     (_name, decline) => {
       if (decline.python_html === null) {
-        expect(() => markdownToWpHtml(decline.markdown)).toThrowError(
-          MissingRendererError,
+        // P1.3c. `<a\nb>` is an open tag with one attribute, so the whole of
+        // it is one `inline_html` token and the line survives as it was
+        // written rather than aborting the conversion.
+        expect(decline.markdown).toBe("[a]: <a\nb>\n");
+        expect(markdownToWpHtml(decline.markdown)).toBe(
+          "<!-- wp:paragraph -->\n<p>[a]: <a\nb></p>\n<!-- /wp:paragraph -->\n\n",
         );
         return;
       }

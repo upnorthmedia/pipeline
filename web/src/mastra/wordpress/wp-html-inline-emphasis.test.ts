@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import parity from "./data/wp-html-inline-emphasis-parity.json";
 import {
-  MissingRendererError,
   markdownToWpHtml,
   parseInlineTokens,
   renderTokens,
@@ -42,6 +41,23 @@ const htmlCases = parity.html_cases as HtmlCase[];
 const tokenCases = parity.token_cases as TokenCase[];
 const renderCases = parity.render_cases as RenderCase[];
 
+const para = (inner: string) =>
+  `<!-- wp:paragraph -->\n<p>${inner}</p>\n<!-- /wp:paragraph -->\n\n`;
+
+/**
+ * Ledger item P1.3c: what the port renders where Python raised. Both cases are
+ * a run of emphasis losing the precedence scan to a tag, so the whole line
+ * survives as it was written: the `*` never opened, and the tag the scan
+ * protected is emitted verbatim rather than aborting the conversion. There is
+ * no Python answer to check these against, and the replay above asserts that
+ * the oracle still records the crash, so a regenerated corpus cannot quietly
+ * drop the divergence. An error case with no entry here fails.
+ */
+const DIVERGENT: Record<string, string> = {
+  "tag outruns the emphasis": para('*a <span x="*"> b*'),
+  "comment outruns the emphasis": para("*a <!-- b* --> c*"),
+};
+
 describe("markdownToWpHtml, the emphasis rule and the precedence scan", () => {
   it("has an oracle generated from the Python implementation", () => {
     expect(parity.source).toBe(
@@ -61,16 +77,15 @@ describe("markdownToWpHtml, the emphasis rule and the precedence scan", () => {
     (_name, testCase) => {
       if (testCase.error) {
         // Python's `BaseRenderer._get_method` raises
-        // `AttributeError: No renderer "'inline_html'"`.
+        // `AttributeError: No renderer "'inline_html'"`. The port renders
+        // instead (P1.3c), so the assertion is on the oracle's record of the
+        // crash and on the string that replaced it.
         expect(testCase.error.type).toBe("AttributeError");
         expect(testCase.error.message).toBe("No renderer \"'inline_html'\"");
-        try {
-          markdownToWpHtml(testCase.markdown);
-          expect.unreachable("expected a MissingRendererError");
-        } catch (error) {
-          expect(error).toBeInstanceOf(MissingRendererError);
-          expect((error as MissingRendererError).tokenType).toBe("inline_html");
-        }
+        expect(DIVERGENT).toHaveProperty(testCase.name);
+        expect(markdownToWpHtml(testCase.markdown)).toBe(
+          DIVERGENT[testCase.name],
+        );
         return;
       }
       expect(markdownToWpHtml(testCase.markdown)).toBe(testCase.html);

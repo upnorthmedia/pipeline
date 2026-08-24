@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import parity from "./data/wp-html-inline-link-parity.json";
 import {
-  MissingRendererError,
   markdownToWpHtml,
   parseInlineTokens,
   renderTokens,
@@ -54,6 +53,30 @@ const renderCases = parity.render_cases as RenderCase[];
 
 const refLinksOf = (c: TokenCase) => new Map(Object.entries(c.ref_links));
 
+const para = (inner: string) =>
+  `<!-- wp:paragraph -->\n<p>${inner}</p>\n<!-- /wp:paragraph -->\n\n`;
+
+/**
+ * Ledger item P1.3c: what the port renders where Python raised. Both cases put
+ * a tag inside a link's text, which is where `in_link` is set and where the
+ * precedence scan decides whether the `](` inside an attribute closes the link.
+ * The link still renders; the tag inside it is emitted verbatim rather than
+ * aborting the conversion. There is no Python answer to check these against,
+ * and the replay asserts the oracle still records the crash, so a regenerated
+ * corpus cannot quietly drop the divergence. A case with no entry here fails.
+ */
+const DIVERGENT: Record<string, string> = {
+  // The tag outruns the `link` match, so `precedence_scan` emits the text up to
+  // the `<`, then the tag, then resumes after it. Nothing is left holding a
+  // `[`, so no link forms at all and the whole line stays as it was written.
+  "a tag winning the precedence scan has no renderer": para(
+    '[a <span x="](/b)"> c](/d)',
+  ),
+  "a tag inside a link text has no renderer": para(
+    '<a href="/c">a <span> b</a>',
+  ),
+};
+
 describe("markdownToWpHtml, the link and image rules", () => {
   it("has an oracle generated from the Python implementation", () => {
     expect(parity.source).toBe(
@@ -81,19 +104,18 @@ describe("markdownToWpHtml, the link and image rules", () => {
   );
 
   it.each(raisingCases.map((c): [string, RaisingCase] => [c.name, c]))(
-    "raises where Python's renderer raises: %s",
+    "renders where Python's renderer raised: %s",
     (_name, testCase) => {
       // Python's `BaseRenderer._get_method` raises
-      // `AttributeError: No renderer "'inline_html'"`.
+      // `AttributeError: No renderer "'inline_html'"`. The port renders
+      // instead (P1.3c), so the assertion is on the oracle's record of the
+      // crash and on the string that replaced it.
       expect(testCase.error.type).toBe("AttributeError");
       expect(testCase.error.message).toBe("No renderer \"'inline_html'\"");
-      try {
-        markdownToWpHtml(testCase.markdown);
-        expect.unreachable("expected a MissingRendererError");
-      } catch (error) {
-        expect(error).toBeInstanceOf(MissingRendererError);
-        expect((error as MissingRendererError).tokenType).toBe("inline_html");
-      }
+      expect(DIVERGENT).toHaveProperty(testCase.name);
+      expect(markdownToWpHtml(testCase.markdown)).toBe(
+        DIVERGENT[testCase.name],
+      );
     },
   );
 
@@ -121,9 +143,6 @@ describe("hand written controls", () => {
    * replay would still pass without, so a rewrite that broke one has something
    * to fail against by name.
    */
-
-  const para = (inner: string) =>
-    `<!-- wp:paragraph -->\n<p>${inner}</p>\n<!-- /wp:paragraph -->\n\n`;
 
   it("nests a wp:image block comment inside the paragraph's p tag", () => {
     // An image is an inline token, so the Gutenberg block comment it renders to

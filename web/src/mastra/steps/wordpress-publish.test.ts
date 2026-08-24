@@ -49,6 +49,8 @@ const POST_NO_CREDS = "00000000-0000-4000-8000-0000000000b4"
 const POST_BAD_KEY = "00000000-0000-4000-8000-0000000000b5"
 const POST_WP_ERROR = "00000000-0000-4000-8000-0000000000b6"
 const POST_PLAIN = "00000000-0000-4000-8000-0000000000b7"
+/** The article whose markdown carries the HTML `rules/blog-ready.md` asks for. */
+const POST_INLINE_HTML = "00000000-0000-4000-8000-0000000000b8"
 const POST_ABSENT = "00000000-0000-4000-8000-0000000000bf"
 
 const ALL_POSTS = [
@@ -59,6 +61,7 @@ const ALL_POSTS = [
   POST_BAD_KEY,
   POST_WP_ERROR,
   POST_PLAIN,
+  POST_INLINE_HTML,
   POST_ABSENT,
 ]
 
@@ -87,6 +90,33 @@ function markdown(postId: string): string {
     `![](/media/${postId}/b.jpg)`,
     "",
     `![](/media/${postId}/c.webp)`,
+    "",
+  ].join("\n")
+}
+
+/**
+ * An article of the shape `rules/blog-ready.md` asks the ready stage for when
+ * the output format is `wordpress`: a `wp:image` comment, a `figure` block, and
+ * prose carrying the inline tags an LLM writes without being asked. Only the
+ * first two are HTML *blocks*; `<br />`, `<sup>` and an anchor with text after
+ * it on the same line are inline, which is the whole point of the case.
+ */
+function inlineHtmlMarkdown(postId: string): string {
+  return [
+    "---",
+    `title: ${TITLE}`,
+    `description: ${DESCRIPTION}`,
+    "---",
+    "",
+    "Bees navigate by polarised light.<br />Even under cloud.",
+    "",
+    '<!-- wp:image {"sizeSlug":"large"} -->',
+    `<figure class="wp-block-image size-large"><img src="/media/${postId}/a.png" alt="A bee"/></figure>`,
+    "<!-- /wp:image -->",
+    "",
+    'See <a href="/guide">the field guide</a> for the dance vocabulary.',
+    "",
+    "Ultraviolet<sup>1</sup> light is the cue.",
     "",
   ].join("\n")
 }
@@ -274,6 +304,7 @@ beforeAll(async () => {
     [POST_BAD_KEY, PROFILE_ID],
     [POST_WP_ERROR, PROFILE_ID],
     [POST_PLAIN, PLAIN_PROFILE_ID],
+    [POST_INLINE_HTML, PROFILE_ID],
   ] as const) {
     await db.insert(posts).values({
       id: postId,
@@ -282,7 +313,12 @@ beforeAll(async () => {
       topic: "Topic from the row",
       // `POST_PLAIN` is the row with no `ready_content` and no manifest, so it
       // is what proves the `or` chain and the featured fallback.
-      readyContent: postId === POST_PLAIN ? null : markdown(postId),
+      readyContent:
+        postId === POST_PLAIN
+          ? null
+          : postId === POST_INLINE_HTML
+            ? inlineHtmlMarkdown(postId)
+            : markdown(postId),
       // Always present, so `ready_content or final_md_content` is a real choice
       // rather than a null coalesce with nothing on the other side.
       finalMdContent:
@@ -546,6 +582,45 @@ describe("a post with nothing configured", () => {
 
   it("uses posts.topic as the alt text of every upload", () => {
     expect(JSON.parse(recorded[1].body)).toEqual({ alt_text: "Topic from the row" })
+  })
+})
+
+/**
+ * Ledger item P1.3c. `rules/blog-ready.md` asks the ready stage for Gutenberg
+ * HTML when the output format is `wordpress`, and an LLM writing prose reaches
+ * for `<br />` and `<sup>` unasked. Every one of those that mistune's *block*
+ * layer declines becomes an `inline_html` token, which `_GutenbergRenderer` has
+ * no method for, so the publish died inside `markdownToWpHtml` and the run
+ * reported `no renderer for "inline_html"`.
+ */
+describe("an article carrying the HTML the ready stage is told to write", () => {
+  let output: WordPressPublishOutput
+
+  beforeAll(async () => {
+    recorded = []
+    published.length = 0
+    logged.length = 0
+    output = await publishPost(POST_INLINE_HTML)
+  }, 60_000)
+
+  it("publishes rather than failing in the converter", () => {
+    expect(output.status).toBe("published")
+    expect(output.error).toBeNull()
+  })
+
+  it("sends the inline tags through to WordPress verbatim", () => {
+    const { content } = articleBody<{ content: string }>()
+    expect(content).toContain(
+      "<p>Bees navigate by polarised light.<br />Even under cloud.</p>",
+    )
+    expect(content).toContain('<p>See <a href="/guide">the field guide</a> for the dance vocabulary.</p>')
+    expect(content).toContain("<p>Ultraviolet<sup>1</sup> light is the cue.</p>")
+  })
+
+  it("still rewrites the media URL inside the figure block", () => {
+    const { content } = articleBody<{ content: string }>()
+    expect(content).toContain(`${base}/wp-content/uploads/`)
+    expect(content).not.toContain(`/media/${POST_INLINE_HTML}/`)
   })
 })
 

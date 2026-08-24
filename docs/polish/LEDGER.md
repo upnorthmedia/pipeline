@@ -181,9 +181,16 @@ move on. A split is not an iteration on its own: split and complete the first ch
         joins a 422's field errors instead of falling back, and the two Test Connection
         buttons report the reason instead of swallowing it. Verified against a real WordPress
         install, `ui/p13b-wp-url-*.png`. [evidence](evidence/p1.md#p13b)
-  - [ ] **P1.3c** `markdown_to_wp_html` raises `AttributeError: No renderer "'inline_html'"`
+  - [x] **P1.3c** `markdown_to_wp_html` raised `AttributeError: No renderer "'inline_html'"`
         for any article whose markdown carries an HTML tag mistune's block layer declines
-        (P2.61), so the publish path crashes rather than rendering.
+        (P2.61), so the publish crashed in the converter before it reached WordPress, and the
+        run reported an internal token type. `rules/blog-ready.md` asks the ready stage for
+        HTML, and an LLM writes `<br />` and `<sup>` unasked, so the token is one the
+        pipeline produces. `renderToken` emits the tag as it was written; every other
+        unknown type still raises. The 25 oracle cases that record the crash are kept and
+        each now asserts both the record and the string that replaced it. Verified by a real
+        publish to a real WordPress install, read back with `context=edit`.
+        [evidence](evidence/p1.md#p13c)
   - [ ] **P1.3d** The UI: one obvious place to configure and test a connection, a connection
         status derived from a real test rather than from two fields being non-empty, output
         formats that disable themselves with an explanation, and a publish action that reports
@@ -267,7 +274,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [x] **P2.58** `[confirmed]` `GET /api/profiles/{profile_id}/wordpress/categories` and `/authors` answer a 500 for every failure the WordPress install reports, because ... Fixed by P1.3a: both handlers answer a 502 carrying the install's own message, or a sentence naming the key the payload is missing; entry removed from `todo.md`. [evidence](evidence/p1.md#p13a)
 - [x] **P2.59** `[confirmed]` `GET /api/profiles/{profile_id}/wordpress/test` answers a 500, not `{connected: false}`, when the configured `wp_url` serves valid JSON that is ... Fixed by P1.3a: a `/wp-json` root that is not a JSON object is reported as `{connected: false, error}` like every other failure the endpoint knows about; entry removed from `todo.md`. [evidence](evidence/p1.md#p13a)
 - [x] **P2.60** `[confirmed]` `src/mastra/workflows/scaffold-check.test.ts > emits the workflow lifecycle events the trace view will read` fails inside a full `pnpm test` run ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
-- [ ] **P2.61** `[confirmed]` `markdown_to_wp_html` raises `AttributeError: No renderer "'inline_html'"` for any article whose markdown contains an HTML tag mistune's block ...
+- [x] **P2.61** `[confirmed]` `markdown_to_wp_html` raises `AttributeError: No renderer "'inline_html'"` for any article whose markdown contains an HTML tag mistune's block ...
 - [ ] **P2.62** `[confirmed]` The TypeScript port of mistune's `linebreak` and `softbreak` inline patterns in `web/src/mastra/wordpress/wp-html.ts` still spells Python's `\s` ...
 - [x] **P2.63** `[confirmed]` WordPress publishing uploads no images at all in production. The media sweep in `api/src/pipeline/publish.py` keeps a file only when ... Fixed by P1.2c-i; entry removed from `todo.md`. [evidence](evidence/p1.md#p12c-i)
 - [ ] **P2.64** `[confirmed]` The local-to-remote image URL rewrite in `api/src/pipeline/publish.py` corrupts a media URL that is a prefix of another one. The loop is `for ...

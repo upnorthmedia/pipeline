@@ -325,16 +325,6 @@
   change which rows a given bound returns and defeat the parity oracle. Worth revisiting
   once the TypeScript writers are the only ones producing `execution_logs` entries: item
   5.5c's `log` publisher is the single writer, so pinning its format in one place is cheap.
-- [confirmed] 2026-08-23 `markdown_to_wp_html` raises `AttributeError: No renderer
-  "'inline_html'"` for any article whose markdown contains an HTML tag mistune's block
-  layer declines. `_GutenbergRenderer` in `api/src/services/wp_html.py` implements
-  `block_html` but not `inline_html`, so `<custom-tag />`, `<span>x</span>` mid paragraph,
-  or a block tag on the line after a paragraph all crash the WordPress publish path rather
-  than rendering. Found while porting ledger item 5.3c-iii-b-1-b-ii-3-a, which records five
-  such inputs in `web/src/mastra/wordpress/data/wp-html-html-parity.json` under `declines`.
-  The fix is a two-line `inline_html` method returning `token["raw"]`, but it changes the
-  output of a currently-crashing path and belongs with the Phase 3 images/ready work rather
-  than with the tokenizer port.
 - [confirmed] 2026-08-23 The TypeScript port of mistune's `linebreak` and `softbreak`
   inline patterns in `web/src/mastra/wordpress/wp-html.ts` still spells Python's `\s` as
   JavaScript's `\s`. The two sets differ: Python's holds `\x1c`-`\x1f` and `\x85` and not

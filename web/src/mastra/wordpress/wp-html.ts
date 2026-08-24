@@ -63,10 +63,12 @@
  * Ported here too (ledger 5.3c-iii-b-1-b-iii-b): `auto_link`, `auto_email` and
  * `inline_html`, the three rules that turn on `in_link`. Inside an anchor an
  * autolink is not a link, it is the text it was written as, which is what stops
- * a hand written `<a>` from nesting a second one. `inline_html` is also the one
- * inline token `_GutenbergRenderer` has no method for, so any document holding
- * a tag inside a paragraph raises out of the renderer rather than converting;
- * `MissingRendererError` is where mistune raises `AttributeError`.
+ * a hand written `<a>` from nesting a second one. `inline_html` is the one
+ * inline token `_GutenbergRenderer` has no method for, so in Python any
+ * document holding a tag inside a paragraph raised out of the renderer rather
+ * than converting; `MissingRendererError` is where mistune raises
+ * `AttributeError`, and ledger item P1.3c is the one place this file answers
+ * differently. See the `inline_html` branch of `renderToken`.
  *
  * Ported here too (ledger 5.3c-iii-b-1-b-iii-c): `emphasis`, which produces both
  * the `emphasis` and the `strong` token and is the first rule to recurse into
@@ -78,8 +80,8 @@
  * `state.env.refLinks`, so this is where the block layer's `ref_link` output is
  * finally observable, and it is also the only rule that walks the source by
  * hand rather than through a single pattern. With it the whole of
- * `markdown_to_wp_html` is ported, so nothing is left that raises for want of a
- * handler.
+ * `markdown_to_wp_html` is ported, so nothing is left unparsed for want of a
+ * rule.
  *
  * Regex translation notes:
  *
@@ -141,8 +143,10 @@ export type Token = {
  * `_GutenbergRenderer` deliberately implements only the token types the
  * pipeline's own markdown produces, so an `inline_html` token, which is what a
  * hand written tag inside a paragraph becomes, aborts the whole conversion in
- * Python. The port raises in the same place rather than inventing an output for
- * it.
+ * Python. Ledger item P1.3c gave that one token an output, because the pipeline
+ * does produce it and a crashed publish is not a faithful behaviour worth
+ * keeping. Every other unknown type still raises here rather than being
+ * invented an output for.
  */
 export class MissingRendererError extends Error {
   readonly tokenType: string;
@@ -2093,9 +2097,16 @@ function renderToken(token: Token): string {
         '<hr class="wp-block-separator"/>\n' +
         "<!-- /wp:separator -->\n\n"
       );
-    // `inline_html` is listed for the reader: `_GutenbergRenderer` has no
-    // method for it, so it takes the same path as any other unhandled type.
+    // The one deliberate divergence from `_GutenbergRenderer`, ledger item
+    // P1.3c. Python has no `inline_html` method, so every article carrying a
+    // tag the block layer declined aborted the whole conversion and the
+    // WordPress publish reported `No renderer "'inline_html'"`. The tag is
+    // emitted as it was written, which is what `text` and `block_html` already
+    // do with their own raw: nothing in this renderer escapes. No `wp:html`
+    // wrapper, because the token is inline and the comment would land inside
+    // the `<p>` its paragraph opened.
     case "inline_html":
+      return token.raw ?? "";
     default:
       throw new MissingRendererError(token.type);
   }

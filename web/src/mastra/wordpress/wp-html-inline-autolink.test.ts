@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import parity from "./data/wp-html-inline-autolink-parity.json";
 import {
-  MissingRendererError,
   markdownToWpHtml,
   parseInlineTokens,
   renderTokens,
@@ -19,9 +18,10 @@ import {
  *
  * Three corpora, because these rules cannot all be observed the same way:
  *
- * * `html_cases` are whole documents. An autolink case pins the HTML, and an
- *   `inline_html` case pins the `AttributeError` mistune raises because
- *   `_GutenbergRenderer` has no method for that token.
+ * * `html_cases` are whole documents. An autolink case pins the HTML. An
+ *   `inline_html` case records the `AttributeError` mistune raises because
+ *   `_GutenbergRenderer` has no method for that token, which ledger item P1.3c
+ *   diverges from; see `DIVERGENT` below.
  * * `token_cases` are single inline strings run through mistune's own
  *   `InlineParser.__call__`. This is the only surface the `in_link` flag is
  *   visible on, since the rule that toggles it is also the rule that aborts
@@ -44,6 +44,54 @@ const htmlCases = parity.html_cases as HtmlCase[];
 const tokenCases = parity.token_cases as TokenCase[];
 const renderCases = parity.render_cases as RenderCase[];
 
+/**
+ * Ledger item P1.3c: what the port renders where Python raised.
+ *
+ * The oracle records an `AttributeError` for every case here, because
+ * `_GutenbergRenderer` has no `inline_html` method and mistune's
+ * `BaseRenderer._get_method` raises for one. That crashed the WordPress publish
+ * for any article carrying a tag the block layer declined, so the renderer now
+ * emits the tag exactly as it was written. There is no Python answer to check
+ * these against: every string below is derived from the source and from the
+ * wrappers the surrounding block token renders, and the replay asserts that the
+ * oracle still records the crash so a regenerated corpus cannot quietly drop
+ * the divergence.
+ *
+ * The table is keyed by case name and the replay fails an error case with no
+ * entry, so a scenario exported later cannot slip through unasserted.
+ */
+const para = (inner: string) =>
+  `<!-- wp:paragraph -->\n<p>${inner}</p>\n<!-- /wp:paragraph -->\n\n`;
+
+const DIVERGENT: Record<string, string> = {
+  // The autolink is refused by the `<` in the middle of it, so the leading `<`
+  // is text and only `<b>` is a tag. Both survive verbatim.
+  "an angle bracket stops the autolink and opens a tag": para(
+    "<https://example.com/a<b>",
+  ),
+  "inline tag with text after it on the line is not a block":
+    para("<span>a</span>"),
+  "anchor with text after it on the line is not a block": para(
+    '<a href="/x">y</a>',
+  ),
+  "open tag inside a paragraph": para("a <span>b"),
+  "close tag inside a paragraph": para("a </span> b"),
+  "self closing tag inside a paragraph": para("a <br/> b"),
+  "open tag with attributes inside a paragraph": para(
+    'a <img src="x" alt="y"> b',
+  ),
+  "anchor inside a paragraph": para('see <a href="/x">y</a> now'),
+  "comment inside a paragraph": para("a <!-- c --> b"),
+  "processing instruction inside a paragraph": para("a <?php echo 1; ?> b"),
+  "doctype inside a paragraph": para("a <!DOCTYPE html> b"),
+  "cdata inside a paragraph": para("a <![CDATA[x]]> b"),
+  "a tag name that is not html is still a tag": para("a <weird-tag> b"),
+  "tag inside a heading":
+    '<!-- wp:heading {"level":1} -->\n<h1>a <span>b</h1>\n<!-- /wp:heading -->\n\n',
+  "tag inside a list item":
+    "<!-- wp:list -->\n<ul><li>a <span>b</li>\n</ul>\n<!-- /wp:list -->\n\n",
+};
+
 describe("markdownToWpHtml, the autolink and inline html rules", () => {
   it("has an oracle generated from the Python implementation", () => {
     expect(parity.source).toBe(
@@ -63,16 +111,15 @@ describe("markdownToWpHtml, the autolink and inline html rules", () => {
     (_name, testCase) => {
       if (testCase.error) {
         // Python's `BaseRenderer._get_method` raises
-        // `AttributeError: No renderer "'inline_html'"`.
+        // `AttributeError: No renderer "'inline_html'"`. The port renders
+        // instead (P1.3c), so the assertion is on the oracle's record of the
+        // crash and on the string that replaced it.
         expect(testCase.error.type).toBe("AttributeError");
         expect(testCase.error.message).toBe("No renderer \"'inline_html'\"");
-        try {
-          markdownToWpHtml(testCase.markdown);
-          throw new Error("expected markdownToWpHtml to throw");
-        } catch (err) {
-          expect(err).toBeInstanceOf(MissingRendererError);
-          expect((err as MissingRendererError).tokenType).toBe("inline_html");
-        }
+        expect(DIVERGENT).toHaveProperty(testCase.name);
+        expect(markdownToWpHtml(testCase.markdown)).toBe(
+          DIVERGENT[testCase.name],
+        );
         return;
       }
       expect(markdownToWpHtml(testCase.markdown)).toBe(testCase.html);
@@ -100,9 +147,6 @@ describe("hand written controls", () => {
    * the real Python function before being committed. They cover seams the
    * generated corpora reach only indirectly.
    */
-
-  const para = (inner: string) =>
-    `<!-- wp:paragraph -->\n<p>${inner}</p>\n<!-- /wp:paragraph -->\n\n`;
 
   it("uses the bracketed text as both href and label", () => {
     expect(markdownToWpHtml("<https://example.com>\n")).toBe(
