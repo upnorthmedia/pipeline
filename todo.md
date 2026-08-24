@@ -607,3 +607,13 @@
   path concatenation, but userinfo passes through `fetch` unharmed, so it is not that defect.
   It does mean a password can land in `website_profiles.wp_url`, which is stored in plain
   text while `wp_app_password` is Fernet-encrypted. Found at polish ledger item P1.3b.
+
+- [confirmed] 2026-08-24 The run trace does not render publish events. `RunTrace`
+  (`web/src/components/run-trace.tsx`) builds its table from the six pipeline stages and reads
+  `execution_logs` entries by `stage`, and both publish steps write their entries with
+  `stage: ""`, so `publish_start`, `publish_complete` and `publish_error` are invisible there.
+  A publish is the last thing a run does and the thing most likely to fail on something
+  outside this app, and the view built for watching a run says nothing about it. The post
+  header now carries a failure panel (polish ledger P1.3d-iii), so the reason is reachable;
+  this is about the trace being the complete account it presents itself as. Found at polish
+  ledger P1.3d-iii.

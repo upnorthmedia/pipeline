@@ -79,6 +79,7 @@ vi.mock("remark-gfm", () => ({
 }));
 
 const { posts } = await import("@/lib/api");
+const { toast } = await import("sonner");
 const mockGet = vi.mocked(posts.get);
 const mockAnalytics = vi.mocked(posts.analytics);
 const mockRun = vi.mocked(posts.run);
@@ -378,5 +379,148 @@ describe("PostDetailPage", () => {
     await waitFor(() => {
       expect(screen.getByText("SEO Checklist")).toBeInTheDocument();
     });
+  });
+});
+
+describe("PostDetailPage publishing", () => {
+  const mockPublish = vi.mocked(posts.publish);
+
+  /** `appendExecutionLog`'s stored shape, with the keys it always writes. */
+  function logEntry(event: string, message: string) {
+    return { ts: "2026-08-24T00:00:00Z", stage: "", level: "error", event, message };
+  }
+
+  it("reports the reason the server refused the publish", async () => {
+    mockGet.mockResolvedValue(
+      makeCompletedPost({ output_format: "wordpress" })
+    );
+    mockPublish.mockRejectedValue(
+      new Error(JSON.stringify({ detail: "No content to publish" }))
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /publish to wordpress/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /publish to wordpress/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("No content to publish");
+    });
+  });
+
+  it("says the publish is queued rather than already running", async () => {
+    mockGet.mockResolvedValue(
+      makeCompletedPost({ output_format: "wordpress" })
+    );
+    mockPublish.mockResolvedValue({ status: "queued" });
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /publish to wordpress/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /publish to wordpress/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Queued to publish")).toBeInTheDocument();
+    });
+    expect(toast.info).toHaveBeenCalledWith("Queued to publish to WordPress.");
+  });
+
+  it("shows the reason a WordPress publish failed on a page that was reloaded after it", async () => {
+    mockGet.mockResolvedValue(
+      makeCompletedPost({
+        output_format: "wordpress",
+        wp_publish_status: "failed",
+        execution_logs: [
+          logEntry(
+            "publish_error",
+            "WordPress publish failed: <strong>Error:</strong> Invalid application password."
+          ),
+        ],
+      })
+    );
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Publishing to WordPress failed")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("Error: Invalid application password.")
+    ).toBeInTheDocument();
+  });
+
+  it("shows the reason a Next.js publish failed the same way", async () => {
+    mockGet.mockResolvedValue(
+      makeCompletedPost({
+        output_format: "nextjs",
+        nextjs_publish_status: "failed",
+        execution_logs: [
+          logEntry("publish_error", "Next.js publish failed: Webhook returned 401: bad signature"),
+        ],
+      })
+    );
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Publishing to Next.js failed")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Webhook returned 401: bad signature")).toBeInTheDocument();
+  });
+
+  it("says so plainly when a failed publish left no reason behind", async () => {
+    mockGet.mockResolvedValue(
+      makeCompletedPost({ output_format: "wordpress", wp_publish_status: "failed" })
+    );
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Publishing to WordPress failed")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("The run recorded no reason. The worker log has the detail.")
+    ).toBeInTheDocument();
+  });
+
+  it("retries from the failure itself", async () => {
+    mockGet.mockResolvedValue(
+      makeCompletedPost({
+        output_format: "wordpress",
+        wp_publish_status: "failed",
+        execution_logs: [logEntry("publish_error", "WordPress publish failed: nope")],
+      })
+    );
+    mockPublish.mockResolvedValue({ status: "queued" });
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Publishing to WordPress failed")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /try publishing again/i }));
+
+    await waitFor(() => {
+      expect(mockPublish).toHaveBeenCalledWith("post-1");
+    });
+    expect(screen.queryByText("Publishing to WordPress failed")).not.toBeInTheDocument();
+  });
+
+  it("does not claim a failure once the post has published", async () => {
+    mockGet.mockResolvedValue(
+      makeCompletedPost({
+        output_format: "wordpress",
+        wp_publish_status: "published",
+        wp_post_url: "https://example.test/hello",
+        execution_logs: [logEntry("publish_error", "WordPress publish failed: an older attempt")],
+      })
+    );
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Published")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Publishing to WordPress failed")).not.toBeInTheDocument();
   });
 });

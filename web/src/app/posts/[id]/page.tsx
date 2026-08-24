@@ -48,6 +48,8 @@ import {
   type PostAnalytics,
   STAGES,
 } from "@/lib/api";
+import { lastPublishError } from "@/lib/publish-report";
+import { plainMessage } from "@/lib/plain-message";
 import { useSSE, type SSEEvent } from "@/hooks/use-sse";
 import { toast } from "sonner";
 
@@ -240,8 +242,13 @@ export default function PostDetailPage() {
         fetchPost();
       }
       if (event.event === "publish_error") {
-        const error = (event as Record<string, unknown>).error as string || "Unknown error";
-        toast.error(error, { duration: 8000 });
+        const raw = (event as Record<string, unknown>).error;
+        // WordPress writes its REST errors for a browser; the refetch below
+        // renders the same reason off the row through the same cleaner.
+        const error = typeof raw === "string" ? plainMessage(raw) : "";
+        toast.error(error || "The publish failed and reported no reason.", {
+          duration: 8000,
+        });
         fetchPost();
       }
     },
@@ -334,18 +341,30 @@ export default function PostDetailPage() {
     }
   };
 
+  /**
+   * `POST /api/posts/{id}/publish` queues the run and answers 202; the worker
+   * is what publishes. So the optimistic write here is `pending`, which is the
+   * status the handler actually stored, and not `publishing`, which only the
+   * publish step sets once it has the credentials in hand. Claiming
+   * `publishing` made a post whose worker never picked the event up read
+   * "Publishing..." forever.
+   *
+   * The refusals are ordinary and worth reading: no content on the post, or an
+   * `output_format` no publish step handles.
+   */
   const handlePublish = async () => {
+    const target = post?.output_format === "nextjs" ? "Next.js" : "WordPress";
     try {
       await posts.publish(postId);
-      if (post?.output_format === "nextjs") {
-        toast.info("Publishing to Next.js...");
-        setPost((prev) => prev ? { ...prev, nextjs_publish_status: "publishing" } : prev);
-      } else {
-        toast.info("Publishing to WordPress...");
-        setPost((prev) => prev ? { ...prev, wp_publish_status: "publishing" } : prev);
-      }
-    } catch {
-      toast.error("Failed to publish");
+      toast.info(`Queued to publish to ${target}.`);
+      setPost((prev) => {
+        if (!prev) return prev;
+        return prev.output_format === "nextjs"
+          ? { ...prev, nextjs_publish_status: "pending" }
+          : { ...prev, wp_publish_status: "pending" };
+      });
+    } catch (e) {
+      toast.error(apiErrorMessage(e, `Could not start publishing to ${target}.`));
     }
   };
 
@@ -390,6 +409,24 @@ export default function PostDetailPage() {
 
   const isRunning = STAGES.some((s) => post.stage_status[s] === "running");
   const isComplete = post.current_stage === "complete";
+  // The destination this post's `output_format` names, and what the last
+  // attempt at it did. The two status columns are independent and neither
+  // publish step clears the other, so a post that changed format can still
+  // carry its old destination's status; the format is what decides which one
+  // this page speaks about.
+  const publishTarget =
+    post.output_format === "wordpress"
+      ? { label: "WordPress", status: post.wp_publish_status }
+      : post.output_format === "nextjs"
+        ? { label: "Next.js", status: post.nextjs_publish_status }
+        : null;
+  // Gated on the status column, not on the presence of an entry: a retry that
+  // succeeded leaves the earlier failure's entry on the row forever.
+  const publishFailure =
+    publishTarget?.status === "failed"
+      ? (lastPublishError(post.execution_logs) ??
+        "The run recorded no reason. The worker log has the detail.")
+      : null;
   // A post nothing has ever executed against: no stage has moved off
   // `pending` and no stage column holds output. Posts normally start on
   // creation, so this is the state of a post whose run never reached the
@@ -432,6 +469,11 @@ export default function PostDetailPage() {
                   </Badge>
                 </a>
               )}
+              {post.wp_publish_status === "pending" && (
+                <Badge variant="outline" className="text-amber-600 border-amber-600">
+                  Queued to publish
+                </Badge>
+              )}
               {post.wp_publish_status === "publishing" && (
                 <Badge variant="outline">
                   <Loader2 className="h-3 w-3 mr-1 animate-spin" />
@@ -453,7 +495,7 @@ export default function PostDetailPage() {
               )}
               {post.nextjs_publish_status === "pending" && (
                 <Badge variant="outline" className="text-amber-600 border-amber-600">
-                  Publish pending
+                  Queued to publish
                 </Badge>
               )}
               {post.nextjs_publish_status === "publishing" && (
@@ -463,9 +505,7 @@ export default function PostDetailPage() {
                 </Badge>
               )}
               {post.nextjs_publish_status === "failed" && (
-                <Badge variant="destructive" title="Check the profile's Next.js Integration settings">
-                  Next.js publish failed
-                </Badge>
+                <Badge variant="destructive">Publish failed</Badge>
               )}
               {saving && (
                 <span className="text-xs text-muted-foreground animate-pulse">
@@ -508,26 +548,12 @@ export default function PostDetailPage() {
                 Publish to WordPress
               </Button>
             )}
-          {post.output_format === "wordpress" &&
-            post.wp_publish_status === "failed" && (
-              <Button size="sm" variant="outline" onClick={handlePublish}>
-                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                Retry Publish
-              </Button>
-            )}
           {post.output_format === "nextjs" &&
             isComplete &&
             (!post.nextjs_publish_status || post.nextjs_publish_status === "pending") && (
               <Button size="sm" onClick={handlePublish}>
                 <Upload className="h-3.5 w-3.5 mr-1.5" />
                 Publish to Next.js
-              </Button>
-            )}
-          {post.output_format === "nextjs" &&
-            post.nextjs_publish_status === "failed" && (
-              <Button size="sm" variant="outline" onClick={handlePublish}>
-                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                Retry Publish
               </Button>
             )}
 
@@ -556,6 +582,31 @@ export default function PostDetailPage() {
           <Button variant="outline" size="sm" onClick={retry}>
             <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
             Retry
+          </Button>
+        </div>
+      )}
+
+      {/*
+        A publish runs in the worker, so its reason arrives as one toast the
+        user may not have been looking at. This is the same reason read back
+        off the row, so it survives a reload for as long as the status column
+        says the attempt failed.
+      */}
+      {publishTarget && publishFailure && (
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">
+              Publishing to {publishTarget.label} failed
+            </p>
+            <p className="mt-0.5 text-sm text-muted-foreground">{publishFailure}</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={handlePublish}>
+            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+            Try publishing again
           </Button>
         </div>
       )}

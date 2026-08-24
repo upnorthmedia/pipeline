@@ -409,9 +409,10 @@ describe("a post the blog accepts", () => {
   })
 
   /**
-   * Python's `_fail` and its success branch both write the column and the bus
-   * and nothing else. The WordPress hook's write an `execution_logs` entry;
-   * this one must not, or `GET /posts/{id}/logs` grows a line Python never had.
+   * Python's success branch wrote the column and the bus and nothing else, and
+   * that is kept: `nextjs_published_at` is on the row, so a page loaded later
+   * can still say when the post went out. Only the failure path diverges, and
+   * only because nothing else records why it failed. See its own test below.
    */
   it("writes no execution log entry", async () => {
     const row = await readPost(POST_OK)
@@ -507,13 +508,29 @@ describe("the guards", () => {
   })
 
   /**
-   * `_fail` in `nextjs_publish.py` logs, writes the column and publishes the
-   * event. Its WordPress namesake also appends to `execution_logs`; copying
-   * that here would put an entry in `GET /posts/{id}/logs` Python never wrote.
+   * Deliberate divergence from `nextjs_publish.py`, whose `_fail` logged to the
+   * process, wrote the column and published the event, and left no record on
+   * the row. The `publish_error` event is gone the moment it is delivered, so a
+   * page loaded after the run had `nextjs_publish_status = "failed"` and no
+   * reason anywhere the dashboard can reach. Its WordPress namesake already
+   * appended the entry; this one now matches it, with the same wording pattern,
+   * so `GET /posts/{id}/logs` and the run trace hold the reason for both
+   * destinations. The cost is one line in that response Python never wrote.
    */
-  it("writes no execution log entry on the failure path either", async () => {
-    for (const postId of [POST_NO_PROFILE, POST_UNCONFIGURED, POST_BAD_SECRET]) {
-      expect((await readPost(postId)).executionLogs ?? []).toEqual([])
+  it("records the reason on the row so a later page load can still show it", async () => {
+    for (const [postId, reason] of [
+      [POST_NO_PROFILE, NO_PROFILE_MESSAGE],
+      [POST_UNCONFIGURED, NOT_CONFIGURED_MESSAGE],
+      [POST_BAD_SECRET, "Failed to decrypt webhook secret"],
+    ] as const) {
+      const entries = (await readPost(postId)).executionLogs ?? []
+      expect(entries).toHaveLength(1)
+      expect(entries[0]).toMatchObject({
+        stage: "",
+        level: "error",
+        event: "publish_error",
+        message: `Next.js publish failed: ${reason}`,
+      })
     }
   })
 })

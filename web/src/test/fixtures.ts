@@ -96,7 +96,7 @@ export function makePost(overrides?: Partial<Post>): Post {
   };
 }
 
-export function makeCompletedPost(): Post {
+export function makeCompletedPost(overrides?: Partial<Post>): Post {
   const stageStatus: StageStatusMap = {
     research: "complete",
     outline: "complete",
@@ -134,6 +134,7 @@ export function makeCompletedPost(): Post {
       total_failed: 0,
     },
     completed_at: "2025-01-16T12:00:00Z",
+    ...overrides,
   });
 }
 

@@ -220,7 +220,17 @@ move on. A split is not an iteration on its own: split and complete the first ch
           selected format's reason as a `role="alert"`. Reachability is deliberately not part
           of it: a configured site that is down is a failure the connection card reports.
           Verified in a real browser, `ui/p13dii-*.png`. [evidence](evidence/p1.md#p13d-ii)
-    - [ ] **P1.3d-iii** A publish action that reports what happened.
+    - [x] **P1.3d-iii** A publish action that reports what happened. `handlePublish` had a
+          bare `catch` that replaced the handler's own refusal (`No content to publish`,
+          `Publishing not supported for output_format '<x>'`) with `Failed to publish`; it
+          wrote `publishing` on a 202 that had stored `pending`, so a post whose worker never
+          picked the event up read `Publishing...` forever; and the reason a publish failed
+          was not durable anywhere the UI reads. `src/lib/publish-report.ts` reads the last
+          `publish_error` entry off `execution_logs` and a `role="alert"` panel under the
+          header carries it with the retry next to it. `steps/nextjs-publish.ts`'s `fail` now
+          appends that entry, the one deliberate divergence from Python, which left a failed
+          Next.js publish with no reason on the row at all. Verified in a real browser,
+          `ui/p13diii-*.png`. [evidence](evidence/p1.md#p13d-iii)
 
 ## P2. Clear the backlog in `todo.md`
 

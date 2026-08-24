@@ -61,6 +61,7 @@ import { z } from "zod"
 
 import { getDb, posts, websiteProfiles } from "../../db"
 import { decrypt } from "../../lib/crypto"
+import { appendExecutionLog } from "../execution-log"
 import { signPayload } from "../../lib/hmac-signing"
 import { mediaRoot } from "../images/media-dir"
 import { buildNextjsPayload, isoformatUtc } from "../nextjs/payload"
@@ -111,12 +112,21 @@ export const nextjsPublishOutputSchema = z.object({
 export type NextjsPublishOutput = z.infer<typeof nextjsPublishOutputSchema>
 
 /**
- * `_fail`: the log line, then the row, then the browser.
+ * `_fail`: the log line, then the row, then the audit trail, then the browser.
  *
- * The order is Python's and it is the opposite of the WordPress hook's, which
- * wrote the row first. Kept as written: nothing here depends on the ordering
- * between the log and the column, and reordering to match its sibling would be
- * a change with no reason behind it.
+ * The first three are Python's order, which is the opposite of the WordPress
+ * hook's; nothing here depends on the ordering between the process log and the
+ * column, so reordering to match its sibling would be a change with no reason
+ * behind it.
+ *
+ * The `execution_logs` entry is the one deliberate divergence. Python left no
+ * record of a Next.js failure on the row at all: the reason went to the process
+ * log, which no user can read, and to the `publish_error` event, which is gone
+ * the moment it is delivered. A page loaded after the run therefore showed
+ * `failed` with no reason anywhere. The entry goes in before the event, for the
+ * same reason the WordPress hook writes its row first: the dashboard refetches
+ * on `publish_error` and must not read a post that has not recorded why yet.
+ * The wording matches the WordPress hook's so one reader can strip either.
  */
 async function fail(
   pubsub: PubSub,
@@ -126,6 +136,12 @@ async function fail(
 ): Promise<NextjsPublishOutput> {
   logger?.error(`Next.js publish failed for post ${postId}: ${message}`)
   await getDb().update(posts).set({ nextjsPublishStatus: "failed" }).where(eq(posts.id, postId))
+  await appendExecutionLog(postId, {
+    stage: "",
+    level: "error",
+    event: "publish_error",
+    message: `Next.js publish failed: ${message}`,
+  })
   await publishPipelineEvent(pubsub, postId, "publish_error", {
     error: message,
     target: "nextjs",
