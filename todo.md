@@ -57,12 +57,6 @@
   image is recorded as failed. `web/src/mastra/images/generate-one.ts` treats a non-string as
   absent instead. No rule asks the model for a null there and no fixture contains one, so the
   divergence is unobserved rather than tested; decide the intended behaviour before Phase 7.
-- [confirmed] 2026-08-22 A `pnpm test` run writes generated images into the repo's own
-  `media/test-123/` rather than a temp directory, and 41 of them are already committed. The
-  filenames carry a random suffix, so every run leaves new untracked files behind for the
-  next commit to sweep up. `MEDIA_DIR` already exists and the workflow suites set it to a
-  `mkdtemp`; the `images-generate` unit tests do not.
-
 - [confirmed] 2026-08-22 The `posts.stage_settings` column default in the live database is
   `{"edit":"review","write":"review","images":"review","outline":"review","research":"review"}`,
   which predates the gate removal and does not mention `ready` at all. SQLAlchemy sent its own
@@ -117,11 +111,6 @@
   and the variable is the only lever. Item 7.2 must set `RULES_DIR`, `TEXTSTAT_DATA_DIR` and
   `MEDIA_DIR` on the Railway `worker` service, and 7.1 must set them on the compose `worker`
   service.
-- [confirmed] 2026-08-22 `web/src/components/__tests__/export-button.test.tsx` writes real files
-  into the repo's `media/test-123/` on every `pnpm -C web test` run, leaving untracked `.webp`
-  artifacts behind. It never sets `MEDIA_DIR`, unlike the workflow suites, which point it at a
-  temp directory in `beforeAll`. Harmless but it dirties the working tree and hides real
-  untracked files in `git status`.
 - [confirmed] 2026-08-22 `settings.key` is the entire primary key, so two users cannot both hold
   one settings key. `PATCH /api/settings` therefore 500s with a `23505` unique violation when a
   user patches a key another user already owns, in both stacks (Python raises the same
@@ -162,13 +151,6 @@
   a port. Fixing it means widening the type in `api.ts` and in `SeoChecklistProps`, then
   deciding in the UI whether to filter the counts out or render them as counts; that is Phase 8
   work, not a route-handler change.
-- [confirmed] 2026-08-22 39 generated image files under `media/test-123/` are committed to the
-  repo. They are test output: the media-writing tests in the images-stage suite name each file
-  after the wall clock (`featured-<MMDDYY>-<nn>.png`), so every full `pnpm -C web test` run
-  leaves a fresh batch of untracked files behind and a `git add -A` sweeps them in. Noticed in
-  item 5.3d-iii, where a full test run produced eight more; those eight were deleted rather than
-  committed. The fix is to point the tests at a temp directory or add `media/` to `.gitignore`
-  and delete the 39, but that is a test-infrastructure change, not a route port.
 - [confirmed] 2026-08-22 `retry_dead_letter()` in `api/src/api/queue.py` looks the post up with
   an unscoped `session.get(Post, post_id)`, so any authenticated user can reset another user's
   post to `pending`, strip its `_error` log and re-enqueue it. The other two dead-letter
@@ -272,16 +254,6 @@
   contract decision for ledger item 5.5d (the SSE route handlers), not a bug fix; left
   alone under 5.5c-iv-d-2 because adding names to `NAMED_EVENTS` changes what
   `debug-log-panel.tsx` renders mid-run.
-- [investigate] 2026-08-23 Running `pnpm -C web test` leaves untracked WebP files in the
-  repo's `media/test-123/` directory (six appeared during the 5.5c-iv-d-2 iteration, named
-  `featured-<mmddyy>-<nn>.webp`). `mediaRoot()` falls back to `<cwd>/../media` when
-  `MEDIA_DIR` is unset, so some suite exercising the featured-filename path writes into
-  the real media root instead of a tmpdir. The 39 `.png` files already committed there
-  are the Python-era version of the same leak. Not traced to a specific test file: no
-  test under `web/src/mastra` references `test-123`, so the post id is coming from
-  somewhere else. Deleted by hand under 5.5c-iv-d-2; the fix is either an
-  `afterAll` cleanup in whichever suite writes them or a `MEDIA_DIR` default in
-  `vitest.setup`, plus a `.gitignore` entry for `media/`.
 - [optimization] 2026-08-23 `GET /api/events/{post_id}` opens one `RedisStreamsPubSub`
   subscription per connected browser, and each one costs a dedicated Redis connection plus
   a private `__fanout-<uuid>` consumer group (verified in `@mastra/redis-streams`'s

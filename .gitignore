@@ -29,6 +29,11 @@ playwright-report/
 test-results/
 blob-report/
 
+# Generated images. `mediaRoot()` defaults to this directory for `pnpm -C web dev`;
+# compose and Railway both mount a volume instead, and the test suite writes to a
+# temp directory (see web/src/test/test-media-root.ts). Nothing here is source.
+/media/
+
 # IDE
 .vscode/
 .idea/

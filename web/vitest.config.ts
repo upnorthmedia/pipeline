@@ -3,6 +3,8 @@ import react from "@vitejs/plugin-react";
 import fs from "fs";
 import path from "path";
 
+import { testMediaRoot } from "./src/test/test-media-root";
+
 /**
  * The repo keeps one `.env` at its root (shared by compose, `next.config.ts`
  * and the Mastra CLI). Vitest runs from `web/`, so load it here to give
@@ -27,8 +29,13 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
+    globalSetup: ["./src/test/global-setup.ts"],
     css: false,
-    env: repoRootEnv(),
+    // `MEDIA_DIR` goes last, and deliberately outranks the repo `.env`: its
+    // fallback is the repository's own `media/`, so a run that inherits it
+    // writes post directories into the working tree.
+    // `src/test/media-root-isolation.test.ts` fails when this stops being set.
+    env: { ...repoRootEnv(), MEDIA_DIR: testMediaRoot() },
   },
   resolve: {
     alias: {
