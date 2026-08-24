@@ -111,11 +111,13 @@ move on. A split is not an iteration on its own: split and complete the first ch
 
 ## P1. The three things a user sees immediately
 
-- [ ] **P1.1** The logo is broken. `web/src/components/sidebar.tsx:60` renders
-      `<Image src="/icon.svg">` and `web/public/icon.svg` is a 49KB SVG whose content is an
-      HTML `<foreignObject>`, which browsers do not render through `<img>`. Produce a real
-      vector mark used consistently for the sidebar, the favicon and the PWA manifest icons.
-      Verify by screenshot.
+- [x] **P1.1** The logo is broken. `web/public/icon.svg` was a devtools element capture whose
+      whole content is a `<foreignObject>`, so it rasterises to zero painted pixels. Replaced
+      by a 561-byte hand-authored vector, copied to `src/app/icon0.svg` and regenerated into
+      all five rasters, so one mark serves the sidebar, the favicon and the manifest. A second
+      cause underneath it: `src/middleware.ts` 307ed six of the eight brand assets for a
+      signed-out browser, including the SVG favicon and both manifest icons.
+      [evidence](evidence/p1.md#p11)
 - [ ] **P1.2** Post images are broken. Two media directories hold 0 files while their manifests
       claim 4 and 5 images, 4 manifest entries carry an `error`, and `stage_status.images`
       still reads `complete`. Both causes get fixed: the stage reporting success when every

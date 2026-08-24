@@ -639,3 +639,18 @@
   the three run on `push` to the default branch only. Found at polish ledger P0.6b-ii, comparing
   the green run's summary (`4661 passed | 10 skipped`) with the local one (`4664 passed |
   7 skipped`).
+
+- [confirmed] 2026-08-24 The PWA has no maskable icon. `web/src/app/manifest.json` declared both
+  of its icons `"purpose": "maskable"` while the art carries a transparent margin, which is the
+  opposite of the contract: a maskable icon is full bleed with everything important inside the
+  centre 80%, and Android crops it to whatever shape the launcher uses. The declaration is now
+  `"any"`, which is truthful, but the consequence is that an installed app gets the platform's
+  own white badge behind the mark rather than the mark filling the tile. Fixing it means a second
+  full-bleed render of `web/public/icon.svg` at 192 and 512 with the page extended to the edges,
+  listed alongside the `any` entries. Found at polish ledger P1.1.
+
+- [investigate] 2026-08-24 `web/public/` still carries five unreferenced Next.js starter assets:
+  `next.svg`, `vercel.svg`, `file.svg`, `globe.svg`, `window.svg`. Nothing under `web/src` names
+  any of them (grepped across `.ts`, `.tsx`, `.json`, `.md`, `.mjs`), so they are served as public
+  routes and shipped in the Docker image for no reason. Confirm nothing outside the repo links
+  them before deleting. Found at polish ledger P1.1.

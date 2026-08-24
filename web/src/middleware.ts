@@ -21,7 +21,14 @@ export function middleware(request: NextRequest) {
  * Route handlers authenticate themselves with `getRequestUser()`; this
  * middleware only checks that a cookie is present, so it was never the thing
  * protecting them.
+ *
+ * The brand assets are excluded because the sign-in page renders the sidebar
+ * logo and the browser asks for the favicon before anyone has a session, and a
+ * PWA installer reads the manifest icons with no cookies at all. A redirect
+ * there is a broken image on the first page a user sees. `icon` covers
+ * `icon.svg`, `icon0.svg` and `icon1.png`; it replaces `icons`, which matched
+ * no path this app serves. `src/app/brand-mark.test.ts` pins the list.
  */
 export const config = {
-  matcher: ["/((?!auth|api|_next|favicon|manifest|icons).*)"],
+  matcher: ["/((?!auth|api|_next|favicon|manifest|icon|apple-icon|web-app-manifest).*)"],
 }
