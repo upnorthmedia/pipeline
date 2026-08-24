@@ -38,28 +38,6 @@
   `retry_delay = 10` was a `WorkerSettings` key and spaced every job function's retries
   equally. Ledger item P2.95.
 
-- [confirmed] 2026-08-23 `web/src/mastra/steps/images-manifest.ts` renders the manifest's
-  `error` value into its parse-failure message with `String(...)` where Python's f-string
-  applies `str(...)`. The two agree on every scalar but not on a container:
-  `str({'a': 1})` is `{'a': 1}` and `String({a: 1})` is `[object Object]`. The branch is
-  reachable, because `pythonTruthy` deliberately treats a non-empty dict or list as a
-  truthy `error`, so a model that writes `"error": {"reason": "..."}` produces a
-  divergent SSE message and execution_logs entry. The stored `data.error` is unaffected:
-  it carries the raw JSON value in both stacks. A fix means porting Python's `str()` for
-  arbitrary JSON (container `repr`, `True`/`False`/`None`, single-quoted strings), which
-  is its own item; left alone under ledger item 5.5c-iv-d-1 to keep that diff scoped. Ledger
-  item P2.46.
-
-- [confirmed] 2026-08-23 `web/src/app/api/analytics/costs/route.ts` (ledger item 5.8b) reads
-  its two optional query parameters with `url.searchParams.get("profile_id")` and
-  `url.searchParams.get("model")`, which return the *first* value of a repeated key.
-  Starlette's `QueryParams.get()` returns the *last*, so `?model=a&model=b` filters on `a` in
-  the port and on `b` in the Python endpoint. Found while porting `/models` (item 5.8c),
-  which reads `getAll("model").at(-1)` and has a test for it. Two one-line changes plus two
-  tests; left out of 5.8c to keep that iteration to one ledger item. `/dashboard` is already
-  correct (`parseDays()` in `web/src/app/api/analytics/days.ts` uses `getAll().at(-1)`).
-  Ledger item P2.53.
-
 - [confirmed] 2026-08-23 The whole `/api/analytics/logs` result set is ordered and bounded by
   a *text* comparison on `log_entry->>'ts'`, in both stacks. That is only correct because
   every writer renders the timestamp with `datetime.now(UTC).isoformat()`, which always
@@ -74,15 +52,6 @@
   Update 2026-08-24: `api/` is gone, so the TypeScript handler is the only reader and item
   5.5c's `log` publisher the only writer, which is what makes pinning the format in one
   place cheap. Ledger item P2.56.
-
-- [confirmed] 2026-08-23 The TypeScript port of mistune's `linebreak` and `softbreak`
-  inline patterns in `web/src/mastra/wordpress/wp-html.ts` still spells Python's `\s` as
-  JavaScript's `\s`. The two sets differ: Python's holds `\x1c`-`\x1f` and `\x85` and not
-  `﻿`, JavaScript's is the other way round, so a paragraph whose line ends in one of
-  those characters folds differently from the Python original. Found while porting ledger
-  item 5.3c-iii-b-1-b-iii-c, which fixed the same mistake in the `emphasis` pattern; the
-  file already has `PY_SPACE` for exactly this, so the fix is a two-line swap plus corpus
-  cases, but `linebreak` and `softbreak` are outside that item's scope. Ledger item P2.62.
 
 - [confirmed] 2026-08-23 The local-to-remote image URL rewrite in
   `api/src/pipeline/publish.py` corrupts a media URL that is a prefix of another one. The
@@ -99,16 +68,6 @@
   2026-08-24: `api/` is gone, so the live site of this is `rewriteImageUrls()` in
   `web/src/mastra/wordpress/media-upload.ts`, which reproduces the loop faithfully. Ledger
   item P2.64.
-
-- [confirmed] 2026-08-23 `pythonJsonDumps` in `web/src/mastra/prompts.ts` does not escape
-  U+007F. Its regex is `[\u0080-\uffff]`, but Python's `ESCAPE_ASCII` is `[^\ -~]`, so
-  `json.dumps("\x7f")` is `"\u007f"` while that function leaves the character literal. The
-  `ready` stage embeds the image manifest through it, so a manifest carrying a DEL renders
-  a prompt one character different from the Python stack's. Confirmed against the deployed
-  interpreter in `web/src/mastra/nextjs/data/nextjs-payload-parity.json` (case
-  "escaping: delete character"). The fix is to reuse `encodeBasestringAscii` from
-  `web/src/mastra/nextjs/json-dumps.ts`, which is a behaviour change to a rendered prompt
-  and therefore not part of ledger item 5.3c-iii-b-2-c. Ledger item P2.66.
 
 - [confirmed] 2026-08-23 `POST /api/posts/{post_id}/publish` cannot publish a post whose
   `output_format` is `both`, which is the column's default value. `publish_post()` in

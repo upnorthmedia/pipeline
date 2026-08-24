@@ -86,7 +86,11 @@ async function getHandler(request: Request): Promise<Response> {
   // same `uuid_parsing` 422 `GET /api/posts` answers, because the alternative
   // is a database error surfacing as a 500. An empty value is not a filter at
   // all: Python's guard is `if profile_id:`, not `is not None`.
-  const profileId = url.searchParams.get("profile_id")
+  // `getAll().at(-1)`, not `get()`: Starlette's `QueryParams.get` answers the
+  // *last* value of a repeated key where `URLSearchParams.get` answers the
+  // first, so `?model=a&model=b` filtered on `a` here. Same reading as
+  // `parseDays()` and `/models`.
+  const profileId = url.searchParams.getAll("profile_id").at(-1)
   if (profileId && !UUID_PATTERN.test(profileId)) {
     const issue: ValidationErrorDetail = {
       type: "uuid_parsing",
@@ -96,7 +100,7 @@ async function getHandler(request: Request): Promise<Response> {
     }
     return unprocessableRequest([issue])
   }
-  const model = url.searchParams.get("model")
+  const model = url.searchParams.getAll("model").at(-1)
 
   const since = new Date(Date.now() - days * DAY_MS)
   const filters = [

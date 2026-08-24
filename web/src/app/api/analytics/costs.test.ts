@@ -449,6 +449,27 @@ describe("GET /api/analytics/costs", () => {
       expect(Object.keys(data.by_stage)).toEqual(["outline"])
     })
 
+    it("takes the last value of a repeated model parameter, as Starlette does", async () => {
+      await insertPost(profileId, {
+        stageLogs: {
+          research: stageLog({ cost_usd: 0.5 }),
+          outline: stageLog({ cost_usd: 0.25, model: "claude-opus-4-6" }),
+        },
+      })
+
+      const data = await body("?model=sonar-pro&model=claude-opus-4-6")
+      expect(data.total_cost).toBe(0.25)
+      expect(Object.keys(data.by_stage)).toEqual(["outline"])
+    })
+
+    it("takes the last value of a repeated profile_id parameter, as Starlette does", async () => {
+      const second = await createProfile(user.userId, `${PREFIX}Repeated`)
+      await insertPost(profileId, { stageLogs: { research: stageLog({ cost_usd: 0.5 }) } })
+      await insertPost(second, { stageLogs: { research: stageLog({ cost_usd: 0.25 }) } })
+
+      expect((await body(`?profile_id=${profileId}&profile_id=${second}`)).total_cost).toBe(0.25)
+    })
+
     it("treats an empty profile_id or model as no filter, matching Python's `if value:`", async () => {
       await insertPost(profileId, { stageLogs: { research: stageLog({ cost_usd: 0.25 }) } })
 

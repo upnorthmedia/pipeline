@@ -456,6 +456,50 @@ describe("images manifest step parse-failure branch", () => {
     expect(output.images).toEqual([])
   })
 
+  it("says what a container error holds instead of `[object Object]`", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+    // `pythonTruthy` deliberately admits a non-empty object, so a model that
+    // answers `"error": {...}` reaches the same warning line a string does.
+    const structured = JSON.stringify({
+      error: { reason: "no safe prompt", code: 12 },
+      images: [{ prompt: "a" }],
+    })
+
+    const { announced, output } = await runStep(fixtureIds[0], {
+      ...replayOf(fixture),
+      text: structured,
+    })
+
+    expect(output.parseFailed).toBe(true)
+    expect(logLines(announced).at(-1)).toEqual({
+      event: "log",
+      post_id: fixtureIds[0],
+      stage: "images",
+      level: "warning",
+      message: 'Manifest parse failed: {"reason":"no safe prompt","code":12}',
+      timestamp: expect.any(String),
+      data: {
+        error: { reason: "no safe prompt", code: 12 },
+        raw_snippet: structured,
+      },
+    })
+  })
+
+  it("leaves a string error exactly as the model wrote it", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+    // A string is the shape every real manifest uses, and it must not pick up
+    // the quotes a JSON rendering would add.
+    const authored = JSON.stringify({ error: 'the "style_brief" was unusable' })
+
+    const { announced } = await runStep(fixtureIds[0], { ...replayOf(fixture), text: authored })
+
+    expect(logLines(announced).at(-1)?.message).toBe(
+      'Manifest parse failed: the "style_brief" was unusable',
+    )
+  })
+
   it("does not short-circuit on a falsy error value", async () => {
     const fixture = fixtures[0]
     vi.setSystemTime(new Date(fixture.captured_at))

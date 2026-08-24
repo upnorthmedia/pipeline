@@ -280,6 +280,15 @@ describe("buildStagePrompt edge cases", () => {
     )
   })
 
+  it("escapes the delete character, which `ensure_ascii` also escapes", () => {
+    // Python's `ESCAPE_ASCII` is `[^\ -~]`, so `\x7f` is outside the range that
+    // passes through. The old regex started at `\u0080` and left it literal.
+    const context = emptyContext()
+    context.imageManifest = { alt: "a\u007fb" }
+    const prompt = buildStagePrompt("ready", "", context, "2026-08-21")
+    expect(prompt).toContain('{\n  "alt": "a\\u007fb"\n}')
+  })
+
   it("still emits a previous-output section for an empty manifest", () => {
     // Python's truthiness check sees the string "{}", not the empty dict, so the
     // `ready` prompt carries a useless section when `images` produced nothing.

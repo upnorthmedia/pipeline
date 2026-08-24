@@ -68,9 +68,17 @@ export function loadRules(stage: Stage): string {
  *
  * Iterating the string by UTF-16 code unit escapes astral characters as the
  * surrogate pair Python also emits.
+ *
+ * The class starts at `\u007f`, not `\u0080`: `ESCAPE_ASCII` is `[^\ -~]`, so
+ * the delete character escapes too, and `JSON.stringify` emits it literally.
+ * It cannot start lower without also matching the newlines and spaces `indent`
+ * puts *between* the strings, which are structure rather than content.
+ * Nothing is lost by stopping there: over `\x00`-`\x1f`, `"` and `\\`,
+ * `JSON.stringify` and `json.dumps` emit byte-identical escapes, verified
+ * against CPython.
  */
 export function pythonJsonDumps(value: unknown): string {
-  return JSON.stringify(value, null, 2).replace(/[\u0080-\uffff]/g, (char) =>
+  return JSON.stringify(value, null, 2).replace(/[\u007f-\uffff]/g, (char) =>
     `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
   )
 }

@@ -164,6 +164,26 @@ export function pythonTruthy(value: JsonValue | undefined): boolean {
   return Boolean(value)
 }
 
+/**
+ * The manifest's `error` value as a sentence a reader can act on.
+ *
+ * Python rendered this with an f-string, so a container came out as its `repr`
+ * (`{'reason': '...'}`) and `String(...)` ported that as `[object Object]`,
+ * which names nothing. `pythonTruthy` admits a non-empty object or array, so
+ * the branch is reachable from any model that answers a structured error.
+ * With `api/` gone there is no Python renderer left to agree with, and a
+ * faithful `repr` port would need CPython's string-printability rules for a
+ * gain no reader would notice, so a container renders as compact JSON instead:
+ * a deliberate deviation, chosen because the alternative reaches the run trace
+ * as `[object Object]`. A string still passes through untouched, which is what
+ * every real manifest carries and what must not pick up surrounding quotes.
+ */
+export function manifestErrorText(value: JsonValue | undefined): string {
+  if (typeof value === "string") return value
+  if (value === undefined) return "undefined"
+  return JSON.stringify(value) ?? String(value)
+}
+
 export const imagesManifestStep = createStep({
   id: "images-manifest",
   inputSchema: stageStepInputSchema,
@@ -245,7 +265,7 @@ export const imagesManifestStep = createStep({
           mastra,
           postId,
           "images",
-          `Manifest parse failed: ${String(manifest.error)}`,
+          `Manifest parse failed: ${manifestErrorText(manifest.error)}`,
           {
             level: "warning",
             data: { error: manifest.error, raw_snippet: rawSnippet(result.text) },

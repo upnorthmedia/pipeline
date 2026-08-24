@@ -429,8 +429,12 @@ explicitly out of scope.
         API Keys placeholder left out the separator and save row. Both are now built from the
         loaded shape, in the card and in `loading.tsx`: CLS 0 on three runs.
         `ui/p34b-*.png`. [evidence](evidence/p3.md#p34b)
-- [ ] **P3.5** One screen per iteration, verified with `npx -y chrome-devtools-axi`, before and
-      after PNGs committed under `docs/polish/ui/`, no new console errors.
+- [x] **P3.5** One screen per iteration, verified with `npx -y chrome-devtools-axi`, before and
+      after PNGs committed under `docs/polish/ui/`, no new console errors. Closed with its
+      three children: P3.5a swept the eleven screens a signed-in session can reach, P3.5b took
+      `/monitor` and P3.5c the two `/auth/*` screens, which is every route under
+      `web/src/app/`. Every remaining P3 concern is a `todo.md` entry with its own P2 number,
+      not a screen nobody has opened.
   - [x] **P3.5a** The app-wide sweep. Eleven screens opened, read for console messages and
         captured full page: no errors and no warnings on any of them, the only two non-empty
         readings being Next.js' own Fast Refresh log and a Chrome verbose DOM hint. One
@@ -534,14 +538,14 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [x] **P2.43** `[confirmed, fixed 2026-08-23]` test files shared post id `00000000-0000-4000-8000-0000000055d1`: `web/src/mastra/steps/stage-log.test.ts` and ...
 - [x] **P2.44** `[confirmed, fixed 2026-08-23]` in `web/src/mastra/failure-recorder.test.ts` returned as soon as `current_stage` read `failed`, which is a snapshot that can predate the ...
 - [x] **P2.45** `[optimization 2026-08-23]` carries three literal U+2014 em dashes in source (the `em-dash(es)` warning message, the `ACTION REQUIRED` prompt line, and one comment), where ... Deleted at triage: the two product strings are a wire contract and a prompt contract whose bytes must not change, the third is a comment, and none of the three touches correctness, security or anything a user can see.
-- [ ] **P2.46** `[confirmed]` `web/src/mastra/steps/images-manifest.ts` renders the manifest's `error` value into its parse-failure message with `String(...)` where Python's ...
+- [x] **P2.46** `[confirmed]` `web/src/mastra/steps/images-manifest.ts` renders the manifest's `error` value into its parse-failure message with `String(...)` where Python's ... Fixed: `manifestErrorText()` returns a string untouched and renders a container as compact JSON, so a model that answers a structured error reaches the run trace as `{"reason":"..."}` instead of `[object Object]`. A deliberate deviation from Python's `repr`, which has no renderer left to agree with. Entry removed from `todo.md`. [evidence](evidence/p2.md#p246-p253-p262-p266)
 - [x] **P2.47** Closed at P3.2c. `web/src/hooks/use-sse.ts` did not listen for `image_generated` or `image_failed`. `NAMED_EVENTS` listed eight names and neither was among them, ...
 - [x] **P2.48** `[investigate]` New sighting of the `received`-ordering defect recorded above: `pipeline-events.test.ts > carries Python's log payload and nothing else` failed ... Fixed by P0.3b; entry removed from `todo.md`. [evidence](evidence/p0.md#p03b)
 - [x] **P2.49** `[investigate]` Running `pnpm -C web test` leaves untracked WebP files in the repo's `media/test-123/` directory (six appeared during the 5.5c-iv-d-2 iteration, ... Explained and fixed by P0.4: the writer was the deleted pytest suite under `api/`, and the `MEDIA_DIR` default the entry proposed is now in place; entry removed from `todo.md`. [evidence](evidence/p0.md#p04)
 - [x] **P2.50** `[optimization]` `GET /api/events/{post_id}` opens one `RedisStreamsPubSub` subscription per connected browser, and each one costs a dedicated Redis connection ... Deleted at triage: connection count per open tab, teardown already proven by a test, nothing has hit a limit; `[optimization]` with no correctness, security or user-visible effect.
 - [x] **P2.51** `[confirmed]` `delete_link()` in `api/src/api/links.py` has no ownership check: unlike the other two endpoints in that router it never calls ... Stale: `api/` is gone from the repo and the port scopes the delete to the caller with two tests on it; entry removed from `todo.md`. [evidence](evidence/p2.md#p251)
 - [x] **P2.52** `[confirmed]` `cost_analytics()` in `api/src/api/analytics.py` has never run. Its raw SQL puts the `website_profiles` join inside the second `FROM` item ... Deleted at triage: `api/` was deleted at ledger item 7.1c (`f917348`), and the TypeScript replacement `web/src/app/api/analytics/costs/route.ts` puts the join on `posts` and has 30 tests.
-- [ ] **P2.53** `[confirmed]` `web/src/app/api/analytics/costs/route.ts` (ledger item 5.8b) reads its two optional query parameters with `url.searchParams.get("profile_id")` ...
+- [x] **P2.53** `[confirmed]` `web/src/app/api/analytics/costs/route.ts` (ledger item 5.8b) reads its two optional query parameters with `url.searchParams.get("profile_id")` ... Fixed: both filters read `getAll(...).at(-1)`, the reading `parseDays()` and `/models` already used, so a repeated key answers on its last value the way Starlette did. Entry removed from `todo.md`. [evidence](evidence/p2.md#p246-p253-p262-p266)
 - [x] **P2.54** `[confirmed]` `npx next build` in `web/` prints 15 `[Error [BetterAuthError]: You are using the default secret. Please set BETTER_AUTH_SECRET ...]` lines ... Fixed with P2.28: the build imported `/api/auth/[...all]` once per page-data worker, so the 15 lines were 15 workers rather than 15 routes. Build is now clean, or fails naming the variable. [evidence](evidence/p2.md#p228-p254-p275)
 - [x] **P2.55** `[confirmed]` `GET /api/analytics/logs` in `api/src/api/analytics.py` answers a 500 for any `since` or `until` that `datetime.fromisoformat()` rejects. The ... Deleted at triage: same deleted `api/` tree, and the port already answers pydantic's `datetime_from_date_parsing` 422 for a malformed `since`/`until` (item 5.8d-ii).
 - [ ] **P2.56** `[confirmed]` The whole `/api/analytics/logs` result set is ordered and bounded by a *text* comparison on `log_entry->>'ts'`, in both stacks. That is only ...
@@ -550,11 +554,11 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [x] **P2.59** `[confirmed]` `GET /api/profiles/{profile_id}/wordpress/test` answers a 500, not `{connected: false}`, when the configured `wp_url` serves valid JSON that is ... Fixed by P1.3a: a `/wp-json` root that is not a JSON object is reported as `{connected: false, error}` like every other failure the endpoint knows about; entry removed from `todo.md`. [evidence](evidence/p1.md#p13a)
 - [x] **P2.60** `[confirmed]` `src/mastra/workflows/scaffold-check.test.ts > emits the workflow lifecycle events the trace view will read` fails inside a full `pnpm test` run ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [x] **P2.61** `[confirmed]` `markdown_to_wp_html` raises `AttributeError: No renderer "'inline_html'"` for any article whose markdown contains an HTML tag mistune's block ...
-- [ ] **P2.62** `[confirmed]` The TypeScript port of mistune's `linebreak` and `softbreak` inline patterns in `web/src/mastra/wordpress/wp-html.ts` still spells Python's `\s` ...
+- [x] **P2.62** `[confirmed]` The TypeScript port of mistune's `linebreak` and `softbreak` inline patterns in `web/src/mastra/wordpress/wp-html.ts` still spells Python's `\s` ... Fixed: both rules read `PY_SPACE`, so a line starting with U+001C is swallowed and one starting with U+FEFF is kept, both measured through `markdownToWpHtml` before the swap. New `wp-html-inline-breaks.test.ts` carries the three cases, there being no parity corpus for these two rules. Entry removed from `todo.md`. [evidence](evidence/p2.md#p246-p253-p262-p266)
 - [x] **P2.63** `[confirmed]` WordPress publishing uploads no images at all in production. The media sweep in `api/src/pipeline/publish.py` keeps a file only when ... Fixed by P1.2c-i; entry removed from `todo.md`. [evidence](evidence/p1.md#p12c-i)
 - [ ] **P2.64** `[confirmed]` The local-to-remote image URL rewrite in `api/src/pipeline/publish.py` corrupts a media URL that is a prefix of another one. The loop is `for ...
 - [x] **P2.65** `[investigate]` `src/mastra/workflows/pipeline-completion.test.ts > ... (`Date.parse(recorded)` at line 328) failed once in a full `pnpm test` run during ledger ... 0 failures in six full runs; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
-- [ ] **P2.66** `[confirmed]` `pythonJsonDumps` in `web/src/mastra/prompts.ts` does not escape U+007F. Its regex is `[\u0080-\uffff]`, but Python's `ESCAPE_ASCII` is `[^\ ...
+- [x] **P2.66** `[confirmed]` `pythonJsonDumps` in `web/src/mastra/prompts.ts` does not escape U+007F. Its regex is `[\u0080-\uffff]`, but Python's `ESCAPE_ASCII` is `[^\ ... Fixed by widening the class one code point rather than by the proposed `encodeBasestringAscii` reuse, which would mean re-implementing `json.dumps` with `indent=2`. Everything below `\x20` already agrees byte for byte, checked against CPython. Entry removed from `todo.md`. [evidence](evidence/p2.md#p246-p253-p262-p266)
 - [x] **P2.67** `[investigate]` The `pg` driver parses a JSONB column with `JSON.parse`, which erases Python's int/float distinction and loses digits past 2^53 before any port ... Deleted at triage: it reproduces mechanically, but the only thing the divergence broke was byte parity against the Python stack, which no longer exists; the eleven cases stay pinned in `PARSE_DIVERGENCES`.
 - [ ] **P2.68** `[confirmed]` `POST /api/posts/{post_id}/publish` cannot publish a post whose `output_format` is `both`, which is the column's default value. `publish_post()` ...
 - [x] **P2.69** `[confirmed]` `web/src/mastra/pipeline-events.test.ts > a run that executes every stage > carries Python's log payload and nothing else` is flaky: it reads ... Fixed by P0.3b; entry removed from `todo.md`. [evidence](evidence/p0.md#p03b)
@@ -681,11 +685,11 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       clearing every gate for one post is silently written back to the profile's gates. A
       faithful port of Python's rule that the parity oracle asserts, so changing it is a
       deliberate deviation. Found under P3.1a.
-- [ ] **P2.C1** Cleanup batch, one iteration for all four: P2.53 (`searchParams.get` returns
-      the first value of a repeated key where Starlette returned the last, two lines plus two
-      tests), P2.66 (`pythonJsonDumps` does not escape U+007F; reuse `encodeBasestringAscii`),
-      P2.79 (no `typecheck` script in `web/package.json`, so the objective's literal
-      `pnpm -C web tsc --noEmit` exits 254) and P2.105 (five unreferenced starter assets).
+- [ ] **P2.C1** Cleanup batch, one iteration for both: P2.79 (no `typecheck` script in
+      `web/package.json`, so the objective's literal `pnpm -C web tsc --noEmit` exits 254) and
+      P2.105 (five unreferenced starter assets). P2.53 and P2.66 were the other two members
+      and were closed with P2.46 and P2.62 instead, that batch being the topmost four
+      unchecked entries rather than the bottom four.
 
 ## Done
 

@@ -330,14 +330,16 @@ const INLINE_SPECIFICATION: Record<string, string> = {
   escape: `(?:\\\\${PUNCTUATION})+`,
   codespan: "`{1,}",
   // Python's `\s` and `\b` are both Unicode aware for `str` patterns, so the
-  // two spelled out below are not the JavaScript escapes of the same name.
+  // four spelled out below are not the JavaScript escapes of the same name.
+  // `linebreak` and `softbreak` end in `\s*`, so the class decides how much of
+  // the next line's indent the break swallows.
   emphasis: `\\*{1,3}(?=[^${PY_SPACE}*])|${PY_WORD_BOUNDARY_BEFORE}_{1,3}(?=[^${PY_SPACE}_])`,
   link: "!?\\[",
   auto_link: "<[A-Za-z][A-Za-z0-9.+-]{1,31}:[^<>\\x00-\\x20]*>",
   auto_email: AUTO_EMAIL,
   inline_html: INLINE_HTML,
-  linebreak: "(?:\\\\| {2,})\\n\\s*",
-  softbreak: " *\\n\\s*",
+  linebreak: `(?:\\\\| {2,})\\n[${PY_SPACE}]*`,
+  softbreak: ` *\\n[${PY_SPACE}]*`,
   // Registered but not in `DEFAULT_RULES`: `precedence_scan` compiles these two
   // by name to find the *start* of a construct that would outrank an emphasis
   // or a link run. Python's `\d` is `[Nd]`, not `[0-9]`.
