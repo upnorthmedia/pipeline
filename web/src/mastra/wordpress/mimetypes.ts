@@ -15,11 +15,13 @@
  * `data/wp-mimetypes-parity.json` is generated inside that image and the export
  * script refuses to run anywhere else.
  *
- * A consequence worth stating out loud, because it is not a port defect: the
- * images stage writes `.webp` files, and `.webp` is not in the Python 3.12
- * builtin strict table (it arrived in 3.13). In production every generated image
- * is therefore classified as `(None, None)` and skipped by the WordPress media
- * sweep. This module reproduces that, and the defect is logged in `todo.md`.
+ * That table has a consequence the app cannot live with: the images stage
+ * writes `.webp` files, and `.webp` is not in the Python 3.12 builtin strict
+ * table (it arrived in 3.13), so in production every generated image was
+ * classified `(None, None)` and skipped by the WordPress media sweep.
+ * `guessTypeFromFilename` still reproduces that faithfully, because it is what
+ * the oracle is checked against. `guessMediaType` at the bottom of this file is
+ * what the sweep calls instead, and it is the only divergence.
  *
  * The input domain is a single POSIX path component, which is what
  * `Path.iterdir()` yields. A component cannot contain `/`, which makes three
@@ -389,4 +391,38 @@ export function guessTypeFromFilename(
     return [COMMON_TYPES.get(ext)!, encoding]
   }
   return [null, encoding]
+}
+
+/**
+ * The extensions the deployed table is missing and this app writes.
+ *
+ * One entry, because `optimizeImage()` in `../images/optimize.ts` returns
+ * `".webp"` unconditionally: every file the images stage has ever written is a
+ * WebP. `.webp` reached Python's builtin strict table in 3.13, and the deployed
+ * interpreter is 3.12, which is why `guessTypeFromFilename` cannot answer for
+ * it. The value is the one 3.13 records and the one `COMMON_TYPES` below it
+ * already carries (Python's own non-strict table, generated into the oracle),
+ * so this is Python catching up rather than a local choice.
+ */
+const DEPLOYED_TABLE_ADDITIONS: ReadonlyMap<string, string> = new Map([
+  [".webp", "image/webp"],
+])
+
+/**
+ * The media type a file in a post's media directory is uploaded under.
+ *
+ * `guessTypeFromFilename` answers as the deployed interpreter did, which for a
+ * generated image is `null`: the WordPress media sweep filtered on
+ * `mime.startsWith("image/")`, so it skipped every image the pipeline produced
+ * and published articles with no media and unrewritten `/media/...` URLs. This
+ * is the sweep's answer instead, and the one deliberate divergence from the
+ * oracle (ledger item P1.2c-i). Everything the deployed table did know is still
+ * typed exactly as it typed it.
+ *
+ * Takes a single path component, like the function it delegates to.
+ */
+export function guessMediaType(name: string): string | null {
+  const addition = DEPLOYED_TABLE_ADDITIONS.get(splitext(name)[1].toLowerCase())
+  if (addition !== undefined) return addition
+  return guessTypeFromFilename(name)[0]
 }

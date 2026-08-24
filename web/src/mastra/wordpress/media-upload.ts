@@ -36,7 +36,7 @@
 import { readFile } from "node:fs/promises"
 
 import { listMediaFiles, type MediaFile } from "./media-walk"
-import { guessTypeFromFilename } from "./mimetypes"
+import { guessMediaType } from "./mimetypes"
 import type { ManifestImage, ManifestImageIndex } from "./publish-metadata"
 
 /**
@@ -130,7 +130,7 @@ export async function uploadMediaFiles(
   let featuredMediaId: unknown = null
 
   for (const file of files) {
-    const [mime] = guessTypeFromFilename(file.name)
+    const mime = guessMediaType(file.name)
     if (!mime || !mime.startsWith("image/")) continue
 
     const info: ManifestImage = manifest.byFile.get(file.name) ?? {}

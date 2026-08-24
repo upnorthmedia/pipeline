@@ -145,10 +145,20 @@ move on. A split is not an iteration on its own: split and complete the first ch
   - [ ] **P1.2c** The two image gaps outside the dashboard: WordPress publishing uploads no
         images at all (P2.63), and generated images are unreachable from the `web` service on
         Railway (P2.76).
+    - [x] **P1.2c-i** WordPress publishing uploaded no images (P2.63). The media sweep typed
+          files with the port of `mimetypes.guess_type` as `python:3.12-slim` runs it, and
+          `.webp` only reached that table in 3.13, so every file the images stage writes was
+          skipped: no uploads, no featured image, and the local `/media/...` srcs left in the
+          published HTML. `guessMediaType()` is the sweep's own resolver now, one entry over
+          Python's answer; `guessTypeFromFilename()` keeps answering as the oracle recorded.
+          [evidence](evidence/p1.md#p12c-i)
+    - [ ] **P1.2c-ii** Generated images are unreachable from the `web` service on Railway
+          (P2.76). The `/media` volume attaches to `worker`, which writes them, and Railway
+          allows one volume per service, so `web` serves 404s. Needs object storage.
 - [ ] **P1.3** Publishing is incomprehensible. One obvious place to configure and test a
       connection, a visible connection status, output formats that disable themselves with an
       explanation when their target is not configured, and a publish action that reports what
-      happened. Fix the broken endpoints underneath it (P2.57, P2.58, P2.59, P2.61, P2.63).
+      happened. Fix the broken endpoints underneath it (P2.57, P2.58, P2.59, P2.61).
 
 ## P2. Clear the backlog in `todo.md`
 
@@ -230,7 +240,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [x] **P2.60** `[confirmed]` `src/mastra/workflows/scaffold-check.test.ts > emits the workflow lifecycle events the trace view will read` fails inside a full `pnpm test` run ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.61** `[confirmed]` `markdown_to_wp_html` raises `AttributeError: No renderer "'inline_html'"` for any article whose markdown contains an HTML tag mistune's block ...
 - [ ] **P2.62** `[confirmed]` The TypeScript port of mistune's `linebreak` and `softbreak` inline patterns in `web/src/mastra/wordpress/wp-html.ts` still spells Python's `\s` ...
-- [ ] **P2.63** `[confirmed]` WordPress publishing uploads no images at all in production. The media sweep in `api/src/pipeline/publish.py` keeps a file only when ...
+- [x] **P2.63** `[confirmed]` WordPress publishing uploads no images at all in production. The media sweep in `api/src/pipeline/publish.py` keeps a file only when ... Fixed by P1.2c-i; entry removed from `todo.md`. [evidence](evidence/p1.md#p12c-i)
 - [ ] **P2.64** `[confirmed]` The local-to-remote image URL rewrite in `api/src/pipeline/publish.py` corrupts a media URL that is a prefix of another one. The loop is `for ...
 - [x] **P2.65** `[investigate]` `src/mastra/workflows/pipeline-completion.test.ts > ... (`Date.parse(recorded)` at line 328) failed once in a full `pnpm test` run during ledger ... 0 failures in six full runs; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.66** `[confirmed]` `pythonJsonDumps` in `web/src/mastra/prompts.ts` does not escape U+007F. Its regex is `[\u0080-\uffff]`, but Python's `ESCAPE_ASCII` is `[^\ ...

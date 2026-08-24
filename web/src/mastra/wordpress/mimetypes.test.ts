@@ -8,7 +8,9 @@
  * It carries the four tables verbatim as well as the answers, so this file
  * checks the port's tables against Python's rather than trusting a
  * transcription. Nothing here asserts a hand-written expectation except the
- * provenance checks at the top and the four controls at the bottom.
+ * provenance checks at the top, the four controls after them, and the
+ * `guessMediaType` block at the bottom, which covers the one lookup this app
+ * deliberately answers differently from the deployed interpreter.
  */
 import { describe, expect, it } from "vitest"
 
@@ -18,6 +20,7 @@ import {
   ENCODINGS_MAP,
   SUFFIX_MAP,
   TYPES_MAP,
+  guessMediaType,
   guessTypeFromFilename,
   splitext,
 } from "./mimetypes"
@@ -86,7 +89,7 @@ describe("guessTypeFromFilename matches mimetypes.guess_type", () => {
   }
 })
 
-describe("the image predicate the media sweep applies", () => {
+describe("the image predicate the deployed interpreter applied", () => {
   for (const row of cases) {
     it(`${row.name}${row.strict ? "" : " (strict=false)"}`, () => {
       const [mime] = guessTypeFromFilename(row.url, row.strict)
@@ -117,5 +120,38 @@ describe("controls", () => {
       null,
       null,
     ])
+  })
+})
+
+/**
+ * The sweep's own resolver (ledger item P1.2c-i). It is not part of the oracle:
+ * it exists precisely because Python's answer for a generated image is wrong
+ * for this app, and every case here is a deliberate hand-written expectation.
+ */
+describe("guessMediaType", () => {
+  it("types the .webp the deployed table skipped", () => {
+    expect(guessMediaType("featured-082326-abc.webp")).toBe("image/webp")
+  })
+
+  it("uses the value Python's own non-strict table carries", () => {
+    expect(guessMediaType("x.webp")).toBe(COMMON_TYPES.get(".webp"))
+  })
+
+  it("is case insensitive about the extension, as the strict lookup is", () => {
+    expect(guessMediaType("A.WEBP")).toBe("image/webp")
+  })
+
+  it("answers exactly like Python for every case in the oracle but .webp", () => {
+    for (const row of cases) {
+      if (!row.strict || splitext(row.url)[1].toLowerCase() === ".webp") continue
+      expect([row.url, guessMediaType(row.url)]).toEqual([row.url, row.type])
+    }
+  })
+
+  it("does not type a compressed image as an image", () => {
+    // The addition is keyed on the last extension, so an encoding suffix hides
+    // it: `.svgz` is the only compressed form Python types, and it types it as
+    // the encoded document rather than as a payload the uploader could send.
+    expect(guessMediaType("a.webp.gz")).toBeNull()
   })
 })

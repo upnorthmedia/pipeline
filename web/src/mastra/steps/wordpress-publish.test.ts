@@ -68,8 +68,10 @@ const DESCRIPTION = "A field guide to waggle dances."
 /**
  * The post body, frontmatter included, because `markdown_to_wp_html` is handed
  * the whole `content` rather than the `body` `_extract_frontmatter` returns.
- * The two image references are what makes the local-to-remote rewrite visible
- * in the request the site receives.
+ * The three image references are what makes the local-to-remote rewrite
+ * visible in the request the site receives. One of them is the `.webp` the
+ * images stage actually writes; the other two are shapes only a hand-dropped
+ * file can take.
  */
 function markdown(postId: string): string {
   return [
@@ -84,6 +86,8 @@ function markdown(postId: string): string {
     "",
     `![](/media/${postId}/b.jpg)`,
     "",
+    `![](/media/${postId}/c.webp)`,
+    "",
   ].join("\n")
 }
 
@@ -93,6 +97,7 @@ function manifest(postId: string): Record<string, unknown> {
     images: [
       { url: `/media/${postId}/a.png`, placement: "inline" },
       { url: `/media/${postId}/b.jpg`, placement: "featured", alt_text: "A bee" },
+      { url: `/media/${postId}/c.webp`, placement: "inline" },
     ],
   }
 }
@@ -166,6 +171,16 @@ async function readBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = []
   for await (const chunk of req) chunks.push(chunk as Buffer)
   return Buffer.concat(chunks).toString("utf8")
+}
+
+/**
+ * The article request, which the hook always sends last. Named rather than
+ * indexed because the uploads before it are what the media sweep decides.
+ */
+function articleBody<T = Record<string, unknown>>(): T {
+  const last = recorded[recorded.length - 1]
+  expect(last.url.startsWith("/wp-json/wp/v2/posts")).toBe(true)
+  return JSON.parse(last.body) as T
 }
 
 /** Attachment ids, handed out in upload order so the featured pick is observable. */
@@ -283,9 +298,10 @@ beforeAll(async () => {
     await mkdir(dir, { recursive: true })
     await writeFile(path.join(dir, "a.png"), "png-bytes")
     await writeFile(path.join(dir, "b.jpg"), "jpg-bytes")
-    // Neither of these is uploaded: `.txt` is not an image, and `.webp` is
-    // absent from the Python 3.12 `mimetypes` table the port reproduces. The
-    // second is the production defect recorded in `todo.md`.
+    // `.webp` is what the images stage actually writes, so it is the only
+    // extension that matters in production; `guessMediaType` is what makes it
+    // an image here, since the Python 3.12 table the port reproduces has no
+    // entry for it (ledger item P1.2c-i). `.txt` is not an image either way.
     await writeFile(path.join(dir, "c.webp"), "webp-bytes")
     await writeFile(path.join(dir, "notes.txt"), "not an image")
   }
@@ -330,23 +346,28 @@ describe("a post published for the first time", () => {
       status: "published",
       wpPostId: 900,
       wpPostUrl: `${base}/?p=900`,
-      uploaded: 2,
+      uploaded: 3,
       error: null,
     })
   })
 
-  it("uploads the two images in sorted name order and nothing else", () => {
+  it("uploads the three images in sorted name order and nothing else", () => {
     expect(recorded.map((entry) => `${entry.method} ${entry.url}`)).toEqual([
       "POST /wp-json/wp/v2/media",
       "POST /wp-json/wp/v2/media/501",
       "POST /wp-json/wp/v2/media",
       "POST /wp-json/wp/v2/media/502",
+      "POST /wp-json/wp/v2/media",
+      "POST /wp-json/wp/v2/media/503",
       "POST /wp-json/wp/v2/posts",
     ])
     expect(recorded[0].disposition).toBe('attachment; filename="a.png"')
     expect(recorded[0].contentType).toBe("image/png")
     expect(recorded[2].disposition).toBe('attachment; filename="b.jpg"')
     expect(recorded[2].contentType).toBe("image/jpeg")
+    // The generated image, which the deployed table skipped entirely.
+    expect(recorded[4].disposition).toBe('attachment; filename="c.webp"')
+    expect(recorded[4].contentType).toBe("image/webp")
   })
 
   /**
@@ -360,7 +381,7 @@ describe("a post published for the first time", () => {
   })
 
   it("creates the post with the frontmatter title, the profile status and the row's ids", () => {
-    const body = JSON.parse(recorded[4].body) as Record<string, unknown>
+    const body = articleBody()
     expect(Object.keys(body)).toEqual([
       "title",
       "content",
@@ -381,14 +402,18 @@ describe("a post published for the first time", () => {
   })
 
   it("publishes ready_content, not final_md_content", () => {
-    const body = JSON.parse(recorded[4].body) as { content: string }
+    const body = articleBody<{ content: string }>()
     expect(body.content).not.toContain("SHOULD-NOT-BE-PUBLISHED")
   })
 
   it("rewrites every local media URL to the uploaded attachment's URL", () => {
-    const body = JSON.parse(recorded[4].body) as { content: string }
+    const body = articleBody<{ content: string }>()
     expect(body.content).toContain(`${base}/wp-content/uploads/501.bin`)
     expect(body.content).toContain(`${base}/wp-content/uploads/502.bin`)
+    // The generated image. Before P1.2c-i this one was never uploaded, so its
+    // `/media/...` src was left in the published HTML pointing at a host the
+    // site cannot read.
+    expect(body.content).toContain(`${base}/wp-content/uploads/503.bin`)
     expect(body.content).not.toContain(`/media/${POST_CREATE}/`)
     // The frontmatter is stripped by `markdown_to_wp_html`, not by the hook.
     expect(body.content).not.toContain("description:")
@@ -452,18 +477,20 @@ describe("a post that already exists on WordPress", () => {
   it("posts to the existing attachment's id rather than to the collection", () => {
     expect(recorded.map((entry) => `${entry.method} ${entry.url}`)).toEqual([
       "POST /wp-json/wp/v2/media",
-      "POST /wp-json/wp/v2/media/503",
-      "POST /wp-json/wp/v2/media",
       "POST /wp-json/wp/v2/media/504",
+      "POST /wp-json/wp/v2/media",
+      "POST /wp-json/wp/v2/media/505",
+      "POST /wp-json/wp/v2/media",
+      "POST /wp-json/wp/v2/media/506",
       "POST /wp-json/wp/v2/posts/42",
     ])
   })
 
   it("sends the falsy fields rather than dropping them", () => {
-    const body = JSON.parse(recorded[4].body) as Record<string, unknown>
+    const body = articleBody()
     expect(body.categories).toEqual([])
     expect(body.author).toBeNull()
-    expect(body.featured_media).toBe(504)
+    expect(body.featured_media).toBe(505)
     expect(body.status).toBe("draft")
   })
 
@@ -491,12 +518,12 @@ describe("a post with nothing configured", () => {
 
   it("publishes final_md_content when there is no ready_content", () => {
     expect(output.status).toBe("published")
-    const body = JSON.parse(recorded[4].body) as { content: string }
+    const body = articleBody<{ content: string }>()
     expect(body.content).toContain("Bees navigate by polarised light.")
   })
 
   it("titles the post from posts.topic and sends no excerpt", () => {
-    const body = JSON.parse(recorded[4].body) as Record<string, unknown>
+    const body = articleBody()
     expect(body.title).toBe("Topic from the row")
     // `create_post` drops the four falsy fields, so an empty description, a
     // null category list and a null author never reach the wire.
@@ -504,16 +531,17 @@ describe("a post with nothing configured", () => {
   })
 
   it("falls back to publish when the profile names no default status", () => {
-    expect((JSON.parse(recorded[4].body) as { status: string }).status).toBe("publish")
+    expect(articleBody<{ status: string }>().status).toBe("publish")
   })
 
   it("makes the first upload featured when the manifest names none", () => {
     const uploads = recorded.filter((entry) => entry.url === "/wp-json/wp/v2/media")
-    expect(uploads).toHaveLength(2)
-    const body = JSON.parse(recorded[4].body) as { featured_media: number }
-    // Two files are uploaded and the earlier one wins, which is the only thing
-    // separating the fallback from "the last upload" or "the featured entry".
-    expect(body.featured_media).toBe(505)
+    expect(uploads).toHaveLength(3)
+    const body = articleBody<{ featured_media: number }>()
+    // Three files are uploaded and the earliest one wins, which is the only
+    // thing separating the fallback from "the last upload" or "the featured
+    // entry".
+    expect(body.featured_media).toBe(507)
   })
 
   it("uses posts.topic as the alt text of every upload", () => {

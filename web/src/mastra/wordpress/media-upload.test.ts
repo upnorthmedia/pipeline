@@ -86,6 +86,13 @@ class RecordingUploader implements MediaUploader {
   }
 }
 
+/**
+ * The one oracle case the port deliberately answers differently, run on its
+ * own below (ledger item P1.2c-i). Every other case is asserted against
+ * Python's recorded answer unchanged.
+ */
+const WEBP_CASE = "a .webp file is not an image to the deployed table, so it is skipped"
+
 const indexOf = (testCase: UploadCase): ManifestImageIndex => ({
   byFile: new Map(Object.entries(testCase.manifest_by_file)),
   featuredFilename: testCase.featured_filename,
@@ -124,6 +131,7 @@ describe("the upload loop matches publish_to_wordpress", () => {
   })
 
   for (const testCase of cases) {
+    if (testCase.name === WEBP_CASE) continue
     it(testCase.name, async () => {
       const files = await build(testCase)
       const client = new RecordingUploader(testCase.responses)
@@ -156,18 +164,62 @@ describe("the upload loop matches publish_to_wordpress", () => {
   }
 })
 
+describe("the one case the port answers differently from Python", () => {
+  const testCase = cases.find((row) => row.name === WEBP_CASE)!
+
+  it("is still recorded as a skip by the oracle", () => {
+    // If the export ever runs on 3.13, where `.webp` is in the builtin table,
+    // Python stops skipping it and this whole block is dead weight rather than
+    // a divergence. Assert the premise so that shows up as a failure.
+    expect(testCase).toBeDefined()
+    expect(testCase.expected.uploads.map((upload) => upload.filename)).toEqual(["inline.png"])
+    expect(testCase.expected.featured_media_id).toBeNull()
+  })
+
+  it("uploads the .webp the deployed table skipped, as the featured image", async () => {
+    const files = await build(testCase)
+    // Python never reached this file, so the oracle recorded no response for
+    // it. The rest of the case is the oracle's verbatim.
+    const client = new RecordingUploader({
+      ...testCase.responses,
+      "featured-082326-abc.webp": {
+        id: 4,
+        source_url: "https://wp.example/featured-082326-abc.webp",
+      },
+    })
+
+    const result = await uploadMediaFiles(files, {
+      postId: testCase.post_id,
+      title: testCase.title,
+      manifest: indexOf(testCase),
+      client,
+    })
+
+    expect(client.calls.map((call) => [call.filename, call.mime])).toEqual([
+      ["featured-082326-abc.webp", "image/webp"],
+      ["inline.png", "image/png"],
+    ])
+    expect(result.featuredMediaId).toBe(4)
+    expect(rewriteImageUrls(testCase.html, result.imageMap)).toBe(
+      '<img src="https://wp.example/featured-082326-abc.webp"/>' +
+        '<img src="https://wp.example/inline.png"/>',
+    )
+  })
+})
+
 describe("the sweep composes the walk, the filter and the loop", () => {
   it("uploads only the images in the directory, in Python's order", async () => {
     await writeFile(path.join(scratch, "b.png"), Buffer.from("89504e47", "hex"))
     await writeFile(path.join(scratch, "a.jpg"), Buffer.from("ffd8ffe0", "hex"))
     await writeFile(path.join(scratch, "notes.txt"), "hi")
-    // The images stage writes `.webp`, which the deployed table does not know:
-    // see the oracle case of the same name and the entry in `todo.md`.
+    // The images stage writes nothing but `.webp`, so this is the only
+    // extension that matters in production (ledger item P1.2c-i).
     await writeFile(path.join(scratch, "c.webp"), Buffer.from("52494646", "hex"))
 
     const client = new RecordingUploader({
       "a.jpg": { id: 1, source_url: "https://wp.example/a.jpg" },
       "b.png": { id: 2, source_url: "https://wp.example/b.png" },
+      "c.webp": { id: 3, source_url: "https://wp.example/c.webp" },
     })
     const result = await sweepMediaDirectory(scratch, {
       postId: "p1",
@@ -176,9 +228,13 @@ describe("the sweep composes the walk, the filter and the loop", () => {
       client,
     })
 
-    expect(client.calls.map((call) => call.filename)).toEqual(["a.jpg", "b.png"])
+    expect(client.calls.map((call) => call.filename)).toEqual(["a.jpg", "b.png", "c.webp"])
     expect(result.featuredMediaId).toBe(1)
-    expect([...result.imageMap.keys()]).toEqual(["/media/p1/a.jpg", "/media/p1/b.png"])
+    expect([...result.imageMap.keys()]).toEqual([
+      "/media/p1/a.jpg",
+      "/media/p1/b.png",
+      "/media/p1/c.webp",
+    ])
   })
 
   it("uploads nothing when the media directory does not exist", async () => {
