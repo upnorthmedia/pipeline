@@ -14,17 +14,6 @@
   and the generated entry is untouched, so this needs a seam of its own or a `mastra` release
   that registers the processor's logger.
 
-- [confirmed] 2026-08-24 `MODEL_COSTS` prices `claude-opus-4-6` at 15.0 / 75.0 per million
-  tokens, which is that model's launch price; Anthropic publishes 5.0 / 25.0 for it now.
-  The row was pinned value for value from Python so historic `stage_logs` costs would agree
-  with the `model_costs_reference` the same response ships, but item 6.1 put the model on
-  the `outline`, `write`, `edit` and `ready` allowlists, so a stage a user configures for it
-  today is priced 3x over in the run trace and in `GET /api/analytics/logs`. Found while
-  fixing the entry above it, and left alone there because repricing a row also rewrites what
-  pre-cutover runs are reported to have cost, which is a decision of its own. The two other
-  Python rows are unaffected: `sonar-pro` and `gemini-3.1-flash-image-preview` still match
-  their providers' published rates. Ledger item P2.93.
-
 - [confirmed] 2026-08-24 The three non-pipeline workflows lost Python's job retry entirely:
   `sitemapCrawlWorkflow`, `recrawlCheckWorkflow` and `wordpressPublishWorkflow` declare no
   `retryConfig`, so each gets a single attempt where `WorkerSettings.max_tries =

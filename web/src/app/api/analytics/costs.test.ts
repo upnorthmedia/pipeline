@@ -150,7 +150,9 @@ describe("GET /api/analytics/costs", () => {
   it("serves the model price table as the cost reference", async () => {
     const reference = (await body()).model_costs_reference
     expect(reference["sonar-pro"]).toEqual({ input: 3.0, output: 15.0 })
-    expect(reference["claude-opus-4-6"]).toEqual({ input: 15.0, output: 75.0 })
+    // Repriced at P2.93 from the 15.0 / 75.0 the row carried over from Python,
+    // which is the model's launch price rather than the one Anthropic charges.
+    expect(reference["claude-opus-4-6"]).toEqual({ input: 5.0, output: 25.0 })
     expect(reference["gemini-3.1-flash-image-preview"]).toEqual({ input: 0.1, output: 60.0 })
   })
 

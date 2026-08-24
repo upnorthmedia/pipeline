@@ -37,6 +37,18 @@
  * the cent. What it cannot express is the Agent API's per-search fee, which
  * this table has no column for; see ledger item P2.71b-ii.
  *
+ * `claude-opus-4-6` is the one row that was repriced rather than pinned, at
+ * ledger item P2.93. It came over from Python at 15.0 / 75.0, which is what
+ * Anthropic charged for the model at launch and no longer charges: the
+ * published rate is 5.0 / 25.0. Every other superseded number above is kept
+ * because the model it prices is on no allowlist, so its row can only ever
+ * describe runs already recorded. This one is on four stages' allowlists, so
+ * its row prices the next run a user configures, and a launch price there is a
+ * 3x overstatement of a live bill rather than a faithful record of an old one.
+ * Repricing it moves no recorded cost: every `stage_logs` entry carries the
+ * `cost_usd` it was written with and `GET /api/analytics/costs` sums those
+ * stored numbers rather than recomputing them from this table.
+ *
  * `claude-fable-5` is the one row with no Python ancestor: item 6.1 put it on
  * the `outline`, `write`, `edit` and `ready` allowlists without a price, and a
  * selectable model with no price would report every stage run on it as costing
@@ -50,7 +62,7 @@ export interface ModelCost {
 export const MODEL_COSTS: Record<string, ModelCost> = {
   "sonar-pro": { input: 3.0, output: 15.0 },
   "perplexity/sonar": { input: 0.25, output: 2.5 },
-  "claude-opus-4-6": { input: 15.0, output: 75.0 },
+  "claude-opus-4-6": { input: 5.0, output: 25.0 },
   "gemini-3.1-flash-image-preview": { input: 0.1, output: 60.0 },
   "claude-opus-5": { input: 5.0, output: 25.0 },
   "gemini-3-pro-image": { input: 2.0, output: 120.0 },
