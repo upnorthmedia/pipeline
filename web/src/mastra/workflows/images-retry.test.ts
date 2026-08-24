@@ -96,7 +96,20 @@ let agentGenerate: ReturnType<typeof vi.spyOn>
 /** The engine's stderr, captured so the expected step errors are asserted on. */
 let engineErrors: EngineStepErrors
 
+/**
+ * Item P2.39's pause, turned on for this one run so it can be measured.
+ *
+ * The suite runs with `STAGE_RETRY_DELAY_MS: "0"` (`vitest.config.ts`), and the
+ * real `RETRY_DELAY_MS` is ten seconds, which two retries would add to this
+ * file's budget. This is short enough to cost nothing and long enough to be
+ * unambiguous against the millisecond `ts` the entries carry.
+ */
+const TEST_RETRY_DELAY_MS = 400
+let previousRetryDelay: string | undefined
+
 beforeAll(async () => {
+  previousRetryDelay = process.env.STAGE_RETRY_DELAY_MS
+  process.env.STAGE_RETRY_DELAY_MS = String(TEST_RETRY_DELAY_MS)
   engineErrors = captureEngineStepErrors()
 
   agentGenerate = vi.spyOn(imagesAgent, "generate").mockImplementation((async () => {
@@ -130,6 +143,8 @@ beforeAll(async () => {
 }, 120_000)
 
 afterAll(async () => {
+  if (previousRetryDelay === undefined) delete process.env.STAGE_RETRY_DELAY_MS
+  else process.env.STAGE_RETRY_DELAY_MS = previousRetryDelay
   await testMastra.stopWorkers()
   await pubsub.close()
   await db.delete(posts).where(eq(posts.id, POST_ID))
@@ -189,6 +204,22 @@ describe("the images stage under the pipeline's retry policy", () => {
       },
     ])
     expect(retries).toHaveLength(MAX_ATTEMPTS - 1)
+  })
+
+  // Item P2.39: Python's `WorkerSettings.retry_delay = 10` spaced attempts out
+  // in the queue, and the evented engine republishes `workflow.step.run` with
+  // no delay at all. The pause now lives inside the step, so a real run is
+  // where it can be seen doing what the constant claims.
+  it("spaces each attempt from the one before it by the configured delay", async () => {
+    const entries = await readLogs()
+    const at = (index: number) => Date.parse(entries[index].ts as string)
+    // The trail is three attempts of three entries with a `retry` between
+    // them: entries 3 and 7 are the retries, 4 and 8 the `stage_start` of the
+    // attempt each one preceded.
+    expect(entries[3].event).toBe("retry")
+    expect(entries[7].event).toBe("retry")
+    expect(at(4) - at(3)).toBeGreaterThanOrEqual(TEST_RETRY_DELAY_MS)
+    expect(at(8) - at(7)).toBeGreaterThanOrEqual(TEST_RETRY_DELAY_MS)
   })
 
   it("interleaves the retry after every attempt that is followed by another", async () => {

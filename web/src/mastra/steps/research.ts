@@ -101,7 +101,7 @@ export const researchStep = createStep({
   outputSchema: stageStepOutputSchema,
   resumeSchema: gateResumeSchema,
   suspendSchema: gateSuspendSchema,
-  execute: async ({ inputData, mastra, resumeData, suspend, retryCount }) => {
+  execute: async ({ inputData, mastra, resumeData, suspend, retryCount, abortSignal }) => {
     try {
       const { postId } = inputData
       const state = await loadPipelineState(postId)
@@ -221,7 +221,7 @@ export const researchStep = createStep({
       // wrapped the whole stage loop. Only this side of the throw can see the
       // attempt number, so the record is written here and the error is rethrown
       // unchanged for the engine to retry or fail on.
-      await recordStageRetry("research", inputData.postId, retryCount, error)
+      await recordStageRetry("research", inputData.postId, retryCount, error, abortSignal)
       throw error
     }
   },

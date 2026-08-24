@@ -431,6 +431,70 @@ function errorText(error: unknown): string {
 }
 
 /**
+ * The gap between one attempt and the next, ported from
+ * `WorkerSettings.retry_delay = 10` (`api/src/worker.py:610`).
+ *
+ * ARQ spent this in the queue, so the wait cost the worker nothing. Mastra's
+ * evented processor has no counterpart: its only `retryConfig` reference is the
+ * retry branch at `workflow-event-processor-Dp87-e6z.js:3434`, which reads
+ * `attempts` and republishes `workflow.step.run` immediately, and the
+ * `abortableSleep` helper beside it serves sleep steps only. A `delay` on the
+ * workflow would read as honoured and would not be, so the spacing lives inside
+ * the step instead, held before the error is rethrown.
+ *
+ * That is a real deviation and worth naming: the pause occupies the worker slot
+ * where Python's occupied a queue score. `MAX_ATTEMPTS` is 3 and the delay only
+ * precedes an attempt that actually follows, so the worst case is 20 seconds of
+ * held slot per failing run, well inside the 15 minute `RECLAIM_IDLE_MS` after
+ * which another consumer would claim the message.
+ *
+ * The point of it is the case Python was built for: a provider that answers 429
+ * gets three requests in as many seconds otherwise, which is likely to spend
+ * every attempt inside the same rate-limit window.
+ */
+export const RETRY_DELAY_MS = 10_000
+
+/**
+ * `RETRY_DELAY_MS`, or the `STAGE_RETRY_DELAY_MS` override.
+ *
+ * The override exists for the test suite, which sets it to `0` in
+ * `vitest.config.ts`: five suites drive real failing runs through the engine's
+ * retry branch, and every one of them would otherwise gain
+ * `(MAX_ATTEMPTS - 1) * RETRY_DELAY_MS` on top of its own budget. Anything that
+ * is not a non-negative number falls back to Python's value, so a typo in a
+ * deployed environment loses the pause rather than the stage.
+ */
+export function retryDelayMs(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.STAGE_RETRY_DELAY_MS
+  if (raw === undefined || raw.trim() === "") return RETRY_DELAY_MS
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed < 0) return RETRY_DELAY_MS
+  return parsed
+}
+
+/**
+ * Wait out the gap between attempts, or return at once if the run is already
+ * being torn down.
+ *
+ * `signal` is the step's own `abortSignal`. Without it a cancelled run, or a
+ * worker being shut down, would sit here for ten seconds before rethrowing an
+ * error whose retry nobody wants any more.
+ */
+function pauseBeforeRetry(signal?: AbortSignal): Promise<void> {
+  const delay = retryDelayMs()
+  if (delay <= 0 || signal?.aborted) return Promise.resolve()
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", finish)
+      resolve()
+    }
+    const timer = setTimeout(finish, delay)
+    signal?.addEventListener("abort", finish, { once: true })
+  })
+}
+
+/**
  * The `warning` / `retry` entry from Python's exception branch
  * (`api/src/worker.py:334`), written when a stage throws and the engine still
  * has attempts left for it.
@@ -461,12 +525,17 @@ function errorText(error: unknown): string {
  * from the same block, and that publish is already ported in the failure
  * recorder. Publishing a second one here would raise a toast per attempt for a
  * run that has not failed yet.
+ *
+ * The entry is written before the pause below it, deliberately: the run's log
+ * says "retrying..." and then goes quiet for ten seconds, rather than looking
+ * hung for ten seconds and then explaining itself.
  */
 export async function recordStageRetry(
   stage: Stage,
   postId: string,
   retryCount: number,
   error: unknown,
+  signal?: AbortSignal,
 ): Promise<void> {
   const attempt = retryCount + 1
   if (attempt >= MAX_ATTEMPTS) return
@@ -477,6 +546,7 @@ export async function recordStageRetry(
     message: `Pipeline attempt ${attempt} failed, retrying...`,
     data: { attempt, max_attempts: MAX_ATTEMPTS, error: errorText(error) },
   })
+  await pauseBeforeRetry(signal)
 }
 
 /** The output of a stage that was skipped: the chain's fields and nothing else. */

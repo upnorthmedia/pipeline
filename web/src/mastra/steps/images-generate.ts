@@ -156,7 +156,7 @@ export const imagesGenerateStep = createStep({
   id: "images-generate",
   inputSchema: imageJobSchema,
   outputSchema: generatedImageSchema,
-  execute: async ({ inputData, mastra, retryCount }) => {
+  execute: async ({ inputData, mastra, retryCount, abortSignal }) => {
     try {
       const apiKey = await requireApiKey("gemini")
       // The `images` entry in `stage_models` names the generation model (item
@@ -205,7 +205,7 @@ export const imagesGenerateStep = createStep({
       // only ever wrote `images` here. `imagesWorkflow` carries the retry
       // policy of its own (item 5.5c-iii-b-2-b-i), so `retryCount` is the
       // attempt number the same way it is for the five single-step stages.
-      await recordStageRetry("images", inputData.postId, retryCount, error)
+      await recordStageRetry("images", inputData.postId, retryCount, error, abortSignal)
       throw error
     }
   },

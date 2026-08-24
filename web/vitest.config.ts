@@ -37,10 +37,17 @@ export default defineConfig({
     // validated inside the same run by `src/test/session.ts`, so the value
     // never has to match anything; what matters is that it is not better-auth's
     // published fallback. A real `.env` value still wins.
+    // `STAGE_RETRY_DELAY_MS` goes last for the same reason as `MEDIA_DIR`: it
+    // switches off the ten-second pause a stage holds between attempts
+    // (`RETRY_DELAY_MS` in `src/mastra/steps/stage-io.ts`), which five suites
+    // that drive real failing runs would otherwise pay twice per run, past the
+    // 45s budget above. `src/mastra/steps/stage-retry.test.ts` fails when this
+    // stops being set, and covers the pause itself with its own override.
     env: {
       BETTER_AUTH_SECRET: "vitest-fixed-secret-not-used-outside-the-suite",
       ...repoRootEnv(__dirname),
       MEDIA_DIR: testMediaRoot(),
+      STAGE_RETRY_DELAY_MS: "0",
     },
   },
   resolve: {

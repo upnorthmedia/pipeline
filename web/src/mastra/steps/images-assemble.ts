@@ -113,7 +113,7 @@ export const imagesAssembleStep = createStep({
   id: "images-assemble",
   inputSchema: z.array(generatedImageSchema),
   outputSchema: imagesStageOutputSchema,
-  execute: async ({ inputData, getStepResult, mastra, retryCount }) => {
+  execute: async ({ inputData, getStepResult, mastra, retryCount, abortSignal }) => {
     const manifestResult = getStepResult(imagesManifestStep)
     try {
       const { postId, stages, stageStartedAtMs, parseFailed, skipped } = manifestResult
@@ -207,7 +207,7 @@ export const imagesAssembleStep = createStep({
       // comes from the manifest step's result, resolved before the `try` so the
       // catch has it: a `getStepResult` that itself threw is the one failure
       // this record cannot cover, and it has no post id to record against.
-      await recordStageRetry("images", manifestResult.postId, retryCount, error)
+      await recordStageRetry("images", manifestResult.postId, retryCount, error, abortSignal)
       throw error
     }
   },

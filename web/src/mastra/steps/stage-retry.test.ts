@@ -18,7 +18,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, posts } from "../../db"
 import { MAX_ATTEMPTS } from "../state"
-import { recordStageRetry } from "./stage-io"
+import { RETRY_DELAY_MS, recordStageRetry, retryDelayMs } from "./stage-io"
 
 const POST_ID = "00000000-0000-4000-8000-00000005c3b2"
 
@@ -98,5 +98,111 @@ describe("recordStageRetry", () => {
     await recordStageRetry("outline", POST_ID, 0, new Error("boom"))
     const [entry] = await readLogs()
     expect(entry.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+00:00$/)
+  })
+})
+
+/**
+ * Item P2.39: the pause between attempts, Python's `WorkerSettings.retry_delay
+ * = 10` (`api/src/worker.py:610`).
+ *
+ * ARQ spent it in the queue, so the delay cost the worker nothing. Mastra's
+ * evented processor has no counterpart: its only `retryConfig` reference reads
+ * `attempts` and republishes `workflow.step.run` straight away. The only place
+ * the spacing can live is therefore inside the step, on the way out, which is
+ * where the attempt number already is.
+ *
+ * These drive it with a short delay rather than the real ten seconds. The suite
+ * runs with the delay switched off entirely, which the last test pins.
+ */
+describe("the pause before the retry", () => {
+  async function withDelay<T>(ms: string, body: () => Promise<T>): Promise<T> {
+    const previous = process.env.STAGE_RETRY_DELAY_MS
+    process.env.STAGE_RETRY_DELAY_MS = ms
+    try {
+      return await body()
+    } finally {
+      if (previous === undefined) delete process.env.STAGE_RETRY_DELAY_MS
+      else process.env.STAGE_RETRY_DELAY_MS = previous
+    }
+  }
+
+  async function elapsed(body: () => Promise<unknown>): Promise<number> {
+    const started = performance.now()
+    await body()
+    return performance.now() - started
+  }
+
+  it("holds for the configured delay before the stage rethrows", async () => {
+    const took = await withDelay("300", () =>
+      elapsed(() => recordStageRetry("write", POST_ID, 0, new Error("429 rate limited"))),
+    )
+    expect(took).toBeGreaterThanOrEqual(290)
+  })
+
+  it("writes the retry entry before it waits, so the pause is visible as a gap", async () => {
+    // The user-facing point of the delay is that the log says "retrying..." and
+    // then nothing happens for ten seconds. Writing the entry after the wait
+    // would make the run look hung instead.
+    await withDelay("300", async () => {
+      const record = recordStageRetry("write", POST_ID, 0, new Error("429 rate limited"))
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(await readLogs()).toHaveLength(1)
+      await record
+    })
+  })
+
+  it("does not wait on the attempt that spends the last one", async () => {
+    // Python re-queued with the delay only when a retry followed. The last
+    // failure goes straight to the run's failure, so a pause here would be ten
+    // seconds added to every failed run for nothing.
+    const took = await withDelay("3000", () =>
+      elapsed(() =>
+        recordStageRetry("write", POST_ID, MAX_ATTEMPTS - 1, new Error("429 rate limited")),
+      ),
+    )
+    expect(took).toBeLessThan(1000)
+  })
+
+  it("returns straight away when the run has been aborted", async () => {
+    // A cancelled run should not sit in a pause waiting to retry work nobody
+    // wants any more, and neither should a worker being shut down.
+    const controller = new AbortController()
+    controller.abort()
+    const took = await withDelay("3000", () =>
+      elapsed(() =>
+        recordStageRetry("write", POST_ID, 0, new Error("429 rate limited"), controller.signal),
+      ),
+    )
+    expect(took).toBeLessThan(1000)
+  })
+
+  it("stops waiting when the run is aborted mid-pause", async () => {
+    const controller = new AbortController()
+    setTimeout(() => controller.abort(), 100)
+    const took = await withDelay("3000", () =>
+      elapsed(() =>
+        recordStageRetry("write", POST_ID, 0, new Error("429 rate limited"), controller.signal),
+      ),
+    )
+    expect(took).toBeLessThan(1000)
+  })
+
+  it("is ten seconds when nothing overrides it, which is Python's value", () => {
+    expect(retryDelayMs({})).toBe(RETRY_DELAY_MS)
+    expect(RETRY_DELAY_MS).toBe(10_000)
+  })
+
+  it("falls back to Python's value for an override that is not a number", () => {
+    expect(retryDelayMs({ STAGE_RETRY_DELAY_MS: "" })).toBe(RETRY_DELAY_MS)
+    expect(retryDelayMs({ STAGE_RETRY_DELAY_MS: "soon" })).toBe(RETRY_DELAY_MS)
+    expect(retryDelayMs({ STAGE_RETRY_DELAY_MS: "-1" })).toBe(RETRY_DELAY_MS)
+  })
+
+  it("is switched off for the suite, which is what keeps the retry suites fast", () => {
+    // `vitest.config.ts` sets this. Five suites drive real failing runs through
+    // the engine's retry branch, and every one of them would gain
+    // `(MAX_ATTEMPTS - 1) * 10s` per run without it, which is past the 45s
+    // harness timeout. This fails if that line is ever removed.
+    expect(retryDelayMs()).toBe(0)
   })
 })

@@ -39,16 +39,18 @@
   pre-cutover runs are reported to have cost, which is a decision of its own. The two other
   Python rows are unaffected: `sonar-pro` and `gemini-3.1-flash-image-preview` still match
   their providers' published rates. Ledger item P2.93.
-- [confirmed] 2026-08-22 The port's stage retries are immediate where Python spaced them
-  10 seconds apart. `WorkerSettings.retry_delay = 10` (`api/src/worker.py:610`) has no
-  equivalent in Mastra's evented engine: the processor's only `retryConfig` reference is
-  the retry branch at `workflow-event-processor-Dp87-e6z.js:3434`, which reads
-  `attempts` and republishes `workflow.step.run` straight away, and its `abortableSleep`
-  helper is used only by sleep steps. So a provider that rate-limits us takes three rapid
-  failures instead of three spaced ones, which is likelier to spend all three attempts on
-  the same 429. Found setting the retry policy for item 5.5c-iii-b-1. A fix would be a
-  backoff inside the step (it can read `retryCount`) rather than a `delay` on the
-  workflow, which would read as honoured and would not be.
+- [confirmed] 2026-08-24 The three non-pipeline workflows lost Python's job retry entirely:
+  `sitemapCrawlWorkflow`, `recrawlCheckWorkflow` and `wordpressPublishWorkflow` declare no
+  `retryConfig`, so each gets a single attempt where `WorkerSettings.max_tries =
+  MAX_ATTEMPTS` gave all four entries of `functions = [run_pipeline_stage,
+  crawl_profile_sitemap, publish_to_wordpress, publish_to_nextjs]` three. A WordPress
+  publish that meets one 502 therefore fails for good. `nextjsPublishWorkflow` did get the
+  policy. Found closing P2.39. Ledger item P2.94.
+- [confirmed] 2026-08-24 The retry pause added by P2.39 covers the eight pipeline stage
+  steps only, because it lives in `recordStageRetry()` and nothing else calls it.
+  `nextjsPublishWorkflow` retries three times with no gap between them, where Python's
+  `retry_delay = 10` was a `WorkerSettings` key and spaced every job function's retries
+  equally. Ledger item P2.95.
 - [investigate] 2026-08-22 A step that is resumed from a review gate and then throws loses
   its `resumeData` on retry, so it re-suspends at the same gate instead of retrying. The
   engine's retry branch republishes `workflow.step.run` with `retryCount + 1` and does not

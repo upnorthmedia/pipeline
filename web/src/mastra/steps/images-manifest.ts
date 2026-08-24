@@ -170,7 +170,7 @@ export const imagesManifestStep = createStep({
   outputSchema: imagesManifestOutputSchema,
   resumeSchema: gateResumeSchema,
   suspendSchema: gateSuspendSchema,
-  execute: async ({ inputData, mastra, resumeData, suspend, retryCount }) => {
+  execute: async ({ inputData, mastra, resumeData, suspend, retryCount, abortSignal }) => {
     try {
       const { postId } = inputData
       const stageStartedAtMs = Date.now()
@@ -284,7 +284,7 @@ export const imagesManifestStep = createStep({
       // only ever wrote `images` here. `imagesWorkflow` carries the retry
       // policy of its own (item 5.5c-iii-b-2-b-i), so `retryCount` is the
       // attempt number the same way it is for the five single-step stages.
-      await recordStageRetry("images", inputData.postId, retryCount, error)
+      await recordStageRetry("images", inputData.postId, retryCount, error, abortSignal)
       throw error
     }
   },

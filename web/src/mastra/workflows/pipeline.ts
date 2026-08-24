@@ -84,9 +84,8 @@ export const pipelineWorkflow = createWorkflow({
   // `retry_delay = 10`: the evented processor reads `retryConfig.attempts` and
   // nothing else (its only `retryConfig` reference is the retry branch at
   // `workflow-event-processor-Dp87-e6z.js:3434`), so a delay here would be a
-  // value that reads as honoured and is not. Retries are immediate. Logged in
-  // `todo.md`, since it costs a provider that rate-limited us three rapid
-  // failures where Python spaced them 10 seconds apart.
+  // value that reads as honoured and is not. The spacing lives inside the step
+  // instead, as `RETRY_DELAY_MS` in `steps/stage-io.ts` (item P2.39).
   retryConfig: { attempts: MAX_ATTEMPTS - 1 },
 })
   .then(pipelineStartStep)
