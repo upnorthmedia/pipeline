@@ -57,16 +57,6 @@
   project has no deployed Railway environment, so nobody has seen Railway execute the hook or
   abort a deployment on its exit code.
 
-- [confirmed] 2026-08-23 The global `stage_models` row is borrowed the way `api_keys` used to
-  be: `src/mastra/stage-models.test.ts`, `src/app/api/settings/stage-models/route.test.ts` and
-  `src/app/settings/stage-models-to-provider.test.tsx` each hold the pre-borrow value in a
-  module-level variable and write it back in `afterAll`, so a killed run loses it and the next
-  run adopts whatever the dead one left. Polish item P0.3a fixed this shape for `api_keys` by
-  moving the snapshot into a backup row (`web/src/test/borrowed-rows.ts`), and this row can
-  move to the same helper. Lower stakes than `api_keys`, since it holds model ids rather than
-  credentials, which is why it was not done inline: `stage-models.test.ts` also restores the
-  row's `updated_at`, which the shared helper does not carry yet. Ledger item P2.89.
-
 - [confirmed] 2026-08-24 A post created with no profile is unreachable and undeletable through
   the app. `/posts/new` offers "No profile (manual config)"
   (`web/src/components/profile-select-card.tsx:110`) and `POST /api/posts` accepts a body with

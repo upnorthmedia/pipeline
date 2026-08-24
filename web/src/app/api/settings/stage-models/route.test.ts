@@ -22,8 +22,8 @@ import {
 } from "@/mastra/stage-models"
 import { STAGES } from "@/mastra/state"
 import {
-  lockGlobalStageModelsRow,
-  unlockGlobalStageModelsRow,
+  borrowGlobalStageModelsRow,
+  returnGlobalStageModelsRow,
 } from "@/test/stage-models-row"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
@@ -35,7 +35,6 @@ const URL = "http://test/api/settings/stage-models"
 const db = getDb()
 
 let user: TestSession
-let globalRowBefore: { value: unknown } | undefined
 
 async function clearOwn() {
   await db.delete(settings).where(like(settings.userId, `${PREFIX}%`))
@@ -63,14 +62,7 @@ async function stageRow(stage: string, cookie: string) {
 }
 
 beforeAll(async () => {
-  await lockGlobalStageModelsRow()
-  globalRowBefore = (
-    await db
-      .select({ value: settings.value })
-      .from(settings)
-      .where(and(eq(settings.key, STAGE_MODELS_SETTING_KEY), isNull(settings.userId)))
-      .limit(1)
-  )[0]
+  await borrowGlobalStageModelsRow()
 
   await deleteTestSessions(PREFIX)
   user = await createTestSession(PREFIX)
@@ -85,9 +77,9 @@ afterEach(async () => {
 
 afterAll(async () => {
   await clearOwn()
-  await setGlobal(globalRowBefore ? (globalRowBefore.value as StageModelSettings) : null)
   await deleteTestSessions(PREFIX)
-  await unlockGlobalStageModelsRow()
+  // The borrow puts the global row back; `afterEach` already cleared it.
+  await returnGlobalStageModelsRow()
   await closeDb()
 })
 

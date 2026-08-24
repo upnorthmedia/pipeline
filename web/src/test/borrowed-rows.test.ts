@@ -16,6 +16,9 @@
  *
  * Requires `docker compose up -d db redis`.
  */
+import fs from "node:fs"
+import path from "node:path"
+
 import { and, eq, isNull } from "drizzle-orm"
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest"
 
@@ -36,6 +39,9 @@ const rows = createBorrowedRows({
 /** What a human put in the row before any test borrowed it. */
 const REAL_VALUE = { anthropic: "gAAAAA-standing-in-for-a-real-fernet-token" }
 
+/** When they put it there. Any stamp far enough from now to be unambiguous. */
+const EDITED_AT = new Date("2026-07-04T09:15:00.000Z")
+
 async function read(key: string): Promise<unknown | undefined> {
   const found = await getDb()
     .select({ value: settings.value })
@@ -45,11 +51,42 @@ async function read(key: string): Promise<unknown | undefined> {
   return found.length ? found[0].value : undefined
 }
 
+async function readUpdatedAt(key: string): Promise<Date | null | undefined> {
+  const found = await getDb()
+    .select({ updatedAt: settings.updatedAt })
+    .from(settings)
+    .where(and(eq(settings.key, key), isNull(settings.userId)))
+    .limit(1)
+  return found.length ? found[0].updatedAt : undefined
+}
+
 async function write(key: string, value: object): Promise<void> {
   await getDb()
     .insert(settings)
     .values({ key, value })
     .onConflictDoUpdate({ target: [settings.key, settings.userId], set: { value } })
+}
+
+/**
+ * A write shaped like the ones the borrowers make. `PUT /api/settings` and
+ * every test file that borrows a row set `updated_at` alongside `value`, so a
+ * placeholder written the lazy way would not exercise the restore at all.
+ */
+async function writeLikeTheApp(key: string, value: object): Promise<void> {
+  await getDb()
+    .insert(settings)
+    .values({ key, value })
+    .onConflictDoUpdate({
+      target: [settings.key, settings.userId],
+      set: { value, updatedAt: new Date() },
+    })
+}
+
+async function stamp(key: string, updatedAt: Date): Promise<void> {
+  await getDb()
+    .update(settings)
+    .set({ updatedAt })
+    .where(and(eq(settings.key, key), isNull(settings.userId)))
 }
 
 async function wipe(): Promise<void> {
@@ -72,6 +109,16 @@ afterEach(async () => {
 afterAll(async () => {
   await closeDb()
 })
+
+function sourceFiles(dir: string): string[] {
+  const found: string[] = []
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) found.push(...sourceFiles(full))
+    else if (/\.tsx?$/.test(entry.name)) found.push(full)
+  }
+  return found
+}
 
 describe("createBorrowedRows", () => {
   it("puts back the value the row held before the borrow", async () => {
@@ -123,6 +170,48 @@ describe("createBorrowedRows", () => {
     }
   })
 
+  it("puts back the row's own updated_at, not the moment of the restore", async () => {
+    // `GET /api/settings` serves `updated_at` for every row, so a borrow that
+    // restored the value under a fresh stamp would still have changed what the
+    // settings page reports about when a human last touched the row.
+    await write(FIRST_KEY, REAL_VALUE)
+    await stamp(FIRST_KEY, EDITED_AT)
+
+    await rows.borrow()
+    await writeLikeTheApp(FIRST_KEY, { anthropic: "sk-ant-not-a-real-key" })
+    await rows.giveBack()
+
+    expect(await readUpdatedAt(FIRST_KEY)).toEqual(EDITED_AT)
+  })
+
+  it("puts back the updated_at a dead borrower left behind too", async () => {
+    await write(FIRST_KEY, REAL_VALUE)
+    await stamp(FIRST_KEY, EDITED_AT)
+
+    await rows.borrow()
+    await writeLikeTheApp(FIRST_KEY, { anthropic: "sk-ant-not-a-real-key" })
+    await rows.abandonForTest()
+
+    await rows.borrow()
+    await rows.giveBack()
+
+    expect(await readUpdatedAt(FIRST_KEY)).toEqual(EDITED_AT)
+  })
+
+  it("clears the rows on request and still puts them back", async () => {
+    // What a file asserting on a default needs: the borrow alone leaves
+    // whatever a human put in the row, and the assertion would be about that.
+    await write(FIRST_KEY, REAL_VALUE)
+    await stamp(FIRST_KEY, EDITED_AT)
+
+    await rows.borrow({ clear: true })
+    expect(await read(FIRST_KEY)).toBeUndefined()
+    await rows.giveBack()
+
+    expect(await read(FIRST_KEY)).toEqual(REAL_VALUE)
+    expect(await readUpdatedAt(FIRST_KEY)).toEqual(EDITED_AT)
+  })
+
   it("repairs the rows a dead borrower left behind instead of adopting its placeholder", async () => {
     await write(FIRST_KEY, REAL_VALUE)
 
@@ -141,5 +230,23 @@ describe("createBorrowedRows", () => {
 
     expect(await read(FIRST_KEY)).toEqual(REAL_VALUE)
     expect(await read(BACKUP_KEY)).toBeUndefined()
+  })
+})
+
+describe("the lock is reachable only through a borrow", () => {
+  // Holding the lock is not the part that protects the row. A file that took
+  // it, remembered the pre-borrow value in a module variable and wrote it back
+  // in `afterAll` is exactly what lost the developer's `api_keys` row during
+  // the port, and the same shape was still on the `stage_models` row until
+  // P2.89. So `row-lock.ts` has one importer, and it is the module that keeps
+  // the snapshot in the database.
+  it("is imported by borrowed-rows.ts and nothing else", () => {
+    const root = path.join(process.cwd(), "src")
+    const importers = sourceFiles(root)
+      .filter((file) => /from\s+"(?:[./][^"]*|@\/test\/)row-lock"/.test(fs.readFileSync(file, "utf8")))
+      .map((file) => path.relative(root, file))
+      .sort()
+
+    expect(importers).toEqual(["test/borrowed-rows.ts"])
   })
 })

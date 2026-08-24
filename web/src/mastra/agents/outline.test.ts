@@ -52,6 +52,10 @@ import {
 } from "./outline"
 
 import { borrowApiKeysRow, returnApiKeysRow } from "@/test/api-keys-row"
+import {
+  borrowGlobalStageModelsRow,
+  returnGlobalStageModelsRow,
+} from "@/test/stage-models-row"
 import { swapFetch } from "@/test/swapped-fetch"
 import { createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
@@ -95,9 +99,15 @@ async function clearKeys() {
 
 beforeAll(async () => {
   await borrowApiKeysRow({ encryptionKey: TEST_KEY })
+  // The model this file asserts on is the default, and it resolves through the
+  // global `stage_models` row, so the row is both borrowed (or another file
+  // answers for this one) and cleared (or a model a human chose does). Taken
+  // second, in the order `row-lock.ts` documents.
+  await borrowGlobalStageModelsRow({ clear: true })
 }, 30_000)
 
 afterAll(async () => {
+  await returnGlobalStageModelsRow()
   await returnApiKeysRow()
   await pubsub.close()
   await closeDb()

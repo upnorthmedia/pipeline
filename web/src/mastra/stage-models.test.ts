@@ -19,8 +19,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 import { closeDb, getDb, posts, settings, websiteProfiles } from "@/db"
 import { createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 import {
-  lockGlobalStageModelsRow,
-  unlockGlobalStageModelsRow,
+  borrowGlobalStageModelsRow,
+  returnGlobalStageModelsRow,
 } from "@/test/stage-models-row"
 
 import { IMAGES_MODEL_ID } from "./agents/images"
@@ -50,8 +50,6 @@ const db = getDb()
 
 let user: TestSession
 let other: TestSession
-/** The global row as the suite found it, or null when there was none. */
-let existingGlobal: { value: unknown; updatedAt: Date | null } | null = null
 
 async function setGlobal(value: StageModelSettings) {
   await db
@@ -86,13 +84,7 @@ async function clearRows() {
 }
 
 beforeAll(async () => {
-  await lockGlobalStageModelsRow()
-  const rows = await db
-    .select({ value: settings.value, updatedAt: settings.updatedAt })
-    .from(settings)
-    .where(and(eq(settings.key, STAGE_MODELS_SETTING_KEY), isNull(settings.userId)))
-    .limit(1)
-  existingGlobal = rows[0] ?? null
+  await borrowGlobalStageModelsRow()
 
   await deleteTestSessions(PREFIX)
   user = await createTestSession(PREFIX)
@@ -104,15 +96,8 @@ afterEach(clearRows)
 
 afterAll(async () => {
   await clearRows()
-  if (existingGlobal) {
-    await db.insert(settings).values({
-      key: STAGE_MODELS_SETTING_KEY,
-      value: existingGlobal.value,
-      updatedAt: existingGlobal.updatedAt ?? undefined,
-    })
-  }
   await deleteTestSessions(PREFIX)
-  await unlockGlobalStageModelsRow()
+  await returnGlobalStageModelsRow()
   await closeDb()
 })
 

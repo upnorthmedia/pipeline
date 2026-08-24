@@ -61,8 +61,8 @@ import { stageAgentOptions } from "@/mastra/steps/stage-io"
 import { stageLabel } from "@/lib/stages"
 import { borrowApiKeysRow, returnApiKeysRow } from "@/test/api-keys-row"
 import {
-  lockGlobalStageModelsRow,
-  unlockGlobalStageModelsRow,
+  borrowGlobalStageModelsRow,
+  returnGlobalStageModelsRow,
 } from "@/test/stage-models-row"
 import { renderWithProviders } from "@/test/render"
 import { swapFetchForSuite } from "@/test/swapped-fetch"
@@ -95,7 +95,6 @@ const db = getDb()
 
 let user: TestSession
 let mediaDir = ""
-let savedGlobalStageModels: { value: unknown } | undefined
 
 /** Every request the router sent nowhere, in order. */
 const captured: { url: string; body: Record<string, unknown> }[] = []
@@ -235,15 +234,7 @@ beforeAll(async () => {
   // resolution here, so the file owns them for its duration. Taken in the
   // order `row-lock.ts` documents, since no other file takes both.
   await borrowApiKeysRow({ encryptionKey: TEST_KEY })
-  await lockGlobalStageModelsRow()
-
-  savedGlobalStageModels = (
-    await db
-      .select({ value: settings.value })
-      .from(settings)
-      .where(and(eq(settings.key, STAGE_MODELS_SETTING_KEY), isNull(settings.userId)))
-      .limit(1)
-  )[0]
+  await borrowGlobalStageModelsRow()
 
   const value = {
     [CLAUDE_PROVIDER]: encryptWithKey("sk-ant-not-a-real-key", TEST_KEY),
@@ -285,14 +276,8 @@ afterAll(async () => {
   await db.delete(settings).where(like(settings.userId, `${PREFIX}%`))
   await deleteTestSessions(PREFIX)
 
-  if (savedGlobalStageModels) {
-    await db
-      .insert(settings)
-      .values({ key: STAGE_MODELS_SETTING_KEY, value: savedGlobalStageModels.value })
-  }
-
   if (mediaDir) await rm(mediaDir, { recursive: true, force: true })
-  await unlockGlobalStageModelsRow()
+  await returnGlobalStageModelsRow()
   await returnApiKeysRow()
   await closeDb()
 })

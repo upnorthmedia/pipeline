@@ -30,8 +30,16 @@ import { getDb, settings } from "@/db"
 
 import { createRowLock } from "./row-lock"
 
-/** One backed-up row: its value, or `null` when the row did not exist. */
-type SavedRow = { value: unknown } | null
+/**
+ * One backed-up row, or `null` when the row did not exist.
+ *
+ * `updatedAt` is part of the snapshot because `GET /api/settings` serves it
+ * for every row: a borrow that put the value back under a fresh stamp would
+ * still have changed what the settings page reports about when a human last
+ * touched the row. It is carried as an ISO string because the backup lives in
+ * a `jsonb` column, which has no date type.
+ */
+type SavedRow = { value: unknown; updatedAt: string | null } | null
 
 type Backup = Record<string, SavedRow>
 
@@ -42,8 +50,14 @@ export interface BorrowedRows {
    * `WP_ENCRYPTION_KEY` for the borrow and restored by `giveBack()`, so a file
    * whose fixtures are encrypted under a throwaway key does not have to
    * remember to put the real one back.
+   *
+   * `clear` deletes the rows once they are backed up, so the file starts from
+   * the state a database with no operator settings is in. A file that asserts
+   * on a default needs this: the borrow stops another file answering for it,
+   * but a value a human left in the row is still there, and the assertion
+   * would be about that value instead.
    */
-  borrow: (options?: { encryptionKey?: string }) => Promise<void>
+  borrow: (options?: { encryptionKey?: string; clear?: boolean }) => Promise<void>
   /**
    * Puts the rows back and releases the lock. Call it last in `afterAll`,
    * before `closeDb()`, which would otherwise hang waiting on the client the
@@ -62,11 +76,12 @@ export interface BorrowedRows {
 
 async function readGlobal(key: string): Promise<SavedRow> {
   const rows = await getDb()
-    .select({ value: settings.value })
+    .select({ value: settings.value, updatedAt: settings.updatedAt })
     .from(settings)
     .where(and(eq(settings.key, key), isNull(settings.userId)))
     .limit(1)
-  return rows.length ? { value: rows[0].value } : null
+  if (!rows.length) return null
+  return { value: rows[0].value, updatedAt: rows[0].updatedAt?.toISOString() ?? null }
 }
 
 async function writeGlobal(key: string, saved: SavedRow): Promise<void> {
@@ -77,10 +92,31 @@ async function writeGlobal(key: string, saved: SavedRow): Promise<void> {
     return
   }
   const value = saved.value as object
+  const updatedAt = saved.updatedAt === null ? null : new Date(saved.updatedAt)
   await getDb()
     .insert(settings)
-    .values({ key, value })
-    .onConflictDoUpdate({ target: [settings.key, settings.userId], set: { value } })
+    .values({ key, value, updatedAt })
+    .onConflictDoUpdate({ target: [settings.key, settings.userId], set: { value, updatedAt } })
+}
+
+/**
+ * The backup row is written and read as one blob, and no restore reads its
+ * stamp, so it keeps the column's own default rather than carrying one.
+ */
+async function writeBackup(key: string, backup: Backup | null): Promise<void> {
+  if (!backup) {
+    await getDb()
+      .delete(settings)
+      .where(and(eq(settings.key, key), isNull(settings.userId)))
+    return
+  }
+  await getDb()
+    .insert(settings)
+    .values({ key, value: backup })
+    .onConflictDoUpdate({
+      target: [settings.key, settings.userId],
+      set: { value: backup },
+    })
 }
 
 /**
@@ -126,7 +162,11 @@ export function createBorrowedRows(config: {
         } else {
           const backup: Backup = {}
           for (const key of config.keys) backup[key] = await readGlobal(key)
-          await writeGlobal(config.backupKey, { value: backup })
+          await writeBackup(config.backupKey, backup)
+        }
+
+        if (options.clear) {
+          for (const key of config.keys) await writeGlobal(key, null)
         }
 
         if (options.encryptionKey !== undefined) {
@@ -144,7 +184,7 @@ export function createBorrowedRows(config: {
         const backup = await readBackup()
         if (backup) {
           for (const key of config.keys) await writeGlobal(key, backup[key] ?? null)
-          await writeGlobal(config.backupKey, null)
+          await writeBackup(config.backupKey, null)
         }
       } finally {
         restoreEncryptionKey()
