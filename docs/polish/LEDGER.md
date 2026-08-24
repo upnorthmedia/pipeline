@@ -53,7 +53,19 @@ move on. A split is not an iteration on its own: split and complete the first ch
       `MEDIA_DIR` under `tmpdir`, `media/` is gone and gitignored, and 51 committed artifacts
       are deleted. Closes P2.14, P2.24, P2.33 and P2.49. [evidence](evidence/p0.md#p04)
 - [ ] **P0.5** `pnpm test:e2e` is stale and fails. Repair the Playwright suite against the
-      current UI.
+      current UI. Baseline 31 failed / 4 passed / 7.3m; the single cause of all 31 is that the
+      suite ran signed out, so `src/middleware.ts` served every route as the sign-in page.
+  - [x] **P0.5a** The session, plus `navigation.test.ts`. A `setup` project signs one fixed
+        account in over the real BetterAuth endpoints, clears its rows and saves the cookie
+        jar; `auth.test.ts` guards the precondition with its own kill check. Five stale
+        assertions in `navigation.test.ts` repaired against the source. 31/4 -> 12/26, and
+        `navigation.test.ts` is 14/14 in 9.6s. Closes P2.86.
+        [evidence](evidence/p0.md#p05a)
+  - [ ] **P0.5b** `post-editor.test.ts` (7) and `profile-flow.test.ts` (2). Both stub the
+        app's own API with `page.route`, which `CLAUDE.md` forbids, so this means seeding
+        real rows rather than re-pointing mocks.
+  - [ ] **P0.5c** `full-pipeline.test.ts` (3), including a `/queue` route that no longer
+        exists and several tests whose body asserts nothing.
 - [ ] **P0.6** CI. Add `.github/workflows` running tsc, lint, test, build and e2e on push and
       PR with Postgres and Redis services. Green on a real run, URL in the evidence. This is
       the acceptance criterion for all of P0.
@@ -162,7 +174,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [x] **P2.69** `[confirmed]` `web/src/mastra/pipeline-events.test.ts > a run that executes every stage > carries Python's log payload and nothing else` is flaky: it reads ... Fixed by P0.3b; entry removed from `todo.md`. [evidence](evidence/p0.md#p03b)
 - [x] **P2.70** `[confirmed]` The vitest suites that borrow the global `settings.api_keys` row can destroy live credentials. `web/src/mastra/api-keys.test.ts` deletes the row ... Fixed by P0.3a; entry removed from `todo.md`. [evidence](evidence/p0.md#p03a)
 - [ ] **P2.71** `[confirmed]` Perplexity's Sonar Chat Completions endpoint is deprecated with support ending 2026-09-27, per `docs.perplexity.ai/getting-started/models`. The ...
-- [ ] **P2.72** `[confirmed]` The Playwright suite (`pnpm -C web test:e2e`) is stale. A full run during ledger item 7.1b ended `4 passed (7.4m)` with failures listed across ...
+- [ ] **P2.72** `[confirmed]` The Playwright suite (`pnpm -C web test:e2e`) is stale. A full run during ledger item 7.1b ended `4 passed (7.4m)` with failures listed across ... Reproduced exactly at P0.5a and reduced to 12 failed / 26 passed; stays open until P0.5b and P0.5c close. [evidence](evidence/p0.md#p05a)
 - [x] **P2.73** `[confirmed]` `src/mastra/workflows/scaffold-check.test.ts` fails intermittently under a full `pnpm -C web test` run with `Error: Hook timed out in 60000ms` ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [x] **P2.74** `[confirmed]` A worker process running outside the test suite breaks the suite. While a `jena-worker` container was up against the shared dev Redis, a full ... Contradicted: three worker-up runs are identical to three worker-down runs; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.75** `[investigate]` `next build` inside the web image prints seven `[Error [BetterAuthError]: You are using the default secret...]` lines plus a matching BetterAuth ...
@@ -176,7 +188,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [ ] **P2.83** `[investigate]` `GET /api/posts` answers `500` with an empty body when its database is unreachable (verified by stopping the compose `db` container under a live ...
 - [ ] **P2.84** `[confirmed]` `/posts/[id]` names two of the six stages twice: the tab strip in `web/src/app/posts/[id]/page.tsx` labels them "Draft" and "Editing" while the ...
 - [ ] **P2.85** `[confirmed]` The `posts.stage_logs` column is write-only dead weight in the ported stack: the only key anything writes is `_error` ...
-- [ ] **P2.86** `[confirmed]` `web/e2e/navigation.test.ts:56` asserts a "Pipeline Settings" card on `/posts/new` and no such card exists in `web/src/app/posts/new/page.tsx` ...
+- [x] **P2.86** `[confirmed]` `web/e2e/navigation.test.ts:56` asserts a "Pipeline Settings" card on `/posts/new` and no such card exists in `web/src/app/posts/new/page.tsx` ... Fixed by P0.5a: the assertion is removed, and the real hole it was describing (no per-post stage-gate editor anywhere on `/posts/new`, while `/profiles/[id]` and `/posts/batch` both have one) is recorded for P3.1; entry replaced in `todo.md`. [evidence](evidence/p0.md#p05a)
 - [ ] **P2.87** `[confirmed]` `POST /api/profiles` accepts any string as `website_url`: creating a profile with the literal value `not a url` succeeded during item 8.6's live ...
 - [x] **P2.88** `[confirmed]` `pnpm -C web test` is not deterministic above the known `image-preview.test.tsx` baseline: one extra database-backed test fails per full-suite ... Six identical summaries; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.89** `[confirmed]` The global `stage_models` row is borrowed the way `api_keys` used to be: three files hold the pre-borrow value in memory and write it back in `afterAll`, so a killed run loses it. Same shape P0.3a fixed for `api_keys`; move it onto `web/src/test/borrowed-rows.ts`, which first needs to carry `updated_at`.

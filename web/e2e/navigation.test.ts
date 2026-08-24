@@ -4,7 +4,7 @@ test.describe("Navigation", () => {
   test("homepage loads with sidebar and posts table", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator("h1:has-text('Posts')")).toBeVisible();
-    await expect(page.locator("aside").locator("text=Pipeline").first()).toBeVisible();
+    await expect(page.locator("aside").getByText("Content Crew")).toBeVisible();
     await expect(page.locator("th:has-text('Topic')")).toBeVisible();
     await expect(page.locator("th:has-text('Stage')")).toBeVisible();
     await expect(page.locator("th:has-text('Progress')")).toBeVisible();
@@ -15,7 +15,7 @@ test.describe("Navigation", () => {
     const sidebar = page.locator("aside");
     await expect(sidebar.getByText("Posts", { exact: true })).toBeVisible();
     await expect(sidebar.getByText("Profiles", { exact: true })).toBeVisible();
-    await expect(sidebar.getByText("Monitor", { exact: true })).toBeVisible();
+    await expect(sidebar.getByText("Observability", { exact: true })).toBeVisible();
     await expect(sidebar.getByText("Settings", { exact: true })).toBeVisible();
   });
 
@@ -28,9 +28,9 @@ test.describe("Navigation", () => {
 
   test("navigates to monitor page", async ({ page }) => {
     await page.goto("/");
-    await page.locator("aside").getByText("Monitor", { exact: true }).click();
+    await page.locator("aside").getByText("Observability", { exact: true }).click();
     await expect(page).toHaveURL("/monitor");
-    await expect(page.getByRole("heading", { name: "Queue Monitor" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Observability" })).toBeVisible();
   });
 
   test("navigates to settings page", async ({ page }) => {
@@ -53,7 +53,6 @@ test.describe("Navigation", () => {
     await expect(page.locator("[data-slot='card-title']:has-text('Content')")).toBeVisible();
     await expect(page.getByText("Writing Config", { exact: true })).toBeVisible();
     await expect(page.getByText("SEO & Research", { exact: true })).toBeVisible();
-    await expect(page.getByText("Pipeline Settings", { exact: true })).toBeVisible();
   });
 
   test("new post form has required inputs", async ({ page }) => {
@@ -78,8 +77,8 @@ test.describe("Navigation", () => {
 
   test("empty state shows when no posts", async ({ page }) => {
     await page.goto("/");
-    // Without API, the table should show empty state
-    await expect(page.getByText("No posts found")).toBeVisible({ timeout: 5000 });
+    // auth.setup.ts deletes the e2e account's posts, so the list starts empty.
+    await expect(page.getByText("No posts yet")).toBeVisible({ timeout: 5000 });
   });
 
   test("search input is functional", async ({ page }) => {

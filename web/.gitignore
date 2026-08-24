@@ -42,3 +42,6 @@ next-env.d.ts
 
 # mastra dev/build output
 .mastra
+
+# playwright signed-in cookie jar, written by e2e/auth.setup.ts
+/e2e/.auth/

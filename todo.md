@@ -441,6 +441,14 @@
   the page itself loaded fine. No baseline for this gate was ever recorded in Phase 0, so
   there is nothing to compare against; item 9.1 needs it green, which means auditing every
   spec against the current UI and giving the ones that need data a real session.
+  Update 2026-08-24 (polish ledger P0.5a): reproduced exactly (31 failed / 4 passed / 7.3m).
+  The dominant cause was not drift: the suite ran signed out, so `src/middleware.ts` served
+  every route as the sign-in page. A Playwright `setup` project now signs a real account in
+  and saves its cookie jar, which with five stale assertions repaired in `navigation.test.ts`
+  takes the suite to 12 failed / 26 passed / 2.3m. The remaining 12 are in
+  `post-editor.test.ts`, `profile-flow.test.ts` (both stub the app's own API with
+  `page.route`, so they need real seeded rows) and `full-pipeline.test.ts` (asserts on a
+  `/queue` route that no longer exists). Stays open until P0.5b and P0.5c close.
 
 - [investigate] 2026-08-23 `next build` inside the web image prints seven
   `[Error [BetterAuthError]: You are using the default secret...]` lines plus a matching
@@ -513,12 +521,13 @@
   `PostUpdate` still accepts it, so dropping the column is a schema change to weigh after the
   port, not during it.
 
-- [confirmed] 2026-08-23 `web/e2e/navigation.test.ts:56` asserts a "Pipeline Settings" card on
-  `/posts/new` and no such card exists in `web/src/app/posts/new/page.tsx` (the page's cards
-  are Website Profile, Content, Writing Config, SEO & Research and a conditional WordPress
-  Publishing). Found while working item 8.5; it is one instance of the broadly failing e2e
-  drift item 9.1 has to settle, recorded here so that pass knows the assertion is stale rather
-  than the page being wrong.
+- [confirmed] 2026-08-24 `/posts/new` has no per-post pipeline configuration. `stage_settings`
+  decides which of the six stages stops at a review gate, and the only editors for it are
+  `/profiles/[id]` and `/posts/batch`; the single-post creation form never mentions it, so a
+  post created there silently takes the profile's gates with no indication that it did. Found
+  under polish ledger item P0.5a while removing `navigation.test.ts`'s stale assertion for a
+  "Pipeline Settings" card, which had been describing this hole rather than a renamed card.
+  Belongs to polish ledger item P3.1.
 
 - [confirmed] 2026-08-23 `POST /api/profiles` accepts any string as `website_url`: creating a
   profile with the literal value `not a url` succeeded during item 8.6's live checks. This is
