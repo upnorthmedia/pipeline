@@ -403,7 +403,7 @@ explicitly out of scope.
         `PY_WP_DECRYPT_FAILED` and mapped through a `reworded()` in the parity suite, the same
         mechanism P1.3a used. Seven raw stage names gone from `stage-models-card.tsx` and
         `/profiles/[id]`. `ui/p33cii-*.png`. [evidence](evidence/p3.md#p33c-ii)
-- [ ] **P3.4** Speed where it is felt: layout shift, avoidable spinners on cached data, lists
+- [x] **P3.4** Speed where it is felt: layout shift, avoidable spinners on cached data, lists
       that refetch everything on a single-row change.
   - [x] **P3.4a** A keystroke was a server round trip. All three server-backed search boxes
         (`/`, `/profiles/[id]?tab=links`, `/monitor` logs) read their filter straight into the
@@ -417,8 +417,18 @@ explicitly out of scope.
         account while its replacement is in flight, and the logs tab keeps its rows instead of
         flashing skeletons on every character. One request per word in the browser, on all
         three. `ui/p34a-*.png`. [evidence](evidence/p3.md#p34a)
-  - [ ] **P3.4b** The rest of P3.4: `/monitor`'s overview refetches its whole dashboard on
-        every SSE frame (two per generated image since P3.2c), and layout shift is unmeasured.
+  - [x] **P3.4b** The rest of P3.4. `/monitor`'s overview called `fetchData()` (six aggregate
+        queries over `posts`) from its SSE callback with no condition on the frame, so the 20
+        frames the images fan-out publishes for one post cost 20 round trips that could not
+        change a number on it: both endpoints group over `current_stage`, and only the four
+        stage frames accompany a write to it. Those four now refetch, coalesced into one
+        request per 500ms burst; everything else is a feed entry only. Measured in Chrome, 21
+        requests to 1. Layout shift was then measured across seven screens, six of which sit
+        at or under 0.0002. `/settings` was 0.0965 to 0.0997, because its Stage Models
+        placeholder drew six flat 36px bars where a loaded row is a 92px bordered box, and its
+        API Keys placeholder left out the separator and save row. Both are now built from the
+        loaded shape, in the card and in `loading.tsx`: CLS 0 on three runs.
+        `ui/p34b-*.png`. [evidence](evidence/p3.md#p34b)
 - [ ] **P3.5** One screen per iteration, verified with `npx -y chrome-devtools-axi`, before and
       after PNGs committed under `docs/polish/ui/`, no new console errors.
 

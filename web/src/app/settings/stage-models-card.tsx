@@ -46,6 +46,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   apiErrorMessage,
   stageModels,
+  STAGES,
   type PipelineStage,
   type StageModelRow,
   type StageModels,
@@ -194,12 +195,27 @@ export function StageModelsCard() {
       </CardHeader>
       <CardContent className="space-y-4">
         {loading ? (
-          <div className="space-y-3" data-testid="stage-models-loading">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3">
-                <Skeleton className="h-4 w-24" />
-                <Skeleton className="h-9 flex-1" />
-                <Skeleton className="h-9 w-28" />
+          // One placeholder per stage, in the row's own container and with the
+          // row's own two lines, so the answer replaces it without moving the
+          // two cards this one sits between. The flat list of bars it used to
+          // draw predated the rows becoming bordered boxes and stood less than
+          // half their height.
+          <div className="space-y-4" data-testid="stage-models-loading">
+            {STAGES.map((stage) => (
+              <div
+                key={stage}
+                data-testid="stage-models-loading-row"
+                className="rounded-md border p-3 space-y-2"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <Skeleton className="h-5.5 w-40" />
+                  <Skeleton className="h-5.5 w-20" />
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Skeleton className="h-9 w-[230px]" />
+                  <Skeleton className="h-9 w-[110px]" />
+                  <Skeleton className="ml-auto h-9 w-[76px]" />
+                </div>
               </div>
             ))}
           </div>

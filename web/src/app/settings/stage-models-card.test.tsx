@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { StageModelsCard } from "./stage-models-card";
 import { renderWithProviders } from "@/test/render";
 import { STAGE_LABELS, stageLabel } from "@/lib/stages";
-import type { PipelineStage, StageModelRow, StageModels } from "@/lib/api";
+import { STAGES, type PipelineStage, type StageModelRow, type StageModels } from "@/lib/api";
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -94,6 +94,44 @@ describe("StageModelsCard loading and error states", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("stage-models-loading")).not.toBeInTheDocument()
     );
+  });
+
+  /**
+   * The card sits between two others on `/settings`, so any space its
+   * placeholder does not reserve is space both of them jump by when the answer
+   * lands. Measured in Chrome before this was pinned: the placeholder stood
+   * 276px tall against 632px of loaded rows, and the two cards below it moved
+   * by the difference. jsdom has no layout, so the invariant that keeps them in
+   * step is structural: one placeholder per stage, each built from the same
+   * container and the same two lines as the row that replaces it.
+   */
+  it("reserves the shape of a loaded row for every stage while it loads", async () => {
+    mockGet.mockReturnValue(new Promise(() => {}));
+
+    renderWithProviders(<StageModelsCard />);
+
+    const rows = within(screen.getByTestId("stage-models-loading")).getAllByTestId(
+      "stage-models-loading-row"
+    );
+    expect(rows).toHaveLength(STAGES.length);
+    // A loaded row is a heading line over a line of controls.
+    for (const row of rows) expect(row.children).toHaveLength(2);
+  });
+
+  it("builds that placeholder out of the container a loaded row uses", async () => {
+    mockGet.mockReturnValue(new Promise(() => {}));
+    const loading = renderWithProviders(<StageModelsCard />);
+    const placeholder = within(loading.container).getAllByTestId(
+      "stage-models-loading-row"
+    )[0];
+    const placeholderClass = placeholder.className;
+    loading.unmount();
+
+    mockGet.mockResolvedValue(payload());
+    renderWithProviders(<StageModelsCard />);
+    await screen.findByLabelText("Write model");
+
+    expect(placeholderClass).toBe(stageCard("write").className);
   });
 
   it("surfaces the server's own message on a failed load, with a retry", async () => {

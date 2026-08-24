@@ -358,15 +358,6 @@
   ordinary primary colour. `AlertDialogAction` takes a `variant` prop; both sites should pass
   `variant="destructive"`. Found at polish ledger P3.3c-ii.
 
-- [confirmed] 2026-08-24 `/monitor`'s overview tab refetches its entire dashboard on every SSE
-  frame: `useSSE(undefined, ...)` in `web/src/app/monitor/_components/overview-tab.tsx` calls
-  `fetchData()`, which is `queue.status()` plus `analytics.dashboard()`, for every `log`,
-  `stage_*`, `image_generated` and `image_failed` frame the queue-wide feed publishes. A single
-  running post publishes those at stage granularity and, since polish ledger P3.2c, twice per
-  generated image, so an open monitor page turns one pipeline run into dozens of aggregate
-  queries against `posts`. The 10s interval beside it already covers freshness. Filed for
-  polish ledger P3.4b. Found at polish ledger P3.4a.
-
 - [confirmed] 2026-08-24 The logs tab does not reset its page when a filter changes.
   `web/src/app/monitor/_components/logs-tab.tsx` holds `page` in state and only `handleSearch`
   (the form submit) and `resetFilters` set it back to 1, so a search typed while on page 3 asks
@@ -379,3 +370,15 @@
   past still costs a query. `request()` in `web/src/lib/api.ts` takes no `signal`, so wiring an
   `AbortController` through it would fix the class in one place. Check whether the added
   complexity is worth it for the three lists that would use it. Found at polish ledger P3.4a.
+
+- [confirmed] 2026-08-24 `web/src/app/monitor/QueueMonitor.test.tsx` prints 16 React
+  `not wrapped in act(...)` warnings on every run. It passes, and no other suite in the repo
+  emits them, so the state updates its assertions do not await are the ones landing outside
+  `act`. Test-output noise, not a product defect, but it is the only source of it left in
+  `pnpm test`. Found at polish ledger P3.4b.
+
+- [investigate] 2026-08-24 Layout shift on `/settings` was measured and fixed at one viewport
+  only. A loaded Stage Models row wraps its controls line onto two lines at a narrow viewport
+  while the placeholder introduced at polish ledger P3.4b keeps its three bars on one, which
+  would put the height gap back on a phone. Measure `/settings` CLS at 390x844 before deciding
+  whether the placeholder needs the same wrap. Found at polish ledger P3.4b.

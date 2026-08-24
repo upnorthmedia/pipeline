@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   Activity,
   Play,
@@ -40,6 +40,39 @@ import { useSSE, type SSEEvent } from "@/hooks/use-sse";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { TabError, TabEmpty, StaleBanner } from "./tab-states";
+
+/**
+ * The feed frames that can change a number this tab renders.
+ *
+ * Both aggregates behind it, `GET /api/queue` and `GET /api/analytics/dashboard`,
+ * group the caller's posts over `current_stage` and read `completed_at` and
+ * `created_at`. Only these four frames accompany a write to one of those: a
+ * stage start commits `"running"` to the row, a completion, an error and the
+ * end of a run each move it on. The rest of the feed cannot: `log` is a stage's
+ * own progress line, `image_generated` and `image_failed` are two frames per
+ * manifest entry from inside the `images` stage, and the three `publish_*`
+ * frames touch the publish columns only.
+ *
+ * The feed used to refetch on all of them, so one running post turned an open
+ * monitor page into dozens of aggregate queries. Everything still reaches the
+ * activity list below; this set only decides what costs a round trip.
+ */
+const AGGREGATE_EVENTS = new Set([
+  "stage_start",
+  "stage_complete",
+  "stage_error",
+  "pipeline_complete",
+]);
+
+/**
+ * How long a scheduled refetch waits for more frames before it runs.
+ *
+ * Frames arrive in bursts: a stage's completion and the next one's start are
+ * milliseconds apart, and several posts run at once. One trailing window turns
+ * a burst into one request. It stays well under the 10s interval beside it, so
+ * the numbers still move while a run is watched.
+ */
+const AGGREGATE_REFETCH_DELAY_MS = 500;
 
 const EVENT_COLORS: Record<string, string> = {
   stage_start: "bg-blue-500/15 text-blue-400",
@@ -110,7 +143,7 @@ export function OverviewTab() {
       setDashboard(dashData);
       setError(null);
     } catch (err) {
-      // This runs on a 10s interval and on every SSE event, so a toast per
+      // This runs on a 10s interval and after a run's stage frames, so a toast per
       // failure would be a toast every ten seconds for as long as the backend
       // is down. The state is what the render reads instead.
       setError(apiErrorMessage(err, "Could not load overview data."));
@@ -119,17 +152,35 @@ export function OverviewTab() {
     }
   }, []);
 
+  // Held in a ref rather than state: a pending window must not re-render the
+  // page, and the cleanup below has to be able to cancel it on unmount.
+  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleRefetch = useCallback(() => {
+    if (refetchTimer.current) return;
+    refetchTimer.current = setTimeout(() => {
+      refetchTimer.current = null;
+      fetchData();
+    }, AGGREGATE_REFETCH_DELAY_MS);
+  }, [fetchData]);
+
   useSSE(undefined, (event) => {
     setEvents((prev) => [
       { ...event, timestamp: new Date().toISOString() },
       ...prev.slice(0, 19),
     ]);
-    fetchData();
+    if (AGGREGATE_EVENTS.has(event.event)) scheduleRefetch();
   });
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(
+    () => () => {
+      if (refetchTimer.current) clearTimeout(refetchTimer.current);
+    },
+    []
+  );
 
   useEffect(() => {
     const interval = setInterval(fetchData, 10000);

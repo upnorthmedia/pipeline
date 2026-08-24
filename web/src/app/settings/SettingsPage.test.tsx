@@ -32,7 +32,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-const { apiKeys, rules, stageModels } = await import("@/lib/api");
+const { apiKeys, rules, stageModels, STAGES } = await import("@/lib/api");
 const { toast } = await import("sonner");
 const mockApiKeysGet = vi.mocked(apiKeys.get);
 const mockApiKeysUpdate = vi.mocked(apiKeys.update);
@@ -230,6 +230,30 @@ describe("SettingsPage", () => {
 });
 
 describe("SettingsPage async states", () => {
+  /**
+   * The API keys card is the first of three, so anything its placeholder does
+   * not reserve is space the two below jump by. Measured in Chrome: the card
+   * stood 350px while loading against 425px loaded, because the placeholder
+   * drew the three key rows and stopped, leaving out the separator and the save
+   * row the answer renders. jsdom has no layout, so the invariant is the shape.
+   */
+  it("reserves the separator and the save row while the key statuses load", async () => {
+    mockApiKeysGet.mockReturnValue(new Promise(() => {}));
+
+    renderWithProviders(<SettingsPage />);
+
+    const placeholder = screen.getByTestId("api-keys-loading");
+    // A label, an input and a reveal button for each of the three providers,
+    // then the save button under the separator.
+    expect(placeholder.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(
+      3 * 3 + 1
+    );
+    expect(placeholder.querySelector('[data-slot="separator"]')).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /save & validate/i })
+    ).not.toBeInTheDocument();
+  });
+
   it("holds the server's message with a Retry when the key status load fails", async () => {
     mockApiKeysGet.mockRejectedValueOnce(
       new Error('{"detail":"connection to server at \\"db\\" failed"}')
@@ -439,7 +463,16 @@ describe("settings loading.tsx", () => {
 
     // One bordered block per card. It had two while the page had three, so the
     // route-transition skeleton stopped short of the stage models table.
-    expect(container.querySelectorAll(".rounded-md.border")).toHaveLength(3);
+    // Matched on `border-border`, the class only the card wrappers carry: the
+    // stage models placeholder now nests one bordered box per stage, because a
+    // loaded row is one and a flat bar reserved less than half its height.
+    expect(container.querySelectorAll(".rounded-md.border-border")).toHaveLength(3);
+    // The nested boxes are the stage models placeholder. The route transition
+    // and the card's own placeholder have to reserve the same height, or the
+    // page jumps once on the transition and again when the client answer lands.
+    expect(
+      container.querySelectorAll(".rounded-md.border:not(.border-border)")
+    ).toHaveLength(STAGES.length);
     expect(
       container.querySelectorAll('[data-slot="skeleton"]').length
     ).toBeGreaterThan(20);

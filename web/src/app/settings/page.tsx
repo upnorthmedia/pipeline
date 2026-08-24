@@ -300,16 +300,24 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           {loadingKeys ? (
-            <div className="space-y-4">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="space-y-2">
-                  <Skeleton className="h-4 w-40" />
+            // The same rows, separator and save row the answer renders, so the
+            // two cards below this one do not move when it lands. The label
+            // line is 18px because a loaded one carries a status badge, not a
+            // bare `<Label>`.
+            <div className="space-y-4" data-testid="api-keys-loading">
+              {PROVIDERS.map((provider) => (
+                <div key={provider.key} className="space-y-2">
+                  <Skeleton className="h-4.5 w-40" />
                   <div className="flex gap-2">
                     <Skeleton className="h-10 flex-1" />
                     <Skeleton className="h-10 w-10" />
                   </div>
                 </div>
               ))}
+              <Separator />
+              <div className="flex justify-end">
+                <Skeleton className="h-9 w-[137px]" />
+              </div>
             </div>
           ) : keysError ? (
             <div className="py-8 text-center">
