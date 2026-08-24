@@ -593,3 +593,24 @@
   `/monitor` shows the four aggregate counters, but a post suspended at a gate is discoverable
   only by opening its own detail page, which means an operator has to already know which post is
   blocked. Belongs to P3.2 ("what a review gate is waiting for"). Found at polish ledger P0.5c.
+
+- [confirmed] 2026-08-24 A fresh deploy can lose a service to the same `@mastra/pg` first-init
+  race the test suite hit at polish ledger P0.6a. `web` and `worker` both import
+  `web/src/mastra/index.ts`, both start Mastra, and the adapter builds its own `mastra_*` schema
+  on first init with DDL that is not concurrency-safe: two stores initialising at the same
+  moment against a database that has no `mastra_*` tables issue the same `CREATE INDEX` and the
+  loser dies with `duplicate key value violates unique constraint "pg_class_relname_nsp_index"`
+  (measured: four concurrent `PostgresStore.init()` calls against a virgin database, three
+  reject). Railway starts both services together, so a first deploy against an empty database is
+  a coin toss. The suite's fix is `ensureMastraStorage()` in `src/test/global-setup.ts`; the
+  deploy equivalent is a pre-deploy step that runs it once, which is the same hook P2.77 needs
+  for `pnpm db:migrate`. Fix the two together.
+
+- [investigate] 2026-08-24 `pnpm auth:migrate --apply` against a fresh database reports
+  `tables to create: auth_users, auth_sessions, auth_accounts, auth_verifications` and no
+  `subscription`, but `web/src/lib/auth.ts:77` mounts the `@better-auth/stripe` plugin and both
+  `drizzle/README.md` and `src/db/schema-parity.ts` name `subscription` as a BetterAuth-owned
+  table. Either the plugin only creates it when configured with real Stripe credentials, or a
+  fresh database is missing a table the billing path will query at runtime. Reproduce by hitting
+  whatever reads a subscription on a database built by the documented procedure. Found at polish
+  ledger P0.6a.

@@ -75,6 +75,16 @@ move on. A split is not an iteration on its own: split and complete the first ch
 - [ ] **P0.6** CI. Add `.github/workflows` running tsc, lint, test, build and e2e on push and
       PR with Postgres and Redis services. Green on a real run, URL in the evidence. This is
       the acceptance criterion for all of P0.
+  - [x] **P0.6a** What a machine that has never run this repo needs. Measured with a fresh
+        clone against a fresh Postgres and Redis: `pnpm db:migrate` could not reach the
+        database at all (drizzle-kit has no env loader), seven suites died on
+        `pg_class_relname_nsp_index` racing `@mastra/pg`'s first-init DDL, and a database
+        built from this repo's own migrations carried no `alembic_version` row. Virgin-run
+        `9 failed (146)` -> `148 passed (148)`, twice, plus tsc, lint and build in the same
+        clone. [evidence](evidence/p0.md#p06a)
+  - [ ] **P0.6b** `.github/workflows/ci.yml` itself: tsc, lint, test, build and e2e on
+        `ubuntu-latest` with Postgres and Redis service containers, green on a real run with
+        the URL in the evidence.
 
 ## P1. The three things a user sees immediately
 

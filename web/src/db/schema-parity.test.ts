@@ -11,6 +11,7 @@ import { afterAll, describe, expect, it } from "vitest"
 
 import * as schema from "./schema"
 import {
+  SCHEMA_VERSION,
   describeDatabase,
   describeDrizzleSchema,
   diffSchemas,
@@ -18,13 +19,6 @@ import {
   toPostgresType,
   type SchemaShape,
 } from "./schema-parity"
-
-/**
- * The last revision the pre-port Python migration chain stamped into
- * `alembic_version`. That chain is gone; the row it left behind is what marks
- * the schema this file describes, and `drizzle/0000_baseline.sql` recreates it.
- */
-const SCHEMA_VERSION = "012"
 
 const connectionString =
   process.env.DATABASE_URL_SYNC?.replace("postgresql+asyncpg://", "postgresql://") ??

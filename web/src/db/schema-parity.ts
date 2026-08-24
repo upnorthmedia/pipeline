@@ -10,6 +10,14 @@ import { is } from "drizzle-orm"
 import { PgTable, getTableConfig } from "drizzle-orm/pg-core"
 import type { Pool } from "pg"
 
+/**
+ * The last revision the pre-port Python migration chain stamped into
+ * `alembic_version`. That chain is gone; the row it left behind is what marks
+ * the schema these helpers describe, and `drizzle/` recreates both halves of
+ * it: the table in `0000_baseline.sql`, the row in `0001_schema_version_row.sql`.
+ */
+export const SCHEMA_VERSION = "012"
+
 /** A single column reduced to the properties both sides can state exactly. */
 export interface ColumnShape {
   /** Postgres type as `format_type` renders it, e.g. `character varying(255)`. */

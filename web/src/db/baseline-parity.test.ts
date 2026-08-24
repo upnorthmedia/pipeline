@@ -20,6 +20,7 @@ import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import {
+  SCHEMA_VERSION,
   describeConstraints,
   describeDatabase,
   describeIndexes,
@@ -108,6 +109,16 @@ describe("drizzle baseline migration", () => {
     expect(scratchConstraints).toContain(
       "settings | uq_settings_key_user_id | UNIQUE NULLS NOT DISTINCT (key, user_id)",
     )
+  })
+
+  it("stamps the recorded schema version, so a fresh database is not left blank", async () => {
+    // The table alone is not the marker. `schema-parity.test.ts` reads this row
+    // to prove it is comparing against a database at the recorded version, so a
+    // database this folder builds has to carry it too.
+    const { rows } = await scratchPool.query<{ version_num: string }>(
+      "SELECT version_num FROM alembic_version",
+    )
+    expect(rows.map((r) => r.version_num)).toEqual([SCHEMA_VERSION])
   })
 
   it("compares a non-empty catalog, so an empty scratch database cannot pass", () => {
