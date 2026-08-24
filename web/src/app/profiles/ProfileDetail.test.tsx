@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import ProfileDetailPage from "./[id]/page";
 import { renderWithProviders } from "@/test/render";
 import { makeProfile } from "@/test/fixtures";
-import type { InternalLink } from "@/lib/api";
+import type { InternalLink, Profile } from "@/lib/api";
 
 const mockPush = vi.fn();
 
@@ -677,6 +677,93 @@ describe("ProfileDetailPage", () => {
           "Next.js (Webhook): Fill in the Next.js card below to publish there."
         );
       });
+    });
+  });
+
+  describe("default stage settings", () => {
+    it("names the mode a stage is configured for", async () => {
+      renderWithProviders(<ProfileDetailPage />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("research stage mode")).toHaveTextContent(
+          "Run automatically"
+        );
+      });
+    });
+
+    it("shows a stored review gate instead of an empty picker", async () => {
+      // The defect: `StageMode` was `"auto"` alone, so the picker held one
+      // option and a profile whose column already said `review` rendered a
+      // blank trigger with no way to tell what it was set to or clear it.
+      mockGet.mockResolvedValue(
+        makeProfile({
+          default_stage_settings: {
+            research: "review",
+            outline: "auto",
+            write: "auto",
+            edit: "auto",
+            images: "auto",
+            ready: "auto",
+          },
+        })
+      );
+      renderWithProviders(<ProfileDetailPage />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("research stage mode")).toHaveTextContent(
+          "Wait for review"
+        );
+      });
+      expect(screen.getByLabelText("outline stage mode")).toHaveTextContent(
+        "Run automatically"
+      );
+    });
+
+    it("renders a column that names fewer than six stages", async () => {
+      mockGet.mockResolvedValue(
+        makeProfile({
+          default_stage_settings: { research: "auto" } as Profile["default_stage_settings"],
+        })
+      );
+      renderWithProviders(<ProfileDetailPage />);
+
+      await waitFor(() =>
+        expect(screen.getByLabelText("outline stage mode")).toBeInTheDocument()
+      );
+      expect(screen.getByLabelText("research stage mode")).toHaveTextContent(
+        "Run automatically"
+      );
+    });
+
+    it("offers no way to add a gate the dashboard cannot release", async () => {
+      // Nothing in the app resumes a suspended run, so a gate switched on here
+      // would park a post with no approve action anywhere to continue it. The
+      // picker lets a stored gate be cleared and not set.
+      const user = userEvent.setup();
+      mockGet.mockResolvedValue(
+        makeProfile({
+          default_stage_settings: {
+            research: "review",
+            outline: "auto",
+            write: "auto",
+            edit: "auto",
+            images: "auto",
+            ready: "auto",
+          },
+        })
+      );
+      renderWithProviders(<ProfileDetailPage />);
+
+      await waitFor(() =>
+        expect(screen.getByLabelText("outline stage mode")).toBeInTheDocument()
+      );
+
+      await user.click(screen.getByLabelText("outline stage mode"));
+      await waitFor(() =>
+        expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+          "Run automatically",
+        ])
+      );
     });
   });
 });

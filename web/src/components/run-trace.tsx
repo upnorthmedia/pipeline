@@ -41,17 +41,23 @@ import {
 import { cn } from "@/lib/utils";
 import type { PipelineStage, StageStatusMap } from "@/lib/api";
 import { buildRunTrace, type StageTrace, type TraceStatus } from "@/lib/run-trace";
-import { STAGE_LABELS } from "@/lib/stages";
+import { STAGE_LABELS, STAGE_STATUS_LABELS } from "@/lib/stages";
 
+/**
+ * The icon and colour for each status. The names come from
+ * `STAGE_STATUS_LABELS` rather than being repeated here: the progress bar
+ * above this table shows the same statuses, and two copies of the words is how
+ * the stage names ended up disagreeing.
+ */
 const STATUS_META: Record<
   TraceStatus,
   { label: string; icon: React.ComponentType<{ className?: string }>; className: string }
 > = {
-  pending: { label: "Pending", icon: Circle, className: "text-muted-foreground/60" },
-  running: { label: "Running", icon: Loader2, className: "text-amber-500" },
-  review: { label: "Awaiting review", icon: PauseCircle, className: "text-sky-500" },
-  complete: { label: "Complete", icon: CheckCircle2, className: "text-emerald-500" },
-  failed: { label: "Failed", icon: AlertCircle, className: "text-red-500" },
+  pending: { label: STAGE_STATUS_LABELS.pending, icon: Circle, className: "text-muted-foreground/60" },
+  running: { label: STAGE_STATUS_LABELS.running, icon: Loader2, className: "text-amber-500" },
+  review: { label: STAGE_STATUS_LABELS.review, icon: PauseCircle, className: "text-sky-500" },
+  complete: { label: STAGE_STATUS_LABELS.complete, icon: CheckCircle2, className: "text-emerald-500" },
+  failed: { label: STAGE_STATUS_LABELS.failed, icon: AlertCircle, className: "text-red-500" },
 };
 
 /** `12.5` -> `12.5s`, `95.2` -> `1m 35s`. Durations here run from under a second to minutes. */

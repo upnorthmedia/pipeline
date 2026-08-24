@@ -27,17 +27,19 @@
  * trace sums what is stored rather than repricing, so the run total and the
  * per-stage lines cannot disagree with the analytics endpoints.
  */
-import { STAGES, type PipelineStage, type StageStatusMap } from "./api"
+import { STAGES, type PipelineStage, type StageStatus, type StageStatusMap } from "./api"
 
 /**
- * The five states a stage can be in on the trace.
+ * The five states a stage can be in on the trace, which are the five
+ * `stage_status` holds. An alias rather than a second copy of the union: this
+ * file used to spell it out again, so widening one would have left the other.
  *
  * `review` is the suspension: `markStageForReview()` writes it to
  * `stage_status` when a step hands its gate payload to `suspend()`, and it is
  * the one status a browser cannot infer from the content columns, since a
  * stage parked in front of a reviewer has produced nothing yet.
  */
-export type TraceStatus = "pending" | "running" | "review" | "complete" | "failed"
+export type TraceStatus = StageStatus
 
 /** One `retry` entry: an attempt that threw while the engine still had attempts left. */
 export interface TraceRetry {

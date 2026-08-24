@@ -1,6 +1,12 @@
 // --- Types ---
 
-export type StageMode = "auto";
+// The three values `stage_settings` holds. `review` and `approve_only` are the
+// two the pipeline's gate acts on (`REVIEW_MODES` in
+// `src/mastra/steps/stage-io.ts`, which `stage-modes.test.ts` cross-checks this
+// against); it parks the run in front of the stage for either one and runs
+// unattended for anything else. Typing this as `"auto"` alone meant a profile
+// whose column already said `review` had no expressible value in the dashboard.
+export type StageMode = "auto" | "review" | "approve_only";
 // `review` is what `markStageForReview()` writes to `stage_status` when a step
 // suspends at its gate. It was missing here while the value was only ever read
 // through `Record<string, ...>` lookups with a fallback; the run trace tells a

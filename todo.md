@@ -1,9 +1,5 @@
 # todo
 
-- [confirmed] 2026-08-22 `web/src/lib/api.ts` types `StageMode` as `"auto"` and `StageStatus`
-  without `"review"`, so the dashboard cannot express a gated stage. Item 4.3 writes
-  `stage_status[stage] = "review"` when a run parks. Phase 5.3 / Phase 8 must widen both unions
-  (and the stage badge) or a parked post renders as an unknown status.
 - [confirmed] 2026-08-22 The `mastra worker` bundle does not inherit the dev machine's module
   resolution. Two packages that `next build`, `vitest` and `mastra dev` all resolve fine were
   unresolvable in the worker bundle: `@opentelemetry/api` (undeclared by any package in the

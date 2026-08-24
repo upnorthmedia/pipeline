@@ -55,16 +55,33 @@ import {
   type WPAuthor,
   STAGES,
 } from "@/lib/api";
-import { STAGE_LABELS } from "@/lib/stages";
+import { STAGE_LABELS, STAGE_MODE_LABELS } from "@/lib/stages";
 import { plainMessage } from "@/lib/plain-message";
 import { OutputFormatSelect } from "@/components/output-format-select";
 import { publishTargets, type FormatAvailabilityMap } from "@/lib/publishing";
 import { toast } from "sonner";
 import { ProfileDetailSkeleton } from "./profile-detail-skeleton";
 
-const STAGE_MODES: { value: StageMode; label: string }[] = [
-  { value: "auto", label: "Auto" },
-];
+/**
+ * What this picker offers, plus whatever the profile is already set to.
+ *
+ * Only `auto` is offered. `stage_settings` also holds `review` and
+ * `approve_only`, and the pipeline parks a run in front of the stage for
+ * either, but nothing in the dashboard resumes a suspended run: a gate
+ * switched on here would leave the post waiting with no approve action
+ * anywhere to release it. So a stored gate is shown and can be cleared, and a
+ * new one cannot be added until there is something to release it with.
+ */
+const OFFERED_STAGE_MODES: StageMode[] = ["auto"];
+
+function stageModeOptions(current: StageMode | undefined): StageMode[] {
+  // `default_stage_settings` is a bare JSON object on the wire, so a row that
+  // names fewer than six stages reaches here with a hole in it. Prepending
+  // that hole would put an option with no value in the list, and the picker is
+  // not the place to guess what an unconfigured stage means.
+  if (!current || OFFERED_STAGE_MODES.includes(current)) return OFFERED_STAGE_MODES;
+  return [current, ...OFFERED_STAGE_MODES];
+}
 
 /**
  * What is actually known about a publishing destination. The page used to
@@ -903,15 +920,17 @@ export default function ProfileDetailPage() {
                     }
                   >
                     <SelectTrigger
-                      className="w-[140px] h-8"
+                      // Wide enough for the longest mode name. At 140px
+                      // `line-clamp-1` cut "Run automatically" mid-word.
+                      className="w-[180px] h-8"
                       aria-label={`${stage} stage mode`}
                     >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {STAGE_MODES.map((m) => (
-                        <SelectItem key={m.value} value={m.value}>
-                          <span>{m.label}</span>
+                      {stageModeOptions(stageSettings[stage]).map((mode) => (
+                        <SelectItem key={mode} value={mode}>
+                          <span>{STAGE_MODE_LABELS[mode]}</span>
                         </SelectItem>
                       ))}
                     </SelectContent>

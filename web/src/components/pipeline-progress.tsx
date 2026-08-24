@@ -10,12 +10,13 @@ import {
   Circle,
   Loader2,
   AlertCircle,
+  PauseCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { PipelineStage, StageStatusMap } from "@/lib/api";
 import { STAGES } from "@/lib/api";
-import { STAGE_LABELS } from "@/lib/stages";
+import { STAGE_LABELS, stageStatusLabel } from "@/lib/stages";
 
 const STAGE_ICONS: Record<PipelineStage, React.ComponentType<{ className?: string }>> = {
   research: Search,
@@ -26,25 +27,54 @@ const STAGE_ICONS: Record<PipelineStage, React.ComponentType<{ className?: strin
   ready: PackageCheck,
 };
 
-const STATUS_STYLES: Record<string, { ring: string; bg: string; icon: React.ComponentType<{ className?: string }> }> = {
+type StatusStyle = {
+  /** The ring around the full-mode circle, and the whole dot in compact mode. */
+  ring: string;
+  bg: string;
+  /** The circle's inner fill and its icon's colour, which used to be two ternary chains. */
+  fill: string;
+  text: string;
+  icon: React.ComponentType<{ className?: string }>;
+};
+
+const STATUS_STYLES: Record<string, StatusStyle> = {
   complete: {
     ring: "ring-emerald-500/30",
     bg: "bg-emerald-500",
+    fill: "bg-emerald-500/15",
+    text: "text-emerald-500",
     icon: CheckCircle,
   },
   running: {
     ring: "ring-amber-500/30",
     bg: "bg-amber-500",
+    fill: "bg-amber-500/15",
+    text: "text-amber-500 animate-spin",
     icon: Loader2,
   },
   failed: {
     ring: "ring-red-500/30",
     bg: "bg-red-500",
+    fill: "bg-red-500/15",
+    text: "text-red-500",
     icon: AlertCircle,
+  },
+  // A stage waiting on a human, not a stage nothing has reached. Without an
+  // entry here it fell through to `pending` and painted the same grey circle,
+  // so the one state that needs someone to act looked like the one that needs
+  // nobody. Sky and the pause icon are what the run trace already uses for it.
+  review: {
+    ring: "ring-sky-500/30",
+    bg: "bg-sky-500",
+    fill: "bg-sky-500/15",
+    text: "text-sky-500",
+    icon: PauseCircle,
   },
   pending: {
     ring: "ring-muted-foreground/20",
     bg: "bg-muted-foreground/30",
+    fill: "bg-muted",
+    text: "text-muted-foreground/50",
     icon: Circle,
   },
 };
@@ -81,7 +111,7 @@ export const PipelineProgress = ({
               </TooltipTrigger>
               <TooltipContent>
                 <span className="text-xs">
-                  {STAGE_LABELS[stage]}: {status}
+                  {STAGE_LABELS[stage]}: {stageStatusLabel(status)}
                 </span>
               </TooltipContent>
             </Tooltip>
@@ -118,7 +148,7 @@ export const PipelineProgress = ({
               {/* The label is otherwise only in the tooltip, which leaves six
                   unnamed buttons in the accessibility tree and nothing for a
                   keyboard user to read. */}
-              <TooltipTrigger aria-label={`${STAGE_LABELS[stage]}: ${status}`}>
+              <TooltipTrigger aria-label={`${STAGE_LABELS[stage]}: ${stageStatusLabel(status)}`}>
                 <div
                   className={cn(
                     "relative flex h-9 w-9 items-center justify-center rounded-full ring-2 transition-all",
@@ -129,24 +159,10 @@ export const PipelineProgress = ({
                   <div
                     className={cn(
                       "flex h-7 w-7 items-center justify-center rounded-full",
-                      status === "complete"
-                        ? "bg-emerald-500/15"
-                        : status === "running"
-                          ? "bg-amber-500/15"
-                          : status === "failed"
-                            ? "bg-red-500/15"
-                            : "bg-muted"
+                      style.fill
                     )}
                   >
-                    <Icon
-                      className={cn(
-                        "h-3.5 w-3.5",
-                        status === "complete" && "text-emerald-500",
-                        status === "running" && "text-amber-500 animate-spin",
-                        status === "failed" && "text-red-500",
-                        status === "pending" && "text-muted-foreground/50"
-                      )}
-                    />
+                    <Icon className={cn("h-3.5 w-3.5", style.text)} />
                   </div>
                 </div>
               </TooltipTrigger>
