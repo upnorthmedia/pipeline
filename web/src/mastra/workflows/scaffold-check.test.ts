@@ -3,13 +3,30 @@
  * Phase 2 item 2.3: the scaffold workflow actually executes, streams the
  * lifecycle events, and leaves a run row in Postgres storage.
  *
+ * Runs on its own transport. Mastra's orchestration topic is a Redis Streams
+ * consumer group, so every event on it goes to exactly one consumer: a real
+ * worker (or a stray `mastra dev`) sharing the topic claims this run's
+ * `workflow.step.*` events and the assertion on the step lifecycle fails, while
+ * the run itself still reaches `success` through storage. The `keyPrefix` here
+ * is what every other workflow suite already uses; the three process-level
+ * suites that cannot use it (`worker-process`, `web-restart`, `crash-probe`)
+ * take Redis databases 9, 10 and 11 instead.
+ *
+ * The isolation also cuts the other way. Sharing the default topic meant this
+ * suite's workers picked up whatever `pipeline` events an abandoned run had
+ * left in the stream and executed them against posts that no longer exist,
+ * printing "post <id> not found" step failures that belonged to nobody.
+ *
  * Requires `docker compose up -d db redis`.
  */
+import { Mastra } from "@mastra/core"
+import { PostgresStore } from "@mastra/pg"
+import { RedisStreamsPubSub } from "@mastra/redis-streams"
 import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
-import { closeDb, toNodePostgresUrl } from "../../db"
-import { mastra, pubsub, storage } from "../index"
+import { closeDb, getPool, toNodePostgresUrl } from "../../db"
+import { mastra, pubsub as appPubsub } from "../index"
 import { scaffoldCheckWorkflow } from "./scaffold-check"
 
 /** Independent connection, so the storage assertions do not read through the pool under test. */
@@ -21,14 +38,37 @@ let events: { type: string; payload?: Record<string, unknown> }[]
 let finalStatus: string
 let result: Awaited<ReturnType<Awaited<ReturnType<typeof scaffoldCheckWorkflow.createRun>>["start"]>>
 
+const pubsub = new RedisStreamsPubSub({
+  url: process.env.REDIS_URL!,
+  keyPrefix: "mastra:test:scaffold-check",
+})
+const storage = new PostgresStore({ id: "scaffold-check-test", pool: getPool() })
+
+/**
+ * Constructed after the `../index` import has evaluated, so this is the last
+ * instance to register `scaffoldCheckWorkflow` and the one the run below is
+ * published through. The app instance is still imported, because the
+ * registration assertion is about the app instance and nothing else.
+ */
+const testMastra = new Mastra({
+  storage,
+  pubsub,
+  workflows: { scaffoldCheck: scaffoldCheckWorkflow },
+})
+
 beforeAll(async () => {
   probe = new Pool({ connectionString: toNodePostgresUrl(process.env.DATABASE_URL_SYNC!) })
   await storage.init()
 
+  // A previous run of this suite that died mid-stream leaves its events behind
+  // on the prefixed streams, where these workers would consume them.
+  await pubsub.clearTopic("workflows")
+  await pubsub.clearTopic("workflows-finish")
+
   // The evented engine executes steps in the orchestration worker, which is
   // what consumes the `workflows` topic. Without `startWorkers()` the run is
   // published and nothing ever picks it up, so the stream never ends.
-  await mastra.startWorkers()
+  await testMastra.startWorkers()
 
   const run = await scaffoldCheckWorkflow.createRun()
   runId = run.runId
@@ -45,8 +85,11 @@ beforeAll(async () => {
 }, 60_000)
 
 afterAll(async () => {
-  await mastra.stopWorkers()
+  await testMastra.stopWorkers()
+  await pubsub.clearTopic("workflows")
+  await pubsub.clearTopic("workflows-finish")
   await pubsub.close()
+  await appPubsub.close()
   await probe.end()
   await closeDb()
 })

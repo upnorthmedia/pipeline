@@ -1,15 +1,5 @@
 # todo
 
-- [confirmed] 2026-08-23 `src/mastra/workflows/scaffold-check.test.ts` fails whenever a real
-  Mastra worker is running against the same Redis, because it uses the default database and
-  topic instead of isolating like `worker-process.test.ts` (db 9), `web-restart.test.ts`
-  (db 10) and `crash-probe.test.ts` (db 11) do. The live worker's `mastra-orchestration`
-  consumer group claims the events the test asserts on. Proven: with a worker up the
-  lifecycle-events test fails, with it stopped the file is 5/5. This was previously logged as
-  a nondeterministic "stream-event race"; it is deterministic given a live consumer. Fix by
-  isolating the suite on its own Redis database, and note that `pnpm test` is not safe to run
-  against a running worker until then.
-
 - [confirmed] 2026-08-21 The `images` stage's featured-image handling never fires on real
   manifests. `images.py` tests `image_spec.get("placement") == "featured"`, but the manifest
   Claude actually produces (live capture, `docs/mastra-port/golden/how-to-choose-a-crm-for-a-small-team/images.json`)
@@ -666,6 +656,10 @@
   things follow: nobody should run `docker compose up worker` while testing, and item 9.1
   should decide whether the suite deserves its own Redis database index or topic prefix so it
   cannot be poached.
+  Update 2026-08-23 (polish P0.2): `scaffold-check.test.ts` now runs on its own instance and
+  `mastra:test:scaffold-check` prefix, and is 3/3 with a worker up and 3/3 with it down, so it
+  is no longer one of the two. `src/app/api/posts/create.test.ts` is untouched and this entry
+  stands for it alone.
 
 - [investigate] 2026-08-23 `next build` inside the web image prints seven
   `[Error [BetterAuthError]: You are using the default secret...]` lines plus a matching
@@ -782,3 +776,12 @@
 - [confirmed] 2026-08-23 `ImagePreview` renders `placement.location` as the raw enum the model
   writes, so a featured image's placement reads `featured_image` in the UI. Belongs to polish
   ledger item P3.3.
+
+- [investigate] 2026-08-23 `src/mastra/crossprocess-events.test.ts:109` calls
+  `mastra.startWorkers()` on the *production* Mastra instance and so joins the
+  `mastra-orchestration` consumer group on the default `mastra:topic:workflows`. Since
+  polish P0.2 isolated `scaffold-check.test.ts`, this is the only file in the suite still
+  there, which makes it the remaining party exposed to having its step events claimed by a
+  stray worker or a `mastra dev`. It passed 3/3 with a real worker up, so it is exposure
+  rather than a reproduced failure; recorded because P0.3 has to certify the whole suite with
+  a worker running and this is where to look first if it does not.
