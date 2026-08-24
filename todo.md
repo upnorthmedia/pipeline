@@ -17,14 +17,6 @@
   plus up to one 30s tick, and the reclaiming worker re-runs the stage from the beginning.
   The fix has to drain in-flight steps before exiting, which means owning the worker entry
   rather than using the one `mastra worker build` generates. Ledger item P2.91.
-- [confirmed] 2026-08-22 `POST /api/posts/{post_id}/duplicate` silently drops `article_type` and
-  `additional_info`. `duplicate_post`'s `config_fields` list in `api/src/api/posts.py` names
-  eighteen columns and was never extended when those two were added, so a duplicated post loses
-  the article type the new-post form set and any extra instructions the user wrote. Reproduced
-  and pinned by `does not copy article_type or additional_info` in
-  `web/src/app/api/posts/duplicate-batch.test.ts`, where the port keeps the behaviour on
-  purpose: item 5.3b-iii is a port, not a bug fix, and changing what duplicate copies is a
-  product decision. Fixing it is two names in `CONFIG_COLUMNS` plus flipping that test.
 - [confirmed] 2026-08-22 `PostAnalytics.seo_checklist` in `web/src/lib/api.ts` is typed
   `Record<string, boolean>` but the endpoint has always returned a mixed map: `_seo_checklist`
   in `api/src/services/analytics.py` puts `internal_link_count` and `external_link_count` in

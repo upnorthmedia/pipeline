@@ -20,6 +20,8 @@ import { and, eq, like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, posts, websiteProfiles } from "@/db"
+import { stateFromPost } from "@/mastra/post-state"
+import { buildStagePrompt } from "@/mastra/prompts"
 import { ABSENT_POST_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
@@ -325,7 +327,7 @@ describe("POST /api/posts/{post_id}/duplicate", () => {
     expect(copy.completed_at).toBeNull()
   })
 
-  it("does not copy `article_type` or `additional_info`, which `config_fields` predates", async () => {
+  it("copies `article_type` and `additional_info`, which every stage prompt reads", async () => {
     const profile = await insertProfile(user.userId)
     const original = await insertPost({
       slug: `${PREFIX}typed`,
@@ -336,8 +338,26 @@ describe("POST /api/posts/{post_id}/duplicate", () => {
 
     const copy = await (await duplicate(original.id, user.cookie)).json()
 
-    expect(copy.article_type).toBeNull()
-    expect(copy.additional_info).toBeNull()
+    expect(copy.article_type).toBe("listicle")
+    expect(copy.additional_info).toBe("mention the warranty")
+  })
+
+  it("carries both fields into the prompt context the duplicate would run with", async () => {
+    const profile = await insertProfile(user.userId)
+    const original = await insertPost({
+      slug: `${PREFIX}typed-prompt`,
+      profileId: profile.id,
+      articleType: "comparison",
+      additionalInfo: "mention the 10 year warranty",
+    })
+
+    const copy = await (await duplicate(original.id, user.cookie)).json()
+
+    const [row] = await getDb().select().from(posts).where(eq(posts.id, copy.id)).limit(1)
+    const prompt = buildStagePrompt("research", "", stateFromPost(row))
+
+    expect(prompt).toContain("- **ARTICLE_TYPE**: comparison")
+    expect(prompt).toContain("- **ADDITIONAL_INFO**: mention the 10 year warranty")
   })
 
   it("starts no pipeline run, unlike every other create path", async () => {

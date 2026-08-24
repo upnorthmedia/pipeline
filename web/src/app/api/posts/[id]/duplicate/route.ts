@@ -1,7 +1,7 @@
 /**
  * Port of `POST /api/posts/{post_id}/duplicate` in `api/src/api/posts.py`.
  *
- * The copy is a whitelist, not a row clone: `duplicate_post` names eighteen
+ * The copy is a whitelist, not a row clone: `duplicate_post` names its
  * configuration fields and reads only those off the original, so everything
  * else falls back to the column default. That is what makes the duplicate a
  * fresh unrun post rather than a second copy of a finished article: the six
@@ -9,11 +9,13 @@
  * `current_stage`, `stage_status`, `priority`, the WordPress fields and the
  * Next.js publishing fields are all left behind.
  *
- * Two fields the whitelist predates are also left behind, `article_type` and
- * `additional_info`, so a duplicate silently loses them. That is a defect in
- * the original rather than a decision, but it is behaviour the dashboard has
- * always seen, so it is reproduced here and logged in `todo.md` instead of
- * being quietly fixed inside a port.
+ * `article_type` and `additional_info` are in the whitelist here and were not
+ * in Python's. `config_fields` predated both columns and was never extended,
+ * so a duplicate silently lost the article type the new-post form set and any
+ * extra instructions the user wrote. Both are prompt inputs (`ARTICLE_TYPE`
+ * and `ADDITIONAL_INFO` in `CONFIG_FIELDS`, read by all six stages), so the
+ * omission made a duplicate generate a different article from its original
+ * with nothing in the UI saying so.
  *
  * No pipeline run is started. `duplicate_post` is the one write endpoint in the
  * router that does not enqueue, which is why the duplicate sits at
@@ -35,13 +37,20 @@ function slugSuffix(): string {
   return randomUUID().replace(/-/g, "").slice(0, 6)
 }
 
-/** The eighteen names in `duplicate_post`'s `config_fields`, plus `slug`. */
+/**
+ * `duplicate_post`'s `config_fields`, plus `slug`, plus the two columns that
+ * list predates. Ordered to match `CONFIG_FIELDS` in `src/mastra/prompts.ts`
+ * where the two overlap, so a field missing from one is visible against the
+ * other.
+ */
 const CONFIG_COLUMNS = [
   "profileId",
   "topic",
   "targetAudience",
   "niche",
   "intent",
+  "articleType",
+  "additionalInfo",
   "wordCount",
   "tone",
   "outputFormat",
