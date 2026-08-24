@@ -108,7 +108,7 @@ jobs:
           pnpm auth:migrate --apply
 
       - name: tsc
-        run: pnpm exec tsc --noEmit
+        run: pnpm typecheck
 
       - name: lint
         run: pnpm lint

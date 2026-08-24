@@ -59,22 +59,20 @@ pnpm -C web auth:migrate --apply       # BetterAuth tables (prints the DDL witho
 Gates:
 
 ```bash
-pnpm -C web exec tsc --noEmit
+pnpm -C web typecheck                  # tsc --noEmit
 pnpm -C web lint
 pnpm -C web test
 pnpm -C web build
 pnpm -C web test:e2e                   # needs a dev server on :3000
 ```
 
-`pnpm -C web tsc --noEmit` does **not** work on pnpm 10: `tsc` is not a script in
-`web/package.json`, so pnpm treats `web` as a filter and exits 254. Use the `exec` form.
+Every gate is a script, so every one of them takes the `-C` form. `pnpm -C web tsc --noEmit`
+is not a gate and never worked: pnpm 10 reads `tsc` as a script name, finds none, treats `web`
+as a filter and exits 254. `pnpm -C web exec tsc --noEmit` is the equivalent long form.
 
-Known red, both tracked in `todo.md` and by ledger item 9.1, neither caused by the port's
-runtime:
-
-- `pnpm -C web test`: 9 failing tests in 2 files (`image-preview.test.tsx`,
-  `PostDetail.test.tsx`), all expectation drift against the current UI.
-- `pnpm -C web test:e2e`: broadly failing on the same kind of drift, with no recorded baseline.
+All five are green and CI (`.github/workflows/ci.yml`) runs them on every push. The
+expectation drift that used to leave `image-preview.test.tsx`, `PostDetail.test.tsx` and most
+of the e2e suite red was repaired under polish ledger items P0.1 and P0.5.
 
 ## Traps
 

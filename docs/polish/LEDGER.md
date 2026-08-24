@@ -630,7 +630,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
           against `@mastra/pg`'s `CREATE INDEX CONCURRENTLY`, so the lock is polled with
           `pg_try_advisory_lock`. [evidence](evidence/p2.md#p277b-ii)
 - [x] **P2.78** `[confirmed]` `scaffold-check.test.ts > emits the workflow lifecycle events the trace view will read` fails under a full parallel `pnpm -C web test` while ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
-- [ ] **P2.79** `[confirmed]` The objective's literal typecheck gate `pnpm -C web tsc --noEmit` does not run on the installed pnpm (10.26.2): it exits 254 with ...
+- [x] **P2.79** `[confirmed]` The objective's literal typecheck gate `pnpm -C web tsc --noEmit` does not run on the installed pnpm (10.26.2): it exits 254 with ... Closed in the **P2.C1** batch: typechecking is a `typecheck` script, so every gate takes the `-C` form, and CI and both doc gate blocks call it. [evidence](evidence/p2.md#p2c1)
 - [x] **P2.80** `[confirmed]` The 6 failing tests in `web/src/components/__tests__/image-preview.test.tsx`. The same finding as P0.1, removed from `todo.md`. [evidence](evidence/p0.md#p01)
 - [x] **P2.81** `[confirmed]` The app has no theme switch: `web/src/app/layout.tsx:28` hardcodes `<html lang="en" className="dark">` and no `ThemeProvider` is mounted ... Deleted at triage: dark mode is explicitly out of scope for this run. The product is dark-only and that is a `docs/polish/SUMMARY.md` gap line, not an item.
 - [x] **P2.82** `[investigate]` `pnpm -C web dev` serves the repo's own `media/` directory, but the item 7.6 end-to-end run executed in the compose stack and wrote its five ... Deleted at triage: superseded by the `post_media` mirror (P1.2c-ii). Only images generated before that mirror existed are affected, and re-running the images stage makes them viewable from either process.
@@ -691,10 +691,11 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       declares `"any"`, which is truthful, but an installed app gets the platform's white
       badge behind the mark instead of the mark filling the tile. Needs a second full-bleed
       render of the mark at 192 and 512.
-- [ ] **P2.105** `[investigate 2026-08-24]` `web/public/` carries five unreferenced Next.js
+- [x] **P2.105** `[investigate 2026-08-24]` `web/public/` carries five unreferenced Next.js
       starter assets (`next.svg`, `vercel.svg`, `file.svg`, `globe.svg`, `window.svg`), served
-      as public routes and shipped in the Docker image. Confirm nothing outside the repo links
-      them, then delete. Batched into P2.C1.
+      as public routes and shipped in the Docker image. Reproduced by repo-wide grep and
+      deleted in the **P2.C1** batch, along with `icon.png`, an 11KB byte-duplicate of the 512
+      manifest icon that the new `public/` guard found. [evidence](evidence/p2.md#p2c1)
 - [x] **P2.106** A full run stamps `current_stage = "complete"` and `completed_at` even when a
       stage inside it failed, and both summary surfaces read that column alone. Closed at
       P3.2a: `deriveRunState()` reads `current_stage` and `stage_status` together and such a
@@ -745,11 +746,13 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       clearing every gate for one post is silently written back to the profile's gates. A
       faithful port of Python's rule that the parity oracle asserts, so changing it is a
       deliberate deviation. Found under P3.1a.
-- [ ] **P2.C1** Cleanup batch, one iteration for both: P2.79 (no `typecheck` script in
+- [x] **P2.C1** Cleanup batch, one iteration for both: P2.79 (no `typecheck` script in
       `web/package.json`, so the objective's literal `pnpm -C web tsc --noEmit` exits 254) and
       P2.105 (five unreferenced starter assets). P2.53 and P2.66 were the other two members
       and were closed with P2.46 and P2.62 instead, that batch being the topmost four
-      unchecked entries rather than the bottom four.
+      unchecked entries rather than the bottom four. Both guarded: `src/gate-commands.test.ts`
+      holds every documented `pnpm -C web` form to a real script, and `brand-mark.test.ts`
+      holds `public/` to files the app actually names. [evidence](evidence/p2.md#p2c1)
 
 ## Done
 

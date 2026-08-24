@@ -57,13 +57,6 @@
   project has no deployed Railway environment, so nobody has seen Railway execute the hook or
   abort a deployment on its exit code.
 
-- [confirmed] 2026-08-23 The objective's literal typecheck gate `pnpm -C web tsc --noEmit`
-  does not run on the installed pnpm (10.26.2): it exits 254 with
-  `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "web" not found`, because `tsc` is not a
-  script in `web/package.json`. The working form is `pnpm -C web exec tsc --noEmit`
-  (exit 0). Item 9.1 has to paste every gate command, so it needs the `exec` form or a
-  `typecheck` script in `web/package.json`. Ledger item P2.79.
-
 - [confirmed] 2026-08-23 The global `stage_models` row is borrowed the way `api_keys` used to
   be: `src/mastra/stage-models.test.ts`, `src/app/api/settings/stage-models/route.test.ts` and
   `src/app/settings/stage-models-to-provider.test.tsx` each hold the pre-borrow value in a
@@ -132,12 +125,6 @@
   own white badge behind the mark rather than the mark filling the tile. Fixing it means a second
   full-bleed render of `web/public/icon.svg` at 192 and 512 with the page extended to the edges,
   listed alongside the `any` entries. Found at polish ledger P1.1. Ledger item P2.104.
-
-- [investigate] 2026-08-24 `web/public/` still carries five unreferenced Next.js starter assets:
-  `next.svg`, `vercel.svg`, `file.svg`, `globe.svg`, `window.svg`. Nothing under `web/src` names
-  any of them (grepped across `.ts`, `.tsx`, `.json`, `.md`, `.mjs`), so they are served as public
-  routes and shipped in the Docker image for no reason. Confirm nothing outside the repo links
-  them before deleting. Found at polish ledger P1.1. Ledger item P2.105.
 
 - [confirmed] 2026-08-24 `wp_url` accepts a URL carrying credentials
   (`https://user:pass@example.com`). `checkWpUrl` in `web/src/app/api/profiles/validation.ts`

@@ -149,7 +149,7 @@ competing with the real worker for steps. See [`docs/mastra-port/studio.md`](doc
 
 ```bash
 pnpm -C web test               # vitest, against the real database and Redis
-pnpm -C web exec tsc --noEmit  # typecheck
+pnpm -C web typecheck          # tsc --noEmit
 pnpm -C web lint               # eslint
 pnpm -C web build              # next build
 ```

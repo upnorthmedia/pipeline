@@ -38,12 +38,27 @@ const VECTOR_MARKS = ["public/icon.svg", "src/app/icon0.svg"] as const
 
 /** Every raster the mark also ships as, with the size each consumer expects. */
 const RASTER_MARKS = [
-  { file: "public/icon.png", size: 512 },
   { file: "public/web-app-manifest-192x192.png", size: 192 },
   { file: "public/web-app-manifest-512x512.png", size: 512 },
   { file: "src/app/icon1.png", size: 96 },
   { file: "src/app/apple-icon.png", size: 180 },
 ] as const
+
+/**
+ * Every text file under a directory that is shipped code, read as one string
+ * each. Tests are skipped on purpose: a file named only by the test that
+ * checks it is not referenced by anything a browser can reach.
+ */
+function collectSource(dir: string): string[] {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) return collectSource(full)
+    if (!entry.isFile()) return []
+    if (/\.test\.[jt]sx?$/.test(entry.name)) return []
+    if (!/\.(ts|tsx|js|jsx|mjs|json|css|md)$/.test(entry.name)) return []
+    return [fs.readFileSync(full, "utf8")]
+  })
+}
 
 /** A comparison size small enough that renderer antialiasing averages out. */
 const COMPARE = 32
@@ -136,6 +151,20 @@ describe("the brand mark", () => {
     expect(served.filter((asset) => matcher.test(asset))).toEqual([])
     // Anti-vacuity: the matcher still covers the pages it is there to protect.
     expect(["/", "/posts/new", "/settings"].filter((page) => matcher.test(page))).toHaveLength(3)
+  })
+
+  it("is the only thing `public/` serves", () => {
+    // Ledger item P2.105. `public/` is served verbatim at the site root, so
+    // anything left in it is a public route and ships in the image. The
+    // create-next-app starter drops five demo SVGs there, and this app never
+    // referenced any of them.
+    const source = collectSource(path.join(WEB, "src"))
+    const unreferenced = fs
+      .readdirSync(path.join(WEB, "public"))
+      .filter((asset) => !source.some((file) => file.includes(asset)))
+    expect(unreferenced).toEqual([])
+    // Anti-vacuity: the crawl read files, and they name the mark.
+    expect(source.some((file) => file.includes("icon.svg"))).toBe(true)
   })
 
   it("is reachable at every path the app names", () => {
