@@ -56,14 +56,10 @@ import {
   STAGES,
 } from "@/lib/api";
 import { plainMessage } from "@/lib/plain-message";
+import { OutputFormatSelect } from "@/components/output-format-select";
+import { publishTargets, type FormatAvailabilityMap } from "@/lib/publishing";
 import { toast } from "sonner";
 import { ProfileDetailSkeleton } from "./profile-detail-skeleton";
-
-const OUTPUT_FORMATS = [
-  { value: "markdown", label: "Markdown" },
-  { value: "wordpress", label: "WordPress (Direct Publish)" },
-  { value: "nextjs", label: "Next.js (Webhook)" },
-];
 
 const STAGE_MODES: { value: StageMode; label: string }[] = [
   { value: "auto", label: "Auto" },
@@ -251,8 +247,11 @@ export default function ProfileDetailPage() {
     setWpDefaultStatus(p.wp_default_status || "publish");
     setWpDefaultCategoryId(p.wp_default_category_id);
     setWpDefaultAuthorId(p.wp_default_author_id);
+    // All three credentials: `/wordpress/test` answers "credentials not
+    // configured" without the application password, which is a failure the
+    // user has not made yet rather than something to report.
     setWpStatus(
-      p.wp_url && p.wp_username ? { kind: "checking" } : { kind: "unconfigured" }
+      publishTargets(p).wordpress ? { kind: "checking" } : { kind: "unconfigured" }
     );
     setNextjsWebhookUrl(p.nextjs_webhook_url || "");
     setNextjsWebhookSecret("");
@@ -262,7 +261,7 @@ export default function ProfileDetailPage() {
     // Testing a webhook POSTs to the customer's site, so a stored URL can only
     // ever be untested here: the page will not fire it without being asked.
     setNextjsStatus(
-      p.nextjs_webhook_url ? { kind: "untested" } : { kind: "unconfigured" }
+      publishTargets(p).nextjs ? { kind: "untested" } : { kind: "unconfigured" }
     );
   }, []);
 
@@ -341,6 +340,36 @@ export default function ProfileDetailPage() {
       }
     };
   }, [profile?.crawl_status, fetchProfile, fetchLinks, linksSearch]);
+
+  /**
+   * Read off the live form rather than off the loaded profile: the
+   * credentials and the output format sit on the same unsaved form, so
+   * anything else would make the user save twice to pick the destination they
+   * just configured. `wp_app_password_set` covers the saved case, where the
+   * ciphertext exists and the input is deliberately empty.
+   */
+  const credentialTargets = publishTargets({
+    wp_url: wpUrl,
+    wp_username: wpUsername,
+    wp_app_password_set: Boolean(wpAppPassword) || Boolean(profile?.wp_app_password_set),
+    nextjs_webhook_url: nextjsWebhookUrl,
+    nextjs_webhook_secret_set:
+      Boolean(nextjsWebhookSecret) || Boolean(profile?.nextjs_webhook_secret_set),
+  });
+  const formatAvailability: FormatAvailabilityMap = {
+    wordpress: credentialTargets.wordpress
+      ? { available: true }
+      : {
+          available: false,
+          reason: "Fill in the WordPress card below to publish there.",
+        },
+    nextjs: credentialTargets.nextjs
+      ? { available: true }
+      : {
+          available: false,
+          reason: "Fill in the Next.js card below to publish there.",
+        },
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -770,25 +799,11 @@ export default function ProfileDetailPage() {
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="outputFormat">Output Format</Label>
-                <Select
-                  name="output_format"
-                  value={outputFormat}
-                  onValueChange={setOutputFormat}
-                >
-                  <SelectTrigger id="outputFormat">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {OUTPUT_FORMATS.map((f) => (
-                      <SelectItem key={f.value} value={f.value}>
-                        {f.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <OutputFormatSelect
+                value={outputFormat}
+                onValueChange={setOutputFormat}
+                availability={formatAvailability}
+              />
               <div className="space-y-2">
                 <Label htmlFor="avoid">Avoid</Label>
                 <Input

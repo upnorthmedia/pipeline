@@ -40,7 +40,15 @@ export interface Profile {
   wp_default_author_id: number | null;
   wp_default_category_id: number | null;
   wp_default_status: string | null;
+  /**
+   * Whether the encrypted `wp_app_password` / `nextjs_webhook_secret` columns
+   * hold anything. The ciphertext itself is never returned; these say whether
+   * the publish step would find a credential, which is what decides whether an
+   * output format is offered. See `src/app/api/profiles/serialize.ts`.
+   */
+  wp_app_password_set: boolean;
   nextjs_webhook_url: string | null;
+  nextjs_webhook_secret_set: boolean;
   nextjs_frontmatter_map: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;

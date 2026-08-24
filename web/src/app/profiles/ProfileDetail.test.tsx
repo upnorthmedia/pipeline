@@ -63,7 +63,11 @@ const mockNextjsTest = vi.mocked(profiles.nextjsTest);
 
 /** A profile the page treats as WordPress-connected, so it loads the pickers. */
 const wpProfile = () =>
-  makeProfile({ wp_url: "https://wp.example", wp_username: "editor" });
+  makeProfile({
+    wp_url: "https://wp.example",
+    wp_username: "editor",
+    wp_app_password_set: true,
+  });
 
 const testLinks: InternalLink[] = [
   {
@@ -533,7 +537,10 @@ describe("ProfileDetailPage", () => {
       // Testing the webhook POSTs to the customer's site, so the page cannot
       // fire it on load the way it can read `/wp-json`.
       mockGet.mockResolvedValue(
-        makeProfile({ nextjs_webhook_url: "https://blog.example/api/jena-webhook" })
+        makeProfile({
+          nextjs_webhook_url: "https://blog.example/api/jena-webhook",
+          nextjs_webhook_secret_set: true,
+        })
       );
       renderWithProviders(<ProfileDetailPage />);
       await waitFor(() => {
@@ -548,7 +555,10 @@ describe("ProfileDetailPage", () => {
     it("reports a webhook test failure under the webhook fields", async () => {
       const user = userEvent.setup();
       mockGet.mockResolvedValue(
-        makeProfile({ nextjs_webhook_url: "https://blog.example/api/jena-webhook" })
+        makeProfile({
+          nextjs_webhook_url: "https://blog.example/api/jena-webhook",
+          nextjs_webhook_secret_set: true,
+        })
       );
       mockUpdate.mockResolvedValue(makeProfile());
       mockNextjsTest.mockResolvedValue({
@@ -564,6 +574,108 @@ describe("ProfileDetailPage", () => {
 
       await waitFor(() => {
         expect(screen.getByText("Webhook returned 401")).toBeInTheDocument();
+      });
+    });
+  });
+
+  /**
+   * The output format names where a finished post goes. Offering a
+   * destination the profile has no credentials for buys a run that pays for
+   * six stages and then fails in the publish step, so the option is not
+   * offered until the credentials exist.
+   */
+  describe("output format availability", () => {
+    it("refuses both publishing formats on a profile with no credentials", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("Test Site")).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole("combobox", { name: "Output Format" }));
+
+      expect(await screen.findByRole("option", { name: /WordPress/ })).toHaveAttribute(
+        "aria-disabled",
+        "true"
+      );
+      expect(await screen.findByRole("option", { name: /Next.js/ })).toHaveAttribute(
+        "aria-disabled",
+        "true"
+      );
+      expect(await screen.findByRole("option", { name: "Markdown" })).not.toHaveAttribute(
+        "aria-disabled",
+        "true"
+      );
+    });
+
+    it("points at the card that fixes it rather than just greying the option", async () => {
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("Test Site")).toBeInTheDocument();
+      });
+
+      expect(
+        screen.getByText(
+          "WordPress (Direct Publish): Fill in the WordPress card below to publish there."
+        )
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Next.js (Webhook): Fill in the Next.js card below to publish there."
+        )
+      ).toBeInTheDocument();
+    });
+
+    it("offers WordPress once the profile has all three credentials", async () => {
+      const user = userEvent.setup();
+      mockGet.mockResolvedValue(wpProfile());
+      mockWpTest.mockResolvedValue({ connected: true, site_name: "Editorial" });
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(screen.getByText("Connected")).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole("combobox", { name: "Output Format" }));
+
+      expect(await screen.findByRole("option", { name: /WordPress/ })).not.toHaveAttribute(
+        "aria-disabled",
+        "true"
+      );
+    });
+
+    /**
+     * The credentials and the format live on the same unsaved form, so
+     * reading the availability off the loaded profile would make the user
+     * save twice to pick the format they just configured.
+     */
+    it("opens up the format as the credentials are typed, before any save", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ProfileDetailPage />);
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("Test Site")).toBeInTheDocument();
+      });
+
+      await user.type(screen.getByLabelText("WordPress URL"), "https://wp.example");
+      await user.type(screen.getByLabelText("Username"), "editor");
+      await user.type(screen.getByLabelText("Application Password"), "abcd efgh");
+
+      await waitFor(() =>
+        expect(
+          screen.queryByText(
+            "WordPress (Direct Publish): Fill in the WordPress card below to publish there."
+          )
+        ).not.toBeInTheDocument()
+      );
+    });
+
+    it("raises the reason to an alert when the profile already names that format", async () => {
+      mockGet.mockResolvedValue(makeProfile({ output_format: "nextjs" }));
+      renderWithProviders(<ProfileDetailPage />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("alert")).toHaveTextContent(
+          "Next.js (Webhook): Fill in the Next.js card below to publish there."
+        );
       });
     });
   });

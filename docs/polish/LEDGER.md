@@ -207,8 +207,19 @@ move on. A split is not an iteration on its own: split and complete the first ch
           POSTs to the customer's site, and `src/lib/plain-message.ts` turns an upstream
           message into the sentence it was meant to be. Verified against a real WordPress
           install, `ui/p13d-*.png`. [evidence](evidence/p1.md#p13d-i)
-    - [ ] **P1.3d-ii** Output formats that disable themselves with an explanation when their
-          target is not configured, in `/posts/new` and in the profile editor.
+    - [x] **P1.3d-ii** Output formats that disable themselves with an explanation when their
+          target is not configured, in `/posts/new` and in the profile editor. Both selects
+          offered all three formats unconditionally, including `wordpress` on `/posts/new`
+          with no profile selected at all, which no publish step can survive. The profile
+          response also dropped both ciphertext columns, so a profile with a WordPress URL
+          and username but no application password was indistinguishable from a working one.
+          `serialize.ts` gains `wp_app_password_set` and `nextjs_webhook_secret_set`, the one
+          deliberate addition to `ProfileRead`; `src/lib/publishing.ts` holds the two publish
+          steps' preconditions and nothing else; `OutputFormatSelect` disables a format and
+          prints its reason under the field whether or not the list is open, with the
+          selected format's reason as a `role="alert"`. Reachability is deliberately not part
+          of it: a configured site that is down is a failure the connection card reports.
+          Verified in a real browser, `ui/p13dii-*.png`. [evidence](evidence/p1.md#p13d-ii)
     - [ ] **P1.3d-iii** A publish action that reports what happened.
 
 ## P2. Clear the backlog in `todo.md`

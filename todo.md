@@ -372,6 +372,17 @@
   5.3c-iii-b-2-e with its own test, because widening it would start two publish runs from
   one request and that is a behaviour change, not a port. `_post_completion_hook`'s
   auto-publish half has the same shape, so a `both` post is not auto-published either.
+- [confirmed] 2026-08-24 `both` is the `output_format` column default on both
+  `website_profiles` and `posts` (`web/src/db/schema.ts:81` and `:138`) but is not one of
+  the three options `OUTPUT_FORMATS` in `web/src/lib/publishing.ts` offers, so a row that
+  took the column default renders the Output Format trigger with no label at all, and
+  saving the form silently rewrites the value to whatever the user then picks. It is the
+  same `both` the publish endpoint refuses with `Publishing not supported for output_format
+  'both'` (see the 2026-08-23 entry above). No row currently holds it, because every writer
+  in the app sends an explicit value; a row inserted by anything else would. Decide whether
+  `both` is a real format or a default that should never have been `both`, then make the
+  column and the picker agree. Found while doing ledger item P1.3d-ii, which is where the
+  picker's three options moved to.
 - [confirmed] 2026-08-23 Perplexity's Sonar Chat Completions endpoint is deprecated with
   support ending 2026-09-27, per `docs.perplexity.ai/getting-started/models`. The
   `research` stage reaches `sonar-pro` through Mastra's model router, which uses the

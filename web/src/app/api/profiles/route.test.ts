@@ -173,7 +173,7 @@ describe("GET /api/profiles", () => {
     expect(body).toEqual([])
   })
 
-  it("returns exactly the ProfileRead fields, without the two ciphertext columns", async () => {
+  it("returns the ProfileRead fields plus the two set flags, and no ciphertext", async () => {
     await insertProfile(user.userId, {
       niche: "technology",
       targetAudience: "developers",
@@ -201,6 +201,7 @@ describe("GET /api/profiles", () => {
       "last_crawled_at",
       "name",
       "nextjs_frontmatter_map",
+      "nextjs_webhook_secret_set",
       "nextjs_webhook_url",
       "niche",
       "output_format",
@@ -213,6 +214,7 @@ describe("GET /api/profiles", () => {
       "updated_at",
       "website_url",
       "word_count",
+      "wp_app_password_set",
       "wp_default_author_id",
       "wp_default_category_id",
       "wp_default_status",
@@ -220,10 +222,58 @@ describe("GET /api/profiles", () => {
       "wp_username",
     ])
     expect(JSON.stringify(profile)).not.toContain("ciphertext-should-never-be-returned")
+    expect(profile.wp_app_password_set).toBe(true)
+    expect(profile.nextjs_webhook_secret_set).toBe(true)
     expect(profile.niche).toBe("technology")
     expect(profile.word_count).toBe(2500)
     expect(profile.crawl_status).toBe("pending")
     expect(profile.wp_default_status).toBe("publish")
+  })
+
+  /**
+   * The dashboard has to tell a configured publishing target from a
+   * half-configured one, and both publish steps refuse on the ciphertext
+   * column rather than on the URL: `wordpress-publish.ts` checks `wp_url`,
+   * `wp_username` and `wp_app_password`, `nextjs-publish.ts` checks
+   * `nextjs_webhook_url` and `nextjs_webhook_secret`. Without these two flags
+   * a profile carrying a URL and no secret reads as ready to publish and the
+   * run dies after paying for six stages.
+   */
+  it("reports a stored secret as absent when the column is empty", async () => {
+    await insertProfile(user.userId, {
+      wpUrl: "https://wp.example.com",
+      wpUsername: "editor",
+      nextjsWebhookUrl: "https://blog.example/api/jena-webhook",
+    })
+
+    const [profile] = await (
+      await listProfiles(apiRequest(URL, { cookie: user.cookie }))
+    ).json()
+
+    expect(profile.wp_app_password_set).toBe(false)
+    expect(profile.nextjs_webhook_secret_set).toBe(false)
+  })
+
+  /**
+   * `encryptCredentials` guards on truthiness, so an empty string is stored
+   * verbatim rather than encrypted, and both publish steps read it as missing.
+   * A `!== null` flag would report that row as configured.
+   */
+  it("reports an empty-string secret as absent, the way the publish step reads it", async () => {
+    await insertProfile(user.userId, {
+      wpUrl: "https://wp.example.com",
+      wpUsername: "editor",
+      wpAppPassword: "",
+      nextjsWebhookUrl: "https://blog.example/api/jena-webhook",
+      nextjsWebhookSecret: "",
+    })
+
+    const [profile] = await (
+      await listProfiles(apiRequest(URL, { cookie: user.cookie }))
+    ).json()
+
+    expect(profile.wp_app_password_set).toBe(false)
+    expect(profile.nextjs_webhook_secret_set).toBe(false)
   })
 
   it("substitutes the ProfileRead defaults for null columns", async () => {

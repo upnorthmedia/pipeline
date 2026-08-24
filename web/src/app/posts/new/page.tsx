@@ -24,6 +24,8 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { ProfileSelectCard } from "@/components/profile-select-card";
+import { OutputFormatSelect } from "@/components/output-format-select";
+import { publishTargets, type FormatAvailabilityMap } from "@/lib/publishing";
 import {
   apiErrorMessage,
   posts,
@@ -34,12 +36,6 @@ import {
   type WPAuthor,
 } from "@/lib/api";
 import { toast } from "sonner";
-
-const OUTPUT_FORMATS = [
-  { value: "markdown", label: "Markdown" },
-  { value: "wordpress", label: "WordPress (Direct Publish)" },
-  { value: "nextjs", label: "Next.js (Webhook)" },
-];
 
 const ARTICLE_TYPES = [
   { value: "guide", label: "Guide" },
@@ -131,10 +127,13 @@ export default function NewPostPage() {
       setAvoid(profile.avoid || "");
       setRelatedKeywords((profile.related_keywords || []).join(", "));
 
-      // Load WP data if profile has WordPress configured
+      // Load WP data if profile has WordPress configured. All three
+      // credentials, because `/wordpress/categories` answers a 400 without the
+      // application password and the reason would land on the pickers as a
+      // failure the user did not cause.
       setWpCategoryId(profile.wp_default_category_id);
       setWpAuthorId(profile.wp_default_author_id);
-      if (profile.wp_url && profile.wp_username) {
+      if (publishTargets(profile).wordpress) {
         loadWpDefaults(profile.id);
       } else {
         setWpCategories([]);
@@ -142,6 +141,33 @@ export default function NewPostPage() {
         setWpError(null);
       }
     }
+  };
+
+  /**
+   * Both publish steps read their credentials off the linked profile, so with
+   * no profile chosen there is no destination at all, and with a
+   * half-configured one there is a destination that fails after the pipeline
+   * has already run. Named after the profile, because the form shows several
+   * and the fix is on one of them.
+   */
+  const targets = publishTargets(selectedProfile);
+  const formatAvailability: FormatAvailabilityMap = {
+    wordpress: targets.wordpress
+      ? { available: true }
+      : {
+          available: false,
+          reason: selectedProfile
+            ? `"${selectedProfile.name}" has no WordPress connection. Set one up in the profile.`
+            : "Choose a website profile to publish there.",
+        },
+    nextjs: targets.nextjs
+      ? { available: true }
+      : {
+          available: false,
+          reason: selectedProfile
+            ? `"${selectedProfile.name}" has no Next.js webhook. Set one up in the profile.`
+            : "Choose a website profile to publish there.",
+        },
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -336,25 +362,11 @@ export default function NewPostPage() {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="outputFormat">Output Format</Label>
-                <Select
-                  name="output_format"
-                  value={outputFormat}
-                  onValueChange={setOutputFormat}
-                >
-                  <SelectTrigger id="outputFormat">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {OUTPUT_FORMATS.map((f) => (
-                      <SelectItem key={f.value} value={f.value}>
-                        {f.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <OutputFormatSelect
+                value={outputFormat}
+                onValueChange={setOutputFormat}
+                availability={formatAvailability}
+              />
               <div className="space-y-2">
                 <Label htmlFor="websiteUrl">Website URL</Label>
                 <Input

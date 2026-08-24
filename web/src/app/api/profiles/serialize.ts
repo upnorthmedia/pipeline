@@ -7,6 +7,16 @@
  * `nextjs_webhook_secret`, both of which hold ciphertext: FastAPI dropped them
  * because `ProfileRead` never declared them, and the same must hold here or the
  * port would start leaking credentials the Python stack never returned.
+ *
+ * The one addition to `ProfileRead` is `wp_app_password_set` and
+ * `nextjs_webhook_secret_set`, two booleans saying whether those columns hold
+ * anything. Both publish steps refuse on the ciphertext column and not on the
+ * URL beside it (`steps/wordpress-publish.ts` checks all three of `wp_url`,
+ * `wp_username` and `wp_app_password`; `steps/nextjs-publish.ts` checks both
+ * of its own), so without them a profile carrying a URL and no secret is
+ * indistinguishable from a configured one and the dashboard offers a
+ * destination that six paid stages later cannot be reached. A boolean is not
+ * a leak: pressing Test connection already reports the same fact.
  */
 import type { StageSettingsJson, websiteProfiles } from "@/db"
 
@@ -44,7 +54,9 @@ export interface ProfileResponse {
   wp_default_author_id: number | null
   wp_default_category_id: number | null
   wp_default_status: string | null
+  wp_app_password_set: boolean
   nextjs_webhook_url: string | null
+  nextjs_webhook_secret_set: boolean
   nextjs_frontmatter_map: Record<string, unknown> | null
   created_at: string | null
   updated_at: string | null
@@ -98,7 +110,11 @@ export function serializeProfile(row: ProfileRow): ProfileResponse {
     wp_default_author_id: row.wpDefaultAuthorId,
     wp_default_category_id: row.wpDefaultCategoryId,
     wp_default_status: row.wpDefaultStatus,
+    // `!!` and not `!== null`: the profile form saves an empty string for a
+    // cleared field, and both publish steps read that as missing.
+    wp_app_password_set: !!row.wpAppPassword,
     nextjs_webhook_url: row.nextjsWebhookUrl,
+    nextjs_webhook_secret_set: !!row.nextjsWebhookSecret,
     nextjs_frontmatter_map: row.nextjsFrontmatterMap,
     created_at: row.createdAt?.toISOString() ?? null,
     updated_at: row.updatedAt?.toISOString() ?? null,

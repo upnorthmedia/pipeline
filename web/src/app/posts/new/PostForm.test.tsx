@@ -232,6 +232,7 @@ describe("NewPostPage", () => {
       name: "WP Site",
       wp_url: "https://wp.example.com",
       wp_username: "editor",
+      wp_app_password_set: true,
     });
     mockProfilesList.mockResolvedValue([wpProfile]);
     mockWpCategories.mockRejectedValueOnce(
@@ -280,6 +281,117 @@ describe("NewPostPage", () => {
     renderWithProviders(<NewPostPage />);
     await waitFor(() => {
       expect(mockProfilesList).toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * `output_format` decides where the finished post goes, and both publish
+   * steps read their credentials off the linked profile. A form that offers
+   * WordPress with no profile, or with a profile that has none of the three
+   * WordPress credentials, sells a run that pays for six stages and then
+   * fails in the publish step.
+   */
+  describe("output format availability", () => {
+    it("offers no publishing format until a profile is chosen", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(screen.getByRole("combobox", { name: "Output Format" }));
+
+      expect(await screen.findByRole("option", { name: /WordPress/ })).toHaveAttribute(
+        "aria-disabled",
+        "true"
+      );
+      expect(await screen.findByRole("option", { name: /Next.js/ })).toHaveAttribute(
+        "aria-disabled",
+        "true"
+      );
+      expect(await screen.findByRole("option", { name: "Markdown" })).not.toHaveAttribute(
+        "aria-disabled",
+        "true"
+      );
+    });
+
+    it("says a profile is what is missing", () => {
+      renderWithProviders(<NewPostPage />);
+      expect(
+        screen.getByText(
+          "WordPress (Direct Publish): Choose a website profile to publish there."
+        )
+      ).toBeInTheDocument();
+    });
+
+    it("opens WordPress up for a profile that has all three credentials", async () => {
+      mockProfilesList.mockResolvedValue([
+        makeProfile({
+          id: "prof-wp",
+          name: "WP Site",
+          wp_url: "https://wp.example.com",
+          wp_username: "editor",
+          wp_app_password_set: true,
+        }),
+      ]);
+      mockWpCategories.mockResolvedValue([]);
+      mockWpAuthors.mockResolvedValue([]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "WP Site" }));
+      await user.click(screen.getByRole("combobox", { name: "Output Format" }));
+
+      expect(await screen.findByRole("option", { name: /WordPress/ })).not.toHaveAttribute(
+        "aria-disabled",
+        "true"
+      );
+    });
+
+    /**
+     * The application password is the credential the profile response cannot
+     * show, so a URL and a username look like a finished setup. They are not:
+     * `wordpress-publish.ts` refuses on all three.
+     */
+    it("keeps WordPress closed for a profile whose app password was never saved", async () => {
+      mockProfilesList.mockResolvedValue([
+        makeProfile({
+          id: "prof-half",
+          name: "Half Set Up",
+          wp_url: "https://wp.example.com",
+          wp_username: "editor",
+        }),
+      ]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Half Set Up" }));
+
+      expect(
+        await screen.findByText(
+          'WordPress (Direct Publish): "Half Set Up" has no WordPress connection. ' +
+            "Set one up in the profile."
+        )
+      ).toBeInTheDocument();
+    });
+
+    /**
+     * The profile's own `output_format` is prefilled, so a profile that names
+     * WordPress and cannot reach it lands the form on a format that will
+     * fail. Rewriting the value silently would hide that, so it is said out
+     * loud instead.
+     */
+    it("raises the prefilled format's reason to an alert instead of rewriting it", async () => {
+      mockProfilesList.mockResolvedValue([testProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Firearms Blog" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        'WordPress (Direct Publish): "Firearms Blog" has no WordPress connection. ' +
+          "Set one up in the profile."
+      );
     });
   });
 });
