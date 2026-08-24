@@ -374,8 +374,12 @@ export default function ProfileDetailPage() {
         setWpConnected(false);
         toast.error(result.error || "Connection failed");
       }
-    } catch {
-      toast.error("Failed to test connection");
+    } catch (e) {
+      // The credentials are saved before they are tested, so the profile
+      // boundary can refuse the URL before WordPress is ever reached. Its
+      // reason is the one that tells the operator what to change.
+      setWpConnected(false);
+      toast.error(apiErrorMessage(e, "Failed to test connection"));
     } finally {
       setWpTesting(false);
     }
@@ -399,8 +403,11 @@ export default function ProfileDetailPage() {
         setNextjsConnected(false);
         toast.error(result.error || "Connection failed");
       }
-    } catch {
-      toast.error("Failed to test connection");
+    } catch (e) {
+      // Same shape as the WordPress test above: the webhook URL is saved
+      // before it is called, so a rejected save is the failure to report.
+      setNextjsConnected(false);
+      toast.error(apiErrorMessage(e, "Failed to test connection"));
     } finally {
       setNextjsTesting(false);
     }

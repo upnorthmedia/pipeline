@@ -173,9 +173,14 @@ move on. A split is not an iteration on its own: split and complete the first ch
         through its own `{connected: false, error}` channel instead of raising. `fetchWpData`
         uses `allSettled` and renders the reason under the pickers. Verified against a real
         WordPress install, `ui/p13a-wordpress-card-*.png`. [evidence](evidence/p1.md#p13a)
-  - [ ] **P1.3b** `wp_url` validation (P2.57): the client appends its REST paths to the raw
-        value, so a URL carrying a query string or a fragment builds a nonsense endpoint and
-        every call 404s. The fix belongs at the profile boundary, not in the client.
+  - [x] **P1.3b** `wp_url` validation (P2.57), batched with `website_url` (P2.87), which is
+        the same hole in the same file. `WordPressClient` concatenates its REST paths onto the
+        raw value, so a query string, a fragment or surrounding whitespace lands in the middle
+        of every endpoint and every call 404s, while the profile stored the URL anyway.
+        `checkWpUrl` / `checkWebsiteUrl` refuse it at the boundary; `apiErrorMessage()` now
+        joins a 422's field errors instead of falling back, and the two Test Connection
+        buttons report the reason instead of swallowing it. Verified against a real WordPress
+        install, `ui/p13b-wp-url-*.png`. [evidence](evidence/p1.md#p13b)
   - [ ] **P1.3c** `markdown_to_wp_html` raises `AttributeError: No renderer "'inline_html'"`
         for any article whose markdown carries an HTML tag mistune's block layer declines
         (P2.61), so the publish path crashes rather than rendering.
@@ -258,7 +263,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [ ] **P2.54** `[confirmed]` `npx next build` in `web/` prints 15 `[Error [BetterAuthError]: You are using the default secret. Please set BETTER_AUTH_SECRET ...]` lines ...
 - [ ] **P2.55** `[confirmed]` `GET /api/analytics/logs` in `api/src/api/analytics.py` answers a 500 for any `since` or `until` that `datetime.fromisoformat()` rejects. The ...
 - [ ] **P2.56** `[confirmed]` The whole `/api/analytics/logs` result set is ordered and bounded by a *text* comparison on `log_entry->>'ts'`, in both stacks. That is only ...
-- [ ] **P2.57** `[confirmed]` `WordPressClient.__init__` in `api/src/services/wordpress.py` appends its REST paths to the raw `wp_url` after nothing but a trailing-slash ...
+- [x] **P2.57** `[confirmed]` `WordPressClient.__init__` in `api/src/services/wordpress.py` appends its REST paths to the raw `wp_url` after nothing but a trailing-slash ...
 - [x] **P2.58** `[confirmed]` `GET /api/profiles/{profile_id}/wordpress/categories` and `/authors` answer a 500 for every failure the WordPress install reports, because ... Fixed by P1.3a: both handlers answer a 502 carrying the install's own message, or a sentence naming the key the payload is missing; entry removed from `todo.md`. [evidence](evidence/p1.md#p13a)
 - [x] **P2.59** `[confirmed]` `GET /api/profiles/{profile_id}/wordpress/test` answers a 500, not `{connected: false}`, when the configured `wp_url` serves valid JSON that is ... Fixed by P1.3a: a `/wp-json` root that is not a JSON object is reported as `{connected: false, error}` like every other failure the endpoint knows about; entry removed from `todo.md`. [evidence](evidence/p1.md#p13a)
 - [x] **P2.60** `[confirmed]` `src/mastra/workflows/scaffold-check.test.ts > emits the workflow lifecycle events the trace view will read` fails inside a full `pnpm test` run ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
@@ -288,7 +293,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [ ] **P2.84** `[confirmed]` `/posts/[id]` names two of the six stages twice: the tab strip in `web/src/app/posts/[id]/page.tsx` labels them "Draft" and "Editing" while the ...
 - [ ] **P2.85** `[confirmed]` The `posts.stage_logs` column is write-only dead weight in the ported stack: the only key anything writes is `_error` ...
 - [x] **P2.86** `[confirmed]` `web/e2e/navigation.test.ts:56` asserts a "Pipeline Settings" card on `/posts/new` and no such card exists in `web/src/app/posts/new/page.tsx` ... Fixed by P0.5a: the assertion is removed, and the real hole it was describing (no per-post stage-gate editor anywhere on `/posts/new`, while `/profiles/[id]` and `/posts/batch` both have one) is recorded for P3.1; entry replaced in `todo.md`. [evidence](evidence/p0.md#p05a)
-- [ ] **P2.87** `[confirmed]` `POST /api/profiles` accepts any string as `website_url`: creating a profile with the literal value `not a url` succeeded during item 8.6's live ...
+- [x] **P2.87** `[confirmed]` `POST /api/profiles` accepts any string as `website_url`: creating a profile with the literal value `not a url` succeeded during item 8.6's live ...
 - [x] **P2.88** `[confirmed]` `pnpm -C web test` is not deterministic above the known `image-preview.test.tsx` baseline: one extra database-backed test fails per full-suite ... Six identical summaries; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.89** `[confirmed]` The global `stage_models` row is borrowed the way `api_keys` used to be: three files hold the pre-borrow value in memory and write it back in `afterAll`, so a killed run loses it. Same shape P0.3a fixed for `api_keys`; move it onto `web/src/test/borrowed-rows.ts`, which first needs to carry `updated_at`.
 - [x] **P2.90** `[confirmed]` `images-manifest.test.ts > writes only the running marker` drifts 20ms under parallel load: `vi.useFakeTimers({ shouldAdvanceTime: true })` lets real elapsed time move the frozen clock, so an exact-stamp assertion is a race. Found while running P0.3d's affected suites together; belongs to P0.3e. Fixed: `shouldAdvanceTime: false`, with a test pinning the frozen clock; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)

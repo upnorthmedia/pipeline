@@ -399,6 +399,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  * answers `{"detail": "..."}` the way FastAPI did, so unwrapping it here is
  * what lets a page show the server's actual complaint (an id off the
  * allowlist, say) instead of a generic failure notice.
+ *
+ * A 422 answers with a list instead: one entry per field FastAPI refused. The
+ * `msg` values are joined and the `loc` is dropped, because the handlers that
+ * refuse a field a person typed word their `msg` to name that field already.
+ * The cost is that pydantic's own generic wordings ("Field required") arrive
+ * without one, which is thin but is still the server's actual complaint, and
+ * every form that can produce one checks its required fields before it
+ * submits.
  */
 export function apiErrorMessage(error: unknown, fallback: string): string {
   if (!(error instanceof Error) || !error.message) return fallback;
@@ -406,6 +414,12 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
     const body = JSON.parse(error.message);
     const detail = (body as { detail?: unknown }).detail;
     if (typeof detail === "string" && detail) return detail;
+    if (Array.isArray(detail)) {
+      const messages = detail
+        .map((entry) => (entry as { msg?: unknown }).msg)
+        .filter((msg): msg is string => typeof msg === "string" && msg.length > 0);
+      if (messages.length > 0) return messages.join(" ");
+    }
   } catch {
     // Not JSON: a network failure or an HTML error page. Neither is worth
     // showing to a user, so the caller's own wording wins.

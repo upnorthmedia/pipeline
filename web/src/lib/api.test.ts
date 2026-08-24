@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { posts, profiles, queue, settings, sseUrl } from "./api";
+import { apiErrorMessage, posts, profiles, queue, settings, sseUrl } from "./api";
 
 // The dashboard and its route handlers are one Next.js app, so every request
 // the client makes is origin-relative. There is no base URL to configure.
@@ -315,5 +315,62 @@ describe("api client", () => {
     it("generates global SSE URL", () => {
       expect(sseUrl.global()).toBe(`${API_BASE}/api/events`);
     });
+  });
+});
+
+describe("apiErrorMessage", () => {
+  /** `request()` throws with the raw response body, so that is what is passed. */
+  const thrown = (body: unknown) => new Error(JSON.stringify(body));
+
+  it("unwraps the string detail every ported handler answers with", () => {
+    expect(apiErrorMessage(thrown({ detail: "Post not found" }), "fallback")).toBe(
+      "Post not found"
+    );
+  });
+
+  it("unwraps a 422's field errors, which arrive as a list rather than a string", () => {
+    const message = apiErrorMessage(
+      thrown({
+        detail: [
+          {
+            type: "value_error",
+            loc: ["body", "wp_url"],
+            msg: "WordPress URL should start with http:// or https://",
+            input: "example.com",
+          },
+        ],
+      }),
+      "The profile could not be saved."
+    );
+
+    expect(message).toBe("WordPress URL should start with http:// or https://");
+  });
+
+  it("joins several field errors into one sentence run", () => {
+    const message = apiErrorMessage(
+      thrown({
+        detail: [
+          { type: "value_error", loc: ["body", "website_url"], msg: "First problem.", input: "" },
+          { type: "value_error", loc: ["body", "wp_url"], msg: "Second problem.", input: "" },
+        ],
+      }),
+      "fallback"
+    );
+
+    expect(message).toBe("First problem. Second problem.");
+  });
+
+  it("falls back for a detail list carrying no readable message", () => {
+    expect(apiErrorMessage(thrown({ detail: [{ loc: ["body", "x"] }] }), "fallback")).toBe(
+      "fallback"
+    );
+  });
+
+  it("falls back for an empty detail list", () => {
+    expect(apiErrorMessage(thrown({ detail: [] }), "fallback")).toBe("fallback");
+  });
+
+  it("falls back for a body that is not JSON", () => {
+    expect(apiErrorMessage(new Error("<html>502</html>"), "fallback")).toBe("fallback");
   });
 });

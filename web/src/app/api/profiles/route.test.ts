@@ -18,6 +18,15 @@ import { apiRequest, createTestSession, deleteTestSessions, type TestSession } f
 
 import { DELETE as deleteProfile, GET as getProfile, PATCH as patchProfile } from "./[id]/route"
 import { GET as listProfiles, POST as createProfile } from "./route"
+import type { ValidationErrorDetail } from "../pydantic"
+import {
+  WEBSITE_URL_INVALID,
+  WEBSITE_URL_SCHEME,
+  WP_URL_INVALID,
+  WP_URL_SCHEME,
+  WP_URL_SPACES,
+  WP_URL_QUERY_OR_FRAGMENT,
+} from "./validation"
 
 const PREFIX = "profiles-route-test-"
 const URL = "http://test/api/profiles"
@@ -725,5 +734,168 @@ describe("DELETE /api/profiles/[id]", () => {
 
     expect(response.status).toBe(422)
     expect((await response.json()).detail[0]).toMatchObject({ type: "uuid_parsing" })
+  })
+})
+
+/**
+ * The two URL columns are validated at this boundary rather than where they
+ * are consumed, because both are read by code that cannot report a reason to
+ * anyone: `WordPressClient` string-concatenates its REST paths onto `wp_url`,
+ * and the sitemap crawl hands `website_url` to `fetch`. A value that cannot
+ * work has to be refused while the person who typed it is still looking at it.
+ */
+describe("profile URL validation", () => {
+  /** The `detail` entry for one field of a 422, or `undefined`. */
+  async function issueFor(response: Response, field: string) {
+    const { detail } = (await response.json()) as { detail: ValidationErrorDetail[] }
+    return detail.find((entry) => entry.loc[1] === field)
+  }
+
+  it("rejects a wp_url carrying a query string, which the REST path is appended to", async () => {
+    const response = await post(
+      {
+        name: "Query",
+        website_url: "http://127.0.0.1:9/query",
+        wp_url: "https://example.com/?a=1",
+      },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect(await issueFor(response, "wp_url")).toEqual({
+      type: "value_error",
+      loc: ["body", "wp_url"],
+      msg: WP_URL_QUERY_OR_FRAGMENT,
+      input: "https://example.com/?a=1",
+    })
+  })
+
+  it("rejects a wp_url carrying a fragment", async () => {
+    const response = await post(
+      { name: "Hash", website_url: "http://127.0.0.1:9/hash", wp_url: "https://example.com#top" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "wp_url"))?.msg).toBe(WP_URL_QUERY_OR_FRAGMENT)
+  })
+
+  it("rejects a wp_url with whitespace around it, which lands inside the REST path", async () => {
+    const response = await post(
+      { name: "Space", website_url: "http://127.0.0.1:9/space", wp_url: "https://example.com " },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "wp_url"))?.msg).toBe(WP_URL_SPACES)
+  })
+
+  it("rejects a wp_url that is not an absolute URL", async () => {
+    const response = await post(
+      { name: "Bare", website_url: "http://127.0.0.1:9/bare", wp_url: "example.com" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "wp_url"))?.msg).toBe(WP_URL_INVALID)
+  })
+
+  it("rejects a wp_url on a scheme the client cannot speak", async () => {
+    const response = await post(
+      { name: "Ftp", website_url: "http://127.0.0.1:9/ftp", wp_url: "ftp://example.com" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "wp_url"))?.msg).toBe(WP_URL_SCHEME)
+  })
+
+  it("writes no row for a rejected create", async () => {
+    await post(
+      { name: "Nothing", website_url: "http://127.0.0.1:9/nothing", wp_url: "example.com" },
+      user.cookie,
+    )
+
+    const rows = await db
+      .select()
+      .from(websiteProfiles)
+      .where(eq(websiteProfiles.userId, user.userId))
+    expect(rows).toEqual([])
+  })
+
+  it.each([
+    ["https://example.com", "a bare host"],
+    ["https://example.com/", "a trailing slash"],
+    ["https://example.com/blog", "a subdirectory install"],
+    ["http://127.0.0.1:8003", "a port"],
+    ["https://example.com/wp-json", "a suffix the client strips"],
+  ])("accepts %s (%s)", async (wpUrl) => {
+    const response = await post(
+      { name: "Fine", website_url: "http://127.0.0.1:9/fine", wp_url: wpUrl },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(201)
+    expect((await response.json()).wp_url).toBe(wpUrl)
+  })
+
+  it.each([null, ""])(
+    "accepts %j, which every reader already treats as unconfigured",
+    async (wpUrl) => {
+      const response = await post(
+        { name: "Blank", website_url: "http://127.0.0.1:9/blank", wp_url: wpUrl },
+        user.cookie,
+      )
+
+      expect(response.status).toBe(201)
+      expect((await response.json()).wp_url).toBe(wpUrl)
+    },
+  )
+
+  it("rejects a website_url that is not a URL at all", async () => {
+    const response = await post({ name: "Bad", website_url: "not a url" }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect(await issueFor(response, "website_url")).toEqual({
+      type: "value_error",
+      loc: ["body", "website_url"],
+      msg: WEBSITE_URL_INVALID,
+      input: "not a url",
+    })
+  })
+
+  it("rejects a website_url on a scheme nothing here can follow", async () => {
+    const response = await post({ name: "File", website_url: "file:///etc/passwd" }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "website_url"))?.msg).toBe(WEBSITE_URL_SCHEME)
+  })
+
+  it("rejects the same values on PATCH and leaves the stored row alone", async () => {
+    const id = await insertProfile(user.userId, { wpUrl: "https://example.com" })
+
+    const response = await patch(id, { wp_url: "https://example.com/?a=1" }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "wp_url"))?.msg).toBe(WP_URL_QUERY_OR_FRAGMENT)
+    expect((await readRow(id)).wpUrl).toBe("https://example.com")
+  })
+
+  it("still clears wp_url when PATCH sends it as null", async () => {
+    const id = await insertProfile(user.userId, { wpUrl: "https://example.com" })
+
+    const response = await patch(id, { wp_url: null }, user.cookie)
+
+    expect(response.status).toBe(200)
+    expect((await readRow(id)).wpUrl).toBeNull()
+  })
+
+  it("rejects a bad website_url on PATCH", async () => {
+    const id = await insertProfile(user.userId)
+
+    const response = await patch(id, { website_url: "not a url" }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "website_url"))?.msg).toBe(WEBSITE_URL_INVALID)
   })
 })

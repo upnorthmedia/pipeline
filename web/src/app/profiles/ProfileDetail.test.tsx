@@ -34,6 +34,7 @@ vi.mock("@/lib/api", async () => {
       deleteLink: vi.fn(),
       wpCategories: vi.fn(),
       wpAuthors: vi.fn(),
+      wpTest: vi.fn(),
     },
   };
 });
@@ -56,6 +57,7 @@ void vi.mocked(profiles.createLink);
 const mockDeleteLink = vi.mocked(profiles.deleteLink);
 const mockWpCategories = vi.mocked(profiles.wpCategories);
 const mockWpAuthors = vi.mocked(profiles.wpAuthors);
+const mockWpTest = vi.mocked(profiles.wpTest);
 
 /** A profile the page treats as WordPress-connected, so it loads the pickers. */
 const wpProfile = () =>
@@ -92,6 +94,7 @@ beforeEach(() => {
   mockLinks.mockResolvedValue({ items: testLinks, total: testLinks.length, page: 1, per_page: 20, pages: 1 });
   mockWpCategories.mockResolvedValue([]);
   mockWpAuthors.mockResolvedValue([]);
+  mockWpTest.mockResolvedValue({ connected: true, site_name: "Test Site" });
 });
 
 describe("ProfileDetailPage", () => {
@@ -363,5 +366,58 @@ describe("ProfileDetailPage", () => {
         screen.getByText("website_url must be absolute")
       ).toBeInTheDocument();
     });
+  });
+  /**
+   * The profile boundary refuses a `wp_url` the WordPress client cannot build
+   * an endpoint from, and FastAPI's 422 carries the reason as a list of field
+   * errors rather than as a string. Both places a person can trigger that
+   * rejection have to show the reason, or the refusal is worse than the bug it
+   * replaced: the URL looks accepted and nothing says why it was not.
+   */
+  const REJECTED_WP_URL = JSON.stringify({
+    detail: [
+      {
+        type: "value_error",
+        loc: ["body", "wp_url"],
+        msg: "WordPress URL should start with http:// or https://",
+        input: "wp.example",
+      },
+    ],
+  });
+
+  it("shows the field error behind a 422 save, not just that the save failed", async () => {
+    const user = userEvent.setup();
+    mockUpdate.mockRejectedValueOnce(new Error(REJECTED_WP_URL));
+    renderWithProviders(<ProfileDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Test Site")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /Save Profile/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("WordPress URL should start with http:// or https://")
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("shows why Test Connection could not save the URL it was asked to test", async () => {
+    const user = userEvent.setup();
+    mockGet.mockResolvedValue(wpProfile());
+    mockUpdate.mockRejectedValueOnce(new Error(REJECTED_WP_URL));
+    renderWithProviders(<ProfileDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("https://wp.example")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /Test Connection/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        "WordPress URL should start with http:// or https://"
+      );
+    });
+    expect(mockWpTest).not.toHaveBeenCalled();
   });
 });

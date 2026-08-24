@@ -325,15 +325,6 @@
   change which rows a given bound returns and defeat the parity oracle. Worth revisiting
   once the TypeScript writers are the only ones producing `execution_logs` entries: item
   5.5c's `log` publisher is the single writer, so pinning its format in one place is cheap.
-- [confirmed] 2026-08-23 `WordPressClient.__init__` in `api/src/services/wordpress.py`
-  appends its REST paths to the raw `wp_url` after nothing but a trailing-slash strip and a
-  suffix strip, so a profile whose `wp_url` carries a query string or a fragment produces a
-  nonsense endpoint. Measured against the real client: `https://example.com/?a=1` yields
-  `api_url = https://example.com/?a=1/wp-json/wp/v2`, and every call against it 404s. Found
-  while porting the read half of the client (ledger item 5.9a) and reproduced faithfully in
-  `web/src/mastra/wordpress/index.ts`, because changing it would change which URL a stored
-  profile reaches. The fix belongs with the profile form's `wp_url` validation, not in the
-  client: nothing today stops a user pasting a URL with a query string into it.
 - [confirmed] 2026-08-23 `markdown_to_wp_html` raises `AttributeError: No renderer
   "'inline_html'"` for any article whose markdown contains an HTML tag mistune's block
   layer declines. `_GutenbergRenderer` in `api/src/services/wp_html.py` implements
@@ -468,14 +459,6 @@
   under polish ledger item P0.5a while removing `navigation.test.ts`'s stale assertion for a
   "Pipeline Settings" card, which had been describing this hole rather than a renamed card.
   Belongs to polish ledger item P3.1.
-
-- [confirmed] 2026-08-23 `POST /api/profiles` accepts any string as `website_url`: creating a
-  profile with the literal value `not a url` succeeded during item 8.6's live checks. This is
-  a faithful port (`web/src/app/api/profiles/validation.ts` uses `z.string()` where Pydantic
-  used `str`), so it is a product gap rather than a port defect, but the sitemap crawl and the
-  internal-link resolver both assume the field parses as a URL. Tightening it changes an API
-  contract the dashboard and `packages/create-mdx-blog` both sit on, so it is a decision to
-  take deliberately after the port rather than inside it.
 
 - [confirmed] 2026-08-23 `ImagePreview` renders `placement.location` as the raw enum the model
   writes, so a featured image's placement reads `featured_image` in the UI. Belongs to polish
@@ -630,3 +613,16 @@
   beside a category picker that just failed to load with an authentication error. Same
   origin as the entry above; it is the "visible connection status" half of polish ledger
   item P1.3d.
+- [confirmed] 2026-08-24 The WordPress Integration card on `/profiles/[id]` renders only when
+  `outputFormat === "wordpress" || wpConnected` (`web/src/app/profiles/[id]/page.tsx:777`), so
+  a profile that has not already picked WordPress as its output format has nowhere to enter or
+  test a connection, and the new-post form's `wordpress` option has nothing to check against.
+  Found while screenshotting polish ledger item P1.3b: reaching the card at all needed the
+  Output Format select changed first. This is the "one obvious place to configure and test a
+  connection" half of polish ledger item P1.3d.
+- [confirmed] 2026-08-24 `wp_url` accepts a URL carrying credentials
+  (`https://user:pass@example.com`). `checkWpUrl` in `web/src/app/api/profiles/validation.ts`
+  refuses a query string, a fragment and surrounding whitespace because those break the REST
+  path concatenation, but userinfo passes through `fetch` unharmed, so it is not that defect.
+  It does mean a password can land in `website_profiles.wp_url`, which is stored in plain
+  text while `wp_app_password` is Fernet-encrypted. Found at polish ledger item P1.3b.

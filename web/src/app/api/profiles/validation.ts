@@ -8,12 +8,93 @@
  * keys are dropped rather than rejected, which is pydantic's default
  * `extra="ignore"`. The lax coercions and the 422 body itself are shared with
  * the other ported routers in `../pydantic.ts`.
+ *
+ * One deliberate divergence: `website_url` and `wp_url` are checked as URLs,
+ * where pydantic declared both `str` and took anything. Both columns are read
+ * by code with nowhere to report a reason, so a value that cannot work has to
+ * be refused here, while the person who typed it is still looking at it. See
+ * `checkWebsiteUrl` and `checkWpUrl` below.
  */
 import { z } from "zod"
 
 import type { StageSettingsJson, websiteProfiles } from "@/db"
 
 import { jsonObject, pydanticInt } from "../pydantic"
+
+/**
+ * The reasons a URL column is refused, written for the decision the person
+ * has to make rather than for the parser that found the problem. `../pydantic`
+ * reports a `custom` zod issue with no pydantic error type attached as a
+ * `value_error`, which is what pydantic itself answers for a failed validator.
+ */
+export const WEBSITE_URL_INVALID = "Website URL should be a full URL, like https://example.com"
+export const WEBSITE_URL_SCHEME = "Website URL should start with http:// or https://"
+export const WP_URL_INVALID = "WordPress URL should be a full URL, like https://example.com"
+export const WP_URL_SCHEME = "WordPress URL should start with http:// or https://"
+export const WP_URL_SPACES = "WordPress URL should have no spaces around it."
+export const WP_URL_QUERY_OR_FRAGMENT =
+  "WordPress URL should be the site address on its own. The REST path is added to the end of " +
+  "it, so a query string or a #fragment would land in the middle of every request."
+
+/**
+ * A value both `fetch` and a browser can follow, or which of the two ways it
+ * failed. The WHATWG parser is the same one every reader of these columns
+ * ends up in, so agreeing with it is the point.
+ */
+function parseHttpUrl(raw: string): URL | "invalid" | "scheme" {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return "invalid"
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return "scheme"
+  return url
+}
+
+/**
+ * `website_url` seeds the sitemap crawl and is the base the internal-link
+ * resolver resolves relative hrefs against. Neither can say anything to
+ * anyone when it is not a URL: the crawl records a failed run and the resolver
+ * quietly drops links.
+ */
+function checkWebsiteUrl(value: string, ctx: z.RefinementCtx): void {
+  const parsed = parseHttpUrl(value)
+  if (parsed === "invalid") ctx.addIssue({ code: "custom", message: WEBSITE_URL_INVALID })
+  else if (parsed === "scheme") ctx.addIssue({ code: "custom", message: WEBSITE_URL_SCHEME })
+}
+
+/**
+ * `wp_url` is stricter than a URL because `WordPressClient` does not build its
+ * endpoints with the URL parser: it strips trailing slashes and one known
+ * suffix, then concatenates `/wp-json/wp/v2` onto whatever is left. Anything
+ * that has to stay at the end of a URL therefore ends up in the middle of one.
+ * Measured against the real client: `https://example.com/?a=1` reaches
+ * `https://example.com/?a=1/wp-json/wp/v2`, and every call against it 404s.
+ *
+ * The empty string is accepted rather than treated as a bad URL because every
+ * reader already tests `wp_url` for truthiness, so "" is how a profile with no
+ * WordPress connection reads, exactly as `null` does.
+ */
+function checkWpUrl(value: string, ctx: z.RefinementCtx): void {
+  if (value === "") return
+  if (value !== value.trim()) {
+    ctx.addIssue({ code: "custom", message: WP_URL_SPACES })
+    return
+  }
+  const parsed = parseHttpUrl(value)
+  if (parsed === "invalid") {
+    ctx.addIssue({ code: "custom", message: WP_URL_INVALID })
+    return
+  }
+  if (parsed === "scheme") {
+    ctx.addIssue({ code: "custom", message: WP_URL_SCHEME })
+    return
+  }
+  if (parsed.search !== "" || parsed.hash !== "") {
+    ctx.addIssue({ code: "custom", message: WP_URL_QUERY_OR_FRAGMENT })
+  }
+}
 
 /** `ProfileBase.default_stage_settings`, spelled exactly as pydantic spelled it. */
 const DEFAULT_STAGE_SETTINGS: StageSettingsJson = {
@@ -28,7 +109,7 @@ const DEFAULT_STAGE_SETTINGS: StageSettingsJson = {
 /** One entry per field, in `ProfileCreate`'s declaration order. */
 const FIELDS = {
   name: z.string(),
-  website_url: z.string(),
+  website_url: z.string().superRefine(checkWebsiteUrl),
   niche: z.string().nullable(),
   target_audience: z.string().nullable(),
   tone: z.string(),
@@ -43,7 +124,7 @@ const FIELDS = {
   related_keywords: z.array(z.string()),
   default_stage_settings: jsonObject,
   recrawl_interval: z.string().nullable(),
-  wp_url: z.string().nullable(),
+  wp_url: z.string().superRefine(checkWpUrl).nullable(),
   wp_username: z.string().nullable(),
   wp_app_password: z.string().nullable(),
   wp_default_author_id: pydanticInt.nullable(),
