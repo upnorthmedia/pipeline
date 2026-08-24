@@ -14,14 +14,6 @@
   and the generated entry is untouched, so this needs a seam of its own or a `mastra` release
   that registers the processor's logger.
 
-- [confirmed] 2026-08-24 `wordpressPublishWorkflow` declares no `retryConfig`, so a raise
-  from the band outside its own `catch` (the row read, the `publishing` write, the trail entry
-  and the start event, all of which Python raised from too) fails the run on its first attempt
-  and leaves `wp_publish_status` reading `publishing` for good. Its two siblings got the policy
-  at P2.94a; this one is held back because the fourth escape path, a raise from `fail()` after
-  the uploads have run, would re-upload every image on a retry. It needs the guard first.
-  Ledger item P2.94b.
-
 - [investigate] 2026-08-24 One full `pnpm test` run in four reported
   `1 failed | 5262 passed` in `src/app/api/posts/create.test.ts`, about thirty seconds after the
   compose `redis` container was restarted from an `Exited (137)` OOM kill. The file passes on

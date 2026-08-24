@@ -672,7 +672,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
           [evidence](evidence/p2.md#p291b)
 - [x] **P2.92** `[investigate]` One unidentified single-test failure in a full `pnpm test` run during P2.30 (`1 failed | 4932 passed`), output piped through `tail -8` so the name was lost. Five consecutive clean runs after it. Either a residual flake P0.3 did not reach or an artefact of that one run; `tee` the next full runs and name it, or delete this if it does not recur. Deleted at triage: does not reproduce. Zero failures in the six certified full runs at P0.3e and in every full run since, including the CI runs.
 - [x] **P2.93** `[confirmed 2026-08-24]` `MODEL_COSTS` prices `claude-opus-4-6` at 15.0 / 75.0 per MTok, which is that model's launch price; Anthropic publishes 5.0 / 25.0 for it now. The row was pinned value-for-value from Python so historic `stage_logs` costs would agree with the `model_costs_reference` the same response ships, but the model is on four stages' allowlists, so a run configured for it today is priced 3x over. Found by P2.38. Repriced to 5.0 / 25.0, read live from Anthropic's pricing table on 2026-08-24. The item's stated reason for deferring is false and is measured to be: nothing recomputes a historical cost from this table, since `stageCostUsd()` runs once at write time and every reader sums the stored `cost_usd`. A new guard pins the published rate for every Claude model on an allowlist, derived from `STAGE_MODEL_PROVIDER` rather than listed, so a new selectable model fails until someone reads its rate. [evidence](evidence/p2.md#p293)
-- [ ] **P2.94** `[confirmed 2026-08-24]` `sitemapCrawlWorkflow`, `recrawlCheckWorkflow` and
+- [x] **P2.94** `[confirmed 2026-08-24]` `sitemapCrawlWorkflow`, `recrawlCheckWorkflow` and
       `wordpressPublishWorkflow` declare no `retryConfig`, so each gets a single attempt where
       Python's `WorkerSettings.max_tries = MAX_ATTEMPTS` gave all four `functions` entries
       three. Found by P2.39. Split on what a retry is safe to re-run. The item's own stated
@@ -688,10 +688,18 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
           catch of its own and whose next attempt after a lost one is the next midnight.
           Measured on the real engine with the real steps: one attempt before, three after.
           [evidence](evidence/p2.md#p294a-and-p295)
-    - [ ] **P2.94b** `wordpressPublishWorkflow`, held back because a blanket retry there is not
+    - [x] **P2.94b** `wordpressPublishWorkflow`, held back because a blanket retry there is not
           safe. The one path that escapes it after the site has been touched is a raise from
-          `fail()` itself, and a retry of that re-uploads every image. Python had the same
-          hazard and accepted it; restoring it needs the guard, which is this item's work.
+          `fail()` itself, and a retry of that re-uploads every image. Restored with the guard:
+          `recordingSite()` wraps the three client calls this step can make and records that a
+          request has left the process, and the step's outer `catch` rethrows for the engine
+          only while that bit is clear. Measured on a loopback WordPress that counts creates:
+          three attempts and nothing on the site when the `publishing` mark raises, one attempt
+          and one post when the success commit and `_fail` both raise. The state the item
+          warned about was measured too, and it is worse than a stuck row: two posts on the
+          site, a row reading `published` and a run reporting success. Exposed and fixed a
+          `return fail(...)` in the inner `catch` that a `try` cannot catch.
+          [evidence](evidence/p2.md#p294b)
 - [x] **P2.95** `[confirmed 2026-08-24]` P2.39's retry pause covers the eight pipeline stage steps only, because it lives in `recordStageRetry()`. `nextjsPublishWorkflow` retries three times with no gap, where Python's `retry_delay` was a worker-wide setting. Found by P2.39. Fixed with P2.94a, which gave two more steps the same need: `pauseBeforeHookRetry()` is `recordStageRetry()` without the execution-log entry, which only a pipeline stage has a `Stage` and a `postId` to write. Measured as a 5ms gap between publish attempts before and the configured delay after. [evidence](evidence/p2.md#p294a-and-p295)
 
 - [x] **P2.96** `[confirmed 2026-08-24]` The route error boundaries print a raw JavaScript

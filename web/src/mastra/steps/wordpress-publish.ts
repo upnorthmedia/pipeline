@@ -35,6 +35,21 @@
  *   metadata only; the HTML is rendered from the whole `content`, frontmatter
  *   included, because `markdown_to_wp_html` strips its own.
  *
+ * **The retry stops at the site (ledger item P2.94b).** ARQ retried every job
+ * function three times and the port gave this workflow no `retryConfig` at all,
+ * so an infrastructure raise left the row reading `publishing` with nothing
+ * left to move it. `retryConfig` is restored, but a blanket retry here is not
+ * safe: the only band that escapes the `try` above is `_fail` itself, and by
+ * then the uploads and the create have already happened, so a redelivery
+ * uploads every image again and creates a second post. The step therefore
+ * decides which kind of raise it had. Until a request has left this process,
+ * nothing on the site can have changed and the raise is rethrown for the engine
+ * to retry; from the first request onwards it is recorded and returned, so
+ * there is nothing to redeliver. `recordingSite` below is what draws that line,
+ * and it draws it at the *attempt*: a connection refused counts as a request,
+ * because a step cannot tell a request that never arrived from one whose
+ * response was lost.
+ *
  * One divergence that is outcome-equivalent but not message-equivalent.
  * `post.wp_post_id = wp_post.get("id")` assigns into an `integer` column and
  * `post.wp_post_url = wp_post.get("link", "")` into a `text` one. A WordPress
@@ -57,6 +72,7 @@ import { WordPressClient } from "../wordpress"
 import { pythonGet, rewriteImageUrls, sweepMediaDirectory } from "../wordpress/media-upload"
 import { extractFrontmatter, indexManifestImages } from "../wordpress/publish-metadata"
 import { markdownToWpHtml } from "../wordpress/wp-html"
+import { pauseBeforeHookRetry } from "./stage-io"
 
 import type { PubSub } from "@mastra/core/events"
 
@@ -120,6 +136,34 @@ async function fail(
   return { postId, status: "failed", wpPostId: null, wpPostUrl: null, uploaded: 0, error }
 }
 
+/**
+ * The three calls this step can make to somebody else's WordPress, each
+ * recording that a request has left this process before it does.
+ *
+ * A wrapper rather than three assignments at the call sites so that the raw
+ * client is never bound to a name the step body can reach: every route to the
+ * site runs through here, which is what makes "no request has gone out" a
+ * property of the code rather than of a reviewer's attention.
+ */
+type PublishSite = Pick<WordPressClient, "uploadMedia" | "createPost" | "updatePost">
+
+function recordingSite(client: WordPressClient, onRequest: () => void): PublishSite {
+  return {
+    uploadMedia: (imageBytes, filename, mimeType, altText) => {
+      onRequest()
+      return client.uploadMedia(imageBytes, filename, mimeType, altText)
+    },
+    createPost: (options) => {
+      onRequest()
+      return client.createPost(options)
+    },
+    updatePost: (wpPostId, fields) => {
+      onRequest()
+      return client.updatePost(wpPostId, fields)
+    },
+  }
+}
+
 /** See the header: the column check that stands in for asyncpg's parameter check. */
 function integerColumn(value: unknown, column: string): number | null {
   if (value === null || value === undefined) return null
@@ -137,143 +181,186 @@ export const wordpressPublishStep = createStep({
   id: "wordpress-publish",
   inputSchema: wordpressPublishInputSchema,
   outputSchema: wordpressPublishOutputSchema,
-  execute: async ({ inputData, mastra }) => {
+  execute: async ({ inputData, mastra, retryCount, abortSignal }) => {
     const { postId } = inputData
     const logger = mastra?.getLogger()
     const pubsub = mastra.pubsub
     const db = getDb()
+    /** See the header: the line the restored retry stops at. */
+    let requestSent = false
 
-    const [post] = await db.select().from(posts).where(eq(posts.id, postId)).limit(1)
-    if (!post) {
-      logger?.error(`Post ${postId} not found for WP publish`)
-      return {
-        postId,
-        status: "missing" as const,
-        wpPostId: null,
-        wpPostUrl: null,
-        uploaded: 0,
-        error: null,
+    try {
+      const [post] = await db.select().from(posts).where(eq(posts.id, postId)).limit(1)
+      if (!post) {
+        logger?.error(`Post ${postId} not found for WP publish`)
+        return {
+          postId,
+          status: "missing" as const,
+          wpPostId: null,
+          wpPostUrl: null,
+          uploaded: 0,
+          error: null,
+        }
       }
-    }
 
-    const [profile] = post.profileId
-      ? await db
-          .select()
-          .from(websiteProfiles)
-          .where(eq(websiteProfiles.id, post.profileId))
-          .limit(1)
-      : []
-    if (!profile) return fail(pubsub, logger, postId, "No profile linked to post")
+      const [profile] = post.profileId
+        ? await db
+            .select()
+            .from(websiteProfiles)
+            .where(eq(websiteProfiles.id, post.profileId))
+            .limit(1)
+        : []
+      if (!profile) return fail(pubsub, logger, postId, "No profile linked to post")
 
-    // `if not profile.wp_url or ...`: an empty string is as missing as a null.
-    if (!profile.wpUrl || !profile.wpUsername || !profile.wpAppPassword) {
-      return fail(pubsub, logger, postId, "WordPress credentials not configured")
-    }
+      // `if not profile.wp_url or ...`: an empty string is as missing as a null.
+      if (!profile.wpUrl || !profile.wpUsername || !profile.wpAppPassword) {
+        return fail(pubsub, logger, postId, "WordPress credentials not configured")
+      }
 
-    let password: string
-    try {
-      password = decrypt(profile.wpAppPassword)
-    } catch {
-      return fail(pubsub, logger, postId, "Failed to decrypt WP app password")
-    }
+      let password: string
+      try {
+        password = decrypt(profile.wpAppPassword)
+      } catch {
+        return fail(pubsub, logger, postId, "Failed to decrypt WP app password")
+      }
 
-    await db.update(posts).set({ wpPublishStatus: "publishing" }).where(eq(posts.id, postId))
-    // The row, then the trail, then the bus, which is `_fail`'s order and for
-    // the same reason. The trail entry is a divergence from
-    // `wordpress_publish.py`, which announced the start on the bus only: the
-    // event is gone the moment it is delivered, so the run trace, which reads
-    // the row, could neither time a finished publish nor show one in flight.
-    await appendExecutionLog(postId, {
-      stage: "",
-      level: "info",
-      event: "publish_start",
-      message: "Publishing to WordPress...",
-      data: { target: "wordpress" },
-    })
-    await publishPipelineEvent(pubsub, postId, "publish_start", {
-      message: "Publishing to WordPress...",
-    })
-
-    try {
-      const client = new WordPressClient(profile.wpUrl, profile.wpUsername, password)
-
-      const content = post.readyContent || post.finalMdContent || ""
-      // `body` is discarded: see the header.
-      const { meta } = extractFrontmatter(content)
-      const title = meta.has("title") ? meta.get("title")! : post.topic
-      const description = meta.has("description") ? meta.get("description")! : ""
-
-      const wpHtml0 = markdownToWpHtml(content)
-
-      const manifest = indexManifestImages(post.imageManifest)
-      const { imageMap, featuredMediaId } = await sweepMediaDirectory(postMediaDir(postId), {
-        postId,
-        title,
-        manifest,
-        client,
-      })
-      const wpHtml = rewriteImageUrls(wpHtml0, imageMap)
-
-      const categories = post.wpCategoryId ? [post.wpCategoryId] : null
-      const author = post.wpAuthorId
-      const status = profile.wpDefaultStatus || "publish"
-
-      const wpPost = post.wpPostId
-        ? // `**kwargs` with no filtering: a null clears the field rather than
-          // being dropped, and the key order is the call's keyword order.
-          await client.updatePost(post.wpPostId, {
-            title,
-            content: wpHtml,
-            status,
-            categories: categories ?? [],
-            author,
-            featured_media: featuredMediaId,
-            excerpt: description,
-          })
-        : await client.createPost({
-            title,
-            content: wpHtml,
-            status,
-            categories,
-            author,
-            featuredMedia: featuredMediaId,
-            excerpt: description,
-          })
-
-      const wpPostId = integerColumn(pythonGet(wpPost, "id"), "wp_post_id")
-      const wpPostUrl = textColumn(pythonGet(wpPost, "link", ""), "wp_post_url")
-      await db
-        .update(posts)
-        .set({ wpPostId, wpPostUrl, wpPublishStatus: "published" })
-        .where(eq(posts.id, postId))
-
+      await db.update(posts).set({ wpPublishStatus: "publishing" }).where(eq(posts.id, postId))
+      // The row, then the trail, then the bus, which is `_fail`'s order and for
+      // the same reason. The trail entry is a divergence from
+      // `wordpress_publish.py`, which announced the start on the bus only: the
+      // event is gone the moment it is delivered, so the run trace, which reads
+      // the row, could neither time a finished publish nor show one in flight.
       await appendExecutionLog(postId, {
         stage: "",
         level: "info",
-        event: "publish_complete",
-        message: `Published to WordPress: ${wpPostUrl}`,
+        event: "publish_start",
+        message: "Publishing to WordPress...",
         data: { target: "wordpress" },
       })
-      await publishPipelineEvent(pubsub, postId, "publish_complete", {
-        wp_post_url: wpPostUrl,
-        wp_post_id: wpPostId,
+      await publishPipelineEvent(pubsub, postId, "publish_start", {
+        message: "Publishing to WordPress...",
       })
-      logger?.info(`Post ${postId} published to WordPress: ${wpPostUrl}`)
 
-      return {
-        postId,
-        status: "published" as const,
-        wpPostId,
-        wpPostUrl,
-        uploaded: imageMap.size,
-        error: null,
+      try {
+        const site = recordingSite(
+          new WordPressClient(profile.wpUrl, profile.wpUsername, password),
+          () => {
+            requestSent = true
+          },
+        )
+
+        const content = post.readyContent || post.finalMdContent || ""
+        // `body` is discarded: see the header.
+        const { meta } = extractFrontmatter(content)
+        const title = meta.has("title") ? meta.get("title")! : post.topic
+        const description = meta.has("description") ? meta.get("description")! : ""
+
+        const wpHtml0 = markdownToWpHtml(content)
+
+        const manifest = indexManifestImages(post.imageManifest)
+        const { imageMap, featuredMediaId } = await sweepMediaDirectory(postMediaDir(postId), {
+          postId,
+          title,
+          manifest,
+          client: site,
+        })
+        const wpHtml = rewriteImageUrls(wpHtml0, imageMap)
+
+        const categories = post.wpCategoryId ? [post.wpCategoryId] : null
+        const author = post.wpAuthorId
+        const status = profile.wpDefaultStatus || "publish"
+
+        const wpPost = post.wpPostId
+          ? // `**kwargs` with no filtering: a null clears the field rather than
+            // being dropped, and the key order is the call's keyword order.
+            await site.updatePost(post.wpPostId, {
+              title,
+              content: wpHtml,
+              status,
+              categories: categories ?? [],
+              author,
+              featured_media: featuredMediaId,
+              excerpt: description,
+            })
+          : await site.createPost({
+              title,
+              content: wpHtml,
+              status,
+              categories,
+              author,
+              featuredMedia: featuredMediaId,
+              excerpt: description,
+            })
+
+        const wpPostId = integerColumn(pythonGet(wpPost, "id"), "wp_post_id")
+        const wpPostUrl = textColumn(pythonGet(wpPost, "link", ""), "wp_post_url")
+        await db
+          .update(posts)
+          .set({ wpPostId, wpPostUrl, wpPublishStatus: "published" })
+          .where(eq(posts.id, postId))
+
+        await appendExecutionLog(postId, {
+          stage: "",
+          level: "info",
+          event: "publish_complete",
+          message: `Published to WordPress: ${wpPostUrl}`,
+          data: { target: "wordpress" },
+        })
+        await publishPipelineEvent(pubsub, postId, "publish_complete", {
+          wp_post_url: wpPostUrl,
+          wp_post_id: wpPostId,
+        })
+        logger?.info(`Post ${postId} published to WordPress: ${wpPostUrl}`)
+
+        return {
+          postId,
+          status: "published" as const,
+          wpPostId,
+          wpPostUrl,
+          uploaded: imageMap.size,
+          error: null,
+        }
+      } catch (error) {
+        // Python's two arms differ only in the traceback the second one logs,
+        // and both call `_fail(str(e))`. `WordPressError`'s `str` is its message,
+        // which is every other exception's `str` here too.
+        const message = error instanceof Error ? error.message : String(error)
+        // `return await`, not `return`: a returned promise is not awaited by
+        // the `try` that encloses it, so a rejecting `_fail` would settle this
+        // step's own promise and skip the guard below entirely.
+        return await fail(pubsub, logger, postId, message)
       }
     } catch (error) {
-      // Python's two arms differ only in the traceback the second one logs,
-      // and both call `_fail(str(e))`. `WordPressError`'s `str` is its message,
-      // which is every other exception's `str` here too.
+      // Ledger item P2.94b. Whatever the inner `catch` above turned into a
+      // `failed` publish has already been returned; what reaches here is the
+      // band outside it, which is `_fail` itself once the try is running and the
+      // reads and the `publishing` mark before it.
       const message = error instanceof Error ? error.message : String(error)
-      return fail(pubsub, logger, postId, message)
+      if (!requestSent) {
+        // Nothing has left this process, so nothing on the site can have
+        // changed and the engine is free to run the whole step again.
+        await pauseBeforeHookRetry(retryCount, abortSignal)
+        throw error
+      }
+      // The site has been written to. A redelivery would upload every image a
+      // second time and create a second post, so the failure is reported rather
+      // than raised, and `_fail` is given the one more attempt it needs when
+      // what raised was `_fail`'s own write.
+      try {
+        return await fail(pubsub, logger, postId, message)
+      } catch {
+        // The row keeps whatever it holds, which can be `publishing`. Nothing
+        // better is available: the database is what failed, twice.
+        logger?.error(`WP publish failed for post ${postId}, unrecorded: ${message}`)
+        return {
+          postId,
+          status: "failed" as const,
+          wpPostId: null,
+          wpPostUrl: null,
+          uploaded: 0,
+          error: message,
+        }
+      }
     }
   },
 })

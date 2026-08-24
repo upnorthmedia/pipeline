@@ -129,18 +129,19 @@ describe("mastra instance", () => {
   })
 
   /**
-   * The Next.js publish hook's registration (item 5.3c-iii-b-2-d). Unlike its
-   * WordPress sibling it carries a retry policy, because Python left the
-   * payload build outside its `try` and ARQ's `max_tries = 3` therefore applied
-   * to it; `attempts` is one fewer because the engine counts retries after the
-   * first execution.
+   * The Next.js publish hook's registration (item 5.3c-iii-b-2-d). It carries a
+   * retry policy because Python left the payload build outside its `try` and
+   * ARQ's `max_tries = 3` therefore applied to it; `attempts` is one fewer
+   * because the engine counts retries after the first execution. Its WordPress
+   * sibling carries the same policy since item P2.94b, and stops it at the site
+   * from inside the step rather than by declaring nothing here.
    */
   it("registers the Next.js publish hook as a one-step workflow that retries", () => {
     expect(mastra.getWorkflow("nextjsPublish")).toBe(nextjsPublishWorkflow)
     expect(Object.keys(mastra.listWorkflows())).toContain("nextjsPublish")
     expect(nextjsPublishWorkflow.id).toBe("nextjs-publish")
     expect(nextjsPublishWorkflow.retryConfig).toEqual({ attempts: MAX_ATTEMPTS - 1 })
-    expect(wordpressPublishWorkflow.retryConfig?.attempts ?? 0).toBe(0)
+    expect(wordpressPublishWorkflow.retryConfig).toEqual({ attempts: MAX_ATTEMPTS - 1 })
 
     const graph = nextjsPublishWorkflow.serializedStepGraph as {
       type: string
