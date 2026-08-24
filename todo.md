@@ -1,17 +1,19 @@
 # todo
 
-- [confirmed] 2026-08-24 A worker redeploy parks any in-flight post for over fifteen minutes
-  and then re-bills the stage. `Mastra.stopWorkers()` drains the reader, not the work:
-  `RedisStreamsPubSub.#deliverMessage` never awaits the step callback, so unsubscribing and
-  `process.exit(0)` truncate a running step exactly as a `SIGKILL` would. The step's
-  `workflow.step.run` message is left pending in `mastra-orchestration`, neither acked nor
-  nacked (proven in `web/src/mastra/workflows/sigterm-shutdown.test.ts`), so nothing is lost
-  or duplicated, but recovery is the `XAUTOCLAIM` timer at `RECLAIM_IDLE_MS` (15 minutes)
-  plus up to one 30s tick, and the reclaiming worker re-runs the stage from the beginning.
-  The fix has to drain in-flight steps before exiting, which means owning the worker entry
-  rather than using the one `mastra worker build` generates. Ledger item P2.91. Now also
-  owns the console bridge the demoted engine-logger finding needed, whose mechanism is
-  documented at `web/src/test/engine-step-errors.ts`.
+- [confirmed] 2026-08-24 A stage that outlives the shutdown drain is still parked for the
+  fifteen-minute reclaim. P2.91a made `stopWorkers()` wait: `DrainingPubSub` counts each
+  delivery until its `ack`/`nack` and holds `unsubscribe()` open until the count is zero or
+  `WORKER_DRAIN_TIMEOUT_MS` (120s) expires, so a redeploy landing on a normal stage now
+  finishes it, acks it, and costs the run only the gap between the two processes. A stage
+  still running at the deadline (or a `SIGKILL` from the platform before it) is left pending
+  exactly as before, recovered by `XAUTOCLAIM` at `RECLAIM_IDLE_MS` (15 minutes) plus up to
+  one 30s tick, and re-run and re-billed from the beginning. The obvious handoff, a nack on
+  expiry, is not obviously right: a nack increments `deliveryAttempt` against a
+  `maxDeliveryAttempts` the app leaves at the library default of 5, so five redeploys landing
+  on one stage would drop its event rather than stall it, and `XCLAIM` with a zero idle time
+  has no replacement consumer to name at shutdown. Ledger item P2.91b. Now also owns the
+  console bridge the demoted engine-logger finding needed, whose mechanism is documented at
+  `web/src/test/engine-step-errors.ts`.
 
 - [confirmed] 2026-08-24 `MODEL_COSTS` prices `claude-opus-4-6` at 15.0 / 75.0 per million
   tokens, which is that model's launch price; Anthropic publishes 5.0 / 25.0 for it now.
@@ -181,9 +183,10 @@
   publish leaves the column there with nothing to reconcile it. The post header says
   `Publishing...` and, since polish ledger P3.2b-ii, the run trace shows a `Publish to
   <target>` row whose elapsed clock counts up from the `publish_start` entry indefinitely. It
-  is the same shape as the stage case in this file's `stopWorkers()` entry (a `SIGTERM`
+  is the same shape as the stage case in this file's shutdown-drain entry (a `SIGTERM`
   truncates the running step), except that no `XAUTOCLAIM` recovers it, because the publish
-  workflows declare no `retryConfig` either. Found at polish ledger P3.2b-ii.
+  workflows declare no `retryConfig` either. P2.91a's drain narrows it the same way: a publish
+  that finishes inside `WORKER_DRAIN_TIMEOUT_MS` now completes rather than being truncated. Found at polish ledger P3.2b-ii.
 
 - [investigate] 2026-08-24 The run trace does not update during a publish. `use-sse.ts`
   refetches the post on `stage_complete`, `stage_error` and `pipeline_complete`;

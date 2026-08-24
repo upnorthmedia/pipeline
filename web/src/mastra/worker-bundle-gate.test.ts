@@ -90,3 +90,33 @@ describe("worker bundle gate", () => {
     expect(built).toBeLessThan(booted)
   })
 })
+
+/**
+ * P2.91's drain hangs off one line of a template this repo does not own: the
+ * generated entry awaits `mastra.stopWorkers()` before `process.exit(0)`, and
+ * `stopWorkers()` is what unsubscribes, which is what waits for the in-flight
+ * step. An entry that exited without awaiting, or that stopped calling
+ * `stopWorkers()` at all, would leave `DrainingPubSub` correct and unreachable,
+ * and the only symptom would be redeploys quietly truncating stages again.
+ *
+ * `sigterm-shutdown.test.ts` reproduces this handler in its fixture and
+ * measures the drain through it. This pins that the reproduction is still
+ * faithful to the installed CLI.
+ */
+describe("the entry `mastra worker build` generates", () => {
+  const ENTRY_SOURCE = path.resolve(WEB, "node_modules/mastra/dist/index.js")
+
+  it("awaits stopWorkers before it exits, which is the seam the drain uses", () => {
+    const source = fs.readFileSync(ENTRY_SOURCE, "utf8")
+    // `import { mastra } from '#mastra'` opens several of the CLI's templates,
+    // so the worker one is found by the call only it makes.
+    const start = source.indexOf("await mastra.startWorkers();")
+    expect(start).toBeGreaterThan(-1)
+    const entry = source.slice(start, source.indexOf("`", start))
+    expect(entry).toContain("await mastra.stopWorkers();")
+    // Order matters more than presence: an exit before the await is the same
+    // truncation the item is about.
+    expect(entry.indexOf("await mastra.stopWorkers();")).toBeLessThan(entry.indexOf("process.exit(0);"))
+    expect(entry).toContain("process.on('SIGTERM', shutdown);")
+  })
+})

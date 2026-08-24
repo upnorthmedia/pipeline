@@ -36,6 +36,9 @@
  *   PROBE_SLEEP_MS     how long `probe-slow` sleeps
  *   PROBE_GRACEFUL_SIGTERM  `"1"` installs the SIGTERM handler the generated
  *                      worker entry carries, for `sigterm-shutdown.test.ts`
+ *   WORKER_DRAIN_TIMEOUT_MS  read by `DrainingPubSub`, the app's transport
+ *                      class, which this fixture uses so the drain under test
+ *                      is the shipped one
  *   DATABASE_URL_SYNC / DATABASE_URL   Postgres, for run state
  */
 import { appendFileSync, readFileSync } from "node:fs"
@@ -44,8 +47,9 @@ import { pathToFileURL } from "node:url"
 import { Mastra } from "@mastra/core"
 import { createStep, createWorkflow } from "@mastra/core/workflows/evented"
 import { PostgresStore } from "@mastra/pg"
-import { RedisStreamsPubSub } from "@mastra/redis-streams"
 import { z } from "zod"
+
+import { DrainingPubSub } from "../draining-pubsub.ts"
 
 export const PROBE_WORKFLOW_ID = "crash-probe"
 
@@ -124,7 +128,12 @@ export function createProbeMastra({ redisUrl, databaseUrl, markerFile, sleepMs }
     .then(slow)
     .commit()
 
-  const pubsub = new RedisStreamsPubSub({ url: redisUrl })
+  // The app's own transport class, so `sigterm-shutdown.test.ts` measures the
+  // shipped drain rather than a copy of it. Imported as `.ts` because node
+  // strips the types for a file this one runs directly (the same way
+  // `scripts/*.mts` run), and the worker bundle compiles it like any other
+  // module under `src/mastra/`.
+  const pubsub = new DrainingPubSub({ url: redisUrl })
   const storage = new PostgresStore({
     id: "crash-probe",
     connectionString: toNodePostgresUrl(databaseUrl),

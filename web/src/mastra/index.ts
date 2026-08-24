@@ -19,7 +19,6 @@
 import { Mastra } from "@mastra/core"
 import { PinoLogger } from "@mastra/loggers"
 import { PostgresStore } from "@mastra/pg"
-import { RedisStreamsPubSub } from "@mastra/redis-streams"
 
 import { getPool } from "../db"
 import { editAgent } from "./agents/edit"
@@ -28,6 +27,7 @@ import { outlineAgent } from "./agents/outline"
 import { readyAgent } from "./agents/ready"
 import { researchAgent } from "./agents/research"
 import { writeAgent } from "./agents/write"
+import { DrainingPubSub } from "./draining-pubsub"
 import { createWorkerEvents } from "./failure-recorder"
 import { imagesWorkflow } from "./workflows/images"
 import { nextjsPublishWorkflow } from "./workflows/nextjs-publish"
@@ -119,7 +119,13 @@ export const RECLAIM_IDLE_MS = 15 * 60_000
  */
 export const STREAM_IDLE_TTL_MS = 24 * 60 * 60_000
 
-export const pubsub = new RedisStreamsPubSub({
+/**
+ * `DrainingPubSub` rather than `RedisStreamsPubSub` for the reason P2.91
+ * records: an unsubscribe has to outlive the deliveries the subscription is
+ * still holding, or a `SIGTERM` truncates the running stage and parks its
+ * message until the reclaim window above.
+ */
+export const pubsub = new DrainingPubSub({
   url: redisUrl(),
   reclaimIdleMs: RECLAIM_IDLE_MS,
   streamIdleTtlMs: STREAM_IDLE_TTL_MS,

@@ -136,6 +136,15 @@ through the settings UI.
   `pnpm standalone:check`. Nobody has watched Railway execute it, because this
   project has no deployed environment to watch. See
   `docs/polish/evidence/p2.md#p277b-ii`.
+- **How long Railway waits between `SIGTERM` and `SIGKILL` on a redeploy is
+  unverified.** A worker sent `SIGTERM` now finishes the stage it is running
+  before it exits, bounded by `WORKER_DRAIN_TIMEOUT_MS` (120s by default, see
+  `docs/polish/evidence/p2.md#p291a`), so a redeploy no longer parks the post
+  for the fifteen-minute reclaim window. That only holds for as long as the
+  platform lets the process live. Nobody has measured Railway's grace period
+  against a deployed service, and a `SIGKILL` that lands first leaves the stage
+  message pending exactly as it did before the drain existed, which is late but
+  never lost. Lower the variable if a redeploy is seen being killed mid-drain.
 - **Railway IaC is experimental** by Railway's own documentation, and the
   generated file formatting may change while the DSL is unstable.
 - **The worker has no Railway healthcheck.** It serves no HTTP.

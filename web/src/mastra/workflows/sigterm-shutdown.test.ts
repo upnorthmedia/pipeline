@@ -1,12 +1,9 @@
 // @vitest-environment node
 /**
- * Ledger item P2.21: what a *graceful* stop does to a step that is executing.
+ * Ledger item P2.91: a graceful stop has to drain the work, not just the reader.
  *
- * `crash-probe.test.ts` answers the `SIGKILL` half of the durability question:
- * a worker that dies without warning leaves its step's message pending, and a
- * later worker in the same group reclaims and re-runs it. A Railway redeploy is
- * not a `SIGKILL`. The platform sends `SIGTERM`, and the entry `mastra worker
- * build` generates handles it:
+ * P2.21 measured what the generated worker entry does to a step that is
+ * executing when the signal lands:
  *
  *     const shutdown = async () => {
  *       console.log('[mastra] Shutting down workers...');
@@ -20,32 +17,26 @@
  * `.mastra/worker/index.mjs`, which is the `worker` service's start command in
  * both `web/Dockerfile` and `.railway/railway.ts`.)
  *
- * The open question the entry filed was whether that handler leaves the
- * in-flight step's message pending for reclaim, acks it, or nacks it, because
- * the three answers mean "a redeploy stalls the run", "a redeploy loses a
- * stage" and "a redeploy re-queues a stage immediately" respectively. It is
- * answered here against the real transport rather than reasoned about, and the
- * answer is the first one.
- *
- * Why it comes out that way, read out of the installed packages:
- *   - `RedisStreamsPubSub.#deliverMessage` calls `sub.cb(event, ack, nack)` and
- *     does *not* await it, and `PullTransport`'s callback likewise fires
- *     `router.route(...)` without awaiting. So no part of the transport holds a
- *     handle on a running step body.
- *   - `Mastra.stopWorkers()` stops each worker, and `PullTransport.stop()` just
- *     unsubscribes. `RedisStreamsPubSub.unsubscribe` sets `stopped`, quits the
- *     read client and awaits the *read loop*, which is not the step.
- *   - Nothing anywhere runs `XGROUP DELCONSUMER`, so the dead consumer keeps
- *     its pending-entries list and `XAUTOCLAIM` can still find it.
- *
- * The consequence is not cosmetic. `stopWorkers()` is a drain of the reader,
- * not of the work, so `process.exit(0)` truncates the step exactly as a
- * `SIGKILL` would, and recovery is the same `XAUTOCLAIM` timer. The app sets
+ * The answer was that it drains the reader and not the work: nothing in
+ * `Mastra.stopWorkers()`, `PullTransport.stop()` or
+ * `RedisStreamsPubSub.unsubscribe()` holds a handle on a running step body, so
+ * `process.exit(0)` truncated the step exactly as a `SIGKILL` would and the
+ * step's message stayed pending until `XAUTOCLAIM`. This app sets
  * `reclaimIdleMs` to 15 minutes (`RECLAIM_IDLE_MS` in `src/mastra/index.ts`,
  * deliberately wider than the slowest stage, see `reclaim-duplication.test.ts`),
- * so a redeploy that lands while a stage is running parks that post for over
- * fifteen minutes and then re-runs the stage from the beginning, re-billing the
- * provider call the dead worker had already partly paid for.
+ * so a routine redeploy parked the in-flight post for over fifteen minutes and
+ * then re-ran and re-billed that stage.
+ *
+ * `DrainingPubSub` closes the hole at the transport seam, which is where the
+ * only handle on the work exists: an unsubscribe does not resolve until the
+ * deliveries that subscription is still holding have been acked or nacked, or
+ * until `WORKER_DRAIN_TIMEOUT_MS` runs out. `stopWorkers()` calls unsubscribe,
+ * so the generated entry drains without knowing it does.
+ *
+ * Two scenarios, because a drain that is not bounded is a worse defect than the
+ * one it fixes: the step that finishes inside the deadline (the redeploy costs
+ * the run nothing but the gap between processes), and the step that does not
+ * (the worker still exits, and recovery is the old reclaim path).
  *
  * The probe workflow touches no provider, no post row and no media directory.
  * Redis database 7 isolates it from every other suite that starts a worker; all
@@ -76,26 +67,33 @@ const MARKER_FILE = path.join(tmpdir(), `sigterm-shutdown-${randomUUID()}.jsonl`
 const STREAM_KEY = orchestrationStreamKey()
 
 /**
- * Long enough that the signal lands well inside the step body, and long enough
- * that the step would still be running at every assertion below if the
- * shutdown had waited for it.
+ * The step body of the scenario that finishes inside the drain: long enough
+ * that the signal lands unambiguously in the middle of it, short enough that
+ * the suite is not paying for the wait twice.
  */
-const SLEEP_MS = 30_000
+const DRAINABLE_SLEEP_MS = 5_000
 
 /**
- * How long the suite watches a freshly joined worker do nothing with the dead
- * one's pending entry. Not a tuned sleep: the fixture's transport keeps the
- * library defaults, so its reclaim loop first ticks at `reclaimIntervalMs` 30s
- * and only claims entries idle for `reclaimIdleMs` 60s. Any value comfortably
- * under 30s asks the same question.
+ * The step body of the scenario that outlives the drain. Thirty seconds against
+ * a one second deadline, so "the worker gave up and exited" cannot be confused
+ * with "the step happened to finish".
  */
-const REPLACEMENT_IDLE_WATCH_MS = 6_000
+const UNDRAINABLE_SLEEP_MS = 30_000
+const SHORT_DRAIN_TIMEOUT_MS = 1_000
+
+/**
+ * The drain the first scenario runs under: well past `DRAINABLE_SLEEP_MS`, so a
+ * drain that ends on the deadline rather than on the step is a failure and not
+ * a tight race. Kept under the suite-wide `testTimeout` as well, which is what
+ * `src/test/wait-budgets.test.ts` reads it as.
+ */
+const LONG_DRAIN_TIMEOUT_MS = 30_000
 
 const { workflow, pubsub, storage } = createProbeMastra({
   redisUrl: REDIS_URL,
   databaseUrl: process.env.DATABASE_URL_SYNC ?? process.env.DATABASE_URL,
   markerFile: MARKER_FILE,
-  sleepMs: SLEEP_MS,
+  sleepMs: DRAINABLE_SLEEP_MS,
 })
 
 type WorkerProcess = ChildProcessByStdio<null, Readable, Readable>
@@ -113,20 +111,30 @@ type TransportState = { pending: PendingEntry[]; consumers: { name: string; pend
 
 const redis = createClient({ url: REDIS_URL })
 
-let workerA: WorkerProcess
-let workerB: WorkerProcess
-let runId: string
+const workers: WorkerProcess[] = []
 
-/** The transport and the records at three points in the shutdown. */
-let inFlight: { transport: TransportState; records: ProbeRecord[] }
-let afterExit: { transport: TransportState; records: ProbeRecord[]; state: RunState }
-let afterReplacement: { transport: TransportState; records: ProbeRecord[] }
+/** The drained scenario, measured at four points. */
+let drained: {
+  runId: string
+  workerPid: number
+  inFlight: { transport: TransportState; records: ProbeRecord[] }
+  exit: { code: number | null; signal: NodeJS.Signals | null }
+  exitAfterMs: number
+  stdout: string
+  afterExit: { transport: TransportState; records: ProbeRecord[]; state: RunState }
+  afterReplacement: { records: ProbeRecord[]; state: RunState }
+}
 
-let workerAExit: { code: number | null; signal: NodeJS.Signals | null }
-let workerAStdout = ""
+/** The scenario whose step outlives the drain deadline. */
+let expired: {
+  inFlight: { transport: TransportState; records: ProbeRecord[] }
+  exit: { code: number | null; signal: NodeJS.Signals | null }
+  exitAfterMs: number
+  afterExit: { transport: TransportState; records: ProbeRecord[]; state: RunState }
+}
 
-function records(): ProbeRecord[] {
-  return readProbeRecords(MARKER_FILE) as ProbeRecord[]
+function records(label: string): ProbeRecord[] {
+  return (readProbeRecords(MARKER_FILE) as ProbeRecord[]).filter((entry) => entry.label === label)
 }
 
 function matching(all: ProbeRecord[], step: string, phase: string): ProbeRecord[] {
@@ -159,7 +167,7 @@ async function readTransport(): Promise<TransportState> {
 }
 
 /** Spawns the fixture as a worker process and resolves once it has subscribed. */
-async function spawnWorker(): Promise<WorkerProcess> {
+async function spawnWorker(env: Record<string, string>): Promise<WorkerProcess> {
   const child = spawn(process.execPath, [FIXTURE], {
     cwd: WEB_ROOT,
     stdio: ["ignore", "pipe", "pipe"],
@@ -167,13 +175,14 @@ async function spawnWorker(): Promise<WorkerProcess> {
       ...process.env,
       PROBE_REDIS_URL: REDIS_URL,
       PROBE_MARKER_FILE: MARKER_FILE,
-      PROBE_SLEEP_MS: String(SLEEP_MS),
       // The whole point of this suite: handle SIGTERM the way the deployed
       // worker entry does, rather than letting the default action stop the
       // process outright.
       PROBE_GRACEFUL_SIGTERM: "1",
+      ...env,
     },
   }) as WorkerProcess
+  workers.push(child)
   child.stdout.setEncoding("utf8")
   child.stderr.setEncoding("utf8")
   let stderr = ""
@@ -199,6 +208,40 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs: n
   }
 }
 
+/** SIGKILL a worker the suite is finished with, and wait for it to be gone. */
+async function stop(worker: WorkerProcess): Promise<void> {
+  if (worker.exitCode !== null || worker.signalCode !== null) return
+  const exited = new Promise<void>((resolve) => worker.once("exit", () => resolve()))
+  worker.kill("SIGKILL")
+  await exited
+}
+
+/** SIGTERM, and how long the handler took to reach its own `process.exit(0)`. */
+async function terminate(worker: WorkerProcess) {
+  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+    worker.once("exit", (code, signal) => resolve({ code, signal }))
+  })
+  const startedAt = Date.now()
+  worker.kill("SIGTERM")
+  const exit = await exited
+  return { exit, exitAfterMs: Date.now() - startedAt }
+}
+
+/** Starts a run and returns its id once its second step is executing. */
+async function runToSlowStep(label: string): Promise<string> {
+  const run = await workflow.createRun()
+  const runId = (await run.startAsync({ inputData: { label } })).runId
+  await waitFor(
+    () => matching(records(label), "probe-slow", "start").length === 1,
+    60_000,
+    `probe-slow to start for ${label}`,
+  )
+  // A moment inside the sleep, so the signal is unambiguously mid-step rather
+  // than racing the record write.
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  return runId
+}
+
 beforeAll(async () => {
   await redis.connect()
   // A leftover stream would carry this suite's own pending entries from an
@@ -209,45 +252,82 @@ beforeAll(async () => {
   await rm(MARKER_FILE, { force: true })
   await storage.init()
 
-  workerA = await spawnWorker()
+  // Scenario one: the step finishes inside the drain.
+  const workerA = await spawnWorker({
+    PROBE_SLEEP_MS: String(DRAINABLE_SLEEP_MS),
+    WORKER_DRAIN_TIMEOUT_MS: String(LONG_DRAIN_TIMEOUT_MS),
+  })
+  let stdout = ""
   workerA.stdout.on("data", (chunk: string) => {
-    workerAStdout += chunk
+    stdout += chunk
   })
-
-  const run = await workflow.createRun()
-  runId = (await run.startAsync({ inputData: { label: "sigterm-shutdown" } })).runId
-
-  await waitFor(
-    () => matching(records(), "probe-slow", "start").length === 1,
-    60_000,
-    "probe-slow to start under worker A",
-  )
-  // A moment inside the sleep, so the signal is unambiguously mid-step rather
-  // than racing the record write.
-  await new Promise((resolve) => setTimeout(resolve, 1_000))
-  inFlight = { transport: await readTransport(), records: records() }
-
-  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-    workerA.once("exit", (code, signal) => resolve({ code, signal }))
-  })
-  workerA.kill("SIGTERM")
-  workerAExit = await exited
-  afterExit = {
+  const runId = await runToSlowStep("drain-completes")
+  const inFlight = { transport: await readTransport(), records: records("drain-completes") }
+  const { exit, exitAfterMs } = await terminate(workerA)
+  const afterExit = {
     transport: await readTransport(),
-    records: records(),
+    records: records("drain-completes"),
     state: await workflow.getWorkflowRunById(runId),
   }
 
-  workerB = await spawnWorker()
-  await new Promise((resolve) => setTimeout(resolve, REPLACEMENT_IDLE_WATCH_MS))
-  afterReplacement = { transport: await readTransport(), records: records() }
+  // The events the dying worker published on its way out have no consumer
+  // until a replacement joins, which is the shape of a redeploy.
+  const workerB = await spawnWorker({
+    PROBE_SLEEP_MS: String(DRAINABLE_SLEEP_MS),
+    WORKER_DRAIN_TIMEOUT_MS: String(LONG_DRAIN_TIMEOUT_MS),
+  })
+  await waitFor(
+    async () => {
+      const state = await workflow.getWorkflowRunById(runId)
+      return state !== null && state.status !== "running" && state.status !== "pending"
+    },
+    60_000,
+    "the run to finish under the replacement worker",
+  )
+  const afterReplacement = {
+    records: records("drain-completes"),
+    state: await workflow.getWorkflowRunById(runId),
+  }
+  await stop(workerB)
+  // Scenario two counts the group's pending entries, and a worker killed while
+  // it was mid-event would leave one of its own behind. Deleting the stream
+  // takes the group with it, so the second scenario starts from nothing; the
+  // replacement subscribes before its run is started, exactly as above.
+  await pubsub.clearTopic("workflows")
 
-  workerB.kill("SIGKILL")
-}, 180_000)
+  drained = {
+    runId,
+    workerPid: workerA.pid!,
+    inFlight,
+    exit,
+    exitAfterMs,
+    stdout,
+    afterExit,
+    afterReplacement,
+  }
+
+  // Scenario two: the step outlives the drain deadline.
+  const workerC = await spawnWorker({
+    PROBE_SLEEP_MS: String(UNDRAINABLE_SLEEP_MS),
+    WORKER_DRAIN_TIMEOUT_MS: String(SHORT_DRAIN_TIMEOUT_MS),
+  })
+  const expiredRunId = await runToSlowStep("drain-expires")
+  const expiredInFlight = { transport: await readTransport(), records: records("drain-expires") }
+  const expiredTermination = await terminate(workerC)
+  expired = {
+    inFlight: expiredInFlight,
+    exit: expiredTermination.exit,
+    exitAfterMs: expiredTermination.exitAfterMs,
+    afterExit: {
+      transport: await readTransport(),
+      records: records("drain-expires"),
+      state: await workflow.getWorkflowRunById(expiredRunId),
+    },
+  }
+}, 240_000)
 
 afterAll(async () => {
-  workerA?.kill("SIGKILL")
-  workerB?.kill("SIGKILL")
+  for (const worker of workers) worker.kill("SIGKILL")
   await rm(MARKER_FILE, { force: true })
   await pubsub.clearTopic("workflows")
   await pubsub.clearTopic("workflows-finish")
@@ -258,38 +338,70 @@ afterAll(async () => {
 
 describe("a worker sent SIGTERM while a step is executing", () => {
   it("was genuinely mid-step, with the message delivered and unacked", () => {
-    expect(matching(inFlight.records, "probe-slow", "start")).toHaveLength(1)
-    expect(matching(inFlight.records, "probe-slow", "done")).toHaveLength(0)
-    expect(inFlight.records[0].pid).toBe(workerA.pid)
-    expect(inFlight.transport.pending).toHaveLength(1)
-    expect(inFlight.transport.pending[0].event.type).toBe("workflow.step.run")
-    expect(inFlight.transport.pending[0].event.runId).toBe(runId)
-    expect(inFlight.transport.pending[0].deliveriesCounter).toBe(1)
+    expect(matching(drained.inFlight.records, "probe-slow", "start")).toHaveLength(1)
+    expect(matching(drained.inFlight.records, "probe-slow", "done")).toHaveLength(0)
+    expect(drained.inFlight.records[0].pid).toBe(drained.workerPid)
+    expect(drained.inFlight.transport.pending).toHaveLength(1)
+    expect(drained.inFlight.transport.pending[0].event.type).toBe("workflow.step.run")
+    expect(drained.inFlight.transport.pending[0].event.runId).toBe(drained.runId)
+    expect(drained.inFlight.transport.pending[0].deliveriesCounter).toBe(1)
   })
 
   it("runs the generated entry's shutdown handler and exits cleanly", () => {
     // Exit code 0 with no signal is the handler's own `process.exit(0)`. A
     // `signal: "SIGTERM"` here would mean the default action took the process
     // and none of the rest of this file would be about a graceful stop.
-    expect(workerAStdout).toContain("shutting down workers")
-    expect(workerAExit).toEqual({ code: 0, signal: null })
+    expect(drained.stdout).toContain("shutting down workers")
+    expect(drained.exit).toEqual({ code: 0, signal: null })
   })
 
-  it("does not wait for the in-flight step, which never reaches its end", () => {
-    // `stopWorkers()` drains the reader, not the work. The step body was 30s
-    // long and had run for about one of them.
-    expect(matching(afterExit.records, "probe-slow", "done")).toHaveLength(0)
-    expect(afterExit.state?.status).toBe("running")
-    expect(Object.keys(afterExit.state?.steps ?? {})).toEqual(["probe-first"])
+  it("waits for the in-flight step to finish before it exits", () => {
+    // The step body had about 4.5 of its 5 seconds left when the signal
+    // landed, and it ran them in the dying process: same pid, and the exit
+    // came after them rather than a few milliseconds later.
+    const done = matching(drained.afterExit.records, "probe-slow", "done")
+    expect(done).toHaveLength(1)
+    expect(done[0].pid).toBe(drained.workerPid)
+    expect(drained.exitAfterMs).toBeGreaterThan(DRAINABLE_SLEEP_MS / 2)
+    expect(drained.exitAfterMs).toBeLessThan(LONG_DRAIN_TIMEOUT_MS)
   })
 
-  it("leaves the step's message pending: not acked, not nacked", () => {
-    // The three answers the ledger item asked between. An ack would empty the
-    // pending list; a nack would empty it *and* add a redelivery to the stream.
-    // Neither happened: byte for byte the same entry, same delivery count.
-    expect(afterExit.transport.pending).toHaveLength(1)
-    expect(afterExit.transport.pending).toEqual(inFlight.transport.pending)
-    expect(afterExit.transport.streamLength).toBe(inFlight.transport.streamLength)
+  it("acks the drained step's message instead of leaving it for reclaim", () => {
+    // An entry still pending here is a post parked until `RECLAIM_IDLE_MS`,
+    // which this app sets to fifteen minutes. The stream is longer than it was
+    // because the finished step published what comes next.
+    expect(drained.afterExit.transport.pending).toEqual([])
+    expect(drained.afterExit.transport.streamLength).toBeGreaterThan(drained.inFlight.transport.streamLength)
+  })
+
+  it("leaves the run for the replacement worker to finish, with no stage run twice", () => {
+    // The whole point: a redeploy costs the run the gap between the two
+    // processes and nothing else. `probe-slow` executed once, in the worker
+    // that was killed, and was never re-delivered to the replacement.
+    expect(drained.afterReplacement.state?.status).toBe("success")
+    expect(matching(drained.afterReplacement.records, "probe-slow", "start")).toHaveLength(1)
+    expect(matching(drained.afterReplacement.records, "probe-slow", "done")).toHaveLength(1)
+    expect(matching(drained.afterReplacement.records, "probe-first", "done")).toHaveLength(1)
+  })
+})
+
+describe("a step that outlives the drain deadline", () => {
+  it("still lets the worker exit, on the deadline rather than on the step", () => {
+    expect(expired.exit).toEqual({ code: 0, signal: null })
+    expect(expired.exitAfterMs).toBeGreaterThanOrEqual(SHORT_DRAIN_TIMEOUT_MS)
+    expect(expired.exitAfterMs).toBeLessThan(UNDRAINABLE_SLEEP_MS / 2)
+    expect(matching(expired.afterExit.records, "probe-slow", "done")).toHaveLength(0)
+    expect(expired.afterExit.state?.status).toBe("running")
+  })
+
+  it("leaves that step's message pending, which is the old reclaim path", () => {
+    // Not acked (the entry is still in the list) and not nacked (a nack acks
+    // the original and republishes, so the list would be empty and the stream
+    // longer). Recovery is `XAUTOCLAIM` at `RECLAIM_IDLE_MS`, exactly as it was
+    // before the drain existed.
+    expect(expired.afterExit.transport.pending).toHaveLength(1)
+    expect(expired.afterExit.transport.pending).toEqual(expired.inFlight.transport.pending)
+    expect(expired.afterExit.transport.streamLength).toBe(expired.inFlight.transport.streamLength)
   })
 
   it("keeps the dead worker's consumer in the group, which is what XAUTOCLAIM claims from", () => {
@@ -297,28 +409,9 @@ describe("a worker sent SIGTERM while a step is executing", () => {
     // entry still has an owner to be claimed away from. Were the consumer
     // dropped on unsubscribe, the entry would be unreachable and the run
     // unrecoverable rather than merely late.
-    const owner = afterExit.transport.consumers.find(
-      (consumer) => consumer.name === afterExit.transport.pending[0].consumer,
+    const owner = expired.afterExit.transport.consumers.find(
+      (consumer) => consumer.name === expired.afterExit.transport.pending[0].consumer,
     )
     expect(owner?.pending).toBe(1)
-  })
-})
-
-describe("the worker that replaces it", () => {
-  it("does not inherit the pending entry by joining the group", () => {
-    // XREADGROUP with `>` delivers only entries no consumer has taken, so a
-    // fresh worker subscribing to a group with a dead sibling's backlog sees
-    // nothing. It is idle while the run is stalled.
-    expect(afterReplacement.transport.pending).toHaveLength(1)
-    expect(afterReplacement.transport.pending).toEqual(inFlight.transport.pending)
-    expect(matching(afterReplacement.records, "probe-slow", "start")).toHaveLength(1)
-  })
-
-  it("is running, so the stall is the reclaim timer and nothing else", () => {
-    // Two consumers in the group, one dead holding the entry and one alive
-    // holding nothing. That is the shape of a redeploy: recovery waits out
-    // `reclaimIdleMs`, which this app sets to 15 minutes.
-    expect(afterReplacement.transport.consumers).toHaveLength(2)
-    expect(afterReplacement.transport.consumers.filter((c) => c.pending === 1)).toHaveLength(1)
   })
 })

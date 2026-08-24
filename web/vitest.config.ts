@@ -43,11 +43,19 @@ export default defineConfig({
     // that drive real failing runs would otherwise pay twice per run, past the
     // 45s budget above. `src/mastra/steps/stage-retry.test.ts` fails when this
     // stops being set, and covers the pause itself with its own override.
+    // `WORKER_DRAIN_TIMEOUT_MS` likewise: `DrainingPubSub` holds an unsubscribe
+    // open until the deliveries that subscription is still carrying settle
+    // (P2.91), and a suite that tears a transport down mid-run would pay the
+    // two-minute default for a delivery it deliberately abandoned. Zero is the
+    // pre-P2.91 behaviour. `src/mastra/draining-pubsub.test.ts` covers the wait
+    // itself with its own override, and `sigterm-shutdown.test.ts` sets one on
+    // each worker process it spawns.
     env: {
       BETTER_AUTH_SECRET: "vitest-fixed-secret-not-used-outside-the-suite",
       ...repoRootEnv(__dirname),
       MEDIA_DIR: testMediaRoot(),
       STAGE_RETRY_DELAY_MS: "0",
+      WORKER_DRAIN_TIMEOUT_MS: "0",
     },
   },
   resolve: {

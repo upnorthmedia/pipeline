@@ -210,11 +210,14 @@ describe("the app's own pubsub", () => {
     expect(RECLAIM_IDLE_MS).toBeGreaterThanOrEqual(10 * 60_000)
   })
 
-  it("passes that window to the RedisStreamsPubSub it constructs", () => {
+  it("passes that window to the transport it constructs", () => {
     // `#reclaimIdleMs` is a private field, so the wiring cannot be read off the
     // instance. Checked at the source instead, because a constant nobody passes
     // leaves the 60s default in place while the assertion above still passes.
+    // `DrainingPubSub` is the `RedisStreamsPubSub` subclass P2.91 added; it
+    // takes the same options and this is the one place either is constructed
+    // for the app.
     const source = readFileSync(path.join(__dirname, "..", "index.ts"), "utf8")
-    expect(source).toMatch(/new RedisStreamsPubSub\(\{[\s\S]{0,400}?reclaimIdleMs: RECLAIM_IDLE_MS/)
+    expect(source).toMatch(/new DrainingPubSub\(\{[\s\S]{0,400}?reclaimIdleMs: RECLAIM_IDLE_MS/)
   })
 })
