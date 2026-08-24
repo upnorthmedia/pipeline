@@ -231,8 +231,10 @@ beforeEach(async () => {
   await insertFixturePosts()
   // Only `Date` is faked: the prompt stamps TODAY_DATE from the clock and the
   // fixtures were captured on a fixed day. Timers stay real so the postgres
-  // driver's own timeouts still fire.
-  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true })
+  // driver's own timeouts still fire. `shouldAdvanceTime` stays off because the
+  // row and log stamps this file asserts on are exact: letting real elapsed
+  // time move the frozen clock puts a 20ms tick inside the step under load.
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: false })
   return () => vi.useRealTimers()
 })
 
@@ -319,6 +321,18 @@ describe("images manifest step output", () => {
     // only report where the stage began.
     expect(output.stageStartedAtMs).toBe(new Date(fixture.captured_at).getTime())
     expect(output).not.toHaveProperty("durationS")
+  })
+
+  it("holds the clock still while the step does real work", async () => {
+    // Every exact-stamp assertion below rests on this: the step's own writes
+    // read the clock some milliseconds of real database work after the test
+    // set it, so the frozen time has to still be the time that was set.
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    await new Promise((resolve) => setTimeout(resolve, 60))
+
+    expect(Date.now()).toBe(new Date(fixture.captured_at).getTime())
   })
 
   it("writes only the running marker, leaving every content column to the assembling step", async () => {

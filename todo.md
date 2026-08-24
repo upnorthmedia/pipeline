@@ -37,26 +37,6 @@
   through `rulesDir()`. Both need to be resolved before the Phase 7 Railway deploy, either by
   copying them into the standalone output or by moving them somewhere the tracer follows.
 
-- [investigate] 2026-08-21 `src/mastra/agents/{edit,research,write}.test.ts` fail
-  intermittently under a full `pnpm test` run (seen: 4 extra failures, then 1, then 0 across
-  three consecutive runs) while passing when run alone. Suspect shared state across suites:
-  they swap `globalThis.fetch` and read the same `settings` rows. Makes the failure baseline
-  unreliable, so it is worth pinning down before Phase 5 adds more DB-backed suites.
-  2026-08-22: `src/mastra/api-keys.test.ts` joins the list (2 extra failures in one run of
-  iteration 32, then 0 on the rerun), which points at the shared `settings.api_keys` row
-  rather than at the agent suites specifically.
-  2026-08-22: seen again in iteration 38 across three consecutive full runs (edit + ready +
-  api-keys, then outline, then none), with `agents/outline.test.ts` new to the list. Still
-  only ever 1-2 extra failures and always in the suites that swap `globalThis.fetch` or read
-  `settings.api_keys`.
-  2026-08-23: both named causes are now addressed and neither was these files. The shared
-  `settings.api_keys` row moved into a database-backed borrow (polish item P0.3a). The
-  `globalThis.fetch` half was measured under a guard that fails any test finding the transport
-  left swapped: these eight files restore correctly and did not leak, while `src/lib/api.test.ts`,
-  `src/mastra/steps/images-generate.test.ts` and
-  `src/app/settings/stage-models-to-provider.test.tsx` did, and were fixed (polish item P0.3c).
-  Keep open until a six-run determinism check says the intermittency is gone.
-
 - [confirmed] 2026-08-22 `_generate_one` gives every featured image the same filename,
   `featured-<MMDDYY>-<randint(10,99)>.webp`, so two featured entries in one manifest collide:
   the later write overwrites the earlier file and both manifest entries record the same URL.
@@ -82,7 +62,6 @@
   filenames carry a random suffix, so every run leaves new untracked files behind for the
   next commit to sweep up. `MEDIA_DIR` already exists and the workflow suites set it to a
   `mkdtemp`; the `images-generate` unit tests do not.
-
 
 - [confirmed] 2026-08-22 The `posts.stage_settings` column default in the live database is
   `{"edit":"review","write":"review","images":"review","outline":"review","research":"review"}`,
@@ -114,14 +93,6 @@
   twice under a process-group signal, because the CLI and the worker it spawns each handle
   their own SIGTERM and the CLI's handler forwards a second one. Cosmetic locally; worth
   checking that Railway's shutdown does not double-run `stopWorkers()` before Phase 7 ships.
-- [investigate] 2026-08-22 `src/mastra/workflows/scaffold-check.test.ts` intermittently drains
-  a `run.stream()` that is missing `workflow-step-start` / `workflow-step-result`: the stream
-  ends with `workflow-finish` but only 4 chunks. Seen in 3 of 5 full `pnpm test` runs while
-  item 4.5a's suite was present and 0 of 3 with it removed, though the two share no Redis
-  database (11 vs 0), no topic and no rows, so the link looks like scheduling pressure rather
-  than shared state. Either the stream subscribes after the worker has already published the
-  early chunks, or chunks are dropped under load. Phase 8's trace view reads exactly these
-  events, so this needs pinning down before it is built on.
 - [investigate] 2026-08-22 Item 4.5a only covers `SIGKILL`. A Railway redeploy sends `SIGTERM`,
   which the `mastra worker` entry handles by calling `stopWorkers()`, and `stopWorkers()`
   unsubscribes the transport while a step may still be executing. Whether the in-flight step's
@@ -162,24 +133,6 @@
   signed with a publicly known key. Setting one invalidates existing sessions, which is free now
   (`auth_users` was empty when the tables were created) and expensive later. Belongs with the
   Phase 7 env documentation, item 7.4.
-- [investigate] 2026-08-22 `scaffold-check.test.ts > emits the workflow lifecycle events the
-  trace view will read` failed once in a full `pnpm -C web test` run with
-  `expected [ 'workflow-start', ...(5) ] to include 'workflow-step-start'`, then passed in the
-  two runs after (and passes standalone). It is the only test file besides
-  `crossprocess-events.test.ts` that starts workers on the *shared* Mastra instance, i.e. on the
-  default Redis key prefix, so a second process consuming that prefix would take its step
-  messages. Suspected trigger is another file importing `web/src/mastra/index.ts` concurrently;
-  found while adding item 5.2c-ii-1 and worked around there by keeping the new registration
-  assertion inside `index.test.ts`. Worth pinning properly: a keyPrefix of its own for
-  `scaffold-check` would settle it.
-  Update 2026-08-22 (item 5.2c-iii): now also seen as a whole-suite failure, `Hook timed out in
-  60000ms` in its `beforeAll`, which skips all five of its tests and pushes the suite from 9
-  failed / 7 skipped to 9 failed / 12 skipped. Measured on both sides: reproduced at HEAD with
-  item 5.2c-iii stashed, so the extra `workflow.start` traffic that item puts on the shared
-  topic is not the cause, and `XINFO GROUPS mastra:topic:workflows` reports `lag 0` for
-  `mastra-orchestration` after a full run, so it is not a backlog either. It passes standalone
-  in under 4s every time. Whoever picks this up should treat the intermittent skip-5 as part of
-  the same defect and not read it as a new regression.
 - [confirmed] 2026-08-22 `web/src/app/api/profiles/serialize.ts` formats timestamps with a plain
   `Date.toISOString()`, which always writes exactly three fractional digits. Pydantic 2.12 trims
   trailing zeros and drops the fraction entirely when it is zero, so a profile whose
@@ -240,31 +193,6 @@
   the app's structured logs. Found in item 5.4d-i, where capturing that line in a test
   needed a `console.error` spy. Worth checking whether a later `@mastra/core` wires it, or
   whether the worker entry should install a console bridge.
-- [investigate] 2026-08-22 `src/mastra/workflows/scaffold-check.test.ts > emits the workflow
-  lifecycle events the trace view will read` failed once on a full `vitest run` and passed
-  on the other two full runs and when run alone. It is the only test file that streams a run
-  off the *production* Mastra instance and transport on the default Redis key prefix, while
-  85 other files execute in parallel; every other real-run file gives itself an isolated
-  `keyPrefix`. Suspicion is cross-file interference on the shared `workflows` topic rather
-  than a defect in the workflow. Found while verifying item 5.5b, which touches no topic
-  that file reads. Fix is probably to give it its own instance and prefix like the others.
-  Recurred once more on the first full run of item 5.5c-i and passed on the rerun, which
-  strengthens the cross-file reading over a defect in the workflow.
-  Update 2026-08-22 (item 5.5e-ii): it has stopped being intermittent. It failed on both
-  full runs of the item and on a third full run with all of the item's files reverted to
-  HEAD, so the whole-suite failure count is now 10 rather than the recorded 9 and the
-  extra one is this. It still passes alone and alongside `events.test.ts`, so the trigger
-  is still whole-suite concurrency. This has crossed from a flake worth pinning to a
-  standing baseline discrepancy: fix it (own instance and `keyPrefix`) before Phase 9,
-  because item 9.1 wants a green run.
-  Update 2026-08-22 (item 5.6): it is intermittent again and it is load-sensitive. Six full
-  runs measured this iteration: 1 of 3 at HEAD, 3 of 3 with item 5.6's 22-test route-handler
-  file present, and 1 of 3 with a minimal placeholder test file of the same shape (node
-  environment, `createTestSession`, `closeDb`) in its place. So adding a file is not the
-  trigger; adding a file that changes how the fast node-environment files pack against the
-  slow real-transport ones is. That is consistent with the shared-topic reading and means
-  the failure count a future iteration measures depends on what it added, so both sides
-  have to be measured every time until this is fixed.
 - [confirmed] 2026-08-22 The `cost_usd` on every `stage_complete` execution log entry is
   priced at Anthropic Opus rates regardless of provider. `api/src/worker.py:244` hardcodes
   15.0 / 75.0 per million tokens and ignores `MODEL_COSTS` in
@@ -452,20 +380,6 @@
   realistic trigger. Reproduced in the port (ledger item 5.9b) with three oracle scenarios
   so the behaviour is pinned rather than accidental; the one-line fix is to widen the
   `except`, which changes the response for that input and needs a UI decision first.
-- [confirmed] 2026-08-23 `src/mastra/workflows/scaffold-check.test.ts > emits the
-  workflow lifecycle events the trace view will read` fails inside a full `pnpm test` run
-  whenever the suite holds one more test file than it did at the 9-failure baseline, and
-  passes 5/5 every time the file is run alone. It is not intermittent: during ledger item
-  5.3c-iii-b-1-c-ii-2 the suite failed it 2/2 with the new test file present, passed with
-  that file moved aside, and failed again with the file replaced by
-  `web/src/mastra/wordpress/dummy-load.test.ts` holding a single `expect(1 + 1).toBe(2)`.
-  So any iteration that adds a test file takes the frontend gate from 9 failures to 10
-  through this test alone. The run itself succeeds (`stream.status` is `success` and the
-  storage assertions pass); only the drained `fullStream` is short, 4 events rather than
-  the full lifecycle, so the subscription established by `run.stream()` is missing events
-  the orchestration worker has already published. That is the same gap Phase 5's resumable
-  replay item exists to close, and it should be fixed there rather than by shrinking test
-  files; until it is, 9 is not a usable exact baseline.
 - [confirmed] 2026-08-23 `markdown_to_wp_html` raises `AttributeError: No renderer
   "'inline_html'"` for any article whose markdown contains an HTML tag mistune's block
   layer declines. `_GutenbergRenderer` in `api/src/services/wp_html.py` implements
@@ -514,13 +428,6 @@
   item 5.3c-iii-b-1-c-ii-3. Not reachable through the images stage, which names every file
   with a timestamp, so the fix (rewrite longest key first, or one pass with a single
   alternation) is a deliberate behaviour change rather than part of the port.
-- [investigate] 2026-08-23 `src/mastra/workflows/pipeline-completion.test.ts > ...
-  (`Date.parse(recorded)` at line 328) failed once in a full `pnpm test` run during ledger
-  item 5.3c-iii-b-2-b, taking that run to 11 failures, and did not fail in the next two
-  runs of the same suite. The file passes 14/14 in isolation. Likely the same cross-file
-  interference as the `scaffold-check` entry above (both drain a real Redis Streams
-  subscription under load) rather than a defect in the assertion, but it has only been
-  seen once, so it is recorded rather than diagnosed.
 - [confirmed] 2026-08-23 `pythonJsonDumps` in `web/src/mastra/prompts.ts` does not escape
   U+007F. Its regex is `[\u0080-\uffff]`, but Python's `ESCAPE_ASCII` is `[^\ -~]`, so
   `json.dumps("\x7f")` is `"\u007f"` while that function leaves the character literal. The
@@ -563,31 +470,6 @@
   there is nothing to compare against; item 9.1 needs it green, which means auditing every
   spec against the current UI and giving the ones that need data a real session.
 
-- [confirmed] 2026-08-23 `src/mastra/workflows/scaffold-check.test.ts` fails intermittently
-  under a full `pnpm -C web test` run with `Error: Hook timed out in 60000ms` in its
-  `beforeAll`, taking its five tests to skipped. Observed once in three full runs during
-  ledger item 7.1c; the same file passes in isolation in 4.6 s. The hook opens a `Pool`,
-  runs `storage.init()` and starts a Mastra worker, so it is contending for Postgres
-  connections and Redis with every other suite vitest is running in parallel. Item 9.1 needs
-  a green run, so either the hook needs a longer timeout or the suites that start workers
-  need to stop sharing a connection budget.
-
-- [confirmed] 2026-08-23 A worker process running outside the test suite breaks the suite.
-  While a `jena-worker` container was up against the shared dev Redis, a full
-  `pnpm -C web test` reported 11 failures instead of the baseline 9, adding
-  `src/app/api/posts/create.test.ts` and `src/mastra/workflows/scaffold-check.test.ts`; both
-  passed immediately once the container was stopped. Mastra's orchestration topic is a Redis
-  Streams consumer group, so each event goes to exactly one consumer, and a stray worker eats
-  events the in-process test workers are waiting for. This is very likely the real cause of
-  the intermittent `scaffold-check` `beforeAll` timeout logged above, rather than load. Two
-  things follow: nobody should run `docker compose up worker` while testing, and item 9.1
-  should decide whether the suite deserves its own Redis database index or topic prefix so it
-  cannot be poached.
-  Update 2026-08-23 (polish P0.2): `scaffold-check.test.ts` now runs on its own instance and
-  `mastra:test:scaffold-check` prefix, and is 3/3 with a worker up and 3/3 with it down, so it
-  is no longer one of the two. `src/app/api/posts/create.test.ts` is untouched and this entry
-  stands for it alone.
-
 - [investigate] 2026-08-23 `next build` inside the web image prints seven
   `[Error [BetterAuthError]: You are using the default secret...]` lines plus a matching
   BetterAuth base-URL warning per route during page-data collection. Non-fatal (the build
@@ -612,16 +494,6 @@
   `pnpm -C web auth:migrate` run by hand against the Postgres service's `DATABASE_PUBLIC_URL`.
   Either ship the migrator in the image and set a preDeploy command, or accept the manual step
   and keep it documented.
-
-- [confirmed] 2026-08-23 `scaffold-check.test.ts > emits the workflow lifecycle events the
-  trace view will read` fails under a full parallel `pnpm -C web test` while passing in
-  isolation in 3.2 s, and it did so during ledger item 7.6 with no worker process anywhere on
-  the machine (the compose `worker` was stopped for the run). That rules out the stray-worker
-  explanation logged above for this particular failure and leaves in-suite contention on the
-  shared orchestration topic as the remaining candidate. It failed in two of three full runs
-  made that day and passed in the third, taking the total to 10 failures against the standing
-  baseline of 9. Item 9.1 needs a green run, so the suites that drive a real Mastra worker
-  need their own key prefix or their own Redis database index.
 
 - [confirmed] 2026-08-23 The objective's literal typecheck gate `pnpm -C web tsc --noEmit`
   does not run on the installed pnpm (10.26.2): it exits 254 with
@@ -684,17 +556,6 @@
   contract the dashboard and `packages/create-mdx-blog` both sit on, so it is a decision to
   take deliberately after the port rather than inside it.
 
-- [confirmed] 2026-08-23 `pnpm -C web test` is not deterministic above the known
-  `image-preview.test.tsx` baseline: one extra database-backed test fails per full-suite run
-  and it is a different one each time. Four consecutive runs during item 8.8 failed
-  `src/mastra/workflows/scaffold-check.test.ts`, then `src/app/api/settings/route.test.ts`,
-  then `src/mastra/steps/images-manifest.test.ts`, then `scaffold-check` again with this
-  item's new test file moved out of the tree, and every one of them passes when run alone. The
-  suites that flake are the ones that hit Postgres and the Redis Streams consumer group, so
-  the likely cause is contention between parallel vitest workers rather than any single test.
-  Item 9.1 cannot record a green `pnpm -C web test` until this is settled, so it needs either
-  a `poolOptions` concurrency cap for those files or per-file isolation of the consumer group.
-
 - [confirmed] 2026-08-23 `ImagePreview` shows a failed image as a bare `Failed` badge and
   nothing else. `generateOneImage` records the reason on the entry as `error`, and the
   component never reads it, so the user sees that an image failed but not why, and has no way
@@ -712,6 +573,9 @@
   stray worker or a `mastra dev`. It passed 3/3 with a real worker up, so it is exposure
   rather than a reproduced failure; recorded because P0.3 has to certify the whole suite with
   a worker running and this is where to look first if it does not.
+  Update 2026-08-23 (polish P0.3e): it did not fail in any of the three full worker-up runs
+  that certified the suite, so it stays exposure rather than an observed failure. It is still
+  the only file in the suite on the default prefix.
 
 - [confirmed] 2026-08-23 The global `stage_models` row is borrowed the way `api_keys` used to
   be: `src/mastra/stage-models.test.ts`, `src/app/api/settings/stage-models/route.test.ts` and
@@ -723,13 +587,10 @@
   credentials, which is why it was not done inline: `stage-models.test.ts` also restores the
   row's `updated_at`, which the shared helper does not carry yet.
 
-- [confirmed] 2026-08-23 `src/mastra/steps/images-manifest.test.ts > writes only the running
-  marker, leaving every content column to the assembling step` fails under parallel load with a
-  20ms timestamp drift (expected `...57.065+00:00`, received `...57.085+00:00`). The file calls
-  `vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true })`, so the frozen clock keeps
-  advancing with real time: the test computes its expected stamp from `fixture.captured_at` and
-  the step reads `new Date()` however many milliseconds later the run got round to it. Seen once
-  while running the P0.3d-affected suites together (34 files at once); did not fire in either
-  full `pnpm test` run afterwards, so it needs contention rather than the whole suite. Belongs to
-  polish item P0.3e. The fix is either dropping `shouldAdvanceTime` for the assertions that
-  compare an exact stamp, or asserting a bound rather than equality.
+- [confirmed] 2026-08-23 The test suite leaves unconsumed `pipeline` events on the default
+  `mastra-orchestration` topic. Starting the worker bundle after three full `pnpm test` runs
+  drained a backlog of 27 `Error executing step research: Error: post <id> not found` lines
+  before it went quiet: the suite published `workflow.start` events for posts it then deleted
+  and nothing consumed them. Nothing fails over it, because the tests that publish do not await
+  execution, but the topic never reaches zero and the next process to join the group pays for it
+  with a burst of error-shaped stderr against rows that are gone. Found during polish item P0.3e.
