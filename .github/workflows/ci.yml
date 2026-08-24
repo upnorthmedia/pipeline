@@ -1,0 +1,150 @@
+# The five gates, on a machine that has never run this repo before.
+#
+# Everything here mirrors `web/README.md`'s setup procedure rather than
+# inventing a CI-only path: one repo-root `.env`, `pnpm install`, `db:migrate`,
+# `auth:migrate`, then tsc, lint, test, build and e2e in that order. The three
+# first-run-only defects that procedure used to hit are fixed (see
+# `docs/polish/evidence/p0.md#p06a`); this workflow is what keeps them fixed,
+# because CI has nothing but first runs.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: tsc, lint, test, build, e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      # Posts, settings, BetterAuth tables and Mastra run state, all one
+      # database, exactly as `docker-compose.yml` provisions it.
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: pipeline
+          POSTGRES_PASSWORD: pipeline
+          POSTGRES_DB: content_pipeline
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pipeline -d content_pipeline"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      # The Mastra event bus (Redis Streams) and the SSE fan-out. The suite
+      # isolates onto databases 9, 10 and 11 of this same server.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # There is no package.json at the repo root, so the pnpm version has to be
+      # read out of `web/package.json`'s `packageManager` field explicitly.
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      # There is exactly one env file and it lives at the repository root:
+      # `next.config.ts`, `vitest.config.ts`, `drizzle.config.ts` and
+      # `src/test/global-setup.ts` all reach up for it through `web/repo-env.ts`,
+      # and `pnpm auth:migrate` runs under `node --env-file=../.env`, which fails
+      # outright when it is absent.
+      #
+      # Both keys are generated per run rather than committed. The database is
+      # thrown away with the runner, and every suite that needs a Fernet key
+      # sets its own, so nothing here has to survive the job.
+      - name: Write the repo-root .env
+        working-directory: .
+        run: |
+          {
+            echo "POSTGRES_HOST_PORT=5432"
+            echo "REDIS_HOST_PORT=6379"
+            echo "DATABASE_URL_SYNC=postgresql://pipeline:pipeline@localhost:5432/content_pipeline"
+            echo "REDIS_URL=redis://localhost:6379"
+            echo "WP_ENCRYPTION_KEY=$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")"
+            echo "BETTER_AUTH_SECRET=$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")"
+            echo "BETTER_AUTH_URL=http://localhost:3000"
+            echo "NEXT_PUBLIC_APP_URL=http://localhost:3000"
+          } > .env
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # `db:migrate` builds the pipeline tables; `auth:migrate --apply` builds
+      # BetterAuth's. Nothing creates the `mastra_*` run-state tables here:
+      # `src/test/global-setup.ts` does that once for the suite, because
+      # @mastra/pg's first-init DDL is not safe to run concurrently.
+      - name: Migrate
+        run: |
+          pnpm db:migrate
+          pnpm auth:migrate --apply
+
+      - name: tsc
+        run: pnpm exec tsc --noEmit
+
+      - name: lint
+        run: pnpm lint
+
+      - name: test
+        run: pnpm test
+
+      # Done condition 4: a full run leaves the working tree byte-for-byte
+      # unchanged. `media/` is the one the suite used to dirty, and it is
+      # gitignored now, so this also catches the gitignore being weakened.
+      - name: The suite left the working tree clean
+        run: |
+          dirty=$(git status --porcelain)
+          if [ -n "$dirty" ]; then
+            echo "pnpm test dirtied the working tree:"
+            echo "$dirty"
+            exit 1
+          fi
+
+      - name: build
+        run: pnpm build
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      # `playwright.config.ts` starts `pnpm dev` itself through its `webServer`
+      # block and waits for :3000 to answer.
+      - name: e2e
+        run: pnpm test:e2e
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-results
+          path: |
+            web/test-results/
+            web/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore

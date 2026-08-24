@@ -85,6 +85,20 @@ move on. A split is not an iteration on its own: split and complete the first ch
   - [ ] **P0.6b** `.github/workflows/ci.yml` itself: tsc, lint, test, build and e2e on
         `ubuntu-latest` with Postgres and Redis service containers, green on a real run with
         the URL in the evidence.
+    - [x] **P0.6b-i** The workflow file, and everything about it provable without GitHub.
+          One `gates` job with health-gated `postgres:17-alpine` and `redis:7-alpine`,
+          following `web/README.md`'s own setup; `actionlint` clean; all four action major
+          tags read from the API. Dry-run on Linux found the one defect macOS hides: six
+          files declare test-level wait budgets of 10s to 30s while Vitest cuts a test off
+          at 5s, so under load `events.test.ts` died on `Test timed out in 5000ms` instead
+          of naming what never arrived. `testTimeout: 45_000` plus
+          `src/test/wait-budgets.test.ts` keep the two in step, and the `webServer` block is
+          hardened for CI. Whole sequence on Linux: `149 passed`, build, `34 passed` e2e.
+          [evidence](evidence/p0.md#p06b-i)
+    - [ ] **P0.6b-ii** The real run: push the branch, watch the workflow, fix what only the
+          Actions runner can show (`pnpm/action-setup`, the pnpm cache, service-container
+          health gating, two x64 cores), and paste the green run URL. Needs P0.6b-i's commit
+          to exist on the remote first.
 
 ## P1. The three things a user sees immediately
 

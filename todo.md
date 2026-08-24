@@ -614,3 +614,19 @@
   fresh database is missing a table the billing path will query at runtime. Reproduce by hitting
   whatever reads a subscription on a database built by the documented procedure. Found at polish
   ledger P0.6a.
+
+- [confirmed] 2026-08-24 Next 16 deprecates the `middleware` file convention and every dev
+  server boot says so: `⚠ The "middleware" file convention is deprecated. Please use "proxy"
+  instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy`. `web/src/middleware.ts`
+  is the only thing standing between an anonymous request and every page (P0.5a), so this is not
+  a warning to sit on until it becomes an error: the rename has to be done deliberately, with the
+  e2e suite's signed-out redirect test as the guard. Found at polish ledger P0.6b-i.
+
+- [confirmed] 2026-08-24 Signing up logs a Stripe failure on every account when
+  `STRIPE_SECRET_KEY` is unset: `WARN [Better Auth]: Stripe customers.search failed, falling back
+  to customers.list` then `ERROR [Better Auth]: Failed to create or link Stripe customer: Invalid
+  API Key provided: sk_test_********_key`. The sign-up still succeeds, so this is noise rather
+  than a broken path, but it is an ERROR line on the happy path of the first thing a user ever
+  does, and it means the mock key in `web/src/lib/auth.ts` is reaching Stripe's API rather than
+  short-circuiting. Either skip customer creation when the key is the mock, or make the failure a
+  debug line. Found at polish ledger P0.6b-i, in the CI dry run's e2e log.

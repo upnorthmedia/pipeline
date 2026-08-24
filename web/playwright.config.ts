@@ -27,7 +27,14 @@ export default defineConfig({
   webServer: {
     command: "pnpm dev",
     url: BASE_URL,
-    reuseExistingServer: true,
-    timeout: 30000,
+    // Locally this attaches to whatever `pnpm dev` is already up. On CI there
+    // is never one to attach to, and silently adopting a stale server would be
+    // a way to test the wrong build, so CI always starts its own.
+    reuseExistingServer: !process.env.CI,
+    // A cold Turbopack start answers in about a second on a developer machine
+    // (measured: `Ready in 386ms`, first 307 at ~1s, with `.next` deleted).
+    // A two-core runner is not that machine, and a webServer timeout is fatal
+    // rather than retried, so CI gets four times the headroom.
+    timeout: process.env.CI ? 120_000 : 30_000,
   },
 });
