@@ -32,6 +32,8 @@ vi.mock("@/lib/api", async () => {
       links: vi.fn(),
       createLink: vi.fn(),
       deleteLink: vi.fn(),
+      wpCategories: vi.fn(),
+      wpAuthors: vi.fn(),
     },
   };
 });
@@ -52,6 +54,12 @@ const mockCrawl = vi.mocked(profiles.crawl);
 const mockLinks = vi.mocked(profiles.links);
 void vi.mocked(profiles.createLink);
 const mockDeleteLink = vi.mocked(profiles.deleteLink);
+const mockWpCategories = vi.mocked(profiles.wpCategories);
+const mockWpAuthors = vi.mocked(profiles.wpAuthors);
+
+/** A profile the page treats as WordPress-connected, so it loads the pickers. */
+const wpProfile = () =>
+  makeProfile({ wp_url: "https://wp.example", wp_username: "editor" });
 
 const testLinks: InternalLink[] = [
   {
@@ -82,6 +90,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockGet.mockResolvedValue(makeProfile());
   mockLinks.mockResolvedValue({ items: testLinks, total: testLinks.length, page: 1, per_page: 20, pages: 1 });
+  mockWpCategories.mockResolvedValue([]);
+  mockWpAuthors.mockResolvedValue([]);
 });
 
 describe("ProfileDetailPage", () => {
@@ -293,6 +303,49 @@ describe("ProfileDetailPage", () => {
       "tbody tr [class*='animate-pulse']"
     );
     expect(rows.length).toBeGreaterThan(0);
+  });
+
+  it("shows why the WordPress pickers are empty instead of swallowing it", async () => {
+    mockGet.mockResolvedValue(wpProfile());
+    const rejection = new Error(
+      JSON.stringify({
+        detail: "WordPress API error: Sorry, you are not allowed to list users.",
+      })
+    );
+    mockWpAuthors.mockRejectedValue(rejection);
+    renderWithProviders(<ProfileDetailPage />);
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          "WordPress API error: Sorry, you are not allowed to list users."
+        )
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("keeps the categories it did load when only the authors call fails", async () => {
+    // `list_users` needs a capability `list_categories` does not, so one call
+    // failing while the other succeeds is the realistic case, not a corner.
+    mockGet.mockResolvedValue(
+      makeProfile({
+        wp_url: "https://wp.example",
+        wp_username: "editor",
+        wp_default_category_id: 7,
+      })
+    );
+    mockWpCategories.mockResolvedValue([
+      { id: 7, name: "Guides", slug: "guides", count: 3 },
+    ]);
+    mockWpAuthors.mockRejectedValue(new Error(JSON.stringify({ detail: "nope" })));
+    renderWithProviders(<ProfileDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByText("nope")).toBeInTheDocument();
+    });
+    // The category trigger can only read "Guides" if the list survived the
+    // sibling rejection: it renders the selected id's name, not the id.
+    expect(
+      screen.getByRole("combobox", { name: "Default Category" })
+    ).toHaveTextContent("Guides");
   });
 
   it("keeps a rejected save inline above the button", async () => {

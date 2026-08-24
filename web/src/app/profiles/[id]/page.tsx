@@ -121,6 +121,7 @@ export default function ProfileDetailPage() {
   const [wpCategories, setWpCategories] = useState<WPCategory[]>([]);
   const [wpAuthors, setWpAuthors] = useState<WPAuthor[]>([]);
   const [wpTesting, setWpTesting] = useState(false);
+  const [wpListError, setWpListError] = useState<string | null>(null);
   const [wpConnected, setWpConnected] = useState(false);
 
   // Next.js state
@@ -329,16 +330,28 @@ export default function ProfileDetailPage() {
   };
 
   const fetchWpData = useCallback(async () => {
-    try {
-      const [cats, auths] = await Promise.all([
-        profiles.wpCategories(profileId),
-        profiles.wpAuthors(profileId),
-      ]);
-      setWpCategories(cats);
-      setWpAuthors(auths);
-    } catch {
-      // Silently ignore — may not be connected
+    // Both endpoints answer a 502 carrying WordPress's own message when the
+    // install rejects us, so an empty picker can say why. Swallowing it left a
+    // profile whose application password had expired looking like a site with
+    // no categories. `allSettled` because the two calls fail independently:
+    // `list_users` needs a capability that `list_categories` does not.
+    const [cats, auths] = await Promise.allSettled([
+      profiles.wpCategories(profileId),
+      profiles.wpAuthors(profileId),
+    ]);
+    const reasons: string[] = [];
+    if (cats.status === "fulfilled") setWpCategories(cats.value);
+    else {
+      setWpCategories([]);
+      reasons.push(apiErrorMessage(cats.reason, "Categories could not be loaded."));
     }
+    if (auths.status === "fulfilled") setWpAuthors(auths.value);
+    else {
+      setWpAuthors([]);
+      reasons.push(apiErrorMessage(auths.reason, "Authors could not be loaded."));
+    }
+    // One site, so both calls usually fail with the same sentence.
+    setWpListError(reasons.length ? [...new Set(reasons)].join(" ") : null);
   }, [profileId]);
 
   const handleWpTest = async () => {
@@ -883,6 +896,11 @@ export default function ProfileDetailPage() {
                       </Select>
                     </div>
                   </div>
+                  {wpListError && (
+                    <p role="alert" className="text-xs text-destructive">
+                      {wpListError}
+                    </p>
+                  )}
                 </>
               )}
             </CardContent>

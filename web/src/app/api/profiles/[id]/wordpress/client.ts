@@ -16,7 +16,7 @@ import { and, eq } from "drizzle-orm"
 
 import { getDb, websiteProfiles } from "@/db"
 import { decrypt } from "@/lib/crypto"
-import { WordPressClient } from "@/mastra/wordpress"
+import { WordPressClient, WordPressError } from "@/mastra/wordpress"
 
 /**
  * Both strings are copied byte for byte from the Python `HTTPException`
@@ -85,4 +85,31 @@ export class WordPressFieldError extends Error {
 export function requireField(item: Record<string, unknown>, key: string): unknown {
   if (!(key in item)) throw new WordPressFieldError(key)
   return item[key]
+}
+
+/**
+ * The three handlers' shared answer for a failure that happened on the
+ * WordPress side rather than on ours.
+ *
+ * Python let both kinds out of `/categories` and `/authors` uncaught, so an
+ * expired application password, a user without `list_users`, or a site behind
+ * a login wall all reached the dashboard's pickers as a bare 500 with no
+ * reason attached while `/test` on the same profile reported the real message.
+ * A 502 says the upstream is what failed, and `detail` is what
+ * `apiErrorMessage()` in `web/src/lib/api.ts` unwraps for the user.
+ *
+ * `noun` names the thing being listed, so a payload missing a key reads as a
+ * sentence rather than as a `KeyError`.
+ */
+export function upstreamFailure(error: unknown, noun: "category" | "author"): Response | null {
+  if (error instanceof WordPressError) {
+    return Response.json({ detail: error.message }, { status: 502 })
+  }
+  if (error instanceof WordPressFieldError) {
+    return Response.json(
+      { detail: `WordPress returned a ${noun} with no "${error.message}"` },
+      { status: 502 },
+    )
+  }
+  return null
 }

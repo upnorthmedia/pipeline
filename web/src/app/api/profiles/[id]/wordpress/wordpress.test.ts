@@ -29,7 +29,7 @@ import { apiRequest, createTestSession, deleteTestSessions, type TestSession } f
 
 import { GET as getAuthors } from "./authors/route"
 import { GET as getCategories } from "./categories/route"
-import { GET as getTest } from "./test/route"
+import { GET as getTest, WP_ROOT_NOT_WORDPRESS } from "./test/route"
 
 interface Route {
   status: number
@@ -100,6 +100,40 @@ function routeKey(method: string, target: string): string {
 
 let routes: Record<string, Route> = {}
 let seen: SeenRequest[] = []
+
+/**
+ * The seven scenarios where the port deliberately stops reproducing Python
+ * (polish ledger item P1.3a).
+ *
+ * Every one of them is an exception nothing caught, so FastAPI answered a 500
+ * with an empty body and the dashboard had nothing to show. The oracle keeps
+ * recording the exception, because it is the record of what the deployed stack
+ * did; this function is the one place that says what the port answers instead,
+ * and it is derived from the oracle rather than written out, so a scenario
+ * added to the export cannot quietly skip the new behaviour.
+ *
+ * `null` means "still uncaught", which is what the escaping branch below
+ * asserts. Nothing reaches it today, and the guard under "the exported oracle"
+ * is what keeps that fact visible.
+ */
+function divergentAnswer(scenario: Scenario): { status: number; body: unknown } | null {
+  const { unhandled, message } = scenario.expected
+  switch (unhandled) {
+    case "AttributeError":
+      // `info.get(...)` on a `/wp-json` root that is not a JSON object.
+      return { status: 200, body: { connected: false, error: WP_ROOT_NOT_WORDPRESS } }
+    case "WordPressError":
+      return { status: 502, body: { detail: message } }
+    case "KeyError": {
+      // Python's `str(KeyError("id"))` is the repr of the key, quotes included.
+      const key = message!.slice(1, -1)
+      const noun = scenario.endpoint === "categories" ? "category" : "author"
+      return { status: 502, body: { detail: `WordPress returned a ${noun} with no "${key}"` } }
+    }
+    default:
+      return null
+  }
+}
 
 beforeAll(async () => {
   savedEncryptionKey = process.env.WP_ENCRYPTION_KEY
@@ -187,6 +221,22 @@ describe("the exported oracle", () => {
     expect(oracle.generated_by).toBe("api/scripts/export_wordpress_router_parity.py")
     expect(oracle.scenarios.length).toBeGreaterThanOrEqual(36)
   })
+
+  it("still records the seven 500s the port diverges from", () => {
+    const uncaught = oracle.scenarios.filter((scenario) => scenario.expected.unhandled)
+    expect(uncaught.map((scenario) => scenario.name)).toEqual([
+      "test-root-returns-json-array",
+      "test-root-returns-json-null",
+      "test-root-returns-json-string",
+      "categories-missing-id-raises",
+      "categories-401-escapes",
+      "authors-missing-slug-raises",
+      "authors-403-escapes",
+    ])
+    // Every one of them has a replacement, so the escaping branch is unreached.
+    // A scenario exported later with a different exception fails here first.
+    expect(uncaught.filter((scenario) => divergentAnswer(scenario) === null)).toEqual([])
+  })
 })
 
 describe.each(oracle.scenarios)("$endpoint: $name", (scenario) => {
@@ -228,6 +278,14 @@ describe.each(oracle.scenarios)("$endpoint: $name", (scenario) => {
       const { response } = await run()
       expect(response!.status).toBe(scenario.expected.http_status)
       expect(await response!.json()).toEqual({ detail: scenario.expected.detail })
+    })
+  } else if (divergentAnswer(scenario)) {
+    const answer = divergentAnswer(scenario)!
+    it(`answers ${answer.status} where Python raised ${scenario.expected.unhandled}`, async () => {
+      const { thrown, response } = await run()
+      expect(thrown, "the handler raised instead of answering").toBeUndefined()
+      expect(response!.status).toBe(answer.status)
+      expect(await response!.json()).toEqual(answer.body)
     })
   } else {
     it(`lets the ${scenario.expected.unhandled} out, as Python did`, async () => {

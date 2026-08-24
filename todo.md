@@ -334,24 +334,6 @@
   `web/src/mastra/wordpress/index.ts`, because changing it would change which URL a stored
   profile reaches. The fix belongs with the profile form's `wp_url` validation, not in the
   client: nothing today stops a user pasting a URL with a query string into it.
-- [confirmed] 2026-08-23 `GET /api/profiles/{profile_id}/wordpress/categories` and
-  `/authors` answer a 500 for every failure the WordPress install reports, because
-  `api/src/api/wordpress.py` catches no `WordPressError` in either handler. A profile with
-  an expired application password, a user without `list_users` capability, or a site behind
-  a login wall all surface in the dashboard's category and author pickers as a bare server
-  error with no reason attached, while `/test` on the same profile reports the real message.
-  The same two handlers also 500 on a WordPress payload missing `id`, `name` or `slug`,
-  because the projection subscripts rather than `.get`s. Both reproduced faithfully in
-  `web/src/app/api/profiles/[id]/wordpress/` while porting ledger item 5.9b; the fix is to
-  catch `WordPressError` and answer a 502 carrying `error.message`, which changes a
-  documented response shape and so belongs with the Phase 8 pass over the profile page.
-- [confirmed] 2026-08-23 `GET /api/profiles/{profile_id}/wordpress/test` answers a 500,
-  not `{connected: false}`, when the configured `wp_url` serves valid JSON that is not an
-  object at `/wp-json`: `info.get("name", "")` raises `AttributeError` and the handler's
-  `except WordPressError` does not cover it. A parked domain returning `[]` or `null` is the
-  realistic trigger. Reproduced in the port (ledger item 5.9b) with three oracle scenarios
-  so the behaviour is pinned rather than accidental; the one-line fix is to widen the
-  `except`, which changes the response for that input and needs a UI decision first.
 - [confirmed] 2026-08-23 `markdown_to_wp_html` raises `AttributeError: No renderer
   "'inline_html'"` for any article whose markdown contains an HTML tag mistune's block
   layer declines. `_GutenbergRenderer` in `api/src/services/wp_html.py` implements
@@ -635,3 +617,16 @@
   filter now call such a post finished while its stage badge says failed. Decide which of the two
   the list should read; a post with no pictures is not finished in any sense a user means. Found
   at polish ledger P1.2a.
+- [confirmed] 2026-08-24 WordPress's REST error messages carry HTML, and the dashboard
+  renders the tags as literal text. A real install answered `WordPress API error:
+  <strong>Error:</strong> Unknown username. Check again or try your email address.` and that
+  whole string, angle brackets included, is what the profile page shows under the category
+  and author pickers. Found while making those failures visible at all (polish ledger item
+  P1.3a). Stripping belongs in one display-layer place rather than in each handler, and
+  `/test`'s message is pinned by `wordpress-router-parity.json`, so it is a UI item: it
+  belongs with P1.3d, which owns how a connection reports itself.
+- [confirmed] 2026-08-24 The profile page's `Connected` badge is derived from `wp_url` and
+  `wp_username` both being non-empty, not from any test result, so it reads `Connected`
+  beside a category picker that just failed to load with an authentication error. Same
+  origin as the entry above; it is the "visible connection status" half of polish ledger
+  item P1.3d.

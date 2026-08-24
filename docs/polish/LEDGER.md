@@ -165,6 +165,24 @@ move on. A split is not an iteration on its own: split and complete the first ch
       connection, a visible connection status, output formats that disable themselves with an
       explanation when their target is not configured, and a publish action that reports what
       happened. Fix the broken endpoints underneath it (P2.57, P2.58, P2.59, P2.61).
+  - [x] **P1.3a** The three `wordpress` connection endpoints answered a 500 with an empty body
+        for every failure the install reports (P2.58, P2.59), and the profile page dropped two
+        of them on the floor. `upstreamFailure()` answers a 502 carrying WordPress's own
+        message for a `WordPressError` and a sentence naming the missing key for a payload the
+        projection cannot read; `/test` reports a `/wp-json` root that is not a JSON object
+        through its own `{connected: false, error}` channel instead of raising. `fetchWpData`
+        uses `allSettled` and renders the reason under the pickers. Verified against a real
+        WordPress install, `ui/p13a-wordpress-card-*.png`. [evidence](evidence/p1.md#p13a)
+  - [ ] **P1.3b** `wp_url` validation (P2.57): the client appends its REST paths to the raw
+        value, so a URL carrying a query string or a fragment builds a nonsense endpoint and
+        every call 404s. The fix belongs at the profile boundary, not in the client.
+  - [ ] **P1.3c** `markdown_to_wp_html` raises `AttributeError: No renderer "'inline_html'"`
+        for any article whose markdown carries an HTML tag mistune's block layer declines
+        (P2.61), so the publish path crashes rather than rendering.
+  - [ ] **P1.3d** The UI: one obvious place to configure and test a connection, a connection
+        status derived from a real test rather than from two fields being non-empty, output
+        formats that disable themselves with an explanation, and a publish action that reports
+        what happened.
 
 ## P2. Clear the backlog in `todo.md`
 
@@ -241,8 +259,8 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [ ] **P2.55** `[confirmed]` `GET /api/analytics/logs` in `api/src/api/analytics.py` answers a 500 for any `since` or `until` that `datetime.fromisoformat()` rejects. The ...
 - [ ] **P2.56** `[confirmed]` The whole `/api/analytics/logs` result set is ordered and bounded by a *text* comparison on `log_entry->>'ts'`, in both stacks. That is only ...
 - [ ] **P2.57** `[confirmed]` `WordPressClient.__init__` in `api/src/services/wordpress.py` appends its REST paths to the raw `wp_url` after nothing but a trailing-slash ...
-- [ ] **P2.58** `[confirmed]` `GET /api/profiles/{profile_id}/wordpress/categories` and `/authors` answer a 500 for every failure the WordPress install reports, because ...
-- [ ] **P2.59** `[confirmed]` `GET /api/profiles/{profile_id}/wordpress/test` answers a 500, not `{connected: false}`, when the configured `wp_url` serves valid JSON that is ...
+- [x] **P2.58** `[confirmed]` `GET /api/profiles/{profile_id}/wordpress/categories` and `/authors` answer a 500 for every failure the WordPress install reports, because ... Fixed by P1.3a: both handlers answer a 502 carrying the install's own message, or a sentence naming the key the payload is missing; entry removed from `todo.md`. [evidence](evidence/p1.md#p13a)
+- [x] **P2.59** `[confirmed]` `GET /api/profiles/{profile_id}/wordpress/test` answers a 500, not `{connected: false}`, when the configured `wp_url` serves valid JSON that is ... Fixed by P1.3a: a `/wp-json` root that is not a JSON object is reported as `{connected: false, error}` like every other failure the endpoint knows about; entry removed from `todo.md`. [evidence](evidence/p1.md#p13a)
 - [x] **P2.60** `[confirmed]` `src/mastra/workflows/scaffold-check.test.ts > emits the workflow lifecycle events the trace view will read` fails inside a full `pnpm test` run ... 0 failures in six full runs after P0.2's isolation; entry removed from `todo.md`. [evidence](evidence/p0.md#p03e)
 - [ ] **P2.61** `[confirmed]` `markdown_to_wp_html` raises `AttributeError: No renderer "'inline_html'"` for any article whose markdown contains an HTML tag mistune's block ...
 - [ ] **P2.62** `[confirmed]` The TypeScript port of mistune's `linebreak` and `softbreak` inline patterns in `web/src/mastra/wordpress/wp-html.ts` still spells Python's `\s` ...
