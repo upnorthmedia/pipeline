@@ -68,23 +68,16 @@
   gate approval route has to poll `getWorkflowRunById` rather than await the resume, for the
   reason `evented-resume.test.ts` pins. Found at polish ledger P2.16. Ledger item P2.109.
 
-- [confirmed] 2026-08-24 Five of the seven workflow registration keys in
-  `web/src/mastra/index.ts` differ from the workflow's own `id`, and a resume resolves by id.
-  `EventedExecutionEngine.resolveWorkflow` calls `Mastra.getWorkflow(workflowId)`, and
-  `getWorkflow` looks its argument up by registration *key*, so `scaffoldCheck` /
-  `sitemapCrawl` / `recrawlCheck` / `wordpressPublish` / `nextjsPublish` would answer
-  `MASTRA_GET_WORKFLOW_BY_ID_NOT_FOUND` on any resume of `scaffold-check`, `sitemap-crawl`,
-  `recrawl-check`, `wordpress-publish` or `nextjs-publish`. Latent today: none of those five
-  suspends, and the two that can (`pipeline`, `images`) are the two whose key matches. The
-  failure mode is a workflow that starts, runs and then 404s the moment a step in it suspends,
-  which is the least obvious time to find out. Reproduced under polish ledger P2.16, where the
-  probe was registered under a camelCase key and its `start()` succeeded while its `resume()`
-  threw. Renaming the keys also renames what Mastra Studio lists and what the
-  `mastra.getWorkflow(...)` call sites pass, so it is a small change with a wide surface. The
-  same constraint is already known for *nested* workflows and honoured there
-  (`nested-retry.test.ts` keys its five registrations by id, and `images`, the one nested
-  workflow the app registers, matches); the resume path is the second place it bites. Ledger
-  item P2.110.
+- [confirmed] 2026-08-24 `@mastra/core@1.61.0` signals a failed `EventedExecutionEngine.execute()`
+  twice. Its `catch` calls `rejectResult(err)` and then `throw err`, and the `await
+  resultPromise` that would have handled that rejection is on the line after the throw
+  (`dist/agent-DSxJoGjY.js:7087`). A caller that catches the error from `run.resume()`, which
+  is the only thing a caller can do, still leaves one rejected promise with no handler: Node
+  emits `unhandledRejection` and vitest exits 1 with every assertion green. Upstream, so this
+  is a note rather than a fix; `workflows/registration-key.test.ts` works around it by
+  collecting the process's unhandled rejections around the resume and asserting on them. Any
+  gate approval route built for P2.109 has to survive the same double signal. Found under
+  polish ledger P2.110.
 
 - [confirmed] 2026-08-24 `applyProfilePrefill` makes a per-post gate edit unexpressible.
   `src/app/api/posts/prefill.ts` copies the profile's `default_stage_settings` over the

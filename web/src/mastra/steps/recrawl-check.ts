@@ -107,7 +107,7 @@ export const recrawlCheckStep = createStep({
           ),
         )
 
-      const crawl = mastra.getWorkflow("sitemapCrawl")
+      const crawl = mastra.getWorkflow("sitemap-crawl")
       const now = new Date()
       const started: RecrawlCheckOutput["started"] = []
 

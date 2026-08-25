@@ -14,7 +14,7 @@
 import { mastra } from "./index"
 
 export async function startWordPressPublish(postId: string): Promise<string> {
-  const run = await mastra.getWorkflow("wordpressPublish").createRun()
+  const run = await mastra.getWorkflow("wordpress-publish").createRun()
   const { runId } = await run.startAsync({ inputData: { postId } })
   return runId
 }

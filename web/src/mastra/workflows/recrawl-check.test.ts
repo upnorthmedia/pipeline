@@ -118,9 +118,9 @@ const testMastra = new Mastra({
   pubsub,
   scheduler: { tickIntervalMs: 500 },
   workflows: {
-    recrawlCheck: recrawlCheckWorkflow,
-    sitemapCrawl: sitemapCrawlWorkflow,
-    scheduleProbe: scheduleProbeWorkflow,
+    "recrawl-check": recrawlCheckWorkflow,
+    "sitemap-crawl": sitemapCrawlWorkflow,
+    "recrawl-schedule-probe": scheduleProbeWorkflow,
   },
 })
 

@@ -158,29 +158,42 @@ export const mastra = new Mastra({
    * the deploy target installs it for its own platform.
    */
   bundler: { externals: ["sharp"] },
+  // Every key here is the workflow's own `id`, and that is load-bearing rather
+  // than tidy (item P2.110). The record's key is free of the id, and a start,
+  // a read and `getWorkflowById()` all cope with a key that differs, but a
+  // resume does not: the engine's `resume`, `restart` and `timeTravel`
+  // branches resolve through `resolveWorkflow(params.workflowId)`, which is
+  // `Mastra.getWorkflow()` on the *key*, while `params.workflowId` is the
+  // `id`. Five of these seven were camelCase, and each would have thrown
+  // `MASTRA_GET_WORKFLOW_BY_ID_NOT_FOUND` the moment a step in it suspended.
+  // `index.test.ts` holds the invariant; `workflows/registration-key.test.ts`
+  // demonstrates the failure on a real suspended run. Nothing persists the
+  // key, so renaming one is not a data migration: `mastra_workflow_snapshot`
+  // stores the id.
+  //
   // `pipeline` is the six stages composed in order and is what a run starts.
   // `images` stays registered in its own right because it is a workflow rather
   // than a step (its fan-out is `.foreach()`, which only exists at workflow
   // level) and because a single stage can be rerun on its own.
-  // `sitemapCrawl` is not part of a pipeline run: it is the ARQ
+  // `sitemap-crawl` is not part of a pipeline run: it is the ARQ
   // `crawl_profile_sitemap` job, started per profile by the crawl route and by
   // the nightly re-crawl check.
-  // `recrawlCheck` is that nightly check, and is ARQ's `cron_jobs` entry: it
+  // `recrawl-check` is that nightly check, and is ARQ's `cron_jobs` entry: it
   // carries its own cron, so registering it here is what schedules it. The
   // scheduler only runs where `startWorkers()` was called, so it fires in the
   // `worker` service and never in `web`.
-  // `wordpressPublish` and `nextjsPublish` are the two ARQ publish jobs. They
+  // `wordpress-publish` and `nextjs-publish` are the two ARQ publish jobs. They
   // are separate workflows because Python registered two separate functions
   // and `POST /{post_id}/publish` branched on `output_format` to choose one;
   // they share no state and only one ever runs for a given post.
   workflows: {
     pipeline: pipelineWorkflow,
     images: imagesWorkflow,
-    scaffoldCheck: scaffoldCheckWorkflow,
-    sitemapCrawl: sitemapCrawlWorkflow,
-    recrawlCheck: recrawlCheckWorkflow,
-    wordpressPublish: wordpressPublishWorkflow,
-    nextjsPublish: nextjsPublishWorkflow,
+    "scaffold-check": scaffoldCheckWorkflow,
+    "sitemap-crawl": sitemapCrawlWorkflow,
+    "recrawl-check": recrawlCheckWorkflow,
+    "wordpress-publish": wordpressPublishWorkflow,
+    "nextjs-publish": nextjsPublishWorkflow,
   },
   events: workerEvents,
   agents: {

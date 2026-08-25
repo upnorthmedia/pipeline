@@ -64,14 +64,67 @@ describe("mastra instance", () => {
   })
 
   /**
+   * Item P2.110. `Mastra.workflows` is a record and the key is free of the
+   * workflow's own `id`, but a resume is not: the engine's `resume`, `restart`
+   * and `timeTravel` branches all go through
+   * `resolveWorkflow(params.workflowId)`, which is `Mastra.getWorkflow()` on
+   * the *registration key* while `params.workflowId` is the workflow's `id`.
+   * Five of these seven were registered under a camelCase key, so each of them
+   * would have thrown `MASTRA_GET_WORKFLOW_BY_ID_NOT_FOUND` the first time a
+   * step in it suspended and anything resumed it.
+   *
+   * `registration-key.test.ts` demonstrates that on a real suspended run;
+   * this is the invariant it justifies, and it is written over the registry
+   * rather than over a list of names so a workflow added later is covered.
+   */
+  /**
+   * The same invariant from the other side. Three of the call sites that broke
+   * when the keys changed are inside a step's `execute`, where `mastra` is
+   * loosely typed, so `tsc` saw nothing and only a run that reached the line
+   * failed. A literal is cheap to check and this is the whole population of
+   * them: the parameter type covers every other caller.
+   */
+  it("has no source literal asking for a workflow that is not registered", async () => {
+    const { readFile } = await import("node:fs/promises")
+    const { execFileSync } = await import("node:child_process")
+    const keys = new Set(Object.keys(mastra.listWorkflows()))
+    const files = execFileSync("git", ["ls-files", "src"], { encoding: "utf8" })
+      .split("\n")
+      .filter((file) => file.endsWith(".ts") || file.endsWith(".tsx"))
+
+    const unregistered: string[] = []
+    for (const file of files) {
+      // The probe suites register their own workflows on their own instances.
+      if (file.endsWith(".test.ts") || file.endsWith(".test.tsx")) continue
+      const source = await readFile(file, "utf8")
+      for (const match of source.matchAll(/getWorkflow\("([^"]+)"\)/g)) {
+        if (!keys.has(match[1])) unregistered.push(`${file}: ${match[1]}`)
+      }
+    }
+    expect(unregistered).toEqual([])
+    // Anti-vacuity: the scan reaches the files that hold these calls.
+    expect(files).toContain("src/mastra/steps/pipeline-complete.ts")
+  })
+
+  it("registers every workflow under its own id, which is what a resume resolves", () => {
+    const registered = Object.entries(mastra.listWorkflows())
+      // Mastra registers its own notification dispatcher on every instance.
+      .filter(([key]) => !key.startsWith("__mastra"))
+    expect(registered.length).toBe(7)
+    expect(registered.map(([key, workflow]) => [key, workflow.id])).toEqual(
+      registered.map(([, workflow]) => [workflow.id, workflow.id]),
+    )
+  })
+
+  /**
    * The crawl job's registration (item 5.2c-ii-1). It is asserted here rather
    * than beside the run in `workflows/sitemap-crawl.test.ts`, because importing
    * this module rebinds the workflow to this instance and a run started in that
    * file would then publish to a topic whose worker is not running.
    */
   it("registers the sitemap crawl as a one-step workflow", () => {
-    expect(mastra.getWorkflow("sitemapCrawl")).toBe(sitemapCrawlWorkflow)
-    expect(Object.keys(mastra.listWorkflows())).toContain("sitemapCrawl")
+    expect(mastra.getWorkflow("sitemap-crawl")).toBe(sitemapCrawlWorkflow)
+    expect(Object.keys(mastra.listWorkflows())).toContain("sitemap-crawl")
     expect(sitemapCrawlWorkflow.id).toBe("sitemap-crawl")
 
     const graph = sitemapCrawlWorkflow.serializedStepGraph as {
@@ -89,8 +142,8 @@ describe("mastra instance", () => {
    * `recrawlCheckWorkflow` is a re-crawl that never happens.
    */
   it("registers the nightly re-crawl check with its cron declared", () => {
-    expect(mastra.getWorkflow("recrawlCheck")).toBe(recrawlCheckWorkflow)
-    expect(Object.keys(mastra.listWorkflows())).toContain("recrawlCheck")
+    expect(mastra.getWorkflow("recrawl-check")).toBe(recrawlCheckWorkflow)
+    expect(Object.keys(mastra.listWorkflows())).toContain("recrawl-check")
     expect(recrawlCheckWorkflow.id).toBe("recrawl-check")
     // `createWorkflow` returns `EventedWorkflow`, which declares
     // `getScheduleConfigs()`, but `.then().commit()` narrows back to the base
@@ -116,8 +169,8 @@ describe("mastra instance", () => {
    * `steps/wordpress-publish.test.ts` calls the step directly instead.
    */
   it("registers the WordPress publish hook as a one-step workflow", () => {
-    expect(mastra.getWorkflow("wordpressPublish")).toBe(wordpressPublishWorkflow)
-    expect(Object.keys(mastra.listWorkflows())).toContain("wordpressPublish")
+    expect(mastra.getWorkflow("wordpress-publish")).toBe(wordpressPublishWorkflow)
+    expect(Object.keys(mastra.listWorkflows())).toContain("wordpress-publish")
     expect(wordpressPublishWorkflow.id).toBe("wordpress-publish")
 
     const graph = wordpressPublishWorkflow.serializedStepGraph as {
@@ -137,8 +190,8 @@ describe("mastra instance", () => {
    * from inside the step rather than by declaring nothing here.
    */
   it("registers the Next.js publish hook as a one-step workflow that retries", () => {
-    expect(mastra.getWorkflow("nextjsPublish")).toBe(nextjsPublishWorkflow)
-    expect(Object.keys(mastra.listWorkflows())).toContain("nextjsPublish")
+    expect(mastra.getWorkflow("nextjs-publish")).toBe(nextjsPublishWorkflow)
+    expect(Object.keys(mastra.listWorkflows())).toContain("nextjs-publish")
     expect(nextjsPublishWorkflow.id).toBe("nextjs-publish")
     expect(nextjsPublishWorkflow.retryConfig).toEqual({ attempts: MAX_ATTEMPTS - 1 })
     expect(wordpressPublishWorkflow.retryConfig).toEqual({ attempts: MAX_ATTEMPTS - 1 })

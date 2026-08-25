@@ -16,7 +16,7 @@
 import { mastra } from "./index"
 
 export async function startSitemapCrawl(profileId: string): Promise<string> {
-  const run = await mastra.getWorkflow("sitemapCrawl").createRun()
+  const run = await mastra.getWorkflow("sitemap-crawl").createRun()
   const { runId } = await run.startAsync({ inputData: { profileId } })
   return runId
 }

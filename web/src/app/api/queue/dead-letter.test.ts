@@ -382,7 +382,7 @@ describe("GET /api/queue/dead-letter, run rows the caller must not see", () => {
 
   it("excludes a failed run of a workflow that is not the pipeline", async () => {
     const post = await insertPost(profileId)
-    await persistRun({ postId: post, failedStage: "edit", workflowName: "sitemapCrawl" })
+    await persistRun({ postId: post, failedStage: "edit", workflowName: "sitemap-crawl" })
 
     expect(forPost((await listEntries(user.cookie)).entries, post)).toHaveLength(0)
   })

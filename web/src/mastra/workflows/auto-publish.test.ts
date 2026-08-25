@@ -135,8 +135,8 @@ const testMastra = new Mastra({
   workflows: {
     pipeline: pipelineWorkflow,
     images: imagesWorkflow,
-    wordpressPublish: wordpressPublishWorkflow,
-    nextjsPublish: nextjsPublishWorkflow,
+    "wordpress-publish": wordpressPublishWorkflow,
+    "nextjs-publish": nextjsPublishWorkflow,
   },
   agents,
 })

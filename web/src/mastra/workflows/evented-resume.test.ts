@@ -86,10 +86,10 @@ const storage = new PostgresStore({ id: "evented-resume-test", pool: getPool() }
 const testMastra = new Mastra({
   storage,
   pubsub,
-  // Keyed by the workflow id, for the reason `nested-retry.test.ts` records
-  // about nested entries: `resolveWorkflow` calls `Mastra.getWorkflow(<id>)`
-  // and that looks up by registration key, so a key that differs from the id
-  // starts and runs fine and then 404s the moment a step suspends.
+  // Keyed by the workflow id, for the reason `registration-key.test.ts`
+  // demonstrates: `resolveWorkflow` calls `Mastra.getWorkflow(<id>)` and that
+  // looks up by registration key, so a key that differs from the id starts and
+  // runs fine and then 404s the moment a step suspends.
   workflows: { "evented-resume-probe": probeWorkflow },
 })
 

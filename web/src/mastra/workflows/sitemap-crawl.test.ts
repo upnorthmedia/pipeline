@@ -80,7 +80,7 @@ const storage = new PostgresStore({ id: "sitemap-crawl-test", pool: getPool() })
 const testMastra = new Mastra({
   storage,
   pubsub,
-  workflows: { sitemapCrawl: sitemapCrawlWorkflow },
+  workflows: { "sitemap-crawl": sitemapCrawlWorkflow },
 })
 
 /** Log lines the step emits, captured rather than printed. */

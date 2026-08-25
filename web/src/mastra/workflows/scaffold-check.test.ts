@@ -53,7 +53,7 @@ const storage = new PostgresStore({ id: "scaffold-check-test", pool: getPool() }
 const testMastra = new Mastra({
   storage,
   pubsub,
-  workflows: { scaffoldCheck: scaffoldCheckWorkflow },
+  workflows: { "scaffold-check": scaffoldCheckWorkflow },
 })
 
 beforeAll(async () => {
@@ -96,8 +96,8 @@ afterAll(async () => {
 
 describe("scaffold-check workflow", () => {
   it("is registered on the Mastra instance under its id", () => {
-    expect(mastra.getWorkflow("scaffoldCheck")).toBe(scaffoldCheckWorkflow)
-    expect(Object.keys(mastra.listWorkflows())).toContain("scaffoldCheck")
+    expect(mastra.getWorkflow("scaffold-check")).toBe(scaffoldCheckWorkflow)
+    expect(Object.keys(mastra.listWorkflows())).toContain("scaffold-check")
     expect(scaffoldCheckWorkflow.id).toBe("scaffold-check")
   })
 

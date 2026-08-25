@@ -811,11 +811,17 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       second run redoes the chain. A gate approval route has to poll `getWorkflowRunById`
       rather than await the resume, for the reason `evented-resume.test.ts` pins. Carries the
       deleted P2.40: the engine's retry branch does not carry `resumeData` forward, so a step
-      that throws after approval may re-suspend at the same gate.
-- [ ] **P2.110** `[confirmed 2026-08-24]` Five of the seven workflow registration keys in
+      that throws after approval may re-suspend at the same gate. Also has to survive the
+      engine double-signalling a failed resume (`rejectResult` then `throw`, leaving an
+      unhandled rejection), recorded in `todo.md` under P2.110.
+- [x] **P2.110** `[confirmed 2026-08-24]` Five of the seven workflow registration keys in
       `web/src/mastra/index.ts` differ from the workflow's own `id`, and a resume resolves by
       id, so those five would answer `MASTRA_GET_WORKFLOW_BY_ID_NOT_FOUND` the moment a step
-      in them suspends. Latent today; blocks P2.109.
+      in them suspends. Confirmed on a real suspended run, and wider than resume: the
+      `restart` and `timeTravel` branches take the same key-only lookup, so boot-time
+      recovery would have hit it too. Every key is now its workflow's `id`, and the rename
+      exposed three step-level call sites that `tsc` cannot see, which are guarded by a
+      source scan. Unblocks P2.109. [evidence](evidence/p2.md#p2110)
 - [x] **P2.111** `/posts/new` had no per-post pipeline configuration, so a post created on the
       single-post form silently took the profile's gates. Closed at P3.1a with a read-only
       `Pipeline` card that names what each of the six stages will do and links to the profile

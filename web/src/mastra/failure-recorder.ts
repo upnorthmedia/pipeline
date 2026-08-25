@@ -72,8 +72,8 @@ function executionsBeforeFailure(): number {
 
 /**
  * The workflow whose failures mark a post. The nested `images` workflow fails
- * its parent rather than standing alone, and `sitemapCrawl`, `recrawlCheck` and
- * `scaffoldCheck` are not about a post at all, so this is the only id that maps
+ * its parent rather than standing alone, and `sitemap-crawl`, `recrawl-check`
+ * and `scaffold-check` are not about a post at all, so this is the only id that maps
  * onto a row.
  */
 const PIPELINE_WORKFLOW_ID = pipelineWorkflow.id

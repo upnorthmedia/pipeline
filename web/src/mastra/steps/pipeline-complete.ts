@@ -88,12 +88,12 @@ export const pipelineCompleteStep = createStep({
       // import would close a cycle. `startAsync` publishes `workflow.start` and
       // returns the run id without waiting, which is what `enqueue_job` did.
       if (publishTargets.wordpress) {
-        await (await mastra.getWorkflow("wordpressPublish").createRun()).startAsync({
+        await (await mastra.getWorkflow("wordpress-publish").createRun()).startAsync({
           inputData: { postId: inputData.postId },
         })
       }
       if (publishTargets.nextjs) {
-        await (await mastra.getWorkflow("nextjsPublish").createRun()).startAsync({
+        await (await mastra.getWorkflow("nextjs-publish").createRun()).startAsync({
           inputData: { postId: inputData.postId },
         })
       }
