@@ -3,8 +3,8 @@ import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import PostsPage from "./page";
 import { renderWithProviders } from "@/test/render";
-import { makePost, makeProfile } from "@/test/fixtures";
-import type { Post, Profile } from "@/lib/api";
+import { makePost, makeProfileListItem } from "@/test/fixtures";
+import type { Post, ProfileListItem } from "@/lib/api";
 
 // Mock the api module
 vi.mock("@/lib/api", async () => {
@@ -55,7 +55,7 @@ const testPosts: Post[] = [
   makePost({ id: "p3", topic: "Third Post", slug: "third-post", current_stage: "write", stage_status: { research: "complete", outline: "complete", write: "running" } }),
 ];
 
-const testProfiles: Profile[] = [makeProfile({ id: "prof-1", name: "Test Site" })];
+const testProfiles: ProfileListItem[] = [makeProfileListItem({ id: "prof-1", name: "Test Site" })];
 
 beforeEach(() => {
   vi.clearAllMocks();

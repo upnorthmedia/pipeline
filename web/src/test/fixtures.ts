@@ -1,4 +1,12 @@
-import type { Post, Profile, PostAnalytics, QueueStatus, StageSettings, StageStatusMap } from "@/lib/api";
+import type {
+  Post,
+  Profile,
+  ProfileListItem,
+  PostAnalytics,
+  QueueStatus,
+  StageSettings,
+  StageStatusMap,
+} from "@/lib/api";
 
 export const defaultStageSettings: StageSettings = {
   research: "auto",
@@ -44,6 +52,17 @@ export function makeProfile(overrides?: Partial<Profile>): Profile {
     updated_at: "2025-01-01T00:00:00Z",
     ...overrides,
   };
+}
+
+/**
+ * A row as `GET /api/profiles` returns it. `post_count` only exists on the
+ * list, so the two fixtures are separate rather than one with an optional
+ * field: a test that reads the count should be using the list shape.
+ */
+export function makeProfileListItem(
+  overrides?: Partial<ProfileListItem>
+): ProfileListItem {
+  return { ...makeProfile(overrides), post_count: 0, ...overrides };
 }
 
 export function makePost(overrides?: Partial<Post>): Post {

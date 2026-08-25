@@ -8,11 +8,14 @@
  * Also ports `PATCH /api/profiles/{profile_id}` and
  * `DELETE /api/profiles/{profile_id}`.
  */
+import { rm } from "node:fs/promises"
+
 import { and, eq } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import { withServerError } from "@/lib/route-error"
+import { postMediaDir } from "@/mastra/images/media-dir"
 
 import { isUuid, profileNotFound, unprocessableUuid } from "../params"
 import { encryptCredentials } from "../secrets"
@@ -99,6 +102,14 @@ async function patchHandler(
 export const PATCH = withServerError(patchHandler)
 
 /**
+ * A query flag is a string or nothing, and a link that spells it `?with_posts`
+ * with no value means the same as `=true`. Anything else is not the flag.
+ */
+function truthyFlag(value: string | null): boolean {
+  return value === "" || value === "true" || value === "1"
+}
+
+/**
  * The refusal. Singular and plural are spelled out rather than assembled with
  * an `s`, because the sentence names the action too ("it" against "them").
  */
@@ -123,12 +134,21 @@ function profileHasPosts(count: number): Response {
  * dashboard and cannot be deleted through it. Only SQL could remove it.
  *
  * So a profile that still has posts is refused instead, with the count in the
- * sentence. Deleting the posts first is the only path, and it is one the
- * dashboard offers; silently destroying somebody's drafts as a side effect of
- * removing a profile is not a decision this handler gets to make.
+ * sentence. Silently destroying somebody's drafts as a side effect of removing
+ * a profile is not a decision this handler gets to make.
+ *
+ * `?with_posts=true` is how the caller makes it: the count is on the row and in
+ * the confirmation, so asking for it is an answer to a question that named the
+ * number. The posts go inside the same transaction as the profile, so the
+ * failure that used to strand them (profile gone, posts left with a null
+ * `profile_id`) cannot happen. Their media directories are removed afterwards,
+ * the way `DELETE /api/posts/{id}` removes one: a directory that outlives its
+ * transaction is wasted disk, a transaction rolled back after an unlink is a
+ * post with no images.
  *
  * `internal_links_profile_id_fkey` does have `ON DELETE CASCADE`, so the
- * database removes those rows without help.
+ * database removes those rows without help, and `post_media_post_id_fkey`
+ * does the same for the manifest rows of a deleted post.
  */
 async function deleteHandler(
   request: Request,
@@ -141,6 +161,7 @@ async function deleteHandler(
   if (!isUuid(id)) return unprocessableUuid(id)
 
   const owned = and(eq(websiteProfiles.id, id), eq(websiteProfiles.userId, user.id))
+  const withPosts = truthyFlag(new URL(request.url).searchParams.get("with_posts"))
 
   const deleted = await getDb().transaction(async (tx) => {
     // Ownership is settled before anything is written, so a request for
@@ -158,14 +179,19 @@ async function deleteHandler(
       .select({ id: posts.id })
       .from(posts)
       .where(eq(posts.profileId, id))
-    if (attached.length > 0) return attached.length
+    if (attached.length > 0 && !withPosts) return attached.length
 
+    if (attached.length > 0) await tx.delete(posts).where(eq(posts.profileId, id))
     await tx.delete(websiteProfiles).where(owned)
-    return "deleted"
+    return attached.map((post) => post.id)
   })
 
   if (deleted === "missing") return profileNotFound()
   if (typeof deleted === "number") return profileHasPosts(deleted)
+
+  for (const postId of deleted) {
+    await rm(postMediaDir(postId), { recursive: true, force: true })
+  }
   return new Response(null, { status: 204 })
 }
 

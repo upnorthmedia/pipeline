@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProfileSelectCard } from "@/components/profile-select-card";
 import { renderWithProviders } from "@/test/render";
-import { makeProfile } from "@/test/fixtures";
+import { makeProfileListItem } from "@/test/fixtures";
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -16,8 +16,8 @@ vi.mock("@/lib/api", async () => {
 const { profiles } = await import("@/lib/api");
 const mockList = vi.mocked(profiles.list);
 
-const firearms = makeProfile({ id: "prof-1", name: "Firearms Blog" });
-const cookware = makeProfile({ id: "prof-2", name: "Cookware Blog" });
+const firearms = makeProfileListItem({ id: "prof-1", name: "Firearms Blog" });
+const cookware = makeProfileListItem({ id: "prof-2", name: "Cookware Blog" });
 
 function renderCard(onSelect = vi.fn()) {
   renderWithProviders(

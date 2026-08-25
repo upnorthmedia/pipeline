@@ -40,13 +40,23 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { CrawlStatusBadge } from "@/components/crawl-status-badge";
 import {
   profiles,
   apiErrorMessage,
-  type Profile,
+  type ProfileListItem,
   type ProfileCreate,
 } from "@/lib/api";
 import {
@@ -69,9 +79,14 @@ function timeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
+/** "1 post" against "3 posts", so the sentence around it reads either way. */
+function countPosts(count: number): string {
+  return count === 1 ? "1 post" : `${count} posts`;
+}
+
 export default function ProfilesPage() {
   const router = useRouter();
-  const [profileList, setProfileList] = useState<Profile[]>([]);
+  const [profileList, setProfileList] = useState<ProfileListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -80,6 +95,10 @@ export default function ProfilesPage() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [formName, setFormName] = useState("");
   const [formUrl, setFormUrl] = useState("");
+  // The whole row, not the id: the confirmation names the profile and counts
+  // what the press would take with it, and both come off the row the reader
+  // was looking at when they opened the menu.
+  const [deleteTarget, setDeleteTarget] = useState<ProfileListItem | null>(null);
 
   const fetchProfiles = useCallback(async () => {
     setLoading(true);
@@ -137,10 +156,16 @@ export default function ProfilesPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (target: ProfileListItem) => {
+    const withPosts = target.post_count > 0;
     try {
-      await profiles.delete(id);
-      toast.success("Profile deleted");
+      await profiles.delete(target.id, { withPosts });
+      toast.success(
+        withPosts
+          ? `Profile and ${countPosts(target.post_count)} deleted`
+          : "Profile deleted"
+      );
+      setDeleteTarget(null);
       fetchProfiles();
     } catch (e) {
       // A profile with posts still on it is refused, and the refusal names
@@ -289,6 +314,7 @@ export default function ProfilesPage() {
             <TableRow className="hover:bg-transparent">
               <TableHead>Name</TableHead>
               <TableHead>Website URL</TableHead>
+              <TableHead className="w-[80px]">Posts</TableHead>
               <TableHead className="w-[120px]">Crawl Status</TableHead>
               <TableHead className="w-[120px]">Last Crawled</TableHead>
               <TableHead className="w-10" />
@@ -305,6 +331,9 @@ export default function ProfilesPage() {
                     <Skeleton className="h-4 w-48" />
                   </TableCell>
                   <TableCell>
+                    <Skeleton className="h-4 w-6" />
+                  </TableCell>
+                  <TableCell>
                     <Skeleton className="h-5 w-20" />
                   </TableCell>
                   <TableCell>
@@ -317,7 +346,7 @@ export default function ProfilesPage() {
               ))
             ) : error ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={5} className="h-40 text-center">
+                <TableCell colSpan={6} className="h-40 text-center">
                   <AlertCircle className="mx-auto h-5 w-5 text-destructive" />
                   <p className="mt-2 text-sm font-medium">
                     Could not load profiles
@@ -336,7 +365,7 @@ export default function ProfilesPage() {
               </TableRow>
             ) : filtered.length === 0 ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={5} className="h-40 text-center">
+                <TableCell colSpan={6} className="h-40 text-center">
                   <Globe className="h-8 w-8 mx-auto text-muted-foreground/50" />
                   {search ? (
                     <>
@@ -400,6 +429,17 @@ export default function ProfilesPage() {
                     )}
                   </TableCell>
                   <TableCell>
+                    <span
+                      className={
+                        profile.post_count === 0
+                          ? "text-sm text-muted-foreground"
+                          : "text-sm tabular-nums"
+                      }
+                    >
+                      {profile.post_count === 0 ? "None" : profile.post_count}
+                    </span>
+                  </TableCell>
+                  <TableCell>
                     <CrawlStatusBadge status={profile.crawl_status} />
                   </TableCell>
                   <TableCell>
@@ -438,7 +478,7 @@ export default function ProfilesPage() {
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
-                          onClick={() => handleDelete(profile.id)}
+                          onClick={() => setDeleteTarget(profile)}
                           className="text-destructive focus:text-destructive"
                         >
                           <Trash2 className="h-3.5 w-3.5 mr-2" />
@@ -453,6 +493,51 @@ export default function ProfilesPage() {
           </TableBody>
         </Table>
       </div>
+
+      {/* Delete confirmation. The count decides both the question and the
+          button, because the handler behind them is two different actions:
+          with posts attached it takes them too, and that is not something to
+          discover afterwards. */}
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteTarget && deleteTarget.post_count > 0
+                ? `Delete "${deleteTarget.name}" and its ${countPosts(deleteTarget.post_count)}?`
+                : `Delete "${deleteTarget?.name ?? ""}"?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget && deleteTarget.post_count > 0
+                ? `Deleting this profile deletes its ${countPosts(deleteTarget.post_count)} too, with their drafts and generated images. This cannot be undone.`
+                : "This profile has no posts. Its internal links and publishing settings go with it. This cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            {/*
+              `variant`, not a `className` override: `AlertDialogAction` puts
+              the child's class inside its own `Button` through a `Slot`, which
+              concatenates the two lists instead of merging them.
+            */}
+            <AlertDialogAction
+              variant="destructive"
+              onClick={(e) => {
+                // The dialog is dismissed by `handleDelete` on success, so a
+                // refusal keeps the question on screen beside its reason.
+                e.preventDefault();
+                if (deleteTarget) handleDelete(deleteTarget);
+              }}
+            >
+              {deleteTarget && deleteTarget.post_count > 0
+                ? `Delete profile and ${countPosts(deleteTarget.post_count)}`
+                : "Delete profile"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

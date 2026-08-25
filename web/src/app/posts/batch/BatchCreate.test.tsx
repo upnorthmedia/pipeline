@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import BatchCreatePage from "./page";
 import { renderWithProviders } from "@/test/render";
-import { makeProfile } from "@/test/fixtures";
+import { makeProfileListItem } from "@/test/fixtures";
 
 const mockPush = vi.fn();
 
@@ -54,7 +54,7 @@ const mockBatchCreate = vi.mocked(posts.batchCreate);
  * picker selects for the page.
  */
 async function renderWithOneProfile() {
-  mockProfilesList.mockResolvedValue([makeProfile({ id: "prof-1", name: "Test Site" })]);
+  mockProfilesList.mockResolvedValue([makeProfileListItem({ id: "prof-1", name: "Test Site" })]);
   renderWithProviders(<BatchCreatePage />);
   await waitFor(() =>
     expect(screen.getByRole("combobox", { name: "Website profile" })).toHaveTextContent(
@@ -85,7 +85,7 @@ describe("BatchCreatePage", () => {
   });
 
   it("names what the batch's gates will do", async () => {
-    mockProfilesList.mockResolvedValue([makeProfile({ name: "Test Site" })]);
+    mockProfilesList.mockResolvedValue([makeProfileListItem({ name: "Test Site" })]);
     renderWithProviders(<BatchCreatePage />);
     // No profile picked yet: the six stages still have an effective mode.
     expect(await screen.findByTestId("gate-research")).toBeInTheDocument();
@@ -96,7 +96,7 @@ describe("BatchCreatePage", () => {
   });
 
   it("says the gates apply to the batch, not to one run", async () => {
-    mockProfilesList.mockResolvedValue([makeProfile({ name: "Test Site" })]);
+    mockProfilesList.mockResolvedValue([makeProfileListItem({ name: "Test Site" })]);
     renderWithProviders(<BatchCreatePage />);
     expect(
       await screen.findByText(
@@ -107,7 +107,7 @@ describe("BatchCreatePage", () => {
 
   it("links the batch gates at the profile that owns them once one is picked", async () => {
     const user = userEvent.setup();
-    mockProfilesList.mockResolvedValue([makeProfile({ id: "prof-1", name: "Test Site" })]);
+    mockProfilesList.mockResolvedValue([makeProfileListItem({ id: "prof-1", name: "Test Site" })]);
     renderWithProviders(<BatchCreatePage />);
     await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
     await user.click(await screen.findByRole("option", { name: "Test Site" }));
@@ -118,7 +118,7 @@ describe("BatchCreatePage", () => {
   });
 
   it("renders profile selector", async () => {
-    mockProfilesList.mockResolvedValue([makeProfile({ name: "Test Site" }), makeProfile()]);
+    mockProfilesList.mockResolvedValue([makeProfileListItem({ name: "Test Site" }), makeProfileListItem()]);
     renderWithProviders(<BatchCreatePage />);
     expect(
       await screen.findByRole("combobox", { name: "Website profile" })
@@ -127,7 +127,7 @@ describe("BatchCreatePage", () => {
 
   it("cannot submit until a profile is picked", async () => {
     const user = userEvent.setup();
-    mockProfilesList.mockResolvedValue([makeProfile({ name: "A" }), makeProfile({ name: "B" })]);
+    mockProfilesList.mockResolvedValue([makeProfileListItem({ name: "A" }), makeProfileListItem({ name: "B" })]);
     renderWithProviders(<BatchCreatePage />);
     await user.click(screen.getByText("Manual Entry"));
     await user.type(screen.getByPlaceholderText("Topic"), "Test Blog Post");
@@ -248,7 +248,7 @@ describe("BatchCreatePage", () => {
   });
 
   it("applies the chosen profile's defaults to every row", async () => {
-    const profile = makeProfile({
+    const profile = makeProfileListItem({
       id: "prof-batch",
       name: "Batch Site",
       niche: "Optics",

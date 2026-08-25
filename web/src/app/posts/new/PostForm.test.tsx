@@ -3,7 +3,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import NewPostPage from "./page";
 import { renderWithProviders } from "@/test/render";
-import { defaultStageSettings, makeProfile } from "@/test/fixtures";
+import { defaultStageSettings, makeProfileListItem } from "@/test/fixtures";
 
 const mockPush = vi.fn();
 
@@ -49,7 +49,7 @@ const mockProfilesList = vi.mocked(profiles.list);
 const mockWpCategories = vi.mocked(profiles.wpCategories);
 const mockWpAuthors = vi.mocked(profiles.wpAuthors);
 
-const testProfile = makeProfile({
+const testProfile = makeProfileListItem({
   id: "prof-1",
   name: "Firearms Blog",
   niche: "Firearms",
@@ -82,7 +82,7 @@ beforeEach(() => {
  * picker selects for the page.
  */
 async function renderWithOneProfile() {
-  mockProfilesList.mockResolvedValue([makeProfile({ id: "prof-1", name: "Test Site" })]);
+  mockProfilesList.mockResolvedValue([makeProfileListItem({ id: "prof-1", name: "Test Site" })]);
   renderWithProviders(<NewPostPage />);
   await waitFor(() =>
     expect(screen.getByRole("combobox", { name: "Website profile" })).toHaveTextContent(
@@ -182,8 +182,8 @@ describe("NewPostPage", () => {
   it("cannot submit until a profile is picked", async () => {
     const user = userEvent.setup();
     mockProfilesList.mockResolvedValue([
-      makeProfile({ id: "prof-1", name: "A" }),
-      makeProfile({ id: "prof-2", name: "B" }),
+      makeProfileListItem({ id: "prof-1", name: "A" }),
+      makeProfileListItem({ id: "prof-2", name: "B" }),
     ]);
     renderWithProviders(<NewPostPage />);
     await user.type(screen.getByLabelText(/Topic/), "Test Post");
@@ -260,7 +260,7 @@ describe("NewPostPage", () => {
   // wrong password fails here and nowhere else. Silent, it reads as a site
   // with no categories.
   it("surfaces a WordPress lookup failure with a retry", async () => {
-    const wpProfile = makeProfile({
+    const wpProfile = makeProfileListItem({
       id: "prof-wp",
       name: "WP Site",
       wp_url: "https://wp.example.com",
@@ -354,7 +354,7 @@ describe("NewPostPage", () => {
 
     it("opens WordPress up for a profile that has all three credentials", async () => {
       mockProfilesList.mockResolvedValue([
-        makeProfile({
+        makeProfileListItem({
           id: "prof-wp",
           name: "WP Site",
           wp_url: "https://wp.example.com",
@@ -384,7 +384,7 @@ describe("NewPostPage", () => {
      */
     it("keeps WordPress closed for a profile whose app password was never saved", async () => {
       mockProfilesList.mockResolvedValue([
-        makeProfile({
+        makeProfileListItem({
           id: "prof-half",
           name: "Half Set Up",
           wp_url: "https://wp.example.com",
@@ -434,7 +434,7 @@ describe("NewPostPage", () => {
    * `stage_settings` inherits the profile's, a submitted one is kept as sent.
    */
   describe("pipeline gates", () => {
-    const gatedProfile = makeProfile({
+    const gatedProfile = makeProfileListItem({
       id: "prof-gated",
       name: "Gated Blog",
       default_stage_settings: {

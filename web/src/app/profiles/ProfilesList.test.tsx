@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ProfilesPage from "./page";
 import { renderWithProviders } from "@/test/render";
-import { makeProfile } from "@/test/fixtures";
-import type { Profile } from "@/lib/api";
+import { makeProfileListItem } from "@/test/fixtures";
+import type { ProfileListItem } from "@/lib/api";
 
 const mockPush = vi.fn();
 
@@ -50,10 +50,24 @@ void vi.mocked(profiles.create);
 void vi.mocked(profiles.delete);
 void vi.mocked(profiles.crawl);
 
-const testProfiles: Profile[] = [
-  makeProfile({ id: "prof-1", name: "Test Site", website_url: "https://example.com" }),
-  makeProfile({ id: "prof-2", name: "Another Site", website_url: "https://another.com" }),
+const testProfiles: ProfileListItem[] = [
+  makeProfileListItem({
+    id: "prof-1",
+    name: "Test Site",
+    website_url: "https://example.com",
+  }),
+  makeProfileListItem({
+    id: "prof-2",
+    name: "Another Site",
+    website_url: "https://another.com",
+  }),
 ];
+
+/** Open the row menu of the first profile and press Delete. */
+async function openDeleteConfirm(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getAllByRole("button", { name: "Row actions" })[0]);
+  await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -154,7 +168,7 @@ describe("ProfilesPage", () => {
 
   it("shows crawl status badges", async () => {
     mockList.mockResolvedValue([
-      makeProfile({ id: "prof-1", name: "Test Site", crawl_status: "complete" }),
+      makeProfileListItem({ id: "prof-1", name: "Test Site", crawl_status: "complete" }),
     ]);
     renderWithProviders(<ProfilesPage />);
     await waitFor(() => {
@@ -164,7 +178,7 @@ describe("ProfilesPage", () => {
 
   it("shows Never for uncrawled profiles", async () => {
     mockList.mockResolvedValue([
-      makeProfile({ id: "prof-1", name: "Test Site", last_crawled_at: null }),
+      makeProfileListItem({ id: "prof-1", name: "Test Site", last_crawled_at: null }),
     ]);
     renderWithProviders(<ProfilesPage />);
     await waitFor(() => {
@@ -236,8 +250,8 @@ describe("ProfilesPage", () => {
       expect(screen.getByText("Test Site")).toBeInTheDocument();
     });
 
-    await user.click(screen.getAllByRole("button", { name: "Row actions" })[0]);
-    await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
+    await openDeleteConfirm(user);
+    await user.click(await screen.findByRole("button", { name: "Delete profile" }));
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith(
@@ -255,12 +269,117 @@ describe("ProfilesPage", () => {
       expect(screen.getByText("Test Site")).toBeInTheDocument();
     });
 
-    await user.click(screen.getAllByRole("button", { name: "Row actions" })[0]);
-    await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
+    await openDeleteConfirm(user);
+    await user.click(await screen.findByRole("button", { name: "Delete profile" }));
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith("The profile could not be deleted.");
     });
+  });
+
+  /**
+   * The row menu used to delete on the press itself, with no confirmation and
+   * nothing on the row saying what the profile still held. Both halves are
+   * here: the count is on the row before the menu is opened, and the press
+   * only opens a question.
+   */
+  it("shows how many posts each profile holds", async () => {
+    mockList.mockResolvedValue([
+      makeProfileListItem({ id: "prof-1", name: "Busy Site", post_count: 3 }),
+      makeProfileListItem({ id: "prof-2", name: "Empty Site", post_count: 0 }),
+    ]);
+    renderWithProviders(<ProfilesPage />);
+
+    const busy = (await screen.findByText("Busy Site")).closest("tr")!;
+    expect(within(busy).getByText("3")).toBeInTheDocument();
+    const empty = screen.getByText("Empty Site").closest("tr")!;
+    expect(within(empty).getByText("None")).toBeInTheDocument();
+  });
+
+  it("asks before deleting and deletes nothing until the question is answered", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ProfilesPage />);
+    await screen.findByText("Test Site");
+
+    await openDeleteConfirm(user);
+
+    expect(
+      await screen.findByRole("heading", { name: 'Delete "Test Site"?' })
+    ).toBeInTheDocument();
+    expect(profiles.delete).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("heading", { name: 'Delete "Test Site"?' })
+      ).not.toBeInTheDocument();
+    });
+    expect(profiles.delete).not.toHaveBeenCalled();
+  });
+
+  it("deletes a profile with no posts once confirmed", async () => {
+    const user = userEvent.setup();
+    vi.mocked(profiles.delete).mockResolvedValueOnce(undefined);
+    renderWithProviders(<ProfilesPage />);
+    await screen.findByText("Test Site");
+
+    await openDeleteConfirm(user);
+    expect(
+      screen.getByText(/This profile has no posts\./)
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Delete profile" }));
+
+    await waitFor(() => {
+      expect(profiles.delete).toHaveBeenCalledWith("prof-1", { withPosts: false });
+    });
+    expect(toast.success).toHaveBeenCalledWith("Profile deleted");
+  });
+
+  /**
+   * The refusal is still the default, so the cascade has to be a separate
+   * press with the number in it. Before this the only path was clearing fifty
+   * posts from `/` twenty at a time.
+   */
+  it("offers to take the posts with the profile, naming how many", async () => {
+    const user = userEvent.setup();
+    mockList.mockResolvedValue([
+      makeProfileListItem({ id: "prof-1", name: "Busy Site", post_count: 3 }),
+    ]);
+    vi.mocked(profiles.delete).mockResolvedValueOnce(undefined);
+    renderWithProviders(<ProfilesPage />);
+    await screen.findByText("Busy Site");
+
+    await openDeleteConfirm(user);
+
+    expect(
+      await screen.findByRole("heading", { name: 'Delete "Busy Site" and its 3 posts?' })
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Delete profile and 3 posts" })
+    );
+
+    await waitFor(() => {
+      expect(profiles.delete).toHaveBeenCalledWith("prof-1", { withPosts: true });
+    });
+    expect(toast.success).toHaveBeenCalledWith("Profile and 3 posts deleted");
+  });
+
+  it("says post rather than posts when there is one", async () => {
+    const user = userEvent.setup();
+    mockList.mockResolvedValue([
+      makeProfileListItem({ id: "prof-1", name: "One Site", post_count: 1 }),
+    ]);
+    renderWithProviders(<ProfilesPage />);
+    await screen.findByText("One Site");
+
+    await openDeleteConfirm(user);
+
+    expect(
+      await screen.findByRole("heading", { name: 'Delete "One Site" and its 1 post?' })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Delete profile and 1 post" })
+    ).toBeInTheDocument();
   });
 
   it("clears the search from the no-match empty state", async () => {
@@ -306,13 +425,17 @@ describe("ProfilesPage", () => {
  * screen and said nothing about it.
  */
 describe("ProfilesPage, a stored URL carrying a password", () => {
-  const credentialed: Profile[] = [
-    makeProfile({
+  const credentialed: ProfileListItem[] = [
+    makeProfileListItem({
       id: "prof-1",
       name: "Old Site",
       website_url: "https://admin:hunter2@old.example.com",
     }),
-    makeProfile({ id: "prof-2", name: "Clean Site", website_url: "https://clean.example.com" }),
+    makeProfileListItem({
+      id: "prof-2",
+      name: "Clean Site",
+      website_url: "https://clean.example.com",
+    }),
   ];
 
   beforeEach(() => {

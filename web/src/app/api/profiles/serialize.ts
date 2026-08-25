@@ -65,6 +65,18 @@ export interface ProfileResponse {
 }
 
 /**
+ * `GET /api/profiles` answers this instead, one field wider than `ProfileRead`
+ * ever was. The list is the only screen that offers to delete a profile, and
+ * `DELETE /api/profiles/{id}` either refuses over the attached posts or, when
+ * asked, takes them with it; a row that says nothing about how many there are
+ * makes both outcomes a surprise. Counted in the same query as the list rather
+ * than one request per row.
+ */
+export interface ProfileListResponse extends ProfileResponse {
+  post_count: number
+}
+
+/**
  * The stage map `ProfileBase.default_stage_settings` falls back to. It is not
  * the column's server default, which Alembic wrote as a five-key `"review"`
  * map; a null column reached Pydantic as a missing value and picked up this

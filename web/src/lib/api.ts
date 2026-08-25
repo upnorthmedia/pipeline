@@ -64,6 +64,17 @@ export interface Profile {
   updated_at: string;
 }
 
+/**
+ * What `GET /api/profiles` answers, one field wider than a `Profile`. The list
+ * is the only screen that offers to delete a profile, and the delete either
+ * refuses over the attached posts or takes them with it, so the row has to say
+ * how many there are before the press. `GET /api/profiles/{id}` does not carry
+ * it: nothing on the detail page deletes.
+ */
+export interface ProfileListItem extends Profile {
+  post_count: number;
+}
+
 export interface ProfileCreate {
   name: string;
   website_url: string;
@@ -501,7 +512,7 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
 // --- Profiles ---
 
 export const profiles = {
-  list: () => request<Profile[]>("/api/profiles"),
+  list: () => request<ProfileListItem[]>("/api/profiles"),
 
   create: (data: ProfileCreate) =>
     request<Profile>("/api/profiles", {
@@ -517,8 +528,16 @@ export const profiles = {
       body: JSON.stringify(data),
     }),
 
-  delete: (id: string) =>
-    request<void>(`/api/profiles/${id}`, { method: "DELETE" }),
+  /**
+   * `withPosts` is the caller saying yes to a count it has already been shown.
+   * Without it the handler refuses a profile that still has posts, which is
+   * the safe default and the one every other caller wants.
+   */
+  delete: (id: string, options?: { withPosts?: boolean }) =>
+    request<void>(
+      `/api/profiles/${id}${options?.withPosts ? "?with_posts=true" : ""}`,
+      { method: "DELETE" }
+    ),
 
   crawl: (id: string) =>
     request<{ status: string }>(`/api/profiles/${id}/crawl`, {

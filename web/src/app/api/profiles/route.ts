@@ -4,29 +4,39 @@
  * Rows are scoped to the authenticated user by `website_profiles.user_id`
  * (Alembic 010) and ordered newest first, matching the Python query exactly.
  */
-import { desc, eq } from "drizzle-orm"
+import { desc, eq, sql } from "drizzle-orm"
 
-import { getDb, websiteProfiles } from "@/db"
+import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import { withServerError } from "@/lib/route-error"
 import { logger } from "@/mastra"
 import { startSitemapCrawl } from "@/mastra/start-crawl"
 
 import { encryptCredentials } from "./secrets"
-import { serializeProfile, type ProfileResponse } from "./serialize"
+import { serializeProfile, type ProfileListResponse } from "./serialize"
 import { invalidJsonBody, profileCreateSchema, toColumns, unprocessableBody } from "./validation"
 
 async function getHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
   if (!user) return unauthorized()
 
+  // The left join keeps a profile with no posts in the list, and grouping by
+  // the primary key is enough for Postgres to accept every other column.
   const rows = await getDb()
-    .select()
+    .select({
+      profile: websiteProfiles,
+      postCount: sql<number>`count(${posts.id})`.mapWith(Number),
+    })
     .from(websiteProfiles)
+    .leftJoin(posts, eq(posts.profileId, websiteProfiles.id))
     .where(eq(websiteProfiles.userId, user.id))
+    .groupBy(websiteProfiles.id)
     .orderBy(desc(websiteProfiles.createdAt))
 
-  const body: ProfileResponse[] = rows.map(serializeProfile)
+  const body: ProfileListResponse[] = rows.map((row) => ({
+    ...serializeProfile(row.profile),
+    post_count: row.postCount,
+  }))
   return Response.json(body)
 }
 

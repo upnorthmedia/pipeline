@@ -106,9 +106,10 @@ function patch(id: string, body: unknown, cookie?: string) {
   )
 }
 
-/** `DELETE /api/profiles/{id}`. */
-function del(id: string, cookie?: string) {
-  return deleteProfile(apiRequest(`${URL}/${id}`, { method: "DELETE", cookie }), {
+/** `DELETE /api/profiles/{id}`, optionally asking for the posts to go with it. */
+function del(id: string, cookie?: string, withPosts = false) {
+  const query = withPosts ? "?with_posts=true" : ""
+  return deleteProfile(apiRequest(`${URL}/${id}${query}`, { method: "DELETE", cookie }), {
     params: Promise.resolve({ id }),
   })
 }
@@ -227,6 +228,7 @@ describe("GET /api/profiles", () => {
       "nextjs_webhook_url",
       "niche",
       "output_format",
+      "post_count",
       "recrawl_interval",
       "related_keywords",
       "required_mentions",
@@ -334,6 +336,48 @@ describe("GET /api/profiles", () => {
     })
     expect(profile.crawl_status).toBe("pending")
     expect(profile.wp_default_status).toBeNull()
+  })
+})
+
+/**
+ * The list is the only screen that offers to delete a profile, and until this
+ * count existed the row said nothing about what the press would take with it.
+ * The refusal (and now the cascade) is counted server side inside the delete's
+ * own transaction; this is the same number read ahead of the press, so the
+ * dialog can name it.
+ */
+describe("GET /api/profiles post_count", () => {
+  it("reports how many posts each profile has", async () => {
+    const empty = await insertProfile(user.userId, { name: "Empty" })
+    const busy = await insertProfile(user.userId, { name: "Busy" })
+    await db.insert(posts).values([
+      { profileId: busy, slug: `${PREFIX}count-one`, topic: "One" },
+      { profileId: busy, slug: `${PREFIX}count-two`, topic: "Two" },
+    ])
+
+    const body = (await (
+      await listProfiles(apiRequest(URL, { cookie: user.cookie }))
+    ).json()) as Array<{ id: string; post_count: number }>
+
+    const counts = Object.fromEntries(body.map((p) => [p.id, p.post_count]))
+    expect(counts[busy]).toBe(2)
+    expect(counts[empty]).toBe(0)
+  })
+
+  it("does not count another user's posts", async () => {
+    const mine = await insertProfile(user.userId, { name: "Mine" })
+    const theirs = await insertProfile(other.userId, { name: "Theirs" })
+    await db.insert(posts).values([
+      { profileId: mine, slug: `${PREFIX}mine`, topic: "Mine" },
+      { profileId: theirs, slug: `${PREFIX}theirs-count`, topic: "Theirs" },
+    ])
+
+    const body = (await (
+      await listProfiles(apiRequest(URL, { cookie: user.cookie }))
+    ).json()) as Array<{ id: string; post_count: number }>
+
+    expect(body).toHaveLength(1)
+    expect(body[0].post_count).toBe(1)
   })
 })
 
@@ -825,6 +869,68 @@ describe("DELETE /api/profiles/[id]", () => {
     await db.insert(posts).values({ profileId: other, slug: `${PREFIX}elsewhere`, topic: "Else" })
 
     expect((await del(id, user.cookie)).status).toBe(204)
+  })
+
+  /**
+   * The refusal above is the safe default, but it left an account with fifty
+   * posts on one profile clearing them from `/` twenty at a time. `with_posts`
+   * is the deliberate second answer: the caller has read the count and said
+   * yes to it, so the posts go in the same transaction as the profile rather
+   * than being stranded with a null `profile_id` the way the pre-P4.7 handler
+   * left them.
+   */
+  it("deletes the profile and its posts when with_posts is asked for", async () => {
+    const id = await insertProfile(user.userId)
+    const [post] = await db
+      .insert(posts)
+      .values([
+        { profileId: id, slug: `${PREFIX}cascade-one`, topic: "One" },
+        { profileId: id, slug: `${PREFIX}cascade-two`, topic: "Two" },
+      ])
+      .returning({ id: posts.id })
+
+    const response = await del(id, user.cookie, true)
+
+    expect(response.status).toBe(204)
+    expect(await readRow(id)).toBeUndefined()
+    expect(await db.select().from(posts).where(eq(posts.profileId, id))).toEqual([])
+    expect(await db.select().from(posts).where(eq(posts.id, post.id))).toEqual([])
+  })
+
+  it("deletes a profile with no posts when with_posts is asked for", async () => {
+    const id = await insertProfile(user.userId)
+
+    expect((await del(id, user.cookie, true)).status).toBe(204)
+    expect(await readRow(id)).toBeUndefined()
+  })
+
+  it("leaves other profiles' posts alone when cascading", async () => {
+    const id = await insertProfile(user.userId)
+    const keep = await insertProfile(user.userId, { name: "Keep" })
+    await db.insert(posts).values({ profileId: id, slug: `${PREFIX}goes`, topic: "Goes" })
+    const [kept] = await db
+      .insert(posts)
+      .values({ profileId: keep, slug: `${PREFIX}stays`, topic: "Stays" })
+      .returning({ id: posts.id })
+
+    expect((await del(id, user.cookie, true)).status).toBe(204)
+
+    expect(await db.select().from(posts).where(eq(posts.id, kept.id))).toHaveLength(1)
+  })
+
+  it("404s on another user's profile even with with_posts, and deletes none of their posts", async () => {
+    const id = await insertProfile(other.userId, { name: "Not yours" })
+    const [post] = await db
+      .insert(posts)
+      .values({ profileId: id, slug: `${PREFIX}theirs-cascade`, topic: "Theirs" })
+      .returning({ id: posts.id })
+
+    const response = await del(id, user.cookie, true)
+
+    expect(response.status).toBe(404)
+    expect(await readRow(id)).toBeDefined()
+    const [untouched] = await db.select().from(posts).where(eq(posts.id, post.id))
+    expect(untouched.profileId).toBe(id)
   })
 
   it("404s for an id that does not exist", async () => {

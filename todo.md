@@ -40,16 +40,17 @@
   changed while it could not be run; `pnpm posts:orphans --delete` cleans up after it.
   Found under P4.7.
 
-- [confirmed] 2026-08-25 There is no "delete this profile and its posts" path anywhere, and
-  no post count on a profile before the Delete press. Since P4.7 a profile with posts answers
-  409 and names the count, so an account with fifty posts on one profile has to clear them
-  from `/` first, twenty at a time. Filed as the cost of that refusal, not as a regression.
-  Found under P4.7.
+- [investigate] 2026-08-25 The `post_count` the `/profiles` delete dialog names is read once
+  per list fetch, so a post created in another tab between the fetch and the press makes the
+  agreed sentence off by one. The server counts again inside its own transaction, so the
+  outcome is right and the 409 branch still exists, but that branch is now unreachable from
+  this UI and is covered only by a recorded rejection. Found under P5.4.
 
-- [confirmed] 2026-08-25 Deleting a profile with no posts is still one unconfirmed click in
-  the `/profiles` row menu, and it is irreversible. P4.7 blocked only the case that destroys
-  posts. `AlertDialog` is already used for the two delete confirmations on `/` (polish ledger
-  P4.8). Found under P4.7.
+- [investigate] 2026-08-25 `?with_posts=true` removes each deleted post's media directory
+  after the transaction commits, with no retry and nothing sweeping the leftovers, and
+  `execution_logs.post_id` is `ON DELETE SET NULL` so the log rows outlive their posts. Both
+  match what `DELETE /api/posts/{id}` already does; filed because "delete the profile and its
+  posts" reads like it deletes everything they wrote. Found under P5.4.
 
 - [investigate] 2026-08-24 A credentialed `website_url` is still matched by the profiles
   list search, which reads `profile.website_url` while the row renders the stripped value

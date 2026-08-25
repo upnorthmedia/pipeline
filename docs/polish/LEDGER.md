@@ -1152,11 +1152,26 @@ section is in [`evidence/p5.md`](evidence/p5.md).
       `ui/p53-after-parked-says-where-it-stopped.png`,
       `ui/p53-after-cleared-gate-released-the-run.png`.
       [evidence](evidence/p5.md#p53)
-- [ ] **P5.4** Deleting a profile is one unconfirmed, irreversible click in the
-      `/profiles` row menu, and the row shows no post count before the press.
-      P4.7 blocked only the case that destroys posts. Batch with: there is no
-      "delete this profile and its posts" path anywhere, so an account with fifty
-      posts on one profile has to clear them from `/` twenty at a time.
+- [x] **P5.4** Deleting a profile was one unconfirmed, irreversible click in the
+      `/profiles` row menu, on a row that said nothing about what the press
+      would take with it: P4.7's 409 was the first the reader heard of the
+      attached posts, and the refusal was the only answer anywhere, so fifty
+      posts on one profile meant clearing them from `/` twenty at a time.
+      `GET /api/profiles` now left-joins `posts` for a `post_count` on a new
+      `ProfileListResponse` (the detail route does not carry it, because
+      nothing there deletes), the list renders it as a `Posts` column, and the
+      menu item opens an `AlertDialog` whose question and button both come off
+      that count: `Delete "E2E Post Editor Site" and its 2 posts?` /
+      `Delete profile and 2 posts`, against `Delete profile` at zero. Saying
+      yes sends `?with_posts=true`, which deletes the posts inside the same
+      transaction as the profile and then their media directories; without the
+      flag the handler still refuses with the count. Proven on the real
+      database in six route cases and end to end in a browser: three posts, one
+      press, `Profile and 3 posts deleted`, and both counts zero in Postgres
+      afterwards. `ui/p54-before-no-count-no-confirm.png`,
+      `ui/p54-after-confirm-names-the-posts.png`,
+      `ui/p54-after-confirm-empty-profile.png`.
+      [evidence](evidence/p5.md#p54)
 - [ ] **P5.5** A run paused after its last stage can only be finished from
       `/posts/[id]`: the posts list and `/monitor` get the right badge from
       `isPausedBeforeFinish()` but neither carries the `Finish this run` button.
