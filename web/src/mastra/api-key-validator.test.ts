@@ -10,10 +10,10 @@
  * responses replayed below are the real ones, recorded on 2026-08-22 by
  * calling each endpoint with a deliberately invalid key.
  *
- * The live smoke against a real credential is `validates a real key end to
- * end` at the bottom, which runs only when `GEMINI_API_KEY` is set. Anthropic
- * and Perplexity have no equivalent here because this environment holds no key
- * for either; that gap is recorded in the ledger.
+ * The live smokes against real credentials are at the bottom, each gated on
+ * the key it needs being in the environment. Stubs only ever prove a validator
+ * is self-consistent with the shape the stub was written to: it took a live
+ * call to find that Perplexity had started rejecting the one-token probe.
  */
 import { describe, expect, it } from "vitest"
 
@@ -22,6 +22,7 @@ import {
   ANTHROPIC_MESSAGES_URL,
   ANTHROPIC_VALIDATION_MODEL,
   PERPLEXITY_CHAT_URL,
+  PERPLEXITY_VALIDATION_MAX_TOKENS,
   PERPLEXITY_VALIDATION_MODEL,
   validateAnthropic,
   validateGemini,
@@ -155,7 +156,7 @@ describe("validateAnthropic", () => {
 })
 
 describe("validatePerplexity", () => {
-  it("sends the one-token completion the Python validator sent", async () => {
+  it("sends the smallest completion the provider will accept", async () => {
     const sent = stubFetch(() => reply(200, JSON.stringify({ id: "cmpl_ok" })))
 
     const result = await validatePerplexity("pplx-valid")
@@ -166,9 +167,39 @@ describe("validatePerplexity", () => {
     expect(sent[0].headers.get("authorization")).toBe("Bearer pplx-valid")
     expect(sent[0].body).toEqual({
       model: PERPLEXITY_VALIDATION_MODEL,
-      max_tokens: 1,
+      max_tokens: PERPLEXITY_VALIDATION_MAX_TOKENS,
       messages: [{ role: "user", content: "hi" }],
     })
+  })
+
+  /**
+   * Regression. Python asked for `max_tokens: 1` and the port carried that
+   * over, but `api.perplexity.ai` answers it with `400 max_tokens must be at
+   * least 16` (confirmed live on 2026-08-25 against a working key). Every
+   * Perplexity key was therefore stored as invalid, whatever it was, and the
+   * settings page reported the 400's message as the reason.
+   */
+  it("asks for at least the 16 tokens the provider requires", async () => {
+    expect(PERPLEXITY_VALIDATION_MAX_TOKENS).toBeGreaterThanOrEqual(16)
+
+    const sent = stubFetch((request) =>
+      (request.body as { max_tokens: number }).max_tokens < 16
+        ? reply(
+            400,
+            JSON.stringify({
+              error: {
+                message: "max_tokens must be at least 16",
+                type: "invalid_request",
+                code: 400,
+                param: "max_tokens",
+              },
+            }),
+          )
+        : reply(200, JSON.stringify({ id: "cmpl_ok" })),
+    )
+
+    expect(await validatePerplexity("pplx-valid")).toEqual({ valid: true, error: null })
+    expect(sent).toHaveLength(1)
   })
 
   it("reports a 401 as 'Invalid API key'", async () => {
@@ -286,15 +317,42 @@ describe("validateKeys", () => {
  * Listing models is metadata-only, so this stays green on the zero-quota key
  * this environment holds, which a generation probe would not.
  */
-describe.skipIf(!process.env.GEMINI_API_KEY)("live provider smoke", () => {
-  it("validates a real Gemini key against the real endpoint", async () => {
+describe("live provider smoke", () => {
+  it.skipIf(!process.env.ANTHROPIC_API_KEY)(
+    "validates a real Anthropic key against the real endpoint",
+    async () => {
+      expect(await validateAnthropic(process.env.ANTHROPIC_API_KEY!)).toEqual({
+        valid: true,
+        error: null,
+      })
+    },
+    30_000,
+  )
+
+  /**
+   * The one that would have caught the `max_tokens: 1` rejection: the stub
+   * above cannot, because it is the provider's own request validation that
+   * changed.
+   */
+  it.skipIf(!process.env.PERPLEXITY_API_KEY)(
+    "validates a real Perplexity key against the real endpoint",
+    async () => {
+      expect(await validatePerplexity(process.env.PERPLEXITY_API_KEY!)).toEqual({
+        valid: true,
+        error: null,
+      })
+    },
+    30_000,
+  )
+
+  it.skipIf(!process.env.GEMINI_API_KEY)("validates a real Gemini key against the real endpoint", async () => {
     expect(await validateGemini(process.env.GEMINI_API_KEY!)).toEqual({
       valid: true,
       error: null,
     })
   }, 30_000)
 
-  it("rejects a malformed key against the real endpoint", async () => {
+  it.skipIf(!process.env.GEMINI_API_KEY)("rejects a malformed key against the real endpoint", async () => {
     expect(await validateGemini("AIzaNotARealKey")).toEqual({
       valid: false,
       error: "Invalid API key",

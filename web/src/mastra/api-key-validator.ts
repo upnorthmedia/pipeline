@@ -37,6 +37,19 @@ export const ANTHROPIC_VALIDATION_MODEL = "claude-haiku-4-5-20251001"
 /** The model the Perplexity probe names, from `validate_perplexity()`. */
 export const PERPLEXITY_VALIDATION_MODEL = "sonar"
 
+/**
+ * Perplexity's floor for `max_tokens`, and the whole of the probe's budget.
+ *
+ * Python asked for 1 and this port carried that over, but `sonar` now answers
+ * a request under 16 with `400 {"message": "max_tokens must be at least 16"}`
+ * (confirmed live on 2026-08-25 with a working key). The probe never reached
+ * the credential check, so every Perplexity key was stored as invalid and the
+ * settings page showed the provider's complaint about `max_tokens` as if it
+ * were a verdict on the key. The reply is discarded either way; the cost of
+ * the extra fifteen tokens is a fraction of a cent per save.
+ */
+export const PERPLEXITY_VALIDATION_MAX_TOKENS = 16
+
 /** `anthropic-version` is required on every Messages API request. */
 export const ANTHROPIC_API_VERSION = "2023-06-01"
 
@@ -110,7 +123,7 @@ export async function validateAnthropic(apiKey: string): Promise<ValidationResul
   }
 }
 
-/** A one-token completion, the same probe `validate_perplexity()` made. */
+/** The smallest completion Perplexity accepts, the probe `validate_perplexity()` made. */
 export async function validatePerplexity(apiKey: string): Promise<ValidationResult> {
   if (!apiKey) return NO_KEY
   try {
@@ -119,7 +132,7 @@ export async function validatePerplexity(apiKey: string): Promise<ValidationResu
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model: PERPLEXITY_VALIDATION_MODEL,
-        max_tokens: 1,
+        max_tokens: PERPLEXITY_VALIDATION_MAX_TOKENS,
         messages: [{ role: "user", content: "hi" }],
       }),
       signal: AbortSignal.timeout(VALIDATION_TIMEOUT_MS),
