@@ -434,6 +434,27 @@ export interface PaginatedLogs {
 
 // --- Fetch wrapper ---
 
+/**
+ * A 401 from any handler means this browser is holding a session the server no
+ * longer accepts, so send it to sign in.
+ *
+ * `src/proxy.ts` gates pages on the presence of `better-auth.session_token`
+ * rather than its validity, which is the right call at the edge but means a
+ * stale cookie renders the entire authenticated shell while every request
+ * behind it answers 401. Without this the user is stranded on a dashboard
+ * whose data never loads, looking at a Retry button that cannot succeed, with
+ * no route back to the sign-in page because the proxy keeps letting them in.
+ *
+ * `replace` rather than `assign` so the dead page does not sit in history, and
+ * the auth routes are exempt so a failed sign-in attempt does not reload
+ * itself in a loop.
+ */
+function endStaleSession(): void {
+  if (typeof window === "undefined") return;
+  if (window.location.pathname.startsWith("/auth")) return;
+  window.location.replace("/auth/sign-in");
+}
+
 class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -456,6 +477,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!res.ok) {
+    if (res.status === 401) endStaleSession();
     const body = await res.text();
     throw new ApiError(res.status, body);
   }

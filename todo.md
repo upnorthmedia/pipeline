@@ -1,5 +1,14 @@
 # todo
 
+- [confirmed] 2026-08-25 A stale or expired `better-auth.session_token` strands the user in the
+  authenticated shell with no way out. `src/proxy.ts` gates pages on the cookie's presence
+  rather than its validity (deliberate, validation is server-side), so every page answers 200
+  and renders, while every route handler answers 401 `{"detail":"Not authenticated"}`. Fixed
+  the client half: `request()` in `src/lib/api.ts` now sends the browser to `/auth/sign-in` on
+  any 401. Still open: the raw `detail` string is printed verbatim in the UI error card, which
+  P3.3b was meant to eliminate, and nothing clears the dead cookie so the proxy keeps admitting
+  it until a successful sign-in overwrites it.
+
 - [optimization] 2026-08-24 Mastra's engine logs step failures to a logger the app cannot
   configure, so in the `worker` service a step failure prints `Error executing step <id>:
   <stack>` as plain text on stderr instead of as a line in the configured `PinoLogger`'s JSON
