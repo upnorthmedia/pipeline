@@ -1074,11 +1074,18 @@ criterion 9's bar are named at the bottom with what is owed to `SUMMARY.md` inst
       moving a row to 15 seconds inside the window and watching it flip 45 seconds later with
       no third `GET /api/posts`. `ui/p49a-*.png`. [evidence](evidence/p4.md#p49a)
 
-- [ ] **P4.9b** `/monitor` still shows nothing about a stalled publish. Unlike the two
-      readers in P4.9a it holds no post rows: `OverviewTab` reads `GET /api/queue` and
-      `GET /api/analytics/dashboard`, both of which group the caller's posts over
-      `current_stage` and never look at a publish column, so the aggregate has to learn to
-      report one before the tab can show it. Filed by P4.3, split at P4.9a.
+- [x] **P4.9b** `/monitor` showed nothing about a stalled publish. Unlike the two readers in
+      P4.9a it holds no post rows: `OverviewTab` reads `GET /api/queue` and
+      `GET /api/analytics/dashboard`, neither of which looked at a publish column, so the
+      aggregate had to report one before the tab could. `GET /api/queue` now answers
+      `publish_stalled`, a list of the caller's dead publishes derived by the same
+      `publishColumnOf()` and `publishStall()` the other two screens ask of a row they hold,
+      off a second query scoped to the rows whose status column is `pending` or `publishing`
+      rather than five more columns on the counts scan. The tab renders them above the
+      numbers, one row per post linking to the post where the retry is. The three `publish_*`
+      frames joined `AGGREGATE_EVENTS`: they cannot make a stall appear, but they are how one
+      leaves. Proven in the browser against two seeded rows, at HEAD and with the change.
+      `ui/p49b-monitor-*.png`. [evidence](evidence/p4.md#p49b)
 
 Named here rather than fixed, and owed to `SUMMARY.md` as gaps: the Railway pre-deploy
 migration hook has never been watched running, because this project has no deployed Railway

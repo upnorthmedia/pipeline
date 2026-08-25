@@ -37,6 +37,7 @@ import {
   apiErrorMessage,
   type QueueStatus,
   type DashboardStats,
+  type StalledPublish,
 } from "@/lib/api";
 import { STAGE_LABELS } from "@/lib/stages";
 import { PAUSABLE_RUN_STATES, type RunStateKind } from "@/lib/run-state";
@@ -46,16 +47,20 @@ import { toast } from "sonner";
 import { TabError, TabEmpty, StaleBanner } from "./tab-states";
 
 /**
- * The feed frames that can change a number this tab renders.
+ * The feed frames that can change something this tab renders.
  *
- * Both aggregates behind it, `GET /api/queue` and `GET /api/analytics/dashboard`,
- * group the caller's posts over `current_stage` and read `completed_at` and
- * `created_at`. Only these four frames accompany a write to one of those: a
- * stage start commits `"running"` to the row, a completion, an error and the
- * end of a run each move it on. The rest of the feed cannot: `log` is a stage's
- * own progress line, `image_generated` and `image_failed` are two frames per
- * manifest entry from inside the `images` stage, and the three `publish_*`
- * frames touch the publish columns only.
+ * `GET /api/analytics/dashboard` groups the caller's posts over
+ * `current_stage` and reads `completed_at` and `created_at`, and the counts in
+ * `GET /api/queue` come off `current_stage` and `stage_status`. Only these
+ * frames accompany a write to one of those. The rest of the feed cannot: `log`
+ * is a stage's own progress line, and `image_generated` and `image_failed` are
+ * two frames per manifest entry from inside the `images` stage.
+ *
+ * The three `publish_*` frames are here because `GET /api/queue` also reports
+ * the publishes that have stopped moving (ledger item P4.9b), and each of
+ * those frames accompanies a write to the status column that derivation reads.
+ * They cannot make a stall appear, which happens with no event at all and is
+ * what the 10s interval below is for, but they are how one leaves.
  *
  * The feed used to refetch on all of them, so one running post turned an open
  * monitor page into dozens of aggregate queries. Everything still reaches the
@@ -69,6 +74,9 @@ const AGGREGATE_EVENTS = new Set([
   // A pause writes `current_stage` and starts nothing, so this frame is the
   // only one that accompanies it. Both aggregates group over that column.
   "run_paused",
+  "publish_start",
+  "publish_complete",
+  "publish_error",
 ]);
 
 /**
@@ -180,6 +188,54 @@ function formatTimestamp(iso: string): string {
 
 function truncateId(id: string): string {
   return id.length > 8 ? `${id.slice(0, 8)}...` : id;
+}
+
+/**
+ * The publishes that have stopped moving, ledger item P4.9b.
+ *
+ * It sits above the numbers because it is the one thing on this tab that is
+ * asking for a person: a run that finished and a publish after it that died
+ * are two facts about one row, and the strip below counts the row as Complete.
+ * Outside the `hasPosts` branch for the same reason, since a dead publish
+ * belongs to a run that is already over.
+ *
+ * The words are the server's, from the same `publishStall()` the posts list
+ * and the post page ask of a row they hold. The retry lives on the post, so
+ * the row here is a link to it rather than a second copy of the action.
+ */
+function StalledPublishes({ posts }: { posts: StalledPublish[] }) {
+  if (posts.length === 0) return null;
+  return (
+    <Card role="alert" className="border-amber-500/40 bg-amber-500/5">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-medium flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 text-amber-500" />
+          Publishing stopped responding on {posts.length}{" "}
+          {posts.length === 1 ? "post" : "posts"}
+        </CardTitle>
+        <CardDescription className="text-xs">
+          Nothing will move these on their own. Open one to see the reason and try again.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {posts.map((post) => (
+          <div
+            key={post.id}
+            className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-md border border-border/50 px-3 py-2"
+          >
+            <Link
+              href={`/posts/${post.id}`}
+              className="text-sm font-medium hover:underline"
+            >
+              {post.topic}
+            </Link>
+            <span className="text-xs text-muted-foreground">{post.label}</span>
+            <span className="w-full text-xs text-muted-foreground">{post.short}</span>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
 }
 
 export function OverviewTab() {
@@ -341,6 +397,8 @@ export function OverviewTab() {
   return (
     <div className="space-y-6">
       {error && <StaleBanner message={error} />}
+
+      <StalledPublishes posts={stats?.publish_stalled ?? []} />
 
       {!hasPosts ? (
         <TabEmpty

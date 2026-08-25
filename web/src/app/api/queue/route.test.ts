@@ -20,7 +20,7 @@ import { like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, posts, websiteProfiles } from "@/db"
-import type { StageStatusMap } from "@/lib/api"
+import type { QueueStatus, StageStatusMap } from "@/lib/api"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { GET } from "./route"
@@ -32,7 +32,7 @@ const URL = "http://test/api/queue"
 const SITE = "http://127.0.0.1:9/site"
 
 /** Every bucket empty, so a case can name only the ones it cares about. */
-const ZERO = {
+const ZERO_COUNTS = {
   not_started: 0,
   running: 0,
   in_progress: 0,
@@ -42,6 +42,20 @@ const ZERO = {
   finished_with_errors: 0,
   complete: 0,
   total: 0,
+}
+
+/**
+ * The whole response with nothing in it. `publish_stalled` is a list of the
+ * rows whose publish has stopped, not a bucket: a post can be counted as
+ * Complete and be in it at the same time.
+ */
+const ZERO = { ...ZERO_COUNTS, publish_stalled: [] }
+
+/** The count keys on their own, for the cases about the buckets. */
+function countsOf(response: QueueStatus): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(response).filter(([key]) => key !== "publish_stalled"),
+  ) as Record<string, number>
 }
 
 const db = getDb()
@@ -84,10 +98,10 @@ function status(cookie?: string) {
   return GET(apiRequest(URL, { cookie }))
 }
 
-async function body(cookie: string) {
+async function body(cookie: string): Promise<QueueStatus> {
   const response = await status(cookie)
   expect(response.status).toBe(200)
-  return (await response.json()) as Record<string, number>
+  return (await response.json()) as QueueStatus
 }
 
 beforeAll(async () => {
@@ -216,8 +230,7 @@ describe("GET /api/queue", () => {
     await insertPost(profileId, "write", { write: "running" })
     await insertPost(profileId, "complete", { images: "failed" })
 
-    const counts = await body(user.cookie)
-    const { total, ...buckets } = counts
+    const { total, ...buckets } = countsOf(await body(user.cookie))
     expect(Object.values(buckets).reduce((sum, value) => sum + value, 0)).toBe(total)
     expect(total).toBe(5)
   })
@@ -225,9 +238,145 @@ describe("GET /api/queue", () => {
   it("returns numbers, not the bigint strings the driver reports counts as", async () => {
     await insertPost(profileId, "pending")
 
-    const counts = await body(user.cookie)
-    for (const [key, value] of Object.entries(counts)) {
+    for (const [key, value] of Object.entries(countsOf(await body(user.cookie)))) {
       expect(typeof value, key).toBe("number")
     }
+  })
+})
+
+/**
+ * A post carrying a publish attempt. `updatedAt` is the clock
+ * `publishStall()` reads, so a case sets it rather than letting the column
+ * default put every row inside the window.
+ */
+async function insertPublishing(fields: {
+  owner?: string | null
+  topic?: string
+  outputFormat: string
+  wpPublishStatus?: string | null
+  nextjsPublishStatus?: string | null
+  minutesAgo: number
+  executionLogs?: Record<string, unknown>[]
+}): Promise<string> {
+  const [row] = await db
+    .insert(posts)
+    .values({
+      slug: `${PREFIX}${randomUUID()}`,
+      topic: fields.topic ?? "A topic",
+      profileId: fields.owner === undefined ? profileId : fields.owner,
+      outputFormat: fields.outputFormat,
+      wpPublishStatus: fields.wpPublishStatus ?? null,
+      nextjsPublishStatus: fields.nextjsPublishStatus ?? null,
+      updatedAt: new Date(Date.now() - fields.minutesAgo * 60_000),
+      ...(fields.executionLogs === undefined ? {} : { executionLogs: fields.executionLogs }),
+    })
+    .returning()
+  return row.id
+}
+
+describe("GET /api/queue publish_stalled", () => {
+  it("reports a queued publish nobody picked up, with the post it belongs to", async () => {
+    const id = await insertPublishing({
+      topic: "Stuck in the queue",
+      outputFormat: "wordpress",
+      wpPublishStatus: "pending",
+      minutesAgo: 20,
+    })
+
+    const { publish_stalled } = await body(user.cookie)
+    expect(publish_stalled).toEqual([
+      {
+        id,
+        topic: "Stuck in the queue",
+        target: "wordpress",
+        label: "WordPress",
+        short: "This publish has been queued for over 15 minutes and no worker has picked it up.",
+      },
+    ])
+  })
+
+  it("says a worker had it when an execution log says one picked it up", async () => {
+    await insertPublishing({
+      outputFormat: "nextjs",
+      nextjsPublishStatus: "publishing",
+      minutesAgo: 40,
+      executionLogs: [
+        {
+          event: "publish_start",
+          message: "Publishing to Next.js...",
+          ts: new Date(Date.now() - 30 * 60_000).toISOString(),
+        },
+      ],
+    })
+
+    const { publish_stalled } = await body(user.cookie)
+    expect(publish_stalled).toHaveLength(1)
+    expect(publish_stalled[0].target).toBe("nextjs")
+    expect(publish_stalled[0].label).toBe("Next.js")
+    expect(publish_stalled[0].short).toBe(
+      "A worker picked this publish up and then stopped reporting on it for over 15 minutes."
+    )
+  })
+
+  it("leaves a publish inside the window alone", async () => {
+    await insertPublishing({
+      outputFormat: "wordpress",
+      wpPublishStatus: "publishing",
+      minutesAgo: 14,
+    })
+
+    expect((await body(user.cookie)).publish_stalled).toEqual([])
+  })
+
+  it("leaves a finished or failed publish alone however old the row is", async () => {
+    await insertPublishing({
+      outputFormat: "wordpress",
+      wpPublishStatus: "published",
+      minutesAgo: 90,
+    })
+    await insertPublishing({
+      outputFormat: "nextjs",
+      nextjsPublishStatus: "failed",
+      minutesAgo: 90,
+    })
+
+    expect((await body(user.cookie)).publish_stalled).toEqual([])
+  })
+
+  it("reads the status column the post's own format names, not the other one", async () => {
+    // Nothing clears the other destination's column, so a post that was
+    // switched back to markdown still carries a `publishing` from before it.
+    await insertPublishing({
+      outputFormat: "markdown",
+      wpPublishStatus: "publishing",
+      minutesAgo: 90,
+    })
+
+    expect((await body(user.cookie)).publish_stalled).toEqual([])
+  })
+
+  it("reports only the caller's stalled publishes", async () => {
+    await insertPublishing({
+      owner: otherProfileId,
+      outputFormat: "wordpress",
+      wpPublishStatus: "pending",
+      minutesAgo: 90,
+    })
+    await insertPublishing({ owner: null, outputFormat: "wordpress", wpPublishStatus: "pending", minutesAgo: 90 })
+
+    expect((await body(user.cookie)).publish_stalled).toEqual([])
+    expect((await body(other.cookie)).publish_stalled).toHaveLength(1)
+  })
+
+  it("counts a stalled publish into its run-state bucket as well", async () => {
+    await insertPublishing({
+      outputFormat: "wordpress",
+      wpPublishStatus: "pending",
+      minutesAgo: 90,
+    })
+
+    const response = await body(user.cookie)
+    expect(response.publish_stalled).toHaveLength(1)
+    expect(countsOf(response)).toEqual({ ...ZERO_COUNTS, not_started: 1, total: 1 })
   })
 })

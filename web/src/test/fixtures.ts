@@ -183,6 +183,7 @@ export function makeQueueStatus(overrides?: Partial<QueueStatus>): QueueStatus {
     not_started: 0,
     complete: 0,
     total: 0,
+    publish_stalled: [],
     ...overrides,
   };
 }

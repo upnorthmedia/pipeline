@@ -133,12 +133,15 @@
   `XAUTOCLAIM` rather than by a person. Unverified against a real site: nothing in this repo
   has ever published to one. Found while closing polish ledger P4.3.
 
-- [confirmed] 2026-08-25 `/monitor` shows nothing about a stalled publish. The posts list and
-  the run trace were fixed at polish ledger P4.9a, which is why this entry is now about one
-  reader: unlike those two, `OverviewTab` holds no post rows. It reads `GET /api/queue` and
-  `GET /api/analytics/dashboard`, both of which group the caller's posts over `current_stage`
-  and never touch `wp_publish_status` or `nextjs_publish_status`, so the aggregate has to
-  report a publish before the tab can. Polish ledger P4.9b owns it.
+- [confirmed] 2026-08-25 `GET /api/analytics/dashboard` counts a post whose publish died as
+  complete, so the completion rate and the Posts by Stage chart on `/monitor` both say a run
+  finished when its publish never did. The card added at polish ledger P4.9b sits directly
+  above those numbers and contradicts them. The dashboard groups on `current_stage` alone and
+  would need the publish columns to say otherwise. Found while closing P4.9b.
+
+- [investigate] 2026-08-25 The stalled-publish card on `/monitor` renders one row per dead
+  publish with no cap, so an account that lost a worker for a day gets an unbounded list at
+  the top of the tab. No account here has ever had more than two. Found while closing P4.9b.
 
 - [confirmed] 2026-08-25 The posts list marks a stalled publish only on the rows it is
   currently holding, because the 30 second tick added at polish ledger P4.9a is gated on

@@ -26,13 +26,85 @@
  *   answer is to cache this response, not to re-derive the states in SQL and
  *   have a second copy of the precedence rules to keep in step.
  */
-import { eq } from "drizzle-orm"
+import { and, eq, inArray, or } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
-import type { PostStage, StageStatusMap } from "@/lib/api"
+import type { PostStage, StalledPublish, StageStatusMap } from "@/lib/api"
+import { publishColumnOf, publishStall } from "@/lib/publish-report"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import { withServerError } from "@/lib/route-error"
 import { deriveRunState, RUN_STATE_KINDS, type RunStateKind } from "@/lib/run-state"
+
+/**
+ * The two values either publish status column holds while its attempt is
+ * supposed to be moving. They are the only rows `publishStall()` can answer
+ * about, so they are what the second query asks for rather than every owned
+ * post: the derivation needs `execution_logs`, and reading that column off an
+ * account's whole history to answer about the handful of rows mid-publish is
+ * the one part of this handler that would be worth avoiding.
+ */
+const IN_FLIGHT = ["pending", "publishing"]
+
+/**
+ * The caller's publishes that have stopped moving, in the words the posts list
+ * and the post page already use for the same row.
+ *
+ * Derived here rather than in the browser because the monitor page holds no
+ * post rows, and because the derivation reads `execution_logs`, which no
+ * aggregate would otherwise carry. A row whose format names no destination is
+ * dropped by `publishColumnOf()`, including one still carrying a `publishing`
+ * from a format it has since been moved off.
+ */
+async function stalledPublishes(userId: string, now: number): Promise<StalledPublish[]> {
+  const rows = await getDb()
+    .select({
+      id: posts.id,
+      topic: posts.topic,
+      outputFormat: posts.outputFormat,
+      wpPublishStatus: posts.wpPublishStatus,
+      nextjsPublishStatus: posts.nextjsPublishStatus,
+      updatedAt: posts.updatedAt,
+      executionLogs: posts.executionLogs,
+    })
+    .from(posts)
+    .innerJoin(websiteProfiles, eq(posts.profileId, websiteProfiles.id))
+    .where(
+      and(
+        eq(websiteProfiles.userId, userId),
+        or(
+          inArray(posts.wpPublishStatus, IN_FLIGHT),
+          inArray(posts.nextjsPublishStatus, IN_FLIGHT),
+        ),
+      ),
+    )
+
+  const stalled: StalledPublish[] = []
+  for (const row of rows) {
+    const column = publishColumnOf({
+      output_format: row.outputFormat ?? "",
+      wp_publish_status: row.wpPublishStatus,
+      nextjs_publish_status: row.nextjsPublishStatus,
+      updated_at: null,
+      execution_logs: null,
+    })
+    if (column === null) continue
+    const stall = publishStall({
+      status: column.status,
+      updatedAt: row.updatedAt?.toISOString() ?? null,
+      executionLogs: row.executionLogs,
+      now,
+    })
+    if (stall === null) continue
+    stalled.push({
+      id: row.id,
+      topic: row.topic,
+      target: column.target,
+      label: column.label,
+      short: stall.short,
+    })
+  }
+  return stalled
+}
 
 async function getHandler(request: Request): Promise<Response> {
   const user = await getRequestUser(request)
@@ -56,7 +128,11 @@ async function getHandler(request: Request): Promise<Response> {
     counts[state.kind] += 1
   }
 
-  return Response.json({ ...counts, total: rows.length })
+  return Response.json({
+    ...counts,
+    total: rows.length,
+    publish_stalled: await stalledPublishes(user.id, Date.now()),
+  })
 }
 
 export const GET = withServerError(getHandler)

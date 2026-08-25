@@ -1,4 +1,5 @@
 import { INTERNAL_SERVER_ERROR_DETAIL } from "./route-error";
+import type { PublishTarget } from "./publishing";
 import type { RunStateKind } from "./run-state";
 
 // --- Types ---
@@ -243,7 +244,36 @@ export interface PaginatedLinks {
  * the endpoint counts what `deriveRunState()` calls each row, which is what
  * the posts list writes on that row's badge.
  */
-export type QueueStatus = Record<RunStateKind, number> & { total: number };
+/**
+ * One post whose publish attempt has stopped moving, as `GET /api/queue`
+ * reports it.
+ *
+ * The stall is derived on the server because the derivation needs
+ * `execution_logs`, and the monitor page holds no post rows: it reads two
+ * aggregates. The words come from `publishStall()`, the same derivation the
+ * posts list and the post page ask of a row they already have, so the three
+ * screens cannot describe the same dead publish differently.
+ */
+export interface StalledPublish {
+  id: string;
+  /** The post's own name, so the row reads as a post and not as an id. */
+  topic: string;
+  target: PublishTarget;
+  /** The destination's name, for a sentence that already says what happened. */
+  label: string;
+  /** `PublishStall.short`: what happened, in one clause. */
+  short: string;
+}
+
+/**
+ * `publish_stalled` is a list of rows, not a bucket: a post can be counted as
+ * Complete and still be carrying a publish that died, which is two facts about
+ * one row. Every other key is a count and they sum to `total`.
+ */
+export type QueueStatus = Record<RunStateKind, number> & {
+  total: number;
+  publish_stalled: StalledPublish[];
+};
 
 export interface Setting {
   key: string;

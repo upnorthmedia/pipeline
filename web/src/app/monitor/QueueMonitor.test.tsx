@@ -288,3 +288,98 @@ describe("MonitorPage", () => {
     ).toBeInTheDocument();
   });
 });
+
+/**
+ * The stalled-publish card, ledger item P4.9b.
+ *
+ * `/monitor` holds no post rows, so unlike the posts list and the post page it
+ * cannot derive a stall: the server does it and the tab renders what it is
+ * given. These cases are about that rendering, and `route.test.ts` is about
+ * the derivation reaching the response.
+ */
+function stalled(overrides?: Partial<import("@/lib/api").StalledPublish>) {
+  return {
+    id: "post-1",
+    topic: "How to fix a leaking tap",
+    target: "wordpress" as const,
+    label: "WordPress",
+    short: "This publish has been queued for over 15 minutes and no worker has picked it up.",
+    ...overrides,
+  };
+}
+
+describe("MonitorPage, stalled publishes", () => {
+  it("says nothing when no publish has stopped", async () => {
+    renderWithProviders(<MonitorPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Queue Controls")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText(/stopped responding/)).not.toBeInTheDocument();
+  });
+
+  it("names the post, the destination and what happened, and links to the post", async () => {
+    mockStatus.mockResolvedValue(makeQueueStatus({ ...testStats, publish_stalled: [stalled()] }));
+    renderWithProviders(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Publishing stopped responding on 1 post")
+      ).toBeInTheDocument();
+    });
+
+    const link = screen.getByRole("link", { name: "How to fix a leaking tap" });
+    expect(link).toHaveAttribute("href", "/posts/post-1");
+    expect(screen.getByText("WordPress")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This publish has been queued for over 15 minutes and no worker has picked it up."
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("counts the posts rather than saying there is a problem", async () => {
+    mockStatus.mockResolvedValue(
+      makeQueueStatus({
+        ...testStats,
+        publish_stalled: [
+          stalled(),
+          stalled({
+            id: "post-2",
+            topic: "Choosing a boiler",
+            target: "nextjs",
+            label: "Next.js",
+            short:
+              "A worker picked this publish up and then stopped reporting on it for over 15 minutes.",
+          }),
+        ],
+      })
+    );
+    renderWithProviders(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Publishing stopped responding on 2 posts")
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByRole("link", { name: "Choosing a boiler" })).toHaveAttribute(
+      "href",
+      "/posts/post-2"
+    );
+  });
+
+  it("shows the card on an account whose posts have all finished", async () => {
+    // The empty state takes over the tab when the account has no posts, and
+    // the stat cards and charts sit inside it. A dead publish belongs to a
+    // finished run, so the card cannot live in that branch.
+    mockStatus.mockResolvedValue(makeQueueStatus({ complete: 1, total: 1, publish_stalled: [stalled()] }));
+    mockDashboard.mockResolvedValue({ ...testDashboard, by_status: {}, total: 0, complete: 0 });
+    renderWithProviders(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Publishing stopped responding on 1 post")
+      ).toBeInTheDocument();
+    });
+  });
+});

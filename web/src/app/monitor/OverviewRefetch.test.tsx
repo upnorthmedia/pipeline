@@ -133,13 +133,14 @@ describe("OverviewTab feed refetching", () => {
   it("does not re-query the aggregates for a frame that cannot change them", async () => {
     await mountLoaded();
 
+    // The three `publish_*` frames were here until ledger item P4.9b, when
+    // `GET /api/queue` began reporting the publishes that have stopped moving.
+    // They now accompany a write to a column that response reads, so they are
+    // in the case below instead.
     await publish(
       { event: "log", post_id: "p1", stage: "images", message: "Generating image 2" },
       { event: "image_generated", post_id: "p1", stage: "images", index: 1 },
-      { event: "image_failed", post_id: "p1", stage: "images", index: 2 },
-      { event: "publish_start", post_id: "p1", target: "wordpress" },
-      { event: "publish_complete", post_id: "p1", target: "wordpress" },
-      { event: "publish_error", post_id: "p1", target: "wordpress" }
+      { event: "image_failed", post_id: "p1", stage: "images", index: 2 }
     );
     await settle();
 
@@ -166,7 +167,19 @@ describe("OverviewTab feed refetching", () => {
     expect(mockStatus).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["stage_start", "stage_complete", "stage_error", "pipeline_complete", "run_paused"])(
+  it.each([
+    "stage_start",
+    "stage_complete",
+    "stage_error",
+    "pipeline_complete",
+    "run_paused",
+    // A publish frame cannot make a stall appear, which happens with no event
+    // behind it, but it is how one leaves: each of the three writes the status
+    // column `publish_stalled` is derived from.
+    "publish_start",
+    "publish_complete",
+    "publish_error",
+  ])(
     "treats %s as a frame that changes the numbers",
     async (event) => {
       await mountLoaded();
