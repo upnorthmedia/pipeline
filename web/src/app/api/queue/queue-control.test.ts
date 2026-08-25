@@ -220,6 +220,40 @@ describe("POST /api/queue/pause-all", () => {
     await pause(user.cookie)
     expect(start.calls).toEqual([])
   })
+
+  it("leaves a run parked at a review gate alone", async () => {
+    // `markStageForReview()` writes `current_stage = <stage>`, so a parked run
+    // is inside the column guard. Pausing it replaces the one thing on the row
+    // that said a person was being waited on.
+    const id = await insertPost(profileId, {
+      currentStage: "outline",
+      stageStatus: { research: "complete", outline: "review" },
+    })
+    expect(await body(await pause(user.cookie))).toEqual({ status: "paused", count: 0 })
+    expect((await readPost(id)).currentStage).toBe("outline")
+  })
+
+  it("leaves a run that died at a stage alone", async () => {
+    // `current_stage` is still the stage that threw, so the column guard lets
+    // it through while the badge beside the button reads "Failed at Research".
+    const id = await insertPost(profileId, {
+      currentStage: "research",
+      stageStatus: { research: "failed" },
+    })
+    expect(await body(await pause(user.cookie))).toEqual({ status: "paused", count: 0 })
+    expect((await readPost(id)).currentStage).toBe("research")
+  })
+
+  it("still pauses a stage in flight beside a stage that failed earlier", async () => {
+    // The anti-vacuity half: the guard drops runs waiting on a person or
+    // already dead, not every run with a failure anywhere in its history.
+    const id = await insertPost(profileId, {
+      currentStage: "write",
+      stageStatus: { research: "failed", outline: "complete", write: "running" },
+    })
+    expect(await body(await pause(user.cookie))).toEqual({ status: "paused", count: 1 })
+    expect((await readPost(id)).currentStage).toBe("paused")
+  })
 })
 
 // --- POST /api/queue/resume-all ---------------------------------------------
@@ -344,5 +378,27 @@ describe("pause-all followed by resume-all", () => {
     await pause(user.cookie)
     await resume(user.cookie)
     expect((await readPost(id)).currentStage).toBe("research")
+  })
+})
+
+describe("a bulk pause does not approve a review gate", () => {
+  it("leaves a parked run parked, so resume-all cannot start its stage", async () => {
+    // The reason the review guard is on the pause rather than on the resume:
+    // `resume-all` enqueues the single-stage form, and a named stage skips its
+    // review gate by design. So a bulk pause that swallowed the park would
+    // make the next bulk resume run the stage the reviewer had not approved.
+    const id = await insertPost(profileId, {
+      currentStage: "outline",
+      stageStatus: { research: "complete", outline: "review" },
+      stageSettings: { outline: "review" },
+    })
+
+    await pause(user.cookie)
+    expect(await body(await resume(user.cookie))).toEqual({ status: "resumed", count: 0 })
+
+    const row = await readPost(id)
+    expect(row.currentStage).toBe("outline")
+    expect(row.stageStatus).toMatchObject({ outline: "review" })
+    expect(start.calls).toEqual([])
   })
 })

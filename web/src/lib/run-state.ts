@@ -187,3 +187,31 @@ export function deriveRunState(post: {
 export function resumeStage(stageStatus: StageStatusMap): PipelineStage {
   return STAGES.find((stage) => stageStatus[stage] !== "complete") ?? STAGES[STAGES.length - 1]
 }
+
+/**
+ * The run states a bulk pause acts on: a stage in flight, a run between
+ * stages, and a run that has not reached its first stage yet.
+ *
+ * The three it leaves out are the point of the list. `review` and `failed` are
+ * both reachable with `current_stage` set to one of the six stage names, so a
+ * pause scoped by that column alone swallowed them: it overwrote the only
+ * column saying a person was being waited on, or that the run was dead, and
+ * `deriveRunState()` then reported both as "Paused". The review case is worse
+ * than a mislabel, because `POST /api/queue/resume-all` enqueues the
+ * single-stage form and a named stage skips its review gate by design, so
+ * pause-then-resume ran the stage the reviewer never approved. `complete`,
+ * `finished_with_errors` and `paused` were already out of reach.
+ *
+ * `not_started` stays in, even though the strip calls those rows Not started
+ * and nothing is spending anything on them: a run enqueued by `restart` or
+ * `rerun` reads `current_stage = "pending"` with an empty `stage_status` until
+ * its first stage marks itself running, which is this exact state, and
+ * `pauseGate()` stops it in front of `research`. The two columns cannot tell
+ * that run from one nobody ever started, and failing to pause a run that is
+ * about to spend money is the worse of the two mistakes.
+ */
+export const PAUSABLE_RUN_STATES: readonly RunStateKind[] = [
+  "running",
+  "in_progress",
+  "not_started",
+]

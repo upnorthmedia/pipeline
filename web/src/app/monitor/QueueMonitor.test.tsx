@@ -160,6 +160,9 @@ describe("MonitorPage", () => {
   });
 
   it("resume all calls queue.resumeAll", async () => {
+    // Resume All is disabled when nothing is paused, so the fixture has to
+    // hold a paused run for the click to be a click at all.
+    mockStatus.mockResolvedValue(makeQueueStatus({ ...testStats, paused: 1 }));
     const user = userEvent.setup();
     renderWithProviders(<MonitorPage />);
     await waitFor(() => {
@@ -167,6 +170,38 @@ describe("MonitorPage", () => {
     });
     await user.click(screen.getByRole("button", { name: /resume all/i }));
     expect(mockResumeAll).toHaveBeenCalled();
+  });
+
+  it("names on the buttons how many runs each one would act on", async () => {
+    // `testStats` is 2 running and 5 not started, which is what a bulk pause
+    // acts on, beside 1 failed and 42 complete, which it does not.
+    mockStatus.mockResolvedValue(makeQueueStatus({ ...testStats, paused: 4 }));
+    renderWithProviders(<MonitorPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Pause All (7)" })).toBeEnabled();
+    });
+    expect(screen.getByRole("button", { name: "Resume All (4)" })).toBeEnabled();
+  });
+
+  it("disables Pause All when every run is waiting for a person or already dead", async () => {
+    mockStatus.mockResolvedValue(
+      makeQueueStatus({ review: 3, failed: 2, complete: 1, total: 6 })
+    );
+    renderWithProviders(<MonitorPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Pause All" })).toBeDisabled();
+    });
+    expect(screen.getByRole("button", { name: "Pause All" })).toHaveAttribute(
+      "title",
+      expect.stringContaining("Nothing to pause")
+    );
+  });
+
+  it("disables Resume All when nothing is paused", async () => {
+    renderWithProviders(<MonitorPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Resume All" })).toBeDisabled();
+    });
   });
 
   it("shows empty activity state", async () => {

@@ -39,7 +39,7 @@ import {
   type DashboardStats,
 } from "@/lib/api";
 import { STAGE_LABELS } from "@/lib/stages";
-import type { RunStateKind } from "@/lib/run-state";
+import { PAUSABLE_RUN_STATES, type RunStateKind } from "@/lib/run-state";
 import { useSSE, type SSEEvent } from "@/hooks/use-sse";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -249,23 +249,36 @@ export function OverviewTab() {
 
   const hasPosts = (dashboard?.total ?? 0) > 0;
 
+  // What each button would act on, counted out of the same buckets the strip
+  // beside them prints, so the control and the number agree. `null` means the
+  // counts have not loaded (or failed to), and neither button is disabled on a
+  // number nobody has.
+  const pausableCount = stats
+    ? PAUSABLE_RUN_STATES.reduce((sum, kind) => sum + (stats[kind] ?? 0), 0)
+    : null;
+  const resumableCount = stats?.paused ?? null;
+
   const handlePauseAll = async () => {
     try {
       const result = await queue.pauseAll();
-      toast.success(`Paused ${result.count} jobs`);
+      toast.success(
+        result.count === 1 ? "Paused 1 run" : `Paused ${result.count} runs`
+      );
       fetchData();
     } catch {
-      toast.error("Failed to pause jobs");
+      toast.error("Could not pause the runs");
     }
   };
 
   const handleResumeAll = async () => {
     try {
       const result = await queue.resumeAll();
-      toast.success(`Resumed ${result.count} jobs`);
+      toast.success(
+        result.count === 1 ? "Resumed 1 run" : `Resumed ${result.count} runs`
+      );
       fetchData();
     } catch {
-      toast.error("Failed to resume jobs");
+      toast.error("Could not resume the runs");
     }
   };
 
@@ -549,13 +562,35 @@ export function OverviewTab() {
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap items-center gap-4">
-            <Button variant="outline" size="sm" onClick={handlePauseAll}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePauseAll}
+              disabled={pausableCount === 0}
+              title={
+                pausableCount === 0
+                  ? "Nothing to pause. Runs waiting for you and runs that failed are left as they are."
+                  : "Stops every run that is going, in front of its next stage. Runs waiting for you and runs that failed are left as they are."
+              }
+            >
               <Pause className="h-3.5 w-3.5 mr-1.5" />
               Pause All
+              {pausableCount !== null && pausableCount > 0 ? ` (${pausableCount})` : ""}
             </Button>
-            <Button variant="outline" size="sm" onClick={handleResumeAll}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleResumeAll}
+              disabled={resumableCount === 0}
+              title={
+                resumableCount === 0
+                  ? "Nothing is paused."
+                  : "Starts every paused run again, from the stage it stopped at."
+              }
+            >
               <Play className="h-3.5 w-3.5 mr-1.5" />
               Resume All
+              {resumableCount !== null && resumableCount > 0 ? ` (${resumableCount})` : ""}
             </Button>
             <Separator orientation="vertical" className="h-6" />
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">

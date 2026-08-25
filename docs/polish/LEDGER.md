@@ -917,6 +917,65 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       holds every documented `pnpm -C web` form to a real script, and `brand-mark.test.ts`
       holds `public/` to files the app actually names. [evidence](evidence/p2.md#p2c1)
 
+## P4. Done criterion 9
+
+The nine sections above are closed. Criterion 9 is not: `todo.md` still holds `[confirmed]`
+entries that affect correctness, data integrity or something a user can see, most of them
+filed *by* P2 and P3 as residuals rather than inherited from the port. They are enumerated
+here in severity order so the tail of the run has a worklist, and the ones that do not meet
+criterion 9's bar are named at the bottom with what is owed to `SUMMARY.md` instead of a fix.
+
+- [x] **P4.1** `POST /api/queue/pause-all` selected on `current_stage` alone, and three
+      different run states sit on a stage name. Pressing Pause All on a 15-post account paused
+      11 runs, four of them wrongly: the two parked at a review gate and the two that had
+      died. The strip beside the button went from `Waiting for you: 2 ... Failed: 2` to
+      `Waiting for you: 0 ... Failed: 0`, because `deriveRunState()` reads a paused row as
+      Paused and the park and the failure were the columns it overwrote. The review case is
+      worse than a mislabel: `resume-all` enqueues the single-stage form and a named stage
+      skips its gate by design, so pause-then-resume ran a stage no reviewer approved. The
+      handler now keeps Python's column guard and adds a state guard,
+      `PAUSABLE_RUN_STATES` in `src/lib/run-state.ts`, so it acts on running, in progress and
+      not started only. `not_started` stays in deliberately: a run `restart` or `rerun` just
+      enqueued is in that exact state until its first stage marks itself running. The two
+      buttons now name their own count and disable at zero. `ui/p4a-queue-controls-*.png`.
+      [evidence](evidence/p4.md#p41)
+- [ ] **P4.2** `GET /api/analytics/dashboard` still counts the way `GET /api/queue` did before
+      P3.5b: `by_status` groups on `current_stage` and `completion_rate` is the share of rows
+      reading `complete`, so `/monitor` prints `Completion Rate 26.7%` directly above a strip
+      calling three of those four Complete and the fourth Finished with errors.
+- [ ] **P4.3** A publish that dies with its worker reports `Publishing...` forever:
+      `wp_publish_status` / `nextjs_publish_status` move to `publishing` before the step
+      touches the destination and only the step writes them again, and the publish workflows
+      declare no `retryConfig`, so no `XAUTOCLAIM` recovers one.
+- [ ] **P4.4** A run that stops for a pause publishes no event, so a second tab shows it
+      running until the reader reloads. A pause during `ready` also leaves all six stages
+      complete with `current_stage = "paused"` and no `completed_at`, which reads as
+      unfinished.
+- [ ] **P4.5** `stage_review` is a live frame only, never written to `execution_logs`, so a
+      reader who opens a post after the gate was released sees no trace that the run ever
+      waited, and neither does the run trace.
+- [ ] **P4.6** A created post's gates cannot be edited. `PATCH /api/posts/{id}` takes
+      `stage_settings` and keeps it as sent, but the picker added at P2.114 is on `/posts/new`
+      only, so a post that should never have had a gate has to be recreated.
+- [ ] **P4.7** The `posts` rows already written with `profile_id = NULL` are unreachable and
+      undeletable through the app. P2.97 closed the writers; this is a decision on the
+      existing rows, leave them or name them in a one-off migration.
+- [ ] **P4.8** Cleanup batch, one iteration for all four small visible defects: the two delete
+      confirmations on `/` render their destructive action in the primary colour
+      (`AlertDialogAction` takes a `variant` prop and neither site passes it); the logs tab
+      does not reset its page when a filter changes, so a search typed on page 3 answers with
+      an empty table; `WordPressTestResponse.site_name` is typed `string` while the handler
+      forwards `record.name` unchecked, which puts `[object Object]` through
+      `Connected to ${status.siteName}`; and `pnpm -C web db:migrate` cannot run against a
+      dev database carried over from the Python stack, which `web/drizzle/README.md` does not
+      say.
+
+Named here rather than fixed, and owed to `SUMMARY.md` as gaps: the Railway pre-deploy
+migration hook has never been watched running, because this project has no deployed Railway
+environment; `@mastra/core@1.61.0` signals a failed `EventedExecutionEngine.execute()` twice,
+which is upstream; and `QueueMonitor.test.tsx` prints 16 React `act(...)` warnings, which is
+test-output noise rather than a product defect. The `[investigate]` entries stay as leads.
+
 ## Done
 
 - [ ] `cd web && pnpm exec tsc --noEmit`, `pnpm lint`, `pnpm test`, `pnpm build` all exit 0

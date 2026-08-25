@@ -179,13 +179,12 @@
   `markPipelineComplete()` is unconditional. The completion rate is the number a user would
   quote, so it is the one most worth making agree. Found at polish ledger P3.5b.
 
-- [confirmed] 2026-08-24 `POST /api/queue/pause-all` selects on `current_stage` being
-  `["pending", *STAGES]`, which after polish ledger P3.5b is a set the counts beside the
-  button no longer describe: Pause All pauses the rows the strip calls Not started and the
-  row it calls Failed at Research, and pausing a dead run overwrites the only column that
-  said it was dead. Scope the bulk pause to the run states it claims to act on. Distinct from
-  the entry above about pausing being a label rather than a control signal. Found at polish
-  ledger P3.5b.
+- [investigate] 2026-08-24 `POST /api/posts/{id}/pause` still pauses whatever row the reader
+  pressed it on, including one parked at a review gate and one that already died, and the
+  same `deriveRunState()` precedence then reports both as Paused. Polish ledger P4.1 scoped
+  the *bulk* pause away from those two states and deliberately left the per-post one alone,
+  on the grounds that the reader chose that row. Check whether a per-post pause on a parked
+  run should be refused, or should say what it is about to hide. Found under P4.1.
 
 - [investigate 2026-08-24] The `/auth` prefix is written in two places that must agree:
   `src/middleware.ts`'s matcher excludes it, and `AppChrome` in
