@@ -770,10 +770,15 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       add. The gap is stated in the workflow's `test` step and owed to `SUMMARY.md`, and new
       `src/test/env-gated-tests.test.ts` fails when a gate appears that the statement does not
       cover or when a provider key reaches the workflow. [evidence](evidence/p2.md#p2103)
-- [ ] **P2.104** `[confirmed 2026-08-24]` The PWA has no maskable icon. `manifest.json` now
+- [x] **P2.104** `[confirmed 2026-08-24]` The PWA has no maskable icon. `manifest.json` now
       declares `"any"`, which is truthful, but an installed app gets the platform's white
       badge behind the mark instead of the mark filling the tile. Needs a second full-bleed
-      render of the mark at 192 and 512.
+      render of the mark at 192 and 512. Done: `web/brand/icon-maskable.svg` is the same mark
+      with its page extended to the viewBox and no ink moved, which leaves the furthest ink at
+      radius 22.5 of a 25.6 safe circle, and the manifest now names both purposes at both
+      sizes. `brand-mark.test.ts` measures full bleed, the safe zone and sameness on the
+      pixels, and fails on the `any` raster in the maskable slot rather than only on a missing
+      file. [evidence](evidence/p2.md#p2104)
 - [x] **P2.105** `[investigate 2026-08-24]` `web/public/` carries five unreferenced Next.js
       starter assets (`next.svg`, `vercel.svg`, `file.svg`, `globe.svg`, `window.svg`), served
       as public routes and shipped in the Docker image. Reproduced by repo-wide grep and

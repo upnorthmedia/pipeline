@@ -48,15 +48,6 @@
   Done criterion. Reproduce by running that file repeatedly under a loaded machine before
   changing anything.
 
-- [confirmed] 2026-08-24 The PWA has no maskable icon. `web/src/app/manifest.json` declared both
-  of its icons `"purpose": "maskable"` while the art carries a transparent margin, which is the
-  opposite of the contract: a maskable icon is full bleed with everything important inside the
-  centre 80%, and Android crops it to whatever shape the launcher uses. The declaration is now
-  `"any"`, which is truthful, but the consequence is that an installed app gets the platform's
-  own white badge behind the mark rather than the mark filling the tile. Fixing it means a second
-  full-bleed render of `web/public/icon.svg` at 192 and 512 with the page extended to the edges,
-  listed alongside the `any` entries. Found at polish ledger P1.1. Ledger item P2.104.
-
 - [confirmed] 2026-08-24 `wp_url` accepts a URL carrying credentials
   (`https://user:pass@example.com`). `checkWpUrl` in `web/src/app/api/profiles/validation.ts`
   refuses a query string, a fragment and surrounding whitespace because those break the REST
