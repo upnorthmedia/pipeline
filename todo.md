@@ -171,13 +171,15 @@
   to run `db:migrate`. Compounds the entry above about nothing running migrations on deploy.
   Found at polish ledger P3.5a.
 
-- [confirmed] 2026-08-24 `GET /api/analytics/dashboard` still counts the way
-  `GET /api/queue` did before polish ledger P3.5b: `by_status` groups on `current_stage` and
-  `completion_rate` is the share of rows whose column reads `complete`. On `/monitor` that
-  puts `Completion Rate 26.7%` (4 of 15) directly above a Queue Controls strip calling three
-  of those four Complete and the fourth Finished with errors, because
-  `markPipelineComplete()` is unconditional. The completion rate is the number a user would
-  quote, so it is the one most worth making agree. Found at polish ledger P3.5b.
+- [investigate] 2026-08-24 The "Posts by Stage" chart on `/monitor` and the Queue Controls
+  strip below it both have a bar reading `Complete`, and on an account with a run that
+  finished with a failed stage they disagree by design: the chart counts rows sitting on
+  `current_stage = 'complete'` (4) and the strip counts runs `deriveRunState()` calls
+  complete (3). Polish ledger P4.2 fixed the completion rate and put `3 of 15 runs finished
+  cleanly` under it to reconcile them, and deliberately left the chart on the column, since
+  making it a second copy of the run states would duplicate the strip. Check whether the
+  chart's `Complete` bar should be relabelled to say it means the row reached the end.
+  Found under P4.2.
 
 - [investigate] 2026-08-24 `POST /api/posts/{id}/pause` still pauses whatever row the reader
   pressed it on, including one parked at a review gate and one that already died, and the

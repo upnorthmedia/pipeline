@@ -12,7 +12,7 @@
  *
  * The four Python arithmetic details that are load-bearing:
  *
- * - `total` is the sum of *every* group, not of the named buckets, so a post
+ * - `total` counts *every* owned post, not just the named buckets, so a post
  *   with a null or unrecognised `current_stage` still counts toward it and
  *   toward the completion rate's denominator.
  * - `completion_rate` and the average duration use Python's round, which is
@@ -21,12 +21,26 @@
  *   of exactly zero reports as `null` rather than `0`.
  * - `by_profile` groups by profile *name*, not by id, so two profiles sharing
  *   a name are one row.
+ *
+ * **`by_status` and `complete` answer different questions, on purpose.**
+ * `by_status` is still a group-by on `current_stage`: it is where each row got
+ * to, which is what the "Posts by Stage" chart draws and says it draws.
+ * `complete` and `completion_rate` are about what the *run* did, so they are
+ * counted the way `GET /api/queue` counts its buckets, by handing both columns
+ * to `deriveRunState()`. Python read the column for both, which made a run that
+ * reached the end with a failed stage a completion: `markPipelineComplete()` is
+ * unconditional, so an account with four rows on `complete`, one of whose
+ * `images` stage failed, printed `Completion Rate 26.7%` directly above a strip
+ * calling three of them Complete and the fourth Finished with errors. Two
+ * numbers on one screen counting the same rows have to use one rule.
  */
 import { and, count, desc, eq, gte, isNotNull, sql } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
+import type { PostStage, StageStatusMap } from "@/lib/api"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import { withServerError } from "@/lib/route-error"
+import { deriveRunState } from "@/lib/run-state"
 import { pythonRound } from "@/mastra/analytics/python-round"
 
 import { DAY_MS, parseDays } from "../days"
@@ -44,23 +58,32 @@ async function getHandler(request: Request): Promise<Response> {
   const todayStart = new Date()
   todayStart.setUTCHours(0, 0, 0, 0)
 
+  // Both columns of every owned post, rather than a grouped count: the bucket
+  // a row lands in needs `current_stage`, and whether its run finished needs
+  // `stage_status` as well. Same row scan `GET /api/queue` does, and the same
+  // answer if it ever costs anything, which is to cache the response rather
+  // than to re-derive the precedence rules in SQL.
   const statusRows = await db
-    .select({ stage: posts.currentStage, total: count(posts.id) })
+    .select({ stage: posts.currentStage, stageStatus: posts.stageStatus })
     .from(posts)
     .innerJoin(websiteProfiles, eq(posts.profileId, websiteProfiles.id))
     .where(owned)
-    .groupBy(posts.currentStage)
 
   // `json.dumps` renders a `None` dict key as the string "null", so a post
   // whose stage was never written lands under that key rather than being
   // dropped.
   const byStatus: Record<string, number> = {}
-  let total = 0
+  let complete = 0
   for (const row of statusRows) {
-    byStatus[row.stage ?? "null"] = row.total
-    total += row.total
+    const key = row.stage ?? "null"
+    byStatus[key] = (byStatus[key] ?? 0) + 1
+    const state = deriveRunState({
+      currentStage: row.stage as PostStage,
+      stageStatus: (row.stageStatus ?? {}) as StageStatusMap,
+    })
+    if (state.kind === "complete") complete += 1
   }
-  const complete = byStatus.complete ?? 0
+  const total = statusRows.length
   const completionRate = total > 0 ? pythonRound((complete / total) * 100, 1) : 0
 
   // `numeric` reaches `pg` as a string, as it reached asyncpg as a `Decimal`.

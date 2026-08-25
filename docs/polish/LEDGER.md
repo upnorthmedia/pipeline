@@ -939,10 +939,18 @@ criterion 9's bar are named at the bottom with what is owed to `SUMMARY.md` inst
       enqueued is in that exact state until its first stage marks itself running. The two
       buttons now name their own count and disable at zero. `ui/p4a-queue-controls-*.png`.
       [evidence](evidence/p4.md#p41)
-- [ ] **P4.2** `GET /api/analytics/dashboard` still counts the way `GET /api/queue` did before
-      P3.5b: `by_status` groups on `current_stage` and `completion_rate` is the share of rows
-      reading `complete`, so `/monitor` prints `Completion Rate 26.7%` directly above a strip
-      calling three of those four Complete and the fourth Finished with errors.
+- [x] **P4.2** `GET /api/analytics/dashboard` counted the way `GET /api/queue` did before
+      P3.5b: `completion_rate` was the share of rows whose `current_stage` reads `complete`,
+      so `/monitor` printed `Completion Rate 26.7%` directly above a strip calling three of
+      those four Complete and the fourth Finished with errors. `complete` is now counted by
+      `deriveRunState()`, the rule the strip uses, and the same account reads `20%` with
+      `3 of 15 runs finished cleanly` under it. `by_status` stays a `current_stage` group-by
+      on purpose: it is what the "Posts by Stage" chart draws and says it draws, and making
+      it a second copy of the run states would duplicate the strip below it. Two of the three
+      new route tests pass throughout and are the reason the fix reads both columns: a
+      `complete` row with an empty `stage_status` still counts, a row stamped `failed` over a
+      running stage still does not. `ui/p4b-completion-rate-*.png`.
+      [evidence](evidence/p4.md#p42)
 - [ ] **P4.3** A publish that dies with its worker reports `Publishing...` forever:
       `wp_publish_status` / `nextjs_publish_status` move to `publishing` before the step
       touches the destination and only the step writes them again, and the publish workflows

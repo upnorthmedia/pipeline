@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto"
 import { like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
-import { closeDb, getDb, posts, websiteProfiles } from "@/db"
+import { closeDb, getDb, posts, websiteProfiles, type StageStatusJson } from "@/db"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
 import { GET } from "./dashboard/route"
@@ -64,8 +64,19 @@ async function createProfile(userId: string, name = "Main Blog"): Promise<string
 
 type PostOverrides = {
   currentStage?: string | null
+  stageStatus?: StageStatusJson
   createdAt?: Date
   completedAt?: Date | null
+}
+
+/** Every stage green, which is what a run that finished cleanly leaves behind. */
+const ALL_COMPLETE: StageStatusJson = {
+  research: "complete",
+  outline: "complete",
+  write: "complete",
+  edit: "complete",
+  images: "complete",
+  ready: "complete",
 }
 
 function postRow(profile: string | null, overrides: PostOverrides = {}) {
@@ -247,6 +258,46 @@ describe("GET /api/analytics/dashboard", () => {
 
     it("reports a completion rate of 0 rather than dividing by zero", async () => {
       expect((await body()).completion_rate).toBe(0)
+    })
+
+    it("leaves a run that reached the end with a failed stage out of complete", async () => {
+      await insertPost(profileId, { currentStage: "complete", stageStatus: ALL_COMPLETE })
+      await insertPost(profileId, { currentStage: "complete", stageStatus: ALL_COMPLETE })
+      await insertPost(profileId, { currentStage: "complete", stageStatus: ALL_COMPLETE })
+      await insertPost(profileId, {
+        currentStage: "complete",
+        stageStatus: { ...ALL_COMPLETE, images: "failed" },
+      })
+      await insertPost(profileId, { currentStage: "pending" })
+
+      const payload = await body()
+      // The row is still where it got to, which is what the chart draws.
+      expect(payload.by_status).toEqual({ complete: 4, pending: 1 })
+      expect(payload.total).toBe(5)
+      // But four of five did not finish: `deriveRunState()` calls the fourth
+      // "Finished with errors", and the strip beside this number says so.
+      expect(payload.complete).toBe(3)
+      expect(payload.completion_rate).toBe(60)
+    })
+
+    it("counts a complete row with no stage_status, which every legacy row is", async () => {
+      await insertPost(profileId, { currentStage: "complete" })
+      await insertPost(profileId, { currentStage: "complete", stageStatus: ALL_COMPLETE })
+
+      const payload = await body()
+      expect(payload.complete).toBe(2)
+      expect(payload.completion_rate).toBe(100)
+    })
+
+    it("counts a stage the row never left as incomplete, whatever the column says", async () => {
+      // `markPipelineFailed()` stamps `failed` over a stage still recorded as
+      // running, so neither column alone answers this one.
+      await insertPost(profileId, { currentStage: "failed", stageStatus: { research: "running" } })
+      await insertPost(profileId, { currentStage: "complete", stageStatus: ALL_COMPLETE })
+
+      const payload = await body()
+      expect(payload.complete).toBe(1)
+      expect(payload.completion_rate).toBe(50)
     })
   })
 

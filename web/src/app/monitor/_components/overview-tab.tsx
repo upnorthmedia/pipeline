@@ -384,6 +384,17 @@ export function OverviewTab() {
                   <p className="text-3xl font-bold mt-1 tracking-tight text-emerald-500">
                     {dashboard?.completion_rate ?? 0}%
                   </p>
+                  {/*
+                    The two counts, because the percentage alone cannot be
+                    checked against anything else on the screen. `complete` is
+                    the runs `deriveRunState()` calls Complete, the same rule
+                    the strip below uses, which is fewer than the rows the
+                    chart draws under "Complete" whenever one of them finished
+                    with a failed stage.
+                  */}
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    {dashboard?.complete ?? 0} of {dashboard?.total ?? 0} runs finished cleanly
+                  </p>
                 </div>
                 <div className="h-10 w-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
                   <TrendingUp className="h-5 w-5 text-emerald-500" />

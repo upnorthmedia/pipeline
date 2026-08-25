@@ -140,6 +140,31 @@ describe("MonitorPage", () => {
     expect(screen.getByText("3")).toBeInTheDocument();
   });
 
+  it("names the two counts behind the completion rate", async () => {
+    renderWithProviders(<MonitorPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Completion Rate")).toBeInTheDocument();
+    });
+    expect(screen.getByText("42 of 50 runs finished cleanly")).toBeInTheDocument();
+  });
+
+  it("counts a run that reached the end with a failed stage out of the rate", async () => {
+    // Four rows sit on `complete`, which is what the chart draws, but one of
+    // them finished with a failed stage, so three runs finished cleanly.
+    mockDashboard.mockResolvedValue({
+      ...testDashboard,
+      by_status: { complete: 4, pending: 1 },
+      total: 5,
+      complete: 3,
+      completion_rate: 60,
+    });
+    renderWithProviders(<MonitorPage />);
+    await waitFor(() => {
+      expect(screen.getByText("60%")).toBeInTheDocument();
+    });
+    expect(screen.getByText("3 of 5 runs finished cleanly")).toBeInTheDocument();
+  });
+
   it("renders queue controls with pause/resume buttons", async () => {
     renderWithProviders(<MonitorPage />);
     await waitFor(() => {
