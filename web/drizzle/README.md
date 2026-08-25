@@ -44,6 +44,34 @@ Three owners, applied in this order. Only the first is in this folder.
    test suite creates them once up front for that reason
    (`src/test/mastra-storage.ts`).
 
+## A database that already has the schema
+
+Every database that predates the port, including the dev one in this repo, has
+the tables the twelve Python revisions built and no `drizzle.__drizzle_migrations`
+rows at all. `0000_baseline.sql` creates the whole schema, so `pnpm db:migrate`
+against such a database dies inside its first statement
+(`relation "alembic_version" already exists`) and has applied nothing.
+
+The command now says so and names the remedy instead of raising a query error:
+
+```sh
+pnpm db:migrate --baseline     # record the migrations, run none of them
+```
+
+`--baseline` writes the rows `pnpm db:migrate` would have written, the same
+sha256 per file and the same `meta/_journal.json` timestamp, so an adopted
+database and one built from empty are indistinguishable afterwards and the next
+migration applies to both. It refuses a database that already records a
+migration (otherwise the flag would be a way to mark an unapplied migration as
+done) and one with no pipeline tables (which needs them run, not recorded).
+`src/db/migration-scripts.test.ts` drives all four cases against a scratch
+database.
+
+It is deliberately an operator command and not part of the pre-deploy hook:
+adopting a database is a claim that its schema already matches this folder, and
+nothing but a person can make that claim. `scripts/predeploy.ts` reports the
+same sentence and fails the deploy.
+
 ## Posts with no profile
 
 `posts.profile_id` is nullable and there is no `posts.user_id`, so a row with no

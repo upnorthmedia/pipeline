@@ -230,7 +230,7 @@ export function ImagePreview({ manifest, className, onRetry }: ImagePreviewProps
             <CardTitle className="text-sm">Version</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm font-mono">{version || "—"}</p>
+            <p className="text-sm font-mono">{version || "Not recorded"}</p>
           </CardContent>
         </Card>
       </div>

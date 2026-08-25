@@ -89,6 +89,16 @@ export function LogsTab() {
   const loadedRef = useRef(false);
   const [timePreset, setTimePreset] = useState<number>(24 * 7);
   const [page, setPage] = useState(1);
+  // The search box is the one filter that changes without a click, so it is
+  // the one that cannot reset the page in a handler. Adjusted during the
+  // render that first sees the new query rather than in an effect: an effect
+  // would let the fetch for the old page go out first and answer with an empty
+  // table on its way to being replaced.
+  const askedFor = useRef(search);
+  if (askedFor.current !== search) {
+    askedFor.current = search;
+    setPage(1);
+  }
 
   const fetchLogs = useCallback(async () => {
     // Two filter changes can be in flight together, and the older one
@@ -328,6 +338,7 @@ export function LogsTab() {
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
+                    aria-label="Previous page"
                     disabled={page <= 1}
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                   >
@@ -337,6 +348,7 @@ export function LogsTab() {
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
+                    aria-label="Next page"
                     disabled={page >= (data?.pages ?? 1)}
                     onClick={() => setPage((p) => p + 1)}
                   >

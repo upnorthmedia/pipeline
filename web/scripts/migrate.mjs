@@ -10,16 +10,37 @@
  *
  * Usage, from `web/`:
  *   pnpm db:migrate                 # loads the repo-root `.env` first
+ *   pnpm db:migrate --baseline      # adopt a database that already has the schema
  *   node scripts/migrate.mjs        # environment already set, which is the deploy shape
  */
 import { Pool } from "pg"
 
-import { applyMigrations, databaseUrl, migrationsFolder } from "./migrate-lib.mjs"
+import {
+  applyMigrations,
+  baselineMigrations,
+  databaseUrl,
+  MigrationHalted,
+  migrationsFolder,
+} from "./migrate-lib.mjs"
 
+const baseline = process.argv.slice(2).includes("--baseline")
 const pool = new Pool({ connectionString: databaseUrl() })
 try {
-  const applied = await applyMigrations(pool)
-  console.log(`schema up to date: ${applied} migrations recorded from ${migrationsFolder}`)
+  if (baseline) {
+    const recorded = await baselineMigrations(pool)
+    console.log(
+      `baseline recorded ${recorded} migrations from ${migrationsFolder} as already applied; ` +
+        "nothing was run against the database",
+    )
+  } else {
+    const applied = await applyMigrations(pool)
+    console.log(`schema up to date: ${applied} migrations recorded from ${migrationsFolder}`)
+  }
+} catch (error) {
+  // A state with a remedy prints the remedy. Anything else keeps its stack.
+  if (!(error instanceof MigrationHalted)) throw error
+  console.error(error.message)
+  process.exitCode = 1
 } finally {
   await pool.end()
 }

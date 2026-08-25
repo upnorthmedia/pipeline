@@ -1046,17 +1046,19 @@ criterion 9's bar are named at the bottom with what is owed to `SUMMARY.md` inst
       tool, tested against a scratch database; `profile_id` stays nullable because `NOT NULL`
       would mean a migration that deletes rows whose owner cannot be determined. The dev
       database is at zero orphans. `ui/p47-*.png`. [evidence](evidence/p4.md#p47)
-- [ ] **P4.8** Cleanup batch, one iteration for all four small visible defects: the two delete
-      confirmations on `/` render their destructive action in the primary colour
-      (`AlertDialogAction` takes a `variant` prop and neither site passes it); the logs tab
-      does not reset its page when a filter changes, so a search typed on page 3 answers with
-      an empty table; `WordPressTestResponse.site_name` is typed `string` while the handler
-      forwards `record.name` unchecked, which puts `[object Object]` through
-      `Connected to ${status.siteName}`; and `pnpm -C web db:migrate` cannot run against a
-      dev database carried over from the Python stack, which `web/drizzle/README.md` does not
-      say. Two em dashes in shipped copy join this batch (`Ready - Live Preview` on
-      `/posts/[id]` and the missing-version placeholder in `image-preview.tsx`), filed while
-      closing P4.4b.
+- [x] **P4.8** Cleanup batch, all five done in one iteration. The two delete confirmations on
+      `/` now pass `variant="destructive"`: the `className` override never applied, because
+      `AlertDialogAction` renders a `Button asChild` and Radix's `Slot` concatenates class
+      lists rather than merging them, measured in the browser as `bg-primary bg-destructive`
+      computing to primary. The logs tab resets to page 1 when the debounced search changes,
+      during the render that sees it rather than in an effect, and its two icon-only pager
+      buttons gained names. `GET /api/profiles/{id}/wordpress/test` answers `site_name: ""`
+      for a root whose `name` is not a string, declared as a deviation in the parity oracle.
+      `pnpm db:migrate` against a database built before the port now prints one sentence and
+      the remedy instead of a 60-line `DrizzleQueryError`, and `pnpm db:migrate --baseline`
+      adopts such a database by recording the migrations it already has; the dev database is
+      adopted and `drizzle/README.md` says so. The two em dashes are gone from shipped copy.
+      `ui/p48-delete-confirm-*.png`. [evidence](evidence/p4.md#p48)
 
 - [ ] **P4.9** A stalled publish is legible only on `/posts/[id]`. The posts list and
       `/monitor` show nothing about one, and the run trace's `Publish to <target>` row counts

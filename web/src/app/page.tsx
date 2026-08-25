@@ -552,9 +552,16 @@ export default function PostsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
+            {/*
+              `variant`, not a `className` override: `AlertDialogAction` puts
+              the child's class inside its own `Button` through a `Slot`, which
+              concatenates the two lists instead of merging them, so the
+              button's `bg-primary` stays on the element beside the override
+              and the emitted order decides which one paints.
+            */}
             <AlertDialogAction
+              variant="destructive"
               onClick={() => deleteTarget && confirmDelete(deleteTarget)}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete
             </AlertDialogAction>
@@ -574,10 +581,7 @@ export default function PostsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmBulkDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
+            <AlertDialogAction variant="destructive" onClick={confirmBulkDelete}>
               Delete {selected.size} posts
             </AlertDialogAction>
           </AlertDialogFooter>

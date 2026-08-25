@@ -38,12 +38,21 @@ class WordPressRootError extends Error {
   }
 }
 
-function siteName(info: unknown): unknown {
+/**
+ * `WordPressTestResponse.site_name` is typed `string` in `src/lib/api.ts` and
+ * `/profiles/[id]` renders it as `Connected to ${siteName}`, so forwarding
+ * `record.name` untouched (as Python did) puts `null`, a number, or
+ * `[object Object]` on screen for a root that answers with a `name` that is not
+ * a string. Anything but a string becomes the empty string, which is already
+ * the answer for a root carrying no `name` at all, and which the caller reads
+ * as "connected, name unknown" (P4.8).
+ */
+function siteName(info: unknown): string {
   if (info === null || typeof info !== "object" || Array.isArray(info)) {
     throw new WordPressRootError()
   }
   const record = info as Record<string, unknown>
-  return "name" in record ? record.name : ""
+  return typeof record.name === "string" ? record.name : ""
 }
 
 async function getHandler(

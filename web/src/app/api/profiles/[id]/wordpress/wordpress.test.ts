@@ -137,6 +137,24 @@ function reworded<T>(value: T): T {
   return value
 }
 
+/**
+ * The second deliberate reword (polish ledger item P4.8).
+ *
+ * Python returned `info["name"]` untouched, so a `/wp-json` root answering
+ * `{"name": 1234}` or `{"name": null}` put a number or a null through
+ * `WordPressTestResponse.site_name`, which `src/lib/api.ts` types `string`.
+ * `/profiles/[id]` renders it as `Connected to ${siteName}`, so an object there
+ * reads `Connected to [object Object]`. The port answers the empty string for
+ * anything that is not a string, which is what it already answered for a root
+ * with no `name` at all, and which the caller's `|| "WordPress"` covers.
+ */
+function coercedSiteName<T>(value: T): T {
+  if (!value || typeof value !== "object" || !("site_name" in value)) return value
+  const body = value as { site_name?: unknown }
+  if (typeof body.site_name === "string") return value
+  return { ...body, site_name: "" } as T
+}
+
 function divergentAnswer(scenario: Scenario): { status: number; body: unknown } | null {
   const { unhandled, message } = scenario.expected
   switch (unhandled) {
@@ -292,7 +310,9 @@ describe.each(oracle.scenarios)("$endpoint: $name", (scenario) => {
     it("answers 200 with the value Python returned", async () => {
       const { response } = await run()
       expect(response!.status).toBe(200)
-      expect(await response!.json()).toEqual(reworded(scenario.expected.returned))
+      expect(await response!.json()).toEqual(
+        coercedSiteName(reworded(scenario.expected.returned)),
+      )
     })
   } else if (scenario.expected.http_status !== undefined) {
     it(`answers ${scenario.expected.http_status} with Python's detail`, async () => {

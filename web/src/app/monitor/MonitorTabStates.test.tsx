@@ -345,6 +345,52 @@ describe("LogsTab async states", () => {
     expect(mockLogs).toHaveBeenCalledTimes(1);
   });
 
+  it("goes back to the first page when a search is typed on a later one", async () => {
+    // Page 3 of an unfiltered week rarely holds anything matching a word just
+    // typed, so asking the server for page 3 of the new filter answers with an
+    // empty table and no explanation. Every other filter already resets.
+    const user = userEvent.setup({ delay: null });
+    mockLogs.mockResolvedValue({ ...testLogs, pages: 4 });
+
+    renderWithProviders(<LogsTab />);
+    expect(await screen.findByText("wrote 1200 words")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /next page/i }));
+    await waitFor(() =>
+      expect(mockLogs).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 2 })
+      )
+    );
+
+    await user.type(screen.getByPlaceholderText("Search messages..."), "quota");
+
+    await waitFor(() =>
+      expect(mockLogs).toHaveBeenLastCalledWith(
+        expect.objectContaining({ q: "quota", page: 1 })
+      )
+    );
+  });
+
+  it("asks for the new page once, not once with the old filter first", async () => {
+    const user = userEvent.setup({ delay: null });
+    mockLogs.mockResolvedValue({ ...testLogs, pages: 4 });
+
+    renderWithProviders(<LogsTab />);
+    expect(await screen.findByText("wrote 1200 words")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /next page/i }));
+    await waitFor(() => expect(mockLogs).toHaveBeenCalledTimes(2));
+    mockLogs.mockClear();
+
+    await user.type(screen.getByPlaceholderText("Search messages..."), "quota");
+
+    await waitFor(() =>
+      expect(mockLogs).toHaveBeenLastCalledWith(
+        expect.objectContaining({ q: "quota", page: 1 })
+      )
+    );
+    expect(mockLogs).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the rows on screen while a filter change is in flight", async () => {
     const user = userEvent.setup({ delay: null });
 

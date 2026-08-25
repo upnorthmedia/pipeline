@@ -1111,7 +1111,7 @@ export default function PostDetailPage() {
                   content ? (
                     <Card className="gap-0 py-0">
                       <CardHeader className="flex flex-row items-center justify-between py-3">
-                        <CardTitle className="text-base">Ready — Live Preview</CardTitle>
+                        <CardTitle className="text-base">Ready: live preview</CardTitle>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -1254,9 +1254,9 @@ export default function PostDetailPage() {
             {/*
               `variant`, not a `className` override: `AlertDialogAction` renders
               a `Button` and puts the child's class *inside* it, so a
-              `bg-destructive` class loses to the button's own `variant` classes
-              in the cascade. The two delete dialogs on `/` do it the other way
-              and are not actually red; filed in `todo.md`.
+              `bg-destructive` class lands beside the button's own
+              `bg-primary` rather than replacing it. The two delete dialogs on
+              `/` did it the other way until P4.8.
             */}
             <AlertDialogAction variant="destructive" onClick={handleRestart}>
               Start over

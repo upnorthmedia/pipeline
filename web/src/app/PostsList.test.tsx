@@ -292,6 +292,41 @@ describe("PostsPage", () => {
     expect(screen.getByText("1 selected")).toBeInTheDocument();
   });
 
+  describe("the delete confirmations", () => {
+    // `AlertDialogAction` renders a `Button` and puts the child's class inside
+    // it through a `Slot`, which concatenates rather than merging: the button
+    // keeps its own `bg-primary` and the override sits beside it, so which one
+    // paints is down to the order Tailwind emitted them in. The `variant` prop
+    // is the one way to say destructive here, and `/posts/[id]` already uses it.
+    it("paints the single confirm as destructive, not as the primary action", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<PostsPage />);
+      await screen.findByText("First Post");
+
+      await user.click(
+        screen.getByRole("button", { name: "Actions for First Post" })
+      );
+      await user.click(await screen.findByRole("menuitem", { name: /delete/i }));
+
+      const confirm = await screen.findByRole("button", { name: "Delete" });
+      expect(confirm.className).toContain("bg-destructive");
+      expect(confirm.className).not.toContain("bg-primary");
+    });
+
+    it("paints the bulk confirm as destructive, not as the primary action", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<PostsPage />);
+      await screen.findByText("First Post");
+
+      await user.click(screen.getAllByRole("checkbox")[1]);
+      await user.click(screen.getByRole("button", { name: /^delete$/i }));
+
+      const confirm = await screen.findByRole("button", { name: "Delete 1 posts" });
+      expect(confirm.className).toContain("bg-destructive");
+      expect(confirm.className).not.toContain("bg-primary");
+    });
+  });
+
   it("calls posts.list on mount", async () => {
     renderWithProviders(<PostsPage />);
     await waitFor(() => {

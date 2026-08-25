@@ -21,6 +21,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 
+import { readMigrationFiles } from "drizzle-orm/migrator"
 import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
@@ -35,6 +36,9 @@ const SCRATCH_DB = "content_pipeline_migrate_check"
 
 /** The same, for the drizzle-kit half of the bookkeeping comparison. */
 const KIT_SCRATCH_DB = "content_pipeline_migrate_check_kit"
+
+/** And for the database that has the schema but none of the bookkeeping. */
+const ADOPT_SCRATCH_DB = "content_pipeline_migrate_check_adopt"
 
 const webDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 
@@ -232,4 +236,125 @@ describe("the deploy script's connection string", () => {
   it("refuses to run against nothing rather than a default", () => {
     expect(() => databaseUrl({})).toThrow(/DATABASE_URL_SYNC/)
   })
+})
+
+describe("a database that already has the schema", () => {
+  /**
+   * What every database built before the port looks like: the twelve Python
+   * revisions created the tables, and `drizzle.__drizzle_migrations` is empty
+   * or absent. The dev database in this repo is in exactly that state, so
+   * `pnpm db:migrate` against it dies inside `CREATE TABLE "alembic_version"`
+   * with a sixty-line `DrizzleQueryError` and no hint of what to do.
+   *
+   * Simulated by building the schema and then dropping the bookkeeping, which
+   * leaves the same two facts true: the tables are there, and nothing records
+   * a migration.
+   */
+  const adoptUrl = withDatabase(ADOPT_SCRATCH_DB)
+  const adoptEnv = { ...childEnv(), DATABASE_URL_SYNC: adoptUrl, DATABASE_URL: adoptUrl }
+  let adoptPool: Pool
+
+  /** What a fresh `pnpm db:migrate` records, read from the folder itself. */
+  const expectedLedger = readMigrationFiles({ migrationsFolder: path.join(webDir, "drizzle") }).map(
+    (file) => ({ hash: file.hash, created_at: String(file.folderMillis) }),
+  )
+
+  beforeAll(async () => {
+    const admin = new Pool({ connectionString: withDatabase("postgres") })
+    try {
+      await admin.query(`DROP DATABASE IF EXISTS ${ADOPT_SCRATCH_DB} WITH (FORCE)`)
+      await admin.query(`CREATE DATABASE ${ADOPT_SCRATCH_DB}`)
+    } finally {
+      await admin.end()
+    }
+    adoptPool = new Pool({ connectionString: adoptUrl })
+    await run("node", [path.join(webDir, "scripts/migrate.mjs")], { cwd: webDir, env: adoptEnv })
+    await adoptPool.query("DROP SCHEMA drizzle CASCADE")
+  }, 120_000)
+
+  afterAll(async () => {
+    await adoptPool?.end()
+    const admin = new Pool({ connectionString: withDatabase("postgres") })
+    try {
+      await admin.query(`DROP DATABASE IF EXISTS ${ADOPT_SCRATCH_DB} WITH (FORCE)`)
+    } finally {
+      await admin.end()
+    }
+  })
+
+  it("says what happened and what to run, rather than raising a query error", async () => {
+    const failure = await run("node", [path.join(webDir, "scripts/migrate.mjs")], {
+      cwd: webDir,
+      env: adoptEnv,
+    }).catch((error: Error & { stderr?: string; code?: number }) => error)
+
+    expect(failure).toBeInstanceOf(Error)
+    const stderr = (failure as Error & { stderr?: string }).stderr ?? ""
+    expect(stderr).toContain("already has the pipeline tables")
+    expect(stderr).toContain("db:migrate --baseline")
+    expect(stderr).not.toContain("DrizzleQueryError")
+  }, 120_000)
+
+  it("--baseline records the migrations the database already has", async () => {
+    const { stdout } = await run(
+      "node",
+      [path.join(webDir, "scripts/migrate.mjs"), "--baseline"],
+      { cwd: webDir, env: adoptEnv },
+    )
+    expect(stdout).toContain(`recorded ${expectedLedger.length} migrations`)
+    expect(await migrationLedger(adoptPool)).toEqual(expectedLedger)
+  }, 120_000)
+
+  it("leaves an adopted database with nothing to apply", async () => {
+    const { stdout } = await run("pnpm", ["db:migrate"], { cwd: webDir, env: adoptEnv })
+    expect(stdout).toMatch(/schema up to date: 4 migrations recorded/)
+    expect(await migrationLedger(adoptPool)).toEqual(expectedLedger)
+  }, 120_000)
+
+  it("refuses to baseline a database that is already recording migrations", async () => {
+    // Otherwise the flag becomes a way to mark an unapplied migration as done,
+    // which is the one mistake a stamping tool must not make easy.
+    const failure = await run(
+      "node",
+      [path.join(webDir, "scripts/migrate.mjs"), "--baseline"],
+      { cwd: webDir, env: adoptEnv },
+    ).catch((error: Error & { stderr?: string }) => error)
+
+    expect(failure).toBeInstanceOf(Error)
+    expect((failure as Error & { stderr?: string }).stderr ?? "").toContain(
+      "already records 4 migrations",
+    )
+    expect(await migrationLedger(adoptPool)).toEqual(expectedLedger)
+  }, 120_000)
+
+  it("refuses to baseline a database with no pipeline tables", async () => {
+    const emptyDb = `${ADOPT_SCRATCH_DB}_empty`
+    const admin = new Pool({ connectionString: withDatabase("postgres") })
+    try {
+      await admin.query(`DROP DATABASE IF EXISTS ${emptyDb} WITH (FORCE)`)
+      await admin.query(`CREATE DATABASE ${emptyDb}`)
+    } finally {
+      await admin.end()
+    }
+    const emptyUrl = withDatabase(emptyDb)
+    try {
+      const failure = await run(
+        "node",
+        [path.join(webDir, "scripts/migrate.mjs"), "--baseline"],
+        { cwd: webDir, env: { ...adoptEnv, DATABASE_URL_SYNC: emptyUrl, DATABASE_URL: emptyUrl } },
+      ).catch((error: Error & { stderr?: string }) => error)
+
+      expect(failure).toBeInstanceOf(Error)
+      expect((failure as Error & { stderr?: string }).stderr ?? "").toContain(
+        "has no pipeline tables",
+      )
+    } finally {
+      const cleanup = new Pool({ connectionString: withDatabase("postgres") })
+      try {
+        await cleanup.query(`DROP DATABASE IF EXISTS ${emptyDb} WITH (FORCE)`)
+      } finally {
+        await cleanup.end()
+      }
+    }
+  }, 120_000)
 })

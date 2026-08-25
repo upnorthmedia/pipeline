@@ -113,12 +113,6 @@
   a reader who wants the profile's gates back on a post has to set six selects by hand.
   Found under P4.6.
 
-- [confirmed] 2026-08-25 Two em dashes survive in shipped UI copy, which the repo's own
-  convention forbids: `Ready — Live Preview` in `web/src/app/posts/[id]/page.tsx` and the `—`
-  placeholder for a missing image version in `web/src/components/image-preview.tsx`. Both are
-  one-character fixes and belong in a cleanup batch, not an iteration. Found while closing
-  P4.4b.
-
 - [confirmed] 2026-08-25 A run paused after its last stage can only be finished from
   `/posts/[id]`. `isPausedBeforeFinish()` gives the posts list and `/monitor` the right badge
   (both call `deriveRunState()`), but neither carries the `Finish this run` button, so a
@@ -153,14 +147,6 @@
   simply be a refetch before adding a fourth refetch trigger. Found at polish ledger P3.2b-ii.
 
 
-- [confirmed] 2026-08-24 `WordPressTestResponse.site_name` is typed `string` in
-  `web/src/lib/api.ts` but `GET /api/profiles/{id}/wordpress/test` returns `siteName(info)`,
-  which is `unknown`: it forwards `record.name` verbatim from the WordPress root response
-  without checking its type. A site whose root answers with a non-string `name` puts that value
-  through `Connected to ${status.siteName}` on `/profiles/[id]`, which is `[object Object]` for
-  an object. WordPress core answers a string, so this is a type lie rather than a live defect.
-  Found at polish ledger P3.3c-i.
-
 - [investigate] 2026-08-24 Nothing stops the next nullable field from being interpolated into a
   user-visible sentence. The P3.3c-i sweep found the string `undefined` unreachable in the UI
   today, but only by reading ~140 template literals by hand.
@@ -175,21 +161,6 @@
   says so plainly, but the analytics endpoints read that column, so a restarted post
   disappears from cost reporting entirely rather than showing two runs. Check whether the
   column should be appended to instead. Found at polish ledger P3.3c-ii.
-
-- [confirmed] 2026-08-24 The two delete confirmations on `/` (`web/src/app/page.tsx`, the
-  single delete and the bulk delete) style their destructive action with
-  `className="bg-destructive text-destructive-foreground hover:bg-destructive/90"`, which does
-  nothing: `AlertDialogAction` renders a `Button` and passes the child's `className` to the
-  inner `Radix Action`, so the button's own `variant="default"` classes win the cascade and
-  the confirm button for "permanently delete the post and its generated images" renders in the
-  ordinary primary colour. `AlertDialogAction` takes a `variant` prop; both sites should pass
-  `variant="destructive"`. Found at polish ledger P3.3c-ii.
-
-- [confirmed] 2026-08-24 The logs tab does not reset its page when a filter changes.
-  `web/src/app/monitor/_components/logs-tab.tsx` holds `page` in state and only `handleSearch`
-  (the form submit) and `resetFilters` set it back to 1, so a search typed while on page 3 asks
-  for page 3 of a result set that may have one page and answers with an empty table over a
-  filter that does match rows. Found at polish ledger P3.4a.
 
 - [investigate] 2026-08-24 A superseded list request is dropped, not cancelled. Polish ledger
   P3.4a added `useLatestRequest` so a stale answer cannot overwrite fresher rows, but the
@@ -209,16 +180,6 @@
   while the placeholder introduced at polish ledger P3.4b keeps its three bars on one, which
   would put the height gap back on a phone. Measure `/settings` CLS at 390x844 before deciding
   whether the placeholder needs the same wrap. Found at polish ledger P3.4b.
-
-- [confirmed] 2026-08-24 `pnpm -C web db:migrate` cannot run against a dev database carried
-  over from the Python stack. `drizzle.__drizzle_migrations` is empty on it, because Alembic
-  built the schema, so `drizzle-kit migrate` starts at `0000_baseline` and dies on
-  `relation "alembic_version" already exists`. Every migration after the baseline therefore
-  has to be applied by hand locally, which is how `0003_output_format_default.sql` reached the
-  dev database. Either backfill the ledger with the migrations the baseline represents, or
-  document the hand-application in `web/drizzle/README.md`, which currently tells the reader
-  to run `db:migrate`. Compounds the entry above about nothing running migrations on deploy.
-  Found at polish ledger P3.5a.
 
 - [investigate] 2026-08-24 The "Posts by Stage" chart on `/monitor` and the Queue Controls
   strip below it both have a bar reading `Complete`, and on an account with a run that
@@ -247,3 +208,28 @@
   have ever been opened in a browser in this run. `generateStaticParams` builds all of them,
   so `forgot-password`, `reset-password`, `sign-out` and the rest are live routes nobody has
   looked at. Found at polish ledger P3.5c.
+
+- [confirmed] 2026-08-25 Ten icon-only `<Button size="icon">` elements carry no accessible
+  name: `src/components/sidebar.tsx:114`, `src/app/settings/page.tsx:413`,
+  `src/app/posts/new/page.tsx:243`, `src/app/posts/batch/page.tsx:256` and `:437`,
+  `src/app/posts/[id]/page.tsx:707`, `src/app/profiles/[id]/page.tsx:794` and `:1608`,
+  `src/app/monitor/_components/models-tab.tsx:120` and `costs-tab.tsx:190`. Filed for
+  testability rather than for a11y: this is the third iteration running (P4.7's profiles row
+  menu, P4.8's logs pager) where a test could not reach a control until it was named, so
+  every one of these is a control no test can press. One sweep, one `aria-label` each.
+  Found at polish ledger P4.8.
+
+- [investigate] 2026-08-25 `pnpm db:migrate --baseline` (polish ledger P4.8) trusts the
+  operator that the database it is adopting matches `web/drizzle/`. Nothing checks, so a
+  database whose schema has drifted can be stamped and will then be reported up to date.
+  `src/db/baseline-parity.test.ts` already contains the column, index and constraint
+  comparison that would answer this; check whether it can be lifted into the script as a
+  refusal (or a `--check`) without dragging the test harness into the runtime image.
+  Found at polish ledger P4.8.
+
+- [investigate] 2026-08-25 `scripts/predeploy.ts` has no answer for a production database in
+  the pre-port state. It now reports the same sentence `pnpm db:migrate` prints and fails the
+  deploy, which is deliberate (adopting a database is a claim only a person can make), but it
+  means the first deploy against such a database fails and needs a human with `psql` reach.
+  Check whether the hook should accept an explicit `MIGRATE_BASELINE=1` for that one deploy.
+  Found at polish ledger P4.8.
