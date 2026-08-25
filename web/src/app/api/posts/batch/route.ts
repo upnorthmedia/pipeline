@@ -43,7 +43,7 @@ import { withServerError } from "@/lib/route-error"
 import { logger } from "@/mastra"
 import { startPipeline } from "@/mastra/start-pipeline"
 
-import { applyProfilePrefill } from "../prefill"
+import { applyProfilePrefill, submittedKeys } from "../prefill"
 import { serializePost, type PostResponse } from "../serialize"
 import {
   invalidJsonBody,
@@ -80,11 +80,15 @@ async function postHandler(request: Request): Promise<Response> {
     .where(and(inArray(websiteProfiles.id, profileIds), eq(websiteProfiles.userId, user.id)))
   const profileById = new Map(profiles.map((profile) => [profile.id, profile]))
 
+  // The raw array the client sent, read alongside the parsed one: `submittedKeys`
+  // needs the keys of each item as it arrived, which the parse has filled in.
+  const rawItems: unknown[] = Array.isArray(body) ? body : []
+
   const values = []
-  for (const item of parsed.data) {
+  for (const [index, item] of parsed.data.entries()) {
     const profile = profileById.get(item.profile_id)
     if (!profile) return Response.json({ detail: "Profile not found" }, { status: 404 })
-    const write: PostWriteInput = applyProfilePrefill(item, profile)
+    const write: PostWriteInput = applyProfilePrefill(item, profile, submittedKeys(rawItems[index]))
     values.push(toColumns(write))
   }
 

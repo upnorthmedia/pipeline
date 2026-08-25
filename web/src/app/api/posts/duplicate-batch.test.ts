@@ -506,6 +506,40 @@ describe("POST /api/posts/batch", () => {
     }
   })
 
+  /**
+   * Ledger item P2.114 through the batch endpoint, which is where the raw item
+   * has to be matched to the parsed one by index: the second item names its
+   * own gates and keeps them, the first names none and inherits the profile's.
+   */
+  it("lets one item of a batch clear its gates without touching its siblings", async () => {
+    const profile = await insertProfile(user.userId, {
+      defaultStageSettings: GATED_STAGE_SETTINGS,
+    })
+    const cleared = {
+      research: "auto",
+      outline: "auto",
+      write: "auto",
+      edit: "auto",
+      images: "auto",
+      ready: "auto",
+    }
+
+    const created = await (
+      await batch(
+        [
+          item("gated", { profile_id: profile.id }),
+          item("cleared", { profile_id: profile.id, stage_settings: cleared }),
+        ],
+        user.cookie,
+      )
+    ).json()
+
+    expect(created.map((post: { stage_settings: unknown }) => post.stage_settings)).toEqual([
+      GATED_STAGE_SETTINGS,
+      cleared,
+    ])
+  })
+
   it("prefills each item from its own profile when a batch names two", async () => {
     const first = await insertProfile(user.userId, { niche: "firearms" })
     const second = await insertProfile(user.userId, { niche: "cookware" })

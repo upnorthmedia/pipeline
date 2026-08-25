@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowRight, CircleCheck, PauseCircle } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -10,11 +11,19 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { STAGES, type Profile } from "@/lib/api";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { STAGES, type PipelineStage, type Profile, type StageSettings } from "@/lib/api";
 import {
   STAGE_LABELS,
   STAGE_MODE_LABELS,
   effectiveStageMode,
+  stageModeOptions,
   stageModeStopsRun,
 } from "@/lib/stages";
 
@@ -32,13 +41,19 @@ function joinStageNames(names: string[]): string {
 /**
  * What the run this form is about to start will do at each of the six stages.
  *
- * Read-only on purpose. `stage_settings` is owned by the profile: it is copied
- * onto the post by `applyProfilePrefill`, and that copy fires whenever the
- * submitted value equals the schema default, so a per-post editor that cleared
- * every gate would send six `auto`s and have the profile's gates written back
- * over them without a word. Until that rule changes, the honest surface is one
- * that says what the run will do and points at the profile where it is
- * decided, rather than one that offers an edit the server discards.
+ * Editable when the caller passes `onChange`, which is the new-post form.
+ * It was read-only everywhere until ledger item P2.114: `applyProfilePrefill`
+ * copied the profile's gates over any submitted `stage_settings` equal to the
+ * schema default, and six `auto`s is that default, so "no gates on this one
+ * run" was a body the server discarded. A submitted value now wins, and the
+ * card is where a gate is set for one post.
+ *
+ * `value` is the override and null means "whatever the profile says", which is
+ * the difference between sending `stage_settings` and leaving it out. Every
+ * edit writes all six stages rather than the one that changed: a
+ * `stage_settings` with a hole in it parks the run at the stages it omits
+ * (`DEFAULT_GATE_MODE` in `src/mastra/steps/stage-io.ts` falls back to
+ * `review`), which no reader of this card would expect.
  *
  * `subject` names what the gates apply to, because `/posts/batch` copies the
  * same profile value onto up to twenty posts at once and "this run" would be a
@@ -47,16 +62,27 @@ function joinStageNames(names: string[]): string {
 export const PipelineGatesCard = ({
   profile,
   subject = "This run",
+  value = null,
+  onChange,
 }: {
   profile: Profile | null;
   subject?: string;
+  value?: StageSettings | null;
+  onChange?: (next: StageSettings | null) => void;
 }) => {
-  const settings = profile?.default_stage_settings;
+  const settings = value ?? profile?.default_stage_settings;
   const modes = STAGES.map((stage) => ({
     stage,
     mode: effectiveStageMode(stage, settings),
   }));
   const stopping = modes.filter((entry) => stageModeStopsRun(entry.mode));
+
+  const setStage = (stage: PipelineStage, mode: string) => {
+    const next = Object.fromEntries(
+      modes.map((entry) => [entry.stage, entry.stage === stage ? mode : entry.mode])
+    ) as StageSettings;
+    onChange?.(next);
+  };
 
   return (
     <Card>
@@ -75,20 +101,39 @@ export const PipelineGatesCard = ({
               className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
             >
               <span className="text-sm font-medium">{STAGE_LABELS[stage]}</span>
-              <span
-                className={
-                  stageModeStopsRun(mode)
-                    ? "flex items-center gap-1.5 text-sm text-foreground"
-                    : "flex items-center gap-1.5 text-sm text-muted-foreground"
-                }
-              >
-                {stageModeStopsRun(mode) ? (
-                  <PauseCircle className="h-3.5 w-3.5 shrink-0" />
-                ) : (
-                  <CircleCheck className="h-3.5 w-3.5 shrink-0" />
-                )}
-                {STAGE_MODE_LABELS[mode]}
-              </span>
+              {onChange ? (
+                <Select value={mode} onValueChange={(next) => setStage(stage, next)}>
+                  <SelectTrigger
+                    aria-label={STAGE_LABELS[stage]}
+                    size="sm"
+                    className="w-[190px]"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {stageModeOptions(mode).map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {STAGE_MODE_LABELS[option] ?? option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <span
+                  className={
+                    stageModeStopsRun(mode)
+                      ? "flex items-center gap-1.5 text-sm text-foreground"
+                      : "flex items-center gap-1.5 text-sm text-muted-foreground"
+                  }
+                >
+                  {stageModeStopsRun(mode) ? (
+                    <PauseCircle className="h-3.5 w-3.5 shrink-0" />
+                  ) : (
+                    <CircleCheck className="h-3.5 w-3.5 shrink-0" />
+                  )}
+                  {STAGE_MODE_LABELS[mode]}
+                </span>
+              )}
             </li>
           ))}
         </ul>
@@ -103,6 +148,26 @@ export const PipelineGatesCard = ({
               } without stopping.`}
         </p>
 
+        {onChange && value && (
+          <div
+            data-testid="gate-override"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2"
+          >
+            <span className="text-sm text-muted-foreground">
+              Set for this post only.
+              {profile ? ` The ${profile.name} profile is unchanged.` : ""}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onChange(null)}
+            >
+              Use the profile&apos;s gates
+            </Button>
+          </div>
+        )}
+
         {profile && (
           <Link
             /* Straight to the tab that owns the gates: the profile editor has
@@ -110,7 +175,9 @@ export const PipelineGatesCard = ({
             href={`/profiles/${profile.id}?tab=defaults`}
             className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground underline-offset-4 hover:underline"
           >
-            Edit gates in the {profile.name} profile
+            {onChange
+              ? `Change the default for new posts in ${profile.name}`
+              : `Edit gates in the ${profile.name} profile`}
             <ArrowRight className="h-3.5 w-3.5 shrink-0" />
           </Link>
         )}

@@ -16,7 +16,7 @@ import { logger } from "@/mastra"
 import { startPipeline } from "@/mastra/start-pipeline"
 import { STAGES, STATUS_RUNNING } from "@/mastra/state"
 
-import { applyProfilePrefill } from "./prefill"
+import { applyProfilePrefill, submittedKeys } from "./prefill"
 import { parseListPostsQuery } from "./query"
 import { serializePost, type PostResponse } from "./serialize"
 import {
@@ -125,7 +125,7 @@ async function postHandler(request: Request): Promise<Response> {
     .where(and(eq(websiteProfiles.id, parsed.data.profile_id), eq(websiteProfiles.userId, user.id)))
     .limit(1)
   if (!profile) return Response.json({ detail: "Profile not found" }, { status: 404 })
-  const values: PostWriteInput = applyProfilePrefill(parsed.data, profile)
+  const values: PostWriteInput = applyProfilePrefill(parsed.data, profile, submittedKeys(body))
 
   const [row] = await getDb()
     .insert(posts)

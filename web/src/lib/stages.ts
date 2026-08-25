@@ -93,3 +93,31 @@ export function effectiveStageMode(
 export function stageModeStopsRun(mode: StageMode): boolean {
   return mode !== "auto";
 }
+
+/**
+ * What a stage-mode picker offers, plus whatever the row is already set to.
+ *
+ * All three modes are offered. Only `auto` was, for as long as nothing in the
+ * dashboard could resume a suspended run: a gate switched on parked the post
+ * with no approve action anywhere to release it. `POST /api/posts/{id}/approve`
+ * and the approval on the post page are that action, so the two waiting modes
+ * are real settings again (ledger item P2.109b).
+ *
+ * The pipeline treats `review` and `approve_only` identically; both names are
+ * kept because the column carries both and a profile written by the Python app
+ * may hold either.
+ *
+ * Two pickers read this now, the profile editor's defaults and the per-post
+ * gates on the new-post form (ledger item P2.114), so it lives beside the
+ * labels rather than in either page.
+ */
+export const OFFERED_STAGE_MODES: StageMode[] = ["auto", "review", "approve_only"];
+
+export function stageModeOptions(current: StageMode | undefined): StageMode[] {
+  // `stage_settings` is a bare JSON object on the wire, so a row that names
+  // fewer than six stages reaches here with a hole in it. Prepending that hole
+  // would put an option with no value in the list, and the picker is not the
+  // place to guess what an unconfigured stage means.
+  if (!current || OFFERED_STAGE_MODES.includes(current)) return OFFERED_STAGE_MODES;
+  return [current, ...OFFERED_STAGE_MODES];
+}

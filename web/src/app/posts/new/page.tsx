@@ -33,6 +33,7 @@ import {
   profiles,
   type Profile,
   type PostCreate,
+  type StageSettings,
   type WPCategory,
   type WPAuthor,
 } from "@/lib/api";
@@ -76,6 +77,10 @@ export default function NewPostPage() {
   const [avoid, setAvoid] = useState("");
   const [relatedKeywords, setRelatedKeywords] = useState("");
   const [competitorUrls, setCompetitorUrls] = useState("");
+  // Null means "whatever the profile says", which is what decides whether the
+  // body carries `stage_settings` at all: an omitted key inherits the
+  // profile's gates, a submitted one is kept as sent (ledger item P2.114).
+  const [stageSettings, setStageSettings] = useState<StageSettings | null>(null);
   const [wpCategoryId, setWpCategoryId] = useState<number | null>(null);
   const [wpAuthorId, setWpAuthorId] = useState<number | null>(null);
   const [articleType, setArticleType] = useState("");
@@ -117,6 +122,10 @@ export default function NewPostPage() {
 
   const handleProfileSelect = (profile: Profile | null) => {
     setSelectedProfile(profile);
+    // A gate override was made against the profile it was shown beside, so it
+    // does not survive a different one: keeping it would silently apply one
+    // site's gates to another's post.
+    setStageSettings(null);
     if (profile) {
       setNiche(profile.niche || "");
       setTargetAudience(profile.target_audience || "");
@@ -212,6 +221,7 @@ export default function NewPostPage() {
         required_mentions: requiredMentions || undefined,
         wp_category_id: wpCategoryId,
         wp_author_id: wpAuthorId,
+        ...(stageSettings ? { stage_settings: stageSettings } : {}),
       };
       const post = await posts.create(data);
       toast.success("Post created");
@@ -555,7 +565,11 @@ export default function NewPostPage() {
           the article: everything above is an input to the six stages, this is
           what those stages will do with it.
         */}
-        <PipelineGatesCard profile={selectedProfile} />
+        <PipelineGatesCard
+          profile={selectedProfile}
+          value={stageSettings}
+          onChange={setStageSettings}
+        />
 
         <Separator />
 

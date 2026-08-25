@@ -61,7 +61,7 @@ import {
   SEARCH_DEBOUNCE_MS,
 } from "@/hooks/use-debounced-value";
 import { useLatestRequest } from "@/hooks/use-latest-request";
-import { STAGE_LABELS, STAGE_MODE_LABELS } from "@/lib/stages";
+import { STAGE_LABELS, STAGE_MODE_LABELS, stageModeOptions } from "@/lib/stages";
 import { plainMessage } from "@/lib/plain-message";
 import { OutputFormatSelect } from "@/components/output-format-select";
 import { publishTargets, type FormatAvailabilityMap } from "@/lib/publishing";
@@ -102,30 +102,6 @@ function tabFromUrl(): TabValue {
 
 /** Ties the action bar to the form it submits without nesting it inside. */
 const PROFILE_FORM_ID = "profile-form";
-
-/**
- * What this picker offers, plus whatever the profile is already set to.
- *
- * All three modes are offered. Only `auto` was, for as long as nothing in the
- * dashboard could resume a suspended run: a gate switched on here parked the
- * post with no approve action anywhere to release it. `POST /api/posts/{id}/approve`
- * and the approval on the post page are that action, so the two waiting modes
- * are real settings again (ledger item P2.109b).
- *
- * The pipeline treats `review` and `approve_only` identically; both names are
- * kept because the column carries both and a profile written by the Python app
- * may hold either.
- */
-const OFFERED_STAGE_MODES: StageMode[] = ["auto", "review", "approve_only"];
-
-function stageModeOptions(current: StageMode | undefined): StageMode[] {
-  // `default_stage_settings` is a bare JSON object on the wire, so a row that
-  // names fewer than six stages reaches here with a hole in it. Prepending
-  // that hole would put an option with no value in the list, and the picker is
-  // not the place to guess what an unconfigured stage means.
-  if (!current || OFFERED_STAGE_MODES.includes(current)) return OFFERED_STAGE_MODES;
-  return [current, ...OFFERED_STAGE_MODES];
-}
 
 /**
  * What is actually known about a publishing destination. The page used to

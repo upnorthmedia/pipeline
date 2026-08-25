@@ -427,10 +427,11 @@ describe("NewPostPage", () => {
   });
 
   /**
-   * `stage_settings` decides which stages park the run in front of a reviewer,
-   * and `applyProfilePrefill` copies it off the profile whether or not the
-   * form ever mentions it. A form that stays silent sells a run that stops
-   * halfway with nothing on screen that said it would.
+   * `stage_settings` decides which stages park the run in front of a reviewer.
+   * The profile is where it comes from and a form that stays silent sells a
+   * run that stops halfway with nothing on screen that said it would, so the
+   * card names all six. Since P2.114 it also sets them: an omitted
+   * `stage_settings` inherits the profile's, a submitted one is kept as sent.
    */
   describe("pipeline gates", () => {
     const gatedProfile = makeProfile({
@@ -463,7 +464,10 @@ describe("NewPostPage", () => {
       for (const [stage, label, mode] of rows) {
         const row = within(screen.getByTestId(`gate-${stage}`));
         expect(row.getByText(label)).toBeInTheDocument();
-        expect(row.getByText(mode)).toBeInTheDocument();
+        // The mode is read off the picker rather than off any text in the row:
+        // since P2.114 the row carries a select, and radix renders its value
+        // in the trigger and again in the hidden native control it shadows.
+        expect(row.getByRole("combobox", { name: label })).toHaveTextContent(mode);
       }
     });
 
@@ -493,9 +497,10 @@ describe("NewPostPage", () => {
       );
     });
 
-    // The gates are the profile's, not the post's: nothing on this form can
-    // change them, so the form has to say where they are changed.
-    it("points at the profile that owns the gates", async () => {
+    // The gates on this form are the post's since P2.114, so the link is no
+    // longer where they are changed: it is where the default they started from
+    // is changed, which is the profile every later post will inherit.
+    it("points at the profile the gates were inherited from", async () => {
       mockProfilesList.mockResolvedValue([gatedProfile]);
       const user = userEvent.setup();
       renderWithProviders(<NewPostPage />);
@@ -504,8 +509,97 @@ describe("NewPostPage", () => {
       await user.click(await screen.findByRole("option", { name: "Gated Blog" }));
 
       expect(
-        await screen.findByRole("link", { name: "Edit gates in the Gated Blog profile" })
+        await screen.findByRole("link", {
+          name: "Change the default for new posts in Gated Blog",
+        })
       ).toHaveAttribute("href", "/profiles/prof-gated?tab=defaults");
+    });
+
+    /**
+     * Ledger item P2.114. The card was read-only because the server discarded
+     * the edit: `applyProfilePrefill` copied the profile's gates over any
+     * submitted value equal to the schema default, and "no gates" is that
+     * default. A submitted `stage_settings` now wins, so the card is where a
+     * gate is set for one post.
+     */
+    it("sends no gates of its own when they are left alone", async () => {
+      mockProfilesList.mockResolvedValue([gatedProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Gated Blog" }));
+      await user.type(screen.getByLabelText(/Topic/), "Inherited gates");
+      await user.click(screen.getByText("Create Post"));
+
+      await waitFor(() => expect(mockCreate).toHaveBeenCalled());
+      expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("stage_settings");
+    });
+
+    it("sends the one gate this post changed, leaving the other five alone", async () => {
+      mockProfilesList.mockResolvedValue([gatedProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Gated Blog" }));
+      await user.click(await screen.findByRole("combobox", { name: "Research" }));
+      await user.click(await screen.findByRole("option", { name: "Wait for review" }));
+      await user.type(screen.getByLabelText(/Topic/), "One gate changed");
+      await user.click(screen.getByText("Create Post"));
+
+      await waitFor(() => expect(mockCreate).toHaveBeenCalled());
+      expect(mockCreate.mock.calls[0][0].stage_settings).toEqual({
+        ...gatedProfile.default_stage_settings,
+        research: "review",
+      });
+    });
+
+    // The case the old rule could not express: six "auto"s is the schema
+    // default, so Python wrote the profile's gates back over it.
+    it("can clear every gate for one post", async () => {
+      mockProfilesList.mockResolvedValue([gatedProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Gated Blog" }));
+      for (const stage of ["Outline", "Ready"]) {
+        await user.click(await screen.findByRole("combobox", { name: stage }));
+        await user.click(await screen.findByRole("option", { name: "Run automatically" }));
+      }
+
+      expect(screen.getByTestId("gate-summary")).toHaveTextContent(
+        "This run will go from Research to Ready without stopping."
+      );
+
+      await user.type(screen.getByLabelText(/Topic/), "No gates");
+      await user.click(screen.getByText("Create Post"));
+
+      await waitFor(() => expect(mockCreate).toHaveBeenCalled());
+      expect(mockCreate.mock.calls[0][0].stage_settings).toEqual(defaultStageSettings);
+    });
+
+    it("puts the profile's gates back when the edit is undone", async () => {
+      mockProfilesList.mockResolvedValue([gatedProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Gated Blog" }));
+      await user.click(await screen.findByRole("combobox", { name: "Research" }));
+      await user.click(await screen.findByRole("option", { name: "Wait for review" }));
+
+      await user.click(screen.getByRole("button", { name: "Use the profile's gates" }));
+      expect(
+        screen.queryByRole("button", { name: "Use the profile's gates" })
+      ).not.toBeInTheDocument();
+
+      await user.type(screen.getByLabelText(/Topic/), "Undone");
+      await user.click(screen.getByText("Create Post"));
+
+      await waitFor(() => expect(mockCreate).toHaveBeenCalled());
+      expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("stage_settings");
     });
 
     it("reads as an ungated run before a profile is chosen", async () => {
@@ -515,7 +609,7 @@ describe("NewPostPage", () => {
       expect(await screen.findByTestId("gate-summary")).toHaveTextContent(
         "This run will go from Research to Ready without stopping."
       );
-      expect(screen.queryByRole("link", { name: /Edit gates/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /Change the default/ })).not.toBeInTheDocument();
     });
   });
 

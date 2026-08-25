@@ -32,7 +32,7 @@ import { OUTPUT_FORMAT_INVALID } from "../output-format"
 import { pydanticUuid } from "../pydantic"
 
 import parity from "./data/create-parity.json"
-import { applyProfilePrefill } from "./prefill"
+import { applyProfilePrefill, submittedKeys } from "./prefill"
 import { DELETE as deletePost, GET as getPost } from "./[id]/route"
 import { POST as createPost } from "./route"
 import { POST_CREATE_DEFAULTS, postCreateSchema, type PostWriteInput } from "./validation"
@@ -256,6 +256,35 @@ describe("create_post parity", () => {
     }
   })
 
+  /**
+   * The third place the shipped code has left the recording, and the only one
+   * that changes an outcome rather than a refusal: ledger item P2.114. Case 5
+   * submits `stage_settings` explicitly and Python replaced it with the
+   * profile's, which made "no gates on this one run" unsayable. A submitted
+   * key now wins, so that case's recorded `stage_settings` is the one value
+   * replayed against the body rather than against the recording, and this test
+   * names exactly what changed so the deviation cannot be mistaken for drift.
+   */
+  it("deviates from the recording on the one case that names its own gates", () => {
+    const named = parity.cases
+      .map((testCase, index) => ({ index, testCase }))
+      .filter(
+        ({ testCase }) =>
+          testCase.profile !== null &&
+          submittedKeys(testCase.body).has("stage_settings") &&
+          JSON.stringify((testCase.body as Record<string, unknown>).stage_settings) !==
+            JSON.stringify((testCase.post as Record<string, unknown>).stage_settings),
+      )
+
+    expect(named.map(({ index }) => index + 1)).toEqual([5])
+    expect((named[0].testCase.post as Record<string, unknown>).stage_settings).toEqual(
+      named[0].testCase.profile!.default_stage_settings,
+    )
+    expect((named[0].testCase.body as Record<string, unknown>).stage_settings).toEqual(
+      POST_CREATE_DEFAULTS.stage_settings,
+    )
+  })
+
   for (const [index, testCase] of parity.cases.entries()) {
     it(`case ${index + 1}: ${testCase.name}`, () => {
       const parsed = corpusSchema.safeParse(testCase.body)
@@ -264,16 +293,24 @@ describe("create_post parity", () => {
 
       // The corpus keeps Python's nullable `profile_id`, which the write type
       // no longer expresses; nothing in the prefill reads that field.
+      const submitted = submittedKeys(testCase.body)
       let values = parsed.data as unknown as PostWriteInput
       if (testCase.profile) {
-        values = applyProfilePrefill(values, profileRow(testCase.profile))
+        values = applyProfilePrefill(values, profileRow(testCase.profile), submitted)
       }
+
+      // The recorded row, with the P2.114 deviation applied to it rather than
+      // to the assertion: a case whose body named its gates now keeps them.
+      const recorded = testCase.post as Record<string, unknown>
+      const expected = submitted.has("stage_settings")
+        ? { ...recorded, stage_settings: (testCase.body as Record<string, unknown>).stage_settings }
+        : recorded
 
       expect({
         ...values,
         current_stage: STAGES[0],
         stage_status: { [STAGES[0]]: STATUS_RUNNING },
-      }).toEqual(testCase.post)
+      }).toEqual(expected)
       expect(testCase.enqueued_jobs).toEqual(["run_pipeline_stage"])
     })
   }
@@ -519,6 +556,51 @@ describe("POST /api/posts", () => {
     await expect(response.json()).resolves.toMatchObject({
       tone: "Body tone",
       word_count: 4400,
+    })
+  })
+
+  /**
+   * The deliberate deviation from Python recorded as ledger item P2.114.
+   * Python compared the dumped body against the schema default, so a post that
+   * cleared every gate submitted six "auto"s and had the profile's gates
+   * written back over them. There is no other way to spell "no gates on this
+   * one run", so the rule made a per-post gate edit unexpressible.
+   */
+  it("keeps gates the body named even when they are the schema default", async () => {
+    const profile = await insertProfile(user.userId, {
+      defaultStageSettings: GATED_STAGE_SETTINGS,
+    })
+    // Six "auto"s means nothing stops the run, so it is not really started.
+    start.mode = "skip"
+
+    const response = await create(
+      {
+        slug: `${PREFIX}gates-cleared`,
+        topic: "Gates cleared",
+        profile_id: profile.id,
+        stage_settings: POST_CREATE_DEFAULTS.stage_settings,
+      },
+      user.cookie,
+    )
+    expect(response.status).toBe(201)
+
+    const body = await response.json()
+    expect(body.stage_settings).toEqual(POST_CREATE_DEFAULTS.stage_settings)
+    const [row] = await db.select().from(posts).where(eq(posts.id, body.id)).limit(1)
+    expect(row.stageSettings).toEqual(POST_CREATE_DEFAULTS.stage_settings)
+  })
+
+  it("still copies the profile's gates onto a body that names none", async () => {
+    const profile = await insertProfile(user.userId, {
+      defaultStageSettings: GATED_STAGE_SETTINGS,
+    })
+    const response = await create(
+      { slug: `${PREFIX}gates-inherited`, topic: "Gates inherited", profile_id: profile.id },
+      user.cookie,
+    )
+    expect(response.status).toBe(201)
+    await expect(response.json()).resolves.toMatchObject({
+      stage_settings: GATED_STAGE_SETTINGS,
     })
   })
 

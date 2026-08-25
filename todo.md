@@ -75,16 +75,13 @@
   gate approval route built for P2.109 has to survive the same double signal. Found under
   polish ledger P2.110.
 
-- [confirmed] 2026-08-24 `applyProfilePrefill` makes a per-post gate edit unexpressible.
-  `src/app/api/posts/prefill.ts` copies the profile's `default_stage_settings` over the
-  submitted `stage_settings` whenever the submitted value equals the schema default, and that
-  default is six `auto`s. So "clear one gate, leave another" survives the create, and "clear
-  them all", which is what a user reaches for, is silently written back to the profile's gates
-  with a 201 and no warning. It is a faithful port of Python's rule and the parity oracle in
-  `src/app/api/posts/create.test.ts` asserts it, so changing it is a deliberate deviation, not
-  a fix in passing. Found under polish ledger P3.1a, which is why the new `Pipeline` card on
-  `/posts/new` is read-only and links to the profile instead of offering an edit. Ledger item
-  P2.114.
+- [confirmed] 2026-08-25 `PATCH /api/posts/{id}` is the only write path that still cannot
+  clear a post's gates on its own terms. `src/app/api/posts/[id]/route.ts` takes
+  `stage_settings` as a nullable object with no prefill in front of it, so the value is kept
+  as sent, but nothing in the UI edits a created post's gates: the picker added under polish
+  ledger P2.114 is on `/posts/new` only, and `/posts/[id]` shows the run's gates without
+  offering to change them. A post parked at a gate can be approved, and a post that should
+  never have had one has to be recreated. Found under P2.114.
 
 - [confirmed] 2026-08-24 A run that stops for a pause publishes no event, so a second tab
   watching the same post shows it running until the reader reloads. Pausing itself is a real

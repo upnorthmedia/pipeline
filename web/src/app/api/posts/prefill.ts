@@ -14,6 +14,15 @@
  * `stage_settings`, which is copied from `default_stage_settings`
  * unconditionally once the body holds the schema default, null included.
  *
+ * `stage_settings` is also the one field that reads `submitted` rather than
+ * only the parsed value, the deliberate deviation from Python recorded as
+ * ledger item P2.114. Under Python's rule a post that cleared every gate sent
+ * six `auto`s, which is the schema default, and had the profile's gates
+ * written back over it: there was no body that expressed "no gates on this one
+ * run", so the per-post gate editor could not exist. A `stage_settings` key
+ * the client actually sent now wins, and an omitted one still inherits the
+ * profile's. Nothing else deviates: `word_count: 2000` still loses.
+ *
  * The two `wp_*` fields use the other rule: they are filled only when the body
  * left them null, so a client-supplied value always wins.
  *
@@ -76,8 +85,25 @@ function equalsDefault(value: unknown, fallback: unknown): boolean {
   return false
 }
 
+/**
+ * The keys the client actually sent.
+ *
+ * The parsed body cannot answer this: zod fills an omitted `stage_settings`
+ * with the schema default, so an absent key and a submitted six-`auto`s object
+ * arrive identical. Anything that is not a JSON object sent no keys, which is
+ * a body the schema has already refused by the time this is read.
+ */
+export function submittedKeys(raw: unknown): ReadonlySet<string> {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return new Set()
+  return new Set(Object.keys(raw))
+}
+
 /** The body as it should be written, with the profile folded in. */
-export function applyProfilePrefill(body: PostWriteInput, profile: ProfileRow): PostWriteInput {
+export function applyProfilePrefill(
+  body: PostWriteInput,
+  profile: ProfileRow,
+  submitted: ReadonlySet<string>,
+): PostWriteInput {
   const filled: PostWriteInput = { ...body }
 
   for (const [field, column] of Object.entries(PREFILL_FIELDS) as [
@@ -92,7 +118,10 @@ export function applyProfilePrefill(body: PostWriteInput, profile: ProfileRow): 
     }
   }
 
-  if (equalsDefault(filled.stage_settings, POST_CREATE_DEFAULTS.stage_settings)) {
+  if (
+    !submitted.has("stage_settings") &&
+    equalsDefault(filled.stage_settings, POST_CREATE_DEFAULTS.stage_settings)
+  ) {
     // Copied without a null guard, so a profile that has none clears the post's.
     filled.stage_settings = profile.defaultStageSettings
   }

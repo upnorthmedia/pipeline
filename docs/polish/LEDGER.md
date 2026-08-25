@@ -872,12 +872,18 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       itself rather than running, and the badge reads `Pausing` while the interrupted stage
       finishes. Proven on real gated pipeline runs, and `/run-all` (the one start endpoint
       that wrote no `current_stage`) now releases the pause. [evidence](evidence/p2.md#p2115)
-- [ ] **P2.114** `[confirmed 2026-08-24]` `applyProfilePrefill` makes a per-post gate edit
+- [x] **P2.114** `[confirmed 2026-08-24]` `applyProfilePrefill` makes a per-post gate edit
       unexpressible: it copies the profile's `default_stage_settings` over any submitted
       `stage_settings` equal to the schema default, and that default is six `auto`s, so
       clearing every gate for one post is silently written back to the profile's gates. A
       faithful port of Python's rule that the parity oracle asserts, so changing it is a
-      deliberate deviation. Found under P3.1a.
+      deliberate deviation. Found under P3.1a. Taken as a deviation for that one field: a
+      `stage_settings` key the client actually sent now wins, an omitted one still inherits,
+      and nothing else about the prefill changes. The parity corpus is replayed unedited with
+      the one changed field taken from the body, the way P2.68 and P2.97 are. The `Pipeline`
+      card on `/posts/new` is a picker per stage as a result, with an override note and a way
+      back to the profile's gates; `/posts/batch` stays read-only. Proven end to end in a
+      browser on two real posts. [evidence](evidence/p2.md#p2114)
 - [ ] **P2.116** `[investigate 2026-08-24]` `worker-health.test.ts` > "reports a worker that
       is subscribed and waiting as alive" failed once in a full `pnpm test` run
       (`expected false to be true` on `workerAlive`) and passed in the next full run with no
