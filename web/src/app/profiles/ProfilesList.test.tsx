@@ -43,6 +43,7 @@ vi.mock("sonner", () => ({
 }));
 
 const { profiles } = await import("@/lib/api");
+const { toast } = await import("sonner");
 const mockList = vi.mocked(profiles.list);
 // Keep mocked references for mock setup in beforeEach
 void vi.mocked(profiles.create);
@@ -213,6 +214,52 @@ describe("ProfilesPage", () => {
       expect(
         screen.getByText("The request failed and the server gave no reason.")
       ).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * The refusal the handler answers with names a count and an action, and it
+   * is the only thing that tells the reader why the profile is still there.
+   * Swallowing it left a click that appeared to do nothing but print "Failed".
+   */
+  it("shows the server's reason when a profile cannot be deleted", async () => {
+    const user = userEvent.setup();
+    vi.mocked(profiles.delete).mockRejectedValueOnce(
+      new Error(
+        JSON.stringify({
+          detail: "This profile still has 3 posts. Delete them before deleting the profile.",
+        })
+      )
+    );
+    renderWithProviders(<ProfilesPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Test Site")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getAllByRole("button", { name: "Row actions" })[0]);
+    await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        "This profile still has 3 posts. Delete them before deleting the profile."
+      );
+    });
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("falls back to its own wording when a delete fails with no reason", async () => {
+    const user = userEvent.setup();
+    vi.mocked(profiles.delete).mockRejectedValueOnce(new Error(""));
+    renderWithProviders(<ProfilesPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Test Site")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getAllByRole("button", { name: "Row actions" })[0]);
+    await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("The profile could not be deleted.");
     });
   });
 

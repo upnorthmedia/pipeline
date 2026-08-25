@@ -765,7 +765,24 @@ describe("DELETE /api/profiles/[id]", () => {
     expect(await (await getById(id, user.cookie)).status).toBe(404)
   })
 
-  it("orphans the profile's posts and deletes its internal links", async () => {
+  it("deletes the profile's internal links with it", async () => {
+    const id = await insertProfile(user.userId)
+    await db.insert(internalLinks).values({ profileId: id, url: "http://127.0.0.1:9/testblog/a" })
+
+    expect((await del(id, user.cookie)).status).toBe(204)
+
+    expect(await db.select().from(internalLinks).where(eq(internalLinks.profileId, id))).toEqual([])
+  })
+
+  /**
+   * The handler used to answer 204 here and set `profile_id` to null on the
+   * way out, which is where every unreachable post in the table came from:
+   * `posts` carries no `user_id`, so a row with no profile has no owner, and
+   * every read handler inner-joins `website_profiles` to find one. The refusal
+   * is the whole fix. The count is in the sentence because "delete its posts
+   * first" is not actionable without knowing how many there are.
+   */
+  it("refuses to delete a profile that still has posts, and writes nothing", async () => {
     const id = await insertProfile(user.userId)
     const [post] = await db
       .insert(posts)
@@ -773,11 +790,41 @@ describe("DELETE /api/profiles/[id]", () => {
       .returning({ id: posts.id })
     await db.insert(internalLinks).values({ profileId: id, url: "http://127.0.0.1:9/testblog/a" })
 
-    expect((await del(id, user.cookie)).status).toBe(204)
+    const response = await del(id, user.cookie)
 
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({
+      detail: "This profile still has 1 post. Delete it before deleting the profile.",
+    })
     const [kept] = await db.select().from(posts).where(eq(posts.id, post.id))
-    expect(kept.profileId).toBeNull()
-    expect(await db.select().from(internalLinks).where(eq(internalLinks.profileId, id))).toEqual([])
+    expect(kept.profileId).toBe(id)
+    expect(await readRow(id)).toBeDefined()
+    expect(
+      await db.select().from(internalLinks).where(eq(internalLinks.profileId, id)),
+    ).toHaveLength(1)
+  })
+
+  it("counts the posts it refused over, in the plural", async () => {
+    const id = await insertProfile(user.userId)
+    await db.insert(posts).values([
+      { profileId: id, slug: `${PREFIX}one`, topic: "One" },
+      { profileId: id, slug: `${PREFIX}two`, topic: "Two" },
+    ])
+
+    const response = await del(id, user.cookie)
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({
+      detail: "This profile still has 2 posts. Delete them before deleting the profile.",
+    })
+  })
+
+  it("counts only this profile's posts", async () => {
+    const id = await insertProfile(user.userId)
+    const other = await insertProfile(user.userId, { name: "Another" })
+    await db.insert(posts).values({ profileId: other, slug: `${PREFIX}elsewhere`, topic: "Else" })
+
+    expect((await del(id, user.cookie)).status).toBe(204)
   })
 
   it("404s for an id that does not exist", async () => {

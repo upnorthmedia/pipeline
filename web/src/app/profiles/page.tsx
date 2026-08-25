@@ -142,8 +142,11 @@ export default function ProfilesPage() {
       await profiles.delete(id);
       toast.success("Profile deleted");
       fetchProfiles();
-    } catch {
-      toast.error("Failed to delete profile");
+    } catch (e) {
+      // A profile with posts still on it is refused, and the refusal names
+      // how many and what to do about it. Replacing that with "Failed to
+      // delete profile" left a click that looked like it did nothing.
+      toast.error(apiErrorMessage(e, "The profile could not be deleted."));
     }
   };
 
@@ -413,6 +416,7 @@ export default function ProfilesPage() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8"
+                          aria-label="Row actions"
                         >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>

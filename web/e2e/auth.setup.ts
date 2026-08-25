@@ -38,8 +38,9 @@ const signUpOrSignIn = async (request: APIRequestContext) => {
  * still there. Tests that assert on an empty dashboard need them gone, and the
  * account's own API is the only thing that knows which rows are its.
  *
- * Posts go before profiles: `posts_profile_id_fkey` has no `ON DELETE`, so a
- * profile with posts still attached cannot be deleted.
+ * Posts go before profiles: `DELETE /api/profiles/{id}` refuses a profile that
+ * still has posts, because a post left with no profile has no owner and is
+ * unreachable through the app (ledger item P4.7).
  */
 const clearAccountData = async (request: APIRequestContext) => {
   const listed = await request.get("/api/posts?per_page=100")

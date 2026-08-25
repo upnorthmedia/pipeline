@@ -45,7 +45,7 @@ test.describe("Full pipeline journey", () => {
       baseURL: BASE_URL,
       storageState: STORAGE_STATE,
     });
-    // Posts first: `posts_profile_id_fkey` has no ON DELETE.
+    // Posts first: deleting a profile that still has posts is refused (P4.7).
     if (createdPostId) await context.delete(`/api/posts/${createdPostId}`);
     if (createdProfileId) await context.delete(`/api/profiles/${createdProfileId}`);
     await context.dispose();

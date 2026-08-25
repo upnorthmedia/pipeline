@@ -44,6 +44,27 @@ Three owners, applied in this order. Only the first is in this folder.
    test suite creates them once up front for that reason
    (`src/test/mastra-storage.ts`).
 
+## Posts with no profile
+
+`posts.profile_id` is nullable and there is no `posts.user_id`, so a row with no
+profile has no owner: every read handler reaches the account by inner-joining
+`website_profiles`, which means such a row cannot be listed, opened, run or
+deleted through the app. Both writers that produced them are closed, the create
+path (ledger item P2.97) and `DELETE /api/profiles/{id}`, which now refuses a
+profile that still has posts rather than nulling the column (P4.7).
+
+Rows written before those fixes are still there. `pnpm posts:orphans` lists
+them, with `--delete` to remove them:
+
+```sh
+pnpm posts:orphans              # list, write nothing
+pnpm posts:orphans --delete     # remove them
+```
+
+The column is deliberately still nullable. Making it `NOT NULL` would mean a
+migration that first deletes rows whose owner cannot be determined, and a
+schema constraint is not worth destroying somebody's drafts without asking.
+
 ## Changing the schema
 
 `src/db/schema.ts` is the source. Edit it, then regenerate:

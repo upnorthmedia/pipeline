@@ -1034,9 +1034,18 @@ criterion 9's bar are named at the bottom with what is owed to `SUMMARY.md` inst
       plus a real-database case pinning that a gate saved after creation is what the worker
       reads (all six steps call `loadPipelineState()`). Proven in a browser on a real row,
       read back out of Postgres. `ui/p46-*.png`. [evidence](evidence/p4.md#p46)
-- [ ] **P4.7** The `posts` rows already written with `profile_id = NULL` are unreachable and
-      undeletable through the app. P2.97 closed the writers; this is a decision on the
-      existing rows, leave them or name them in a one-off migration.
+- [x] **P4.7** Posts with no `profile_id` are unreachable and undeletable, and P2.97 had not
+      closed the writers: `DELETE /api/profiles/{id}` still nulled the column on its way out,
+      so one unconfirmed click on a profile's row menu destroyed every post that profile
+      made. Proven in a browser at HEAD: three posts vanished from the dashboard, stayed in
+      Postgres, and answered 404 to both `GET` and `DELETE`. The handler now refuses with 409
+      and the count (`This profile still has 3 posts. Delete them before deleting the
+      profile.`), counted inside the delete's own transaction, and the list relays the
+      sentence instead of printing `Failed to delete profile`. For the rows already written,
+      the decision is the operator's and `pnpm posts:orphans` (`--delete` to remove) is the
+      tool, tested against a scratch database; `profile_id` stays nullable because `NOT NULL`
+      would mean a migration that deletes rows whose owner cannot be determined. The dev
+      database is at zero orphans. `ui/p47-*.png`. [evidence](evidence/p4.md#p47)
 - [ ] **P4.8** Cleanup batch, one iteration for all four small visible defects: the two delete
       confirmations on `/` render their destructive action in the primary colour
       (`AlertDialogAction` takes a `variant` prop and neither site passes it); the logs tab

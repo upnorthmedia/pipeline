@@ -99,17 +99,33 @@ async function patchHandler(
 export const PATCH = withServerError(patchHandler)
 
 /**
- * Port of `DELETE /api/profiles/{profile_id}`.
+ * The refusal. Singular and plural are spelled out rather than assembled with
+ * an `s`, because the sentence names the action too ("it" against "them").
+ */
+function profileHasPosts(count: number): Response {
+  const detail =
+    count === 1
+      ? "This profile still has 1 post. Delete it before deleting the profile."
+      : `This profile still has ${count} posts. Delete them before deleting the profile.`
+  return Response.json({ detail }, { status: 409 })
+}
+
+/**
+ * Ported from `DELETE /api/profiles/{profile_id}`, and deliberately no longer
+ * faithful to it. `session.delete(profile)` cascaded over the two
+ * relationships on `WebsiteProfile`: `links` carries
+ * `cascade="all, delete-orphan"` so those rows went, and `posts` carries no
+ * delete cascade, so SQLAlchemy disassociated them by nulling
+ * `posts.profile_id`. This handler copied that, which made it the last writer
+ * of unreachable posts: `posts` has no `user_id`, ownership is only reachable
+ * by joining `website_profiles`, and every read handler inner-joins it. A post
+ * left with no profile therefore belongs to nobody, is invisible in the
+ * dashboard and cannot be deleted through it. Only SQL could remove it.
  *
- * `session.delete(profile)` is not a bare `DELETE`: SQLAlchemy first cascades
- * over the two relationships on `WebsiteProfile`. `links` carries
- * `cascade="all, delete-orphan"` so the rows go, and `posts` carries no delete
- * cascade so SQLAlchemy disassociates them by nulling `posts.profile_id`.
- * Confirmed by probing the real ORM against the test database: deleting a
- * profile with one post and one link left `posts=1 post.profile_id=[None]
- * links=0`. That matters because `posts_profile_id_fkey` has no `ON DELETE`
- * action, so a plain `DELETE` here would raise a foreign key violation instead
- * of orphaning the posts the way the Python endpoint did.
+ * So a profile that still has posts is refused instead, with the count in the
+ * sentence. Deleting the posts first is the only path, and it is one the
+ * dashboard offers; silently destroying somebody's drafts as a side effect of
+ * removing a profile is not a decision this handler gets to make.
  *
  * `internal_links_profile_id_fkey` does have `ON DELETE CASCADE`, so the
  * database removes those rows without help.
@@ -134,14 +150,22 @@ async function deleteHandler(
       .from(websiteProfiles)
       .where(owned)
       .limit(1)
-    if (rows.length === 0) return false
+    if (rows.length === 0) return "missing"
 
-    await tx.update(posts).set({ profileId: null }).where(eq(posts.profileId, id))
+    // Counted inside the same transaction as the delete, so a post created
+    // while this request is in flight cannot be stranded by it.
+    const attached = await tx
+      .select({ id: posts.id })
+      .from(posts)
+      .where(eq(posts.profileId, id))
+    if (attached.length > 0) return attached.length
+
     await tx.delete(websiteProfiles).where(owned)
-    return true
+    return "deleted"
   })
 
-  if (!deleted) return profileNotFound()
+  if (deleted === "missing") return profileNotFound()
+  if (typeof deleted === "number") return profileHasPosts(deleted)
   return new Response(null, { status: 204 })
 }
 

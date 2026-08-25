@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "db:migrate": "node --env-file-if-exists=../.env scripts/migrate.mjs",
+    "posts:orphans": "node --env-file-if-exists=../.env scripts/orphaned-posts.mjs",
     "auth:migrate": "node --env-file=../.env scripts/auth-migrate.mts",
     "worker:build": "mastra worker build -o .mastra/worker",
     "worker": "mastra worker start --dir .mastra/worker",

@@ -33,13 +33,23 @@
   project has no deployed Railway environment, so nobody has seen Railway execute the hook or
   abort a deployment on its exit code.
 
-- [confirmed] 2026-08-24 The `posts` rows already written with `profile_id = NULL` are still
-  unreachable and undeletable through the app, and always will be: ownership lives on
-  `website_profiles.user_id` alone, so an orphan row has no owner to restore it to and only SQL
-  can remove one. Polish ledger P2.97 closed the writers (`profile_id` is required on
-  `postCreateSchema` and the picker offers no "none"), so no new orphan can be created, and the
-  column stays nullable for the rows that predate it. Needs a decision on the existing rows:
-  leave them, or a one-off cleanup that names them in a migration.
+- [confirmed] 2026-08-25 `web/src/mastra/scripts/full-pipeline.mjs` inserts its post with no
+  `profile_id`, by fixed id, and leaves the row behind, which makes it the last writer of
+  posts nobody can reach (polish ledger P4.7 closed the two route writers). It is a developer
+  evidence script rather than a route, and it makes real paid provider calls, so it was not
+  changed while it could not be run; `pnpm posts:orphans --delete` cleans up after it.
+  Found under P4.7.
+
+- [confirmed] 2026-08-25 There is no "delete this profile and its posts" path anywhere, and
+  no post count on a profile before the Delete press. Since P4.7 a profile with posts answers
+  409 and names the count, so an account with fifty posts on one profile has to clear them
+  from `/` first, twenty at a time. Filed as the cost of that refusal, not as a regression.
+  Found under P4.7.
+
+- [confirmed] 2026-08-25 Deleting a profile with no posts is still one unconfirmed click in
+  the `/profiles` row menu, and it is irreversible. P4.7 blocked only the case that destroys
+  posts. `AlertDialog` is already used for the two delete confirmations on `/` (polish ledger
+  P4.8). Found under P4.7.
 
 - [investigate] 2026-08-24 A credentialed `website_url` is still matched by the profiles
   list search, which reads `profile.website_url` while the row renders the stripped value
