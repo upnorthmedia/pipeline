@@ -16,7 +16,12 @@ import { and, eq } from "drizzle-orm"
 
 import { getDb, websiteProfiles } from "@/db"
 import { decrypt } from "@/lib/crypto"
-import { WordPressClient, WordPressError } from "@/mastra/wordpress"
+import {
+  WP_URL_HAS_CREDENTIALS,
+  WordPressClient,
+  WordPressError,
+  wordPressUrlHasCredentials,
+} from "@/mastra/wordpress"
 
 /**
  * The two credential complaints, both of which reach the dashboard: `/test`
@@ -66,6 +71,19 @@ export async function resolveWpClient(
   // `if not profile.wp_url or ...`: an empty string is as missing as a null.
   if (!profile.wpUrl || !profile.wpUsername || !profile.wpAppPassword) {
     return { kind: "bad-request", detail: WP_CREDENTIALS_MISSING }
+  }
+
+  // Polish ledger item P2.107. `WP_URL_HAS_CREDENTIALS` and the predicate come
+  // from the client, which refuses a credentialed `wp_url` in its constructor
+  // for every caller. It is checked again here, before the constructor rather
+  // than around it, so the answer keeps the `bad-request` shape these three
+  // handlers already agree on: `/test` reports it as `{connected: false, error}`
+  // and the two pickers as a 400 `detail`, where a throw would have to be
+  // caught and re-mapped. `POST`/`PATCH /api/profiles` refuse such a value on
+  // the way in (`checkWpUrl` in `../../validation.ts`), so what reaches here is
+  // a row written before that check or around the API.
+  if (wordPressUrlHasCredentials(profile.wpUrl)) {
+    return { kind: "bad-request", detail: WP_URL_HAS_CREDENTIALS }
   }
 
   let password: string

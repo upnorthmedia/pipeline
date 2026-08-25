@@ -48,13 +48,13 @@
   Done criterion. Reproduce by running that file repeatedly under a loaded machine before
   changing anything.
 
-- [confirmed] 2026-08-24 `wp_url` accepts a URL carrying credentials
-  (`https://user:pass@example.com`). `checkWpUrl` in `web/src/app/api/profiles/validation.ts`
-  refuses a query string, a fragment and surrounding whitespace because those break the REST
-  path concatenation, but userinfo passes through `fetch` unharmed, so it is not that defect.
-  It does mean a password can land in `website_profiles.wp_url`, which is stored in plain
-  text while `wp_app_password` is Fernet-encrypted. Found at polish ledger item P1.3b.
-  Ledger item P2.107.
+- [confirmed] 2026-08-24 Nothing scans for or repairs `website_profiles` rows that already
+  hold a credentialed `wp_url` or `website_url`. P2.107 refuses new ones and reports the
+  stored ones on the three `/wordpress/*` endpoints, but a row can sit with a plaintext
+  password in it indefinitely. Needs a decision: leave them, or a one-off migration that
+  strips the userinfo and names the rows it touched. Everything that reads such a row now
+  reports it instead of leaking it (`WordPressClient`'s constructor refuses one), so this is
+  a data-hygiene item rather than a live leak.
 
 - [confirmed] 2026-08-24 A run parked at a review gate can never be resumed: nothing in the app
   calls `run.resume()`. `stage-io.ts` suspends the run and writes `stage_status[stage] =

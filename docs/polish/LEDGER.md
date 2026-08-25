@@ -789,9 +789,16 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       P3.2a: `deriveRunState()` reads `current_stage` and `stage_status` together and such a
       run reads `Finished with errors` with a banner naming the stage, its reason and a retry.
       The write is unchanged and still stamps `complete`. [evidence](evidence/p3.md#p32a)
-- [ ] **P2.107** `[confirmed 2026-08-24]` `wp_url` accepts a URL carrying credentials
+- [x] **P2.107** `[confirmed 2026-08-24]` `wp_url` accepts a URL carrying credentials
       (`https://user:pass@example.com`), so a password can land in `website_profiles.wp_url`,
-      which is stored in plain text while `wp_app_password` is Fernet-encrypted.
+      which is stored in plain text while `wp_app_password` is Fernet-encrypted. Worse than
+      the entry said: `fetch` refuses a credentialed URL with a `TypeError` whose own message
+      quotes the password, so all three `/wordpress/*` endpoints answered 500 and wrote the
+      password to the server log. Refused now on both `wp_url` and `website_url` at the write
+      boundary, and reported rather than thrown for the rows written before that check.
+      `website_url` is carried here because it is the same plaintext column with the same
+      leak, differing only in that `discoverSitemaps` strips the userinfo unsent.
+      [evidence](evidence/p2.md#p2107)
 - [x] **P2.108** `[confirmed 2026-08-24]` The run trace does not render publish events.
       `RunTrace` reads `execution_logs` by `stage` and both publish steps write theirs with
       `stage: ""`, so `publish_start`, `publish_complete` and `publish_error` are invisible in
@@ -839,6 +846,12 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       (`expected false to be true` on `workerAlive`) and passed in the next full run with no
       code between them. One observation, possibly load, but suite determinism is a Done
       criterion. Found while closing P2.102.
+- [ ] **P2.117** `[confirmed 2026-08-24]` Nothing scans for or repairs `website_profiles` rows
+      that already hold a credentialed `wp_url` or `website_url`. P2.107 refuses new ones and
+      every reader now reports one rather than leaking it, so this is data hygiene rather
+      than a live leak, but a plaintext password can sit in the column indefinitely. Needs a
+      decision before any code: leave the rows, or a one-off migration that strips the
+      userinfo and names what it touched. Found under P2.107.
 
 - [x] **P2.C1** Cleanup batch, one iteration for both: P2.79 (no `typecheck` script in
       `web/package.json`, so the objective's literal `pnpm -C web tsc --noEmit` exits 254) and

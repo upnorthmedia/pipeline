@@ -24,6 +24,7 @@ import { like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, websiteProfiles } from "@/db"
+import { WP_URL_HAS_CREDENTIALS } from "@/mastra/wordpress"
 import { ABSENT_PROFILE_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
@@ -416,6 +417,35 @@ describe("cases the oracle cannot reach", () => {
       expect(shown).not.toContain("WP_ENCRYPTION_KEY")
       expect(shown).not.toContain("\u2014")
       expect(seen, "nothing should be contacted with a credential we could not open").toEqual([])
+    },
+  )
+
+  /**
+   * Polish ledger item P2.107. `POST`/`PATCH /api/profiles` now refuse a
+   * `wp_url` carrying userinfo, but a row written before that check still
+   * holds one, and `fetch` refuses a credentialed URL with a `TypeError`
+   * (`Request cannot be constructed from a URL that includes credentials`)
+   * rather than with a `WordPressError`. Nothing here caught it, so all three
+   * endpoints answered 500 with an empty body and the reader was told nothing
+   * about the one field they can fix.
+   */
+  it.each(["test", "categories", "authors"] as const)(
+    "%s reports a stored wp_url carrying credentials instead of failing with a 500",
+    async (endpoint) => {
+      const id = await insertProfile(user.userId, {
+        wpUrl: base.replace("http://", "http://leaked-user:leaked-pass@"),
+        wpUsername: "wp-user",
+        wpAppPassword: scenarioPassword(),
+      })
+
+      const response = await call(endpoint, id, user.cookie)
+      const body = await response.json()
+      const shown = endpoint === "test" ? body.error : body.detail
+
+      expect(response.status).toBe(endpoint === "test" ? 200 : 400)
+      expect(shown).toBe(WP_URL_HAS_CREDENTIALS)
+      expect(shown).not.toContain("leaked-pass")
+      expect(seen, "nothing should be contacted with a URL no request can carry").toEqual([])
     },
   )
 

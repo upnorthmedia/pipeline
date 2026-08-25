@@ -36,6 +36,13 @@ export const WP_URL_SPACES = "WordPress URL should have no spaces around it."
 export const WP_URL_QUERY_OR_FRAGMENT =
   "WordPress URL should be the site address on its own. The REST path is added to the end of " +
   "it, so a query string or a #fragment would land in the middle of every request."
+export const WEBSITE_URL_CREDENTIALS =
+  "Website URL should have no username or password in front of the host. The crawler drops " +
+  "anything before the @ without sending it, and this field is stored as plain text."
+export const WP_URL_CREDENTIALS =
+  "WordPress URL should have no username or password in front of the host. Put them in the " +
+  "WordPress username and application password fields instead: those are sent as the login, " +
+  "and the password is encrypted where this field is stored as plain text."
 
 /**
  * A value both `fetch` and a browser can follow, or which of the two ways it
@@ -54,15 +61,36 @@ function parseHttpUrl(raw: string): URL | "invalid" | "scheme" {
 }
 
 /**
+ * Userinfo (`https://user:pass@host`), which both columns refuse. Empty
+ * userinfo is not a credential: the WHATWG parser reads `https://@example.com`
+ * as `https://example.com/` with both halves empty, so the `@` alone is
+ * harmless and only a value is refused.
+ *
+ * `wordPressUrlHasCredentials` in `@/mastra/wordpress` is the same test on an
+ * unparsed string, for the callers that have not parsed one.
+ */
+function hasCredentials(url: URL): boolean {
+  return url.username !== "" || url.password !== ""
+}
+
+/**
  * `website_url` seeds the sitemap crawl and is the base the internal-link
  * resolver resolves relative hrefs against. Neither can say anything to
  * anyone when it is not a URL: the crawl records a failed run and the resolver
  * quietly drops links.
+ *
+ * Credentials are refused because they cannot reach the site and would be kept
+ * anyway: `discoverSitemaps` rebuilds its base from `protocol` and `host`, so
+ * everything before the `@` is dropped before the first request, while the
+ * column is plain `text` that `GET /api/profiles` hands back out.
  */
 function checkWebsiteUrl(value: string, ctx: z.RefinementCtx): void {
   const parsed = parseHttpUrl(value)
   if (parsed === "invalid") ctx.addIssue({ code: "custom", message: WEBSITE_URL_INVALID })
   else if (parsed === "scheme") ctx.addIssue({ code: "custom", message: WEBSITE_URL_SCHEME })
+  else if (hasCredentials(parsed)) {
+    ctx.addIssue({ code: "custom", message: WEBSITE_URL_CREDENTIALS })
+  }
 }
 
 /**
@@ -76,6 +104,14 @@ function checkWebsiteUrl(value: string, ctx: z.RefinementCtx): void {
  * The empty string is accepted rather than treated as a bad URL because every
  * reader already tests `wp_url` for truthiness, so "" is how a profile with no
  * WordPress connection reads, exactly as `null` does.
+ *
+ * Credentials are refused for a harder reason than the ones above: `fetch`
+ * will not accept a credentialed URL at all. It raises `TypeError: Request
+ * cannot be constructed from a URL that includes credentials` before any
+ * request leaves, which is not a `WordPressError`, so the three
+ * `/wordpress/*` endpoints answered 500 with an empty body. They now report
+ * it for the rows written before this check; `./[id]/wordpress/client.ts`
+ * holds that half.
  */
 function checkWpUrl(value: string, ctx: z.RefinementCtx): void {
   if (value === "") return
@@ -90,6 +126,10 @@ function checkWpUrl(value: string, ctx: z.RefinementCtx): void {
   }
   if (parsed === "scheme") {
     ctx.addIssue({ code: "custom", message: WP_URL_SCHEME })
+    return
+  }
+  if (hasCredentials(parsed)) {
+    ctx.addIssue({ code: "custom", message: WP_URL_CREDENTIALS })
     return
   }
   if (parsed.search !== "" || parsed.hash !== "") {

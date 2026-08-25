@@ -28,10 +28,12 @@ import path from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 import {
+  WP_URL_HAS_CREDENTIALS,
   WordPressClient,
   WordPressError,
   basicAuthHeader,
   normalizeWordPressUrl,
+  wordPressUrlHasCredentials,
 } from "./index"
 
 interface ConstructorCase {
@@ -142,6 +144,43 @@ describe("WordPressClient constructor", () => {
       )
     })
   }
+
+  /**
+   * Polish ledger item P2.107. `fetch` refuses a credentialed URL before any
+   * request leaves, with `TypeError: Request cannot be constructed from a URL
+   * that includes credentials: <the whole URL>`. Both of this class's callers
+   * put that message somewhere durable: the three `/wordpress/*` handlers
+   * logged it, and `steps/wordpress-publish.ts` writes it to
+   * `execution_logs.message` and onto the event bus, where the run trace shows
+   * it. So the URL is refused here, at the one place every caller goes
+   * through, with a message that names the field instead of quoting the value.
+   */
+  it.each([
+    ["https://wp-user:s3cret@example.com", "a username and password"],
+    ["https://wp-user@example.com", "a username on its own"],
+  ])("refuses %s (%s) before any request is built", (wpUrl) => {
+    expect(() => new WordPressClient(wpUrl, "wp-user", "app pass")).toThrow(WordPressError)
+
+    try {
+      new WordPressClient(wpUrl, "wp-user", "app pass")
+    } catch (error) {
+      expect((error as Error).message).toBe(WP_URL_HAS_CREDENTIALS)
+      expect((error as Error).message).not.toContain("s3cret")
+      expect((error as Error).message).not.toContain("wp-user")
+    }
+  })
+
+  it("reads the credential off the parsed url, not off the @ character", () => {
+    expect(wordPressUrlHasCredentials("https://@example.com")).toBe(false)
+    expect(new WordPressClient("https://@example.com", "u", "p").siteUrl).toBe(
+      "https://@example.com/wp-json",
+    )
+  })
+
+  it("leaves a url it cannot parse to the request, which reports it as it always has", () => {
+    expect(wordPressUrlHasCredentials("example.com")).toBe(false)
+    expect(() => new WordPressClient("example.com", "u", "p")).not.toThrow()
+  })
 
   it("strips at most one suffix, leaving the one underneath", () => {
     expect(normalizeWordPressUrl("https://example.com/wp-admin/wp-json")).toBe(

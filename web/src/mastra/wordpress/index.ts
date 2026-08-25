@@ -76,6 +76,39 @@ export function normalizeWordPressUrl(wpUrl: string): string {
   return base
 }
 
+/**
+ * A `wp_url` carrying userinfo (`https://user:pass@host`), which this client
+ * refuses. Polish ledger item P2.107.
+ *
+ * Python's httpx accepted one; `fetch` does not. It raises `TypeError:
+ * Request cannot be constructed from a URL that includes credentials: <the
+ * whole URL>` before anything leaves the process, and every caller of this
+ * class puts that message somewhere durable: the three `/wordpress/*`
+ * handlers logged it through `withServerError`, and
+ * `steps/wordpress-publish.ts` writes it to `execution_logs.message` and onto
+ * the event bus, where the run trace renders it. Refusing here, at the one
+ * place all of them go through, replaces a leaked password with the name of
+ * the field to fix.
+ *
+ * Empty userinfo is not a credential: the WHATWG parser reads
+ * `https://@example.com` as `https://example.com/` with both halves empty. A
+ * value this cannot parse at all is not this failure and is left alone, so
+ * `example.com` still reaches the request and is reported as it always was.
+ */
+export const WP_URL_HAS_CREDENTIALS =
+  "The WordPress URL has a username and password in front of the site address, which no " +
+  "request can carry. Remove everything up to and including the @ from the WordPress URL, and " +
+  "put the login in the username and application password fields."
+
+export function wordPressUrlHasCredentials(wpUrl: string): boolean {
+  try {
+    const url = new URL(wpUrl)
+    return url.username !== "" || url.password !== ""
+  } catch {
+    return false
+  }
+}
+
 /** The `Authorization` header value `__init__` sets, `Basic <base64>`. */
 export function basicAuthHeader(username: string, appPassword: string): string {
   const credentials = Buffer.from(`${username}:${appPassword}`, "utf8").toString("base64")
@@ -114,6 +147,7 @@ export class WordPressClient {
   private readonly authorization: string
 
   constructor(wpUrl: string, username: string, appPassword: string) {
+    if (wordPressUrlHasCredentials(wpUrl)) throw new WordPressError(WP_URL_HAS_CREDENTIALS)
     const base = normalizeWordPressUrl(wpUrl)
     this.apiUrl = `${base}/wp-json/wp/v2`
     this.siteUrl = `${base}/wp-json`

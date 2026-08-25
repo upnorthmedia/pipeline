@@ -27,6 +27,8 @@ import {
   WP_URL_SCHEME,
   WP_URL_SPACES,
   WP_URL_QUERY_OR_FRAGMENT,
+  WEBSITE_URL_CREDENTIALS,
+  WP_URL_CREDENTIALS,
 } from "./validation"
 
 const PREFIX = "profiles-route-test-"
@@ -881,6 +883,87 @@ describe("profile URL validation", () => {
     expect((await issueFor(response, "wp_url"))?.msg).toBe(WP_URL_SCHEME)
   })
 
+  /**
+   * `https://user:pass@example.com` is refused on both URL columns for two
+   * reasons, neither of them the REST-path concatenation the cases above are
+   * about.
+   *
+   * It cannot work. `fetch` refuses a credentialed URL outright, with
+   * `Request cannot be constructed from a URL that includes credentials`, so
+   * every WordPress call raises a `TypeError` no handler here catches and the
+   * three `/wordpress/*` endpoints answer 500. `discoverSitemaps` rebuilds its
+   * base from `protocol` and `host`, so a credentialed `website_url` silently
+   * drops the credential instead.
+   *
+   * And it is a secret in a plaintext column: both are `text`, both come back
+   * out of `GET /api/profiles`, and `wp_app_password` in the same row is
+   * Fernet-encrypted.
+   */
+  it("rejects a wp_url carrying a username and password", async () => {
+    const wpUrl = "https://wp-user:s3cret@example.com"
+    const response = await post(
+      { name: "Userinfo", website_url: "http://127.0.0.1:9/userinfo", wp_url: wpUrl },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect(await issueFor(response, "wp_url")).toEqual({
+      type: "value_error",
+      loc: ["body", "wp_url"],
+      msg: WP_URL_CREDENTIALS,
+      input: wpUrl,
+    })
+  })
+
+  it("rejects a wp_url carrying a username on its own", async () => {
+    const response = await post(
+      { name: "User", website_url: "http://127.0.0.1:9/user", wp_url: "https://wp-user@example.com" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "wp_url"))?.msg).toBe(WP_URL_CREDENTIALS)
+  })
+
+  it("writes no row for a create rejected for credentials, so the password is not stored", async () => {
+    await post(
+      {
+        name: "Userinfo",
+        website_url: "http://127.0.0.1:9/userinfo",
+        wp_url: "https://wp-user:s3cret@example.com",
+      },
+      user.cookie,
+    )
+
+    const rows = await db
+      .select()
+      .from(websiteProfiles)
+      .where(eq(websiteProfiles.userId, user.userId))
+    expect(rows).toEqual([])
+  })
+
+  it("rejects a website_url carrying credentials, which the crawl drops unsent", async () => {
+    const websiteUrl = "https://crawler:s3cret@example.com"
+    const response = await post({ name: "Userinfo", website_url: websiteUrl }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect(await issueFor(response, "website_url")).toEqual({
+      type: "value_error",
+      loc: ["body", "website_url"],
+      msg: WEBSITE_URL_CREDENTIALS,
+      input: websiteUrl,
+    })
+  })
+
+  it("accepts a bare @ with nothing before it, which is not a credential", async () => {
+    const response = await post(
+      { name: "At", website_url: "http://127.0.0.1:9/at", wp_url: "https://@example.com" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(201)
+  })
+
   it("writes no row for a rejected create", async () => {
     await post(
       { name: "Nothing", website_url: "http://127.0.0.1:9/nothing", wp_url: "example.com" },
@@ -959,6 +1042,16 @@ describe("profile URL validation", () => {
 
     expect(response.status).toBe(200)
     expect((await readRow(id)).wpUrl).toBeNull()
+  })
+
+  it("rejects credentials on PATCH and leaves the stored row alone", async () => {
+    const id = await insertProfile(user.userId, { wpUrl: "https://example.com" })
+
+    const response = await patch(id, { wp_url: "https://wp-user:s3cret@example.com" }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "wp_url"))?.msg).toBe(WP_URL_CREDENTIALS)
+    expect((await readRow(id)).wpUrl).toBe("https://example.com")
   })
 
   it("rejects a bad website_url on PATCH", async () => {
