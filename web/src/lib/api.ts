@@ -351,6 +351,13 @@ export interface DashboardStats {
   by_status: Record<string, number>;
   total: number;
   complete: number;
+  /**
+   * Runs that reached the end cleanly and whose own publish then failed or
+   * stopped moving. Out of `complete` and out of `completion_rate`, because
+   * `/monitor` prints those directly under the card naming these same posts as
+   * stopped (polish ledger item P5.2).
+   */
+  publish_incomplete: number;
   completion_rate: number;
   avg_duration_s: number | null;
   by_profile: { name: string; count: number }[];

@@ -195,9 +195,11 @@ function truncateId(id: string): string {
  *
  * It sits above the numbers because it is the one thing on this tab that is
  * asking for a person: a run that finished and a publish after it that died
- * are two facts about one row, and the strip below counts the row as Complete.
- * Outside the `hasPosts` branch for the same reason, since a dead publish
- * belongs to a run that is already over.
+ * are two facts about one row, and everything below is about the first of them.
+ * The completion rate answers this card rather than contradicting it since
+ * ledger item P5.2, by counting these rows under `publish_incomplete` instead
+ * of calling them clean finishes. Outside the `hasPosts` branch, since a dead
+ * publish belongs to a run that is already over.
  *
  * The words are the server's, from the same `publishStall()` the posts list
  * and the post page ask of a row they hold. The retry lives on the post, so
@@ -456,6 +458,18 @@ export function OverviewTab() {
                   <p className="text-[11px] text-muted-foreground mt-1">
                     {dashboard?.complete ?? 0} of {dashboard?.total ?? 0} runs finished cleanly
                   </p>
+                  {/*
+                    The runs that reached the end and then failed to publish,
+                    named rather than quietly missing from the count above
+                    (ledger item P5.2). The stalled ones are the card at the top
+                    of this tab, which is where the post and the retry are; the
+                    rest failed outright and say so on the post itself.
+                  */}
+                  {(dashboard?.publish_incomplete ?? 0) > 0 && (
+                    <p className="text-[11px] text-amber-500 mt-0.5">
+                      {dashboard?.publish_incomplete} more finished but never published
+                    </p>
+                  )}
                 </div>
                 <div className="h-10 w-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
                   <TrendingUp className="h-5 w-5 text-emerald-500" />

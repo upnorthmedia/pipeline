@@ -135,11 +135,18 @@
   `XAUTOCLAIM` rather than by a person. Unverified against a real site: nothing in this repo
   has ever published to one. Found while closing polish ledger P4.3.
 
-- [confirmed] 2026-08-25 `GET /api/analytics/dashboard` counts a post whose publish died as
-  complete, so the completion rate and the Posts by Stage chart on `/monitor` both say a run
-  finished when its publish never did. The card added at polish ledger P4.9b sits directly
-  above those numbers and contradicts them. The dashboard groups on `current_stage` alone and
-  would need the publish columns to say otherwise. Found while closing P4.9b.
+- [investigate] 2026-08-25 The `failed` half of `deadPublishes()`
+  (`web/src/lib/publish-queries.ts`) has no surface of its own on `/monitor`. The completion
+  rate now says `N more finished but never published`, and the card above it names only the
+  stalled ones, so a publish the step recorded as `failed` is a number with no way to reach
+  the posts behind it except the posts list. Decide whether the card should cover both.
+  Found while closing polish ledger P5.2.
+
+- [investigate] 2026-08-25 `avg_duration_s` on `GET /api/analytics/dashboard` averages
+  `completed_at - created_at` over every row that has a `completed_at`, including the ones
+  P5.2 moved out of `complete` and into `publish_incomplete`. That average is about the run,
+  which is defensible, but it is a third rule on one screen and the card says nothing about
+  which rows it covers. Found while closing P5.2.
 
 - [investigate] 2026-08-25 The stalled-publish card on `/monitor` renders one row per dead
   publish with no cap, so an account that lost a worker for a day gets an unbounded list at

@@ -86,6 +86,7 @@ const testDashboard = {
   by_status: { research: 2, pending: 5, complete: 42, failed: 1 },
   total: 50,
   complete: 42,
+  publish_incomplete: 0,
   completion_rate: 84.0,
   avg_duration_s: 300,
   by_profile: [{ name: "Test Blog", count: 20 }],
@@ -163,6 +164,34 @@ describe("MonitorPage", () => {
       expect(screen.getByText("60%")).toBeInTheDocument();
     });
     expect(screen.getByText("3 of 5 runs finished cleanly")).toBeInTheDocument();
+  });
+
+  it("names the finished runs a dead publish keeps out of the rate", async () => {
+    // Five rows reached the end. One of them is on the stalled-publish card
+    // above these numbers, so calling it a clean finish is the contradiction
+    // polish ledger item P5.2 is about.
+    mockDashboard.mockResolvedValue({
+      ...testDashboard,
+      by_status: { complete: 5 },
+      total: 5,
+      complete: 4,
+      publish_incomplete: 1,
+      completion_rate: 80,
+    });
+    renderWithProviders(<MonitorPage />);
+    await waitFor(() => {
+      expect(screen.getByText("80%")).toBeInTheDocument();
+    });
+    expect(screen.getByText("4 of 5 runs finished cleanly")).toBeInTheDocument();
+    expect(screen.getByText("1 more finished but never published")).toBeInTheDocument();
+  });
+
+  it("says nothing about publishing when every finished run published", async () => {
+    renderWithProviders(<MonitorPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Completion Rate")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/never published/)).not.toBeInTheDocument();
   });
 
   it("renders queue controls with pause/resume buttons", async () => {

@@ -77,6 +77,7 @@ const testDashboard = {
   by_status: { research: 2, pending: 5, complete: 42, failed: 1 },
   total: 50,
   complete: 42,
+  publish_incomplete: 0,
   completion_rate: 84.0,
   avg_duration_s: 300,
   by_profile: [{ name: "Test Blog", count: 20 }],

@@ -33,11 +33,23 @@
  * `images` stage failed, printed `Completion Rate 26.7%` directly above a strip
  * calling three of them Complete and the fourth Finished with errors. Two
  * numbers on one screen counting the same rows have to use one rule.
+ *
+ * **A publish that never landed is not a clean finish either** (polish ledger
+ * item P5.2). The run and the publish after it are two things and
+ * `deriveRunState()` only knows about the first, so a post whose WordPress
+ * attempt died still reached `complete`. That put this completion rate directly
+ * under the `/monitor` card naming those exact posts as stopped, with each of
+ * the two calling the same row something else. Those rows come out of
+ * `complete` and into `publish_incomplete`, which is a number the card and the
+ * percentage can both be read against rather than a silent subtraction. A run
+ * already finished with errors is in neither: it has its own explanation, and
+ * one row under two of them is the confusion this is fixing.
  */
 import { and, count, desc, eq, gte, isNotNull, sql } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import type { PostStage, StageStatusMap } from "@/lib/api"
+import { deadPublishes } from "@/lib/publish-queries"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import { withServerError } from "@/lib/route-error"
 import { deriveRunState } from "@/lib/run-state"
@@ -64,7 +76,7 @@ async function getHandler(request: Request): Promise<Response> {
   // answer if it ever costs anything, which is to cache the response rather
   // than to re-derive the precedence rules in SQL.
   const statusRows = await db
-    .select({ stage: posts.currentStage, stageStatus: posts.stageStatus })
+    .select({ id: posts.id, stage: posts.currentStage, stageStatus: posts.stageStatus })
     .from(posts)
     .innerJoin(websiteProfiles, eq(posts.profileId, websiteProfiles.id))
     .where(owned)
@@ -72,8 +84,15 @@ async function getHandler(request: Request): Promise<Response> {
   // `json.dumps` renders a `None` dict key as the string "null", so a post
   // whose stage was never written lands under that key rather than being
   // dropped.
+  // The posts whose own publish attempt failed or stopped moving, which is the
+  // same set the `/monitor` card is built from. A second query rather than five
+  // more columns on the scan above: it reads `execution_logs`, and the rows
+  // that can be in it are the handful carrying a publish status.
+  const deadPublishIds = new Set((await deadPublishes(user.id, Date.now())).map((row) => row.id))
+
   const byStatus: Record<string, number> = {}
   let complete = 0
+  let publishIncomplete = 0
   for (const row of statusRows) {
     const key = row.stage ?? "null"
     byStatus[key] = (byStatus[key] ?? 0) + 1
@@ -81,7 +100,9 @@ async function getHandler(request: Request): Promise<Response> {
       currentStage: row.stage as PostStage,
       stageStatus: (row.stageStatus ?? {}) as StageStatusMap,
     })
-    if (state.kind === "complete") complete += 1
+    if (state.kind !== "complete") continue
+    if (deadPublishIds.has(row.id)) publishIncomplete += 1
+    else complete += 1
   }
   const total = statusRows.length
   const completionRate = total > 0 ? pythonRound((complete / total) * 100, 1) : 0
@@ -138,6 +159,7 @@ async function getHandler(request: Request): Promise<Response> {
     by_status: byStatus,
     total,
     complete,
+    publish_incomplete: publishIncomplete,
     completion_rate: completionRate,
     avg_duration_s: avgDurationS,
     by_profile: profileRows.map((row) => ({ name: row.name, count: row.total })),

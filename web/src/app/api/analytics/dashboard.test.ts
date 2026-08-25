@@ -31,6 +31,7 @@ interface DashboardBody {
   by_status: Record<string, number>
   total: number
   complete: number
+  publish_incomplete: number
   completion_rate: number
   avg_duration_s: number | null
   by_profile: { name: string; count: number }[]
@@ -67,6 +68,15 @@ type PostOverrides = {
   stageStatus?: StageStatusJson
   createdAt?: Date
   completedAt?: Date | null
+  outputFormat?: string
+  wpPublishStatus?: string | null
+  nextjsPublishStatus?: string | null
+  /**
+   * How long ago the publish was last known to be moving. `publishStall()`
+   * reads `updated_at`, so a case that wants a dead publish has to set it:
+   * the column default puts every fresh row inside the 15 minute window.
+   */
+  updatedAt?: Date
 }
 
 /** Every stage green, which is what a run that finished cleanly leaves behind. */
@@ -140,6 +150,7 @@ describe("GET /api/analytics/dashboard", () => {
       by_status: {},
       total: 0,
       complete: 0,
+      publish_incomplete: 0,
       completion_rate: 0,
       avg_duration_s: null,
       by_profile: [],
@@ -301,6 +312,126 @@ describe("GET /api/analytics/dashboard", () => {
     })
   })
 
+  /**
+   * The publishes the monitor page's stalled-publish card names, asked of the
+   * same rows this handler calls complete. A run reaching the end and its
+   * publish dying are two facts about one post, and until polish ledger item
+   * P5.2 the card and the completion rate directly under it disagreed about
+   * every one of them.
+   */
+  describe("complete and a publish that did not land", () => {
+    const OVER_THE_WINDOW = () => new Date(Date.now() - 90 * 60_000)
+
+    it("leaves a complete run whose publish stopped moving out of complete", async () => {
+      await insertPost(profileId, {
+        currentStage: "complete",
+        stageStatus: ALL_COMPLETE,
+        outputFormat: "wordpress",
+        wpPublishStatus: "published",
+      })
+      await insertPost(profileId, {
+        currentStage: "complete",
+        stageStatus: ALL_COMPLETE,
+        outputFormat: "wordpress",
+        wpPublishStatus: "publishing",
+        updatedAt: OVER_THE_WINDOW(),
+      })
+
+      const payload = await body()
+      // The row is still where it got to, which is what the chart draws.
+      expect(payload.by_status).toEqual({ complete: 2 })
+      expect(payload.complete).toBe(1)
+      expect(payload.publish_incomplete).toBe(1)
+      expect(payload.completion_rate).toBe(50)
+    })
+
+    it("leaves a complete run whose publish failed out of complete", async () => {
+      await insertPost(profileId, {
+        currentStage: "complete",
+        stageStatus: ALL_COMPLETE,
+        outputFormat: "nextjs",
+        nextjsPublishStatus: "failed",
+      })
+
+      const payload = await body()
+      expect(payload.complete).toBe(0)
+      expect(payload.publish_incomplete).toBe(1)
+      expect(payload.completion_rate).toBe(0)
+    })
+
+    it("counts a publish still inside the window, which may yet finish", async () => {
+      await insertPost(profileId, {
+        currentStage: "complete",
+        stageStatus: ALL_COMPLETE,
+        outputFormat: "wordpress",
+        wpPublishStatus: "publishing",
+        updatedAt: new Date(Date.now() - 60_000),
+      })
+
+      const payload = await body()
+      expect(payload.complete).toBe(1)
+      expect(payload.publish_incomplete).toBe(0)
+    })
+
+    it("counts a complete run nothing ever tried to publish", async () => {
+      await insertPost(profileId, {
+        currentStage: "complete",
+        stageStatus: ALL_COMPLETE,
+        outputFormat: "wordpress",
+        wpPublishStatus: null,
+        updatedAt: OVER_THE_WINDOW(),
+      })
+
+      const payload = await body()
+      expect(payload.complete).toBe(1)
+      expect(payload.publish_incomplete).toBe(0)
+    })
+
+    it("ignores a status column the row's own format does not name", async () => {
+      // Neither publish step clears the other's column, so a post moved off
+      // WordPress still carries its last WordPress attempt.
+      await insertPost(profileId, {
+        currentStage: "complete",
+        stageStatus: ALL_COMPLETE,
+        outputFormat: "markdown",
+        wpPublishStatus: "failed",
+      })
+
+      const payload = await body()
+      expect(payload.complete).toBe(1)
+      expect(payload.publish_incomplete).toBe(0)
+    })
+
+    it("does not count a run that was already finished with errors twice", async () => {
+      await insertPost(profileId, {
+        currentStage: "complete",
+        stageStatus: { ...ALL_COMPLETE, images: "failed" },
+        outputFormat: "wordpress",
+        wpPublishStatus: "failed",
+      })
+
+      const payload = await body()
+      expect(payload.complete).toBe(0)
+      // `deriveRunState()` already calls this one Finished with errors, and
+      // the strip beside the number says so. Reporting it here as well would
+      // put one row under two explanations.
+      expect(payload.publish_incomplete).toBe(0)
+      expect(payload.completion_rate).toBe(0)
+    })
+
+    it("scopes the publish columns to the caller, like every other aggregate", async () => {
+      await insertPost(otherProfileId, {
+        currentStage: "complete",
+        stageStatus: ALL_COMPLETE,
+        outputFormat: "wordpress",
+        wpPublishStatus: "failed",
+      })
+
+      expect((await body()).publish_incomplete).toBe(0)
+      expect((await body("", other.cookie)).publish_incomplete).toBe(1)
+    })
+  })
+
   describe("avg_duration_s", () => {
     it("averages completed_at minus created_at and rounds to a whole number", async () => {
       const base = new Date(Date.now() - DAY_MS)
@@ -421,6 +552,7 @@ describe("GET /api/analytics/dashboard", () => {
         by_status: {},
         total: 0,
         complete: 0,
+        publish_incomplete: 0,
         completion_rate: 0,
         avg_duration_s: null,
         by_profile: [],

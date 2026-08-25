@@ -1119,9 +1119,22 @@ section is in [`evidence/p5.md`](evidence/p5.md).
       failing run in `failure-recorder.test.ts` and in a browser at HEAD and
       after: the badge now reads `Failed at Write`, with the reason and
       `Re-run Write` beside it. `ui/p51-*.png`. [evidence](evidence/p5.md#p51)
-- [ ] **P5.2** `GET /api/analytics/dashboard` counts a post whose publish died as
-      complete, so the completion rate and the Posts by Stage chart contradict
-      the stalled-publish card P4.9b put directly above them.
+- [x] **P5.2** `GET /api/analytics/dashboard` counted a post whose publish died
+      as complete, so the completion rate contradicted the stalled-publish card
+      P4.9b put directly above it: `Publishing stopped responding on 1 post`
+      over `66.7%` and `4 of 6 runs finished cleanly`, with that post one of the
+      four. `deriveRunState()` was not wrong (the run did reach the end); what
+      was wrong is that its answer was printed as whether the post made it, and
+      the handler had never read the publish columns. New
+      `src/lib/publish-queries.ts` holds `deadPublishes()`, one query for the
+      publishes that will not move again, which `GET /api/queue` now calls for
+      its card and the dashboard calls for the ids. Those runs leave `complete`
+      for the new `publish_incomplete`, which the tab names rather than
+      subtracting silently: `2 more finished but never published`. A run already
+      finished with errors is in neither. Proven on the real database in seven
+      route cases and in a browser at HEAD and after.
+      `ui/p52-before-rate-contradicts-card.png`,
+      `ui/p52-after-rate-names-the-gap.png`. [evidence](evidence/p5.md#p52)
 - [ ] **P5.3** Clearing the gate of the stage a run is already parked at does not
       release the run, so the gates card reads `This post will go from Research
       to Ready without stopping.` over a row that is still suspended with the
