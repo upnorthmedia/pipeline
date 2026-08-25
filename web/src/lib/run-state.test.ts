@@ -93,6 +93,27 @@ describe("deriveRunState", () => {
     });
   });
 
+  it("says a pause that landed after the last stage lost the finish, not a stage", () => {
+    // Ledger item P4.4b. `pipeline-complete` reads the pause and skips the
+    // completion stamp, the auto-publish and the `pipeline_complete` frame, so
+    // this row has all six stages complete, no `completed_at`, and nothing left
+    // to "carry on from": what it lost is the finish itself.
+    const all = Object.fromEntries(STAGES.map((s) => [s, "complete"])) as StageStatusMap;
+    expect(state("paused", all)).toMatchObject({
+      kind: "paused",
+      label: "Paused before finishing",
+      detail:
+        "Every stage finished. The pause stopped the run before it marked this post complete and started its publish.",
+    });
+  });
+
+  it("still says a stage is left to carry on from when one is", () => {
+    expect(state("paused", { research: "complete", outline: "complete" })).toMatchObject({
+      label: "Paused",
+      detail: "The run stopped here. Start it again to carry on from this stage.",
+    });
+  });
+
   it("says it is still pausing while the interrupted stage finishes", () => {
     // Ledger item P2.115: a pause stops the run at the next stage boundary, so
     // a stage still marked `running` is still calling a provider and still

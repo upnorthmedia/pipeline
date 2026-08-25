@@ -74,14 +74,17 @@
   offering to change them. A post parked at a gate can be approved, and a post that should
   never have had one has to be recreated. Found under P2.114.
 
-- [confirmed] 2026-08-24 A pause during `ready` leaves all six stages complete with
-  `current_stage = "paused"` and no `completed_at`, so the row reads as unfinished. The run
-  stopped in front of `pipeline-complete`, which is deliberate (P2.115: that step is where the
-  stamp, the auto-publish and the `pipeline_complete` frame live), but `deriveRunState()` then
-  says "Paused / The run stopped here. Start it again to carry on from this stage" over a post
-  with no stage left to carry on from, and does not say the post was never marked complete or
-  published. Polish ledger P4.4b. The other half of this entry, the missing event, was fixed
-  under P4.4a.
+- [confirmed] 2026-08-25 Two em dashes survive in shipped UI copy, which the repo's own
+  convention forbids: `Ready — Live Preview` in `web/src/app/posts/[id]/page.tsx` and the `—`
+  placeholder for a missing image version in `web/src/components/image-preview.tsx`. Both are
+  one-character fixes and belong in a cleanup batch, not an iteration. Found while closing
+  P4.4b.
+
+- [confirmed] 2026-08-25 A run paused after its last stage can only be finished from
+  `/posts/[id]`. `isPausedBeforeFinish()` gives the posts list and `/monitor` the right badge
+  (both call `deriveRunState()`), but neither carries the `Finish this run` button, so a
+  reader who spots one on a list has to open the post. Same reader gap polish ledger P4.9
+  names for a stalled publish. Found while closing P4.4b.
 
 - [confirmed] 2026-08-24 The posts list at `/` holds no event feed open, so a pause, a stall
   or a stage that finished elsewhere is invisible on it until the reader navigates or reloads.

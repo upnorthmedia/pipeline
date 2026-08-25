@@ -61,7 +61,7 @@ import {
   STAGES,
 } from "@/lib/api";
 import { STAGE_LABELS, stageLabel } from "@/lib/stages";
-import { deriveRunState, resumeStage } from "@/lib/run-state";
+import { deriveRunState, isPausedBeforeFinish, resumeStage } from "@/lib/run-state";
 import { buildRunTrace, type LiveImage } from "@/lib/run-trace";
 import { lastPublishError, publishStall } from "@/lib/publish-report";
 import { PUBLISH_TARGET_LABELS, publishTargetOf } from "@/lib/publishing";
@@ -420,6 +420,31 @@ export default function PostDetailPage() {
   };
 
   /**
+   * The one control a run paused after its last stage needs.
+   *
+   * `POST /run-all` is what finishes it: it releases the pause by writing the
+   * stage the run will start at, which for a post with nothing left to run is
+   * `complete`, then starts a plain full pipeline. Every stage is skipped on
+   * its `stage_status`, so the run reaches only `pipeline-complete`, which is
+   * the stamp, the auto-publish and the `pipeline_complete` frame the pause
+   * skipped. It bills nothing and it forces no gate open: the mode pass only
+   * touches stages `stage_status` does not already call complete.
+   *
+   * `POST /rerun`, which is what the "Resume from Ready" button beside this
+   * one calls, would instead clear `ready_content` and pay for the last stage
+   * again to arrive at the same place.
+   */
+  const handleFinishRun = async () => {
+    try {
+      await posts.runAll(postId);
+      toast.success("Finishing the run");
+      fetchPost();
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "The run could not be finished."));
+    }
+  };
+
+  /**
    * The retry behind a failed stage. `POST /run?stage=<stage>` runs that stage
    * alone, which is the only retry the API offers: there is no finer grain, so
    * one failed image and five failed images take the same action. Item P1.2a is
@@ -616,6 +641,13 @@ export default function PostDetailPage() {
   // The stage the header's re-run will start from, derived the way the handler
   // derives it so the button cannot promise a stage the run does not begin at.
   const resumeFrom = resumeStage(post.stage_status);
+  // A pause that landed after `ready` rather than in front of a stage. The
+  // header's re-run is wrong for it (there is no stage left to re-run) and so
+  // is the badge's usual sentence, so both come from this one derivation.
+  const pausedBeforeFinish = isPausedBeforeFinish({
+    currentStage: post.current_stage,
+    stageStatus: post.stage_status,
+  });
   // A post nothing has ever executed against: no stage has moved off
   // `pending` and no stage column holds output. Posts normally start on
   // creation, so this is the state of a post whose run never reached the
@@ -733,10 +765,15 @@ export default function PostDetailPage() {
             </Button>
           ) : (
             <>
-              <Button variant="outline" size="sm" onClick={handleRerun}>
-                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                Resume from {STAGE_LABELS[resumeFrom]}
-              </Button>
+              {/* A run paused after its last stage has no stage to resume
+                  from, and the action it does need is in the banner below,
+                  next to the sentence saying what the pause cost the post. */}
+              {!pausedBeforeFinish && (
+                <Button variant="outline" size="sm" onClick={handleRerun}>
+                  <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                  Resume from {STAGE_LABELS[resumeFrom]}
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -853,6 +890,30 @@ export default function PostDetailPage() {
         the header uses, so the two cannot disagree about whether a gate is
         open.
       */}
+      {/*
+        A run stopped by a pause that arrived after its last stage. It is not a
+        failure and there is nothing left to run, so it reads as neither: what
+        it says is the one thing that did not happen, and the button does it.
+        Ledger item P4.4b.
+      */}
+      {pausedBeforeFinish && (
+        <div className="flex items-start gap-3 rounded-md border border-orange-500/40 bg-orange-500/5 px-4 py-3">
+          <PauseCircle className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">
+              This run was paused before it finished
+            </p>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {runState.detail}
+            </p>
+          </div>
+          <Button size="sm" onClick={handleFinishRun}>
+            <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
+            Finish this run
+          </Button>
+        </div>
+      )}
+
       {runState.reviewStages.map((stage) => (
         <div
           key={stage}

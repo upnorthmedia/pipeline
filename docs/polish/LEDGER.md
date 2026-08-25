@@ -985,12 +985,27 @@ criterion 9's bar are named at the bottom with what is owed to `SUMMARY.md` inst
       strip went `Running: 1 / Paused: 0` to `Running: 0 / Paused: 1` two seconds later with
       the frame listed in its activity feed. `ui/p44a-*.png`.
       [evidence](evidence/p4.md#p44a)
-- [ ] **P4.4b** A pause during `ready` leaves all six stages complete, `current_stage =
+- [x] **P4.4b** A pause during `ready` leaves all six stages complete, `current_stage =
       "paused"` and no `completed_at`, because `pipeline-complete` reads the pause and skips
       the stamp, the auto-publish and the `pipeline_complete` frame (deliberate, P2.115). The
-      row then reads "Paused / The run stopped here. Start it again to carry on from this
+      row then read "Paused / The run stopped here. Start it again to carry on from this
       stage", which is wrong twice: there is no stage left to carry on from, and what the
       post actually lost is the completion stamp and its publish. Split from P4.4.
+      `isPausedBeforeFinish()` in `src/lib/run-state.ts` is now the one derivation behind
+      both halves: the badge reads `Paused before finishing` with "Every stage finished. The
+      pause stopped the run before it marked this post complete and started its publish", and
+      `/posts/[id]` drops `Resume from Ready` for a banner carrying that sentence and a
+      `Finish this run` button. The button is `POST /run-all`, not the `POST /rerun` the old
+      one called: `/rerun` has no first incomplete stage here so it falls back to the last,
+      clearing `ready_content` and paying for a `claude-opus-5` call to reach a step that
+      needs no stage to run, while `/run-all` releases the pause to `complete` and starts a
+      run that skips all six and reaches only `pipeline-complete`. That fallback was
+      untested and is now pinned in `run-control.test.ts`. The state itself is pinned on the
+      real engine as a fifth run in `pipeline-completion.test.ts`, seeded identically to that
+      file's existing "nothing left to do" run so the pause is the only difference. Proven on
+      a real row with a real worker: press, and `completed_at` is stamped by the worker with
+      the `ready_content` md5 and the trace's 72,037 tokens / $2.62 unchanged.
+      `ui/p44b-*.png`. [evidence](evidence/p4.md#p44b)
 - [ ] **P4.5** `stage_review` is a live frame only, never written to `execution_logs`, so a
       reader who opens a post after the gate was released sees no trace that the run ever
       waited, and neither does the run trace.
@@ -1008,7 +1023,9 @@ criterion 9's bar are named at the bottom with what is owed to `SUMMARY.md` inst
       forwards `record.name` unchecked, which puts `[object Object]` through
       `Connected to ${status.siteName}`; and `pnpm -C web db:migrate` cannot run against a
       dev database carried over from the Python stack, which `web/drizzle/README.md` does not
-      say.
+      say. Two em dashes in shipped copy join this batch (`Ready - Live Preview` on
+      `/posts/[id]` and the missing-version placeholder in `image-preview.tsx`), filed while
+      closing P4.4b.
 
 - [ ] **P4.9** A stalled publish is legible only on `/posts/[id]`. The posts list and
       `/monitor` show nothing about one, and the run trace's `Publish to <target>` row counts

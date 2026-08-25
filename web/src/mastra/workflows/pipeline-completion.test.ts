@@ -25,6 +25,14 @@
  *    chain, so a suspended run must not reach it: a post that reported itself
  *    complete while still waiting on its reviewer would be worse than one that
  *    reported nothing.
+ * 5. **Full run over a paused post.** Same shape as 3 with the pause on the
+ *    row, which is the state a pause pressed during `ready` leaves: `ready` is
+ *    the only stage with no stage after it to read the pause, so this step
+ *    reads it and skips the stamp, the auto-publish and the frame (ledger item
+ *    P2.115). It is here for ledger item P4.4b, to pin on the real engine that
+ *    the row a reader then meets is all six stages complete, `current_stage`
+ *    still `"paused"` and no `completed_at`. Nothing about that is wrong; what
+ *    was wrong is that the UI called it a run to carry on from.
  *
  * The three runs that finish also carry item 5.4c-ii's evidence: the step is
  * where `_record_job_completed()` lands, so a run that reaches it must leave a
@@ -66,7 +74,13 @@ import { outlineAgent } from "../agents/outline"
 import { readyAgent } from "../agents/ready"
 import { researchAgent } from "../agents/research"
 import { writeAgent } from "../agents/write"
-import { CURRENT_STAGE_COMPLETE, STAGES, STATUS_COMPLETE, STATUS_REVIEW } from "../state"
+import {
+  CURRENT_STAGE_COMPLETE,
+  CURRENT_STAGE_PAUSED,
+  STAGES,
+  STATUS_COMPLETE,
+  STATUS_REVIEW,
+} from "../state"
 import { WORKER_LAST_COMPLETED_KEY, readLastCompleted } from "../worker-health"
 import { imagesWorkflow } from "./images"
 import { pipelineWorkflow } from "./pipeline"
@@ -92,6 +106,7 @@ const FULL_RUN_POST_ID = "00000000-0000-4000-8000-00000000061a"
 const NAMED_RUN_POST_ID = "00000000-0000-4000-8000-00000000061b"
 const NOTHING_TO_DO_POST_ID = "00000000-0000-4000-8000-00000000061c"
 const GATED_POST_ID = "00000000-0000-4000-8000-00000000061d"
+const PAUSED_AT_FINISH_POST_ID = "00000000-0000-4000-8000-00000000061e"
 /**
  * Ids have to be unique across the whole suite, not just this file. Vitest runs
  * files in parallel, so two files seeding the same row delete and re-insert it
@@ -104,6 +119,7 @@ const POST_IDS = [
   NAMED_RUN_POST_ID,
   NOTHING_TO_DO_POST_ID,
   GATED_POST_ID,
+  PAUSED_AT_FINISH_POST_ID,
 ]
 
 /** Every stage but `edit`, so a run has exactly one stage left to do. */
@@ -222,6 +238,9 @@ beforeAll(async () => {
   await db.insert(posts).values(seedValues(NAMED_RUN_POST_ID, ALL_BUT_EDIT))
   await db.insert(posts).values(seedValues(NOTHING_TO_DO_POST_ID, STAGES))
   await db.insert(posts).values(seedValues(GATED_POST_ID, ALL_BUT_EDIT, "edit"))
+  await db
+    .insert(posts)
+    .values({ ...seedValues(PAUSED_AT_FINISH_POST_ID, STAGES), currentStage: CURRENT_STAGE_PAUSED })
 
   await storage.init()
   await testMastra.startWorkers()
@@ -233,6 +252,7 @@ beforeAll(async () => {
   // resumes the run, and the only row read afterwards is one `reviewGate`
   // commits before the step calls `suspend()`.
   results.gated = await run(GATED_POST_ID)
+  results.pausedAtFinish = await run(PAUSED_AT_FINISH_POST_ID)
 }, 180_000)
 
 afterAll(async () => {
@@ -369,5 +389,27 @@ describe("a full run parked at a review gate", () => {
 
     expect(row.currentStage).toBe("edit")
     expect(row.completedAt).toBeNull()
+  })
+})
+
+/**
+ * Ledger item P4.4b. The row a pause pressed during `ready` leaves behind, run
+ * through the real engine rather than described: every stage is complete, so
+ * the run calls no provider and reaches only this step, which reads the pause
+ * and returns without stamping anything.
+ */
+describe("a full run over a post paused after its last stage", () => {
+  it("succeeds", () => {
+    expect(results.pausedAtFinish.status).toBe("success")
+  })
+
+  it("leaves the pause on the row and the post unfinished", async () => {
+    const row = await readPost(PAUSED_AT_FINISH_POST_ID)
+
+    expect(row.currentStage).toBe(CURRENT_STAGE_PAUSED)
+    expect(row.completedAt).toBeNull()
+    // The half of the state that makes the generic paused sentence wrong:
+    // there is no stage left to carry on from.
+    expect(STAGES.every((stage) => row.stageStatus?.[stage] === STATUS_COMPLETE)).toBe(true)
   })
 })

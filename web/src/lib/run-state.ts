@@ -111,6 +111,15 @@ export function deriveRunState(post: {
         detail: `${STAGE_LABELS[runningStage]} is finishing. Nothing after it will start.`,
       }
     }
+    if (isPausedBeforeFinish(post)) {
+      return {
+        ...base,
+        kind: "paused",
+        label: "Paused before finishing",
+        detail:
+          "Every stage finished. The pause stopped the run before it marked this post complete and started its publish.",
+      }
+    }
     return {
       ...base,
       kind: "paused",
@@ -171,6 +180,33 @@ export function deriveRunState(post: {
     label: (STAGE_LABELS as Record<string, string>)[currentStage] ?? currentStage,
     detail: null,
   }
+}
+
+/**
+ * A pause that landed after the last stage rather than in front of one.
+ *
+ * `ready` is the only stage with no stage after it to read the pause, so
+ * `pipeline-complete` reads it instead and skips the three things it does for a
+ * full run: the `completed_at` stamp, the auto-publish and the
+ * `pipeline_complete` frame (deliberate, ledger item P2.115). The row that
+ * leaves is all six stages complete with `current_stage = "paused"` and no
+ * `completed_at`, and the generic paused sentence is wrong about it twice:
+ * there is no stage left to carry on from, and what the post is missing is the
+ * finish itself.
+ *
+ * Exported because the post page needs the same answer for a different
+ * question: which control to offer. "Resume from Ready" there is `POST /rerun`,
+ * which clears `ready_content` and pays for the stage again to reach a step
+ * that needs no stage to run at all; `POST /run-all` releases the pause to
+ * `complete` and starts a run that skips all six and reaches only the finish.
+ */
+export function isPausedBeforeFinish(post: {
+  currentStage: PostStage
+  stageStatus: StageStatusMap
+}): boolean {
+  return (
+    post.currentStage === "paused" && STAGES.every((stage) => post.stageStatus[stage] === "complete")
+  )
 }
 
 /**

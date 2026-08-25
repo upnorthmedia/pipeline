@@ -574,6 +574,26 @@ describe("POST /api/posts/{post_id}/run-all", () => {
     expect((await readPost(post.id)).currentStage).toBe("outline")
   })
 
+  /**
+   * Ledger item P4.4b. A pause that lands during `ready` leaves every stage
+   * complete, so there is no stage for the release to name and the handler
+   * falls back to `complete`. That is the fallback the post page's "Finish this
+   * run" depends on: the run it starts skips all six stages and reaches
+   * `pipeline-complete` with the pause released, which is the stamp and the
+   * auto-publish the pause skipped.
+   */
+  it("releases a pause that has no stage left to run to complete", async () => {
+    const post = await insertPost(user.userId, {
+      currentStage: "paused",
+      stageStatus: ALL_COMPLETE,
+    })
+
+    await all(post.id, user.cookie)
+
+    expect((await readPost(post.id)).currentStage).toBe("complete")
+    expect(start.calls).toEqual([{ postId: post.id, stages: undefined }])
+  })
+
   it("leaves current_stage alone on a post that is not paused", async () => {
     const post = await insertPost(user.userId, {
       currentStage: "write",

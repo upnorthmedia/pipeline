@@ -1080,6 +1080,65 @@ describe("the run controls on a post that has already run", () => {
     expect(screen.getByRole("button", { name: "Resume from Ready" })).toBeInTheDocument();
   });
 
+  /**
+   * Ledger item P4.4b. A pause that lands during `ready` leaves all six stages
+   * complete and `current_stage = "paused"`, because `pipeline-complete` reads
+   * the pause and skips the stamp, the auto-publish and the frame. The header
+   * offered "Resume from Ready" on that row, which is `POST /rerun`: it clears
+   * `ready_content` and pays for the stage again to reach a step that needs no
+   * stage run at all.
+   */
+  describe("a pause that landed after the last stage", () => {
+    const mockRunAll = vi.mocked(posts.runAll);
+    const pausedAtFinish = () =>
+      makeCompletedPost({ id: "post-1", topic: "Test Post Topic", current_stage: "paused", completed_at: null });
+
+    it("offers the finish instead of a re-run of the last stage", async () => {
+      mockGet.mockResolvedValue(pausedAtFinish());
+      renderWithProviders(<PostDetailPage />);
+      await screen.findByText("Test Post Topic");
+
+      expect(screen.getByRole("button", { name: "Finish this run" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /resume from/i })).not.toBeInTheDocument();
+    });
+
+    it("finishes the run without re-running a stage", async () => {
+      mockGet.mockResolvedValue(pausedAtFinish());
+      mockRunAll.mockResolvedValue({ status: "queued", mode: "run-all" });
+      renderWithProviders(<PostDetailPage />);
+      await screen.findByText("Test Post Topic");
+
+      await userEvent.click(screen.getByRole("button", { name: "Finish this run" }));
+
+      await waitFor(() => expect(mockRunAll).toHaveBeenCalledWith("post-1"));
+      expect(mockRerun).not.toHaveBeenCalled();
+    });
+
+    it("says what the pause cost the post rather than naming a stage to carry on from", async () => {
+      mockGet.mockResolvedValue(pausedAtFinish());
+      renderWithProviders(<PostDetailPage />);
+      await screen.findByText("Test Post Topic");
+
+      expect(screen.getByText("Paused before finishing")).toBeInTheDocument();
+      expect(screen.queryByText(/carry on from this stage/i)).not.toBeInTheDocument();
+    });
+
+    it("still resumes a pause that has a stage left to run", async () => {
+      mockGet.mockResolvedValue(
+        makePost({
+          current_stage: "paused",
+          stage_status: { research: "complete", outline: "complete" },
+          research_content: "notes",
+        }),
+      );
+      renderWithProviders(<PostDetailPage />);
+      await screen.findByText("Test Post Topic");
+
+      expect(screen.getByRole("button", { name: "Resume from Write" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Finish this run" })).not.toBeInTheDocument();
+    });
+  });
+
   it("asks before starting over, and names what is discarded", async () => {
     mockGet.mockResolvedValue(completed());
     mockRestart.mockResolvedValue({ status: "queued", mode: "restart" });
