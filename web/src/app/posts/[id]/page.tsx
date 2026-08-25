@@ -50,6 +50,7 @@ import { ImagePreview } from "@/components/image-preview";
 import { ExportButton } from "@/components/export-button";
 import { DebugLogPanel, type DebugLog } from "@/components/debug-log-panel";
 import { RunTrace } from "@/components/run-trace";
+import { PipelineGatesCard } from "@/components/pipeline-gates-card";
 import { PostDetailSkeleton } from "./post-detail-skeleton";
 import {
   apiErrorMessage,
@@ -58,9 +59,10 @@ import {
   type PipelineStage,
   type PostStage,
   type PostAnalytics,
+  type StageSettings,
   STAGES,
 } from "@/lib/api";
-import { STAGE_LABELS, stageLabel } from "@/lib/stages";
+import { STAGE_LABELS, stageLabel, stageModeSentence } from "@/lib/stages";
 import { deriveRunState, isPausedBeforeFinish, resumeStage } from "@/lib/run-state";
 import { buildRunTrace, type LiveImage } from "@/lib/run-trace";
 import { lastPublishError, publishStall } from "@/lib/publish-report";
@@ -483,6 +485,44 @@ export default function PostDetailPage() {
       toast.error(apiErrorMessage(e, `The ${name} stage could not be approved.`));
     } finally {
       fetchPost();
+    }
+  };
+
+  /**
+   * Save a gate change onto the post (ledger item P4.6).
+   *
+   * Optimistic, because the control that changed is the one that reports the
+   * change: a select that snaps back to its old value while a request is in
+   * flight reads as a control that did not work. A failed save puts the old
+   * settings back and says so, which is the only signal that the row and the
+   * screen disagree.
+   *
+   * The card hands over all six stages, and that is what goes on the wire: a
+   * `stage_settings` naming fewer than six parks the run at the ones it leaves
+   * out, because `DEFAULT_GATE_MODE` in `src/mastra/steps/stage-io.ts` reads a
+   * missing stage as `review`.
+   *
+   * A run already under way picks this up at its next stage: every one of the
+   * six steps calls `loadPipelineState(postId)` at the top of its `execute`,
+   * so the gates come off the row rather than out of the run's snapshot.
+   */
+  const handleGatesChange = async (next: StageSettings | null) => {
+    if (!post || !next) return;
+    const previous = post.stage_settings;
+    const changed = STAGES.find((stage) => previous[stage] !== next[stage]);
+    setPost((current) => (current ? { ...current, stage_settings: next } : current));
+    try {
+      await posts.update(postId, { stage_settings: next });
+      if (changed) {
+        toast.success(
+          stageModeSentence(changed, next[changed])
+        );
+      }
+    } catch (e) {
+      setPost((current) =>
+        current ? { ...current, stage_settings: previous } : current
+      );
+      toast.error(apiErrorMessage(e, "The review gates could not be saved."));
     }
   };
 
@@ -986,6 +1026,21 @@ export default function PostDetailPage() {
             : null
         }
         onApprove={handleApprove}
+      />
+
+      {/*
+        Under the trace, because the trace is where a reader finds out the run
+        stopped and this is the control that decides where it stops next. It is
+        the same card as the one on `/posts/new`, editing the same column, so a
+        gate set at creation and a gate set afterwards are one thing in two
+        places rather than two settings.
+      */}
+      <PipelineGatesCard
+        profile={null}
+        title="Review gates"
+        subject="This post"
+        value={post.stage_settings}
+        onChange={handleGatesChange}
       />
 
       {/* Stage Content Tabs */}

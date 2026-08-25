@@ -3,8 +3,13 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import PostDetailPage from "./[id]/page";
 import { renderWithProviders } from "@/test/render";
-import { makePost, makeCompletedPost, makeAnalytics } from "@/test/fixtures";
-import { STAGES } from "@/lib/api";
+import {
+  defaultStageSettings,
+  makePost,
+  makeCompletedPost,
+  makeAnalytics,
+} from "@/test/fixtures";
+import { STAGES, type Post } from "@/lib/api";
 import { STAGE_LABELS } from "@/lib/stages";
 
 const mockPush = vi.fn();
@@ -1392,5 +1397,91 @@ describe("PostDetailPage stalled publishing", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * Ledger item P4.6. `PATCH /api/posts/{id}` has taken `stage_settings` and
+ * kept it as sent since P2.114, but the picker that writes it was on
+ * `/posts/new` only, so a post created with a gate it should not have had
+ * could be fixed only by creating it again.
+ *
+ * The worker reads the gates off the row at the top of every step
+ * (`loadPipelineState` in each of the six), not off the run's snapshot, so an
+ * edit made here reaches the stages this run has not started yet.
+ */
+describe("PostDetailPage gate settings", () => {
+  const mockUpdate = vi.mocked(posts.update);
+  const gatedPost = () =>
+    makePost({ stage_settings: { ...defaultStageSettings, outline: "review" } });
+
+  beforeEach(() => {
+    mockGet.mockResolvedValue(gatedPost());
+    mockUpdate.mockImplementation(async (_id, data) =>
+      makePost({ ...gatedPost(), ...(data as Partial<Post>) })
+    );
+  });
+
+  it("says where the post will stop", async () => {
+    renderWithProviders(<PostDetailPage />);
+
+    expect(await screen.findByTestId("gate-summary")).toHaveTextContent(
+      "This post will stop at Outline and wait for you."
+    );
+    expect(
+      within(screen.getByTestId("gate-outline")).getByRole("combobox")
+    ).toHaveTextContent("Wait for review");
+  });
+
+  it("saves a gate the post should never have had", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+
+    await user.click(await screen.findByRole("combobox", { name: "Outline" }));
+    await user.click(await screen.findByRole("option", { name: "Run automatically" }));
+
+    await waitFor(() =>
+      expect(mockUpdate).toHaveBeenCalledWith("post-1", {
+        stage_settings: defaultStageSettings,
+      })
+    );
+    expect(screen.getByTestId("gate-summary")).toHaveTextContent(
+      "This post will go from Research to Ready without stopping."
+    );
+    expect(toast.success).toHaveBeenCalledWith("Outline will run automatically.");
+  });
+
+  // All six stages every time: a `stage_settings` with a hole in it parks the
+  // run at the stages it leaves out (`DEFAULT_GATE_MODE` is `review`), so a
+  // patch carrying only the stage that changed would gate the other five.
+  it("writes every stage rather than the one that changed", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+
+    await user.click(await screen.findByRole("combobox", { name: "Write" }));
+    await user.click(await screen.findByRole("option", { name: "Wait for approval" }));
+
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalled());
+    expect(mockUpdate.mock.calls[0][1].stage_settings).toEqual({
+      ...defaultStageSettings,
+      outline: "review",
+      write: "approve_only",
+    });
+  });
+
+  it("puts the gate back when the save fails", async () => {
+    mockUpdate.mockRejectedValue(new Error("nope"));
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+
+    await user.click(await screen.findByRole("combobox", { name: "Outline" }));
+    await user.click(await screen.findByRole("option", { name: "Run automatically" }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("The review gates could not be saved.")
+    );
+    expect(screen.getByTestId("gate-summary")).toHaveTextContent(
+      "This post will stop at Outline and wait for you."
+    );
   });
 });

@@ -57,18 +57,28 @@ function joinStageNames(names: string[]): string {
  *
  * `subject` names what the gates apply to, because `/posts/batch` copies the
  * same profile value onto up to twenty posts at once and "this run" would be a
- * lie there.
+ * lie there, and `/posts/[id]` edits the gates of a post that already exists.
+ *
+ * `onUseProfileGates` is the way back to the profile's own gates, and the
+ * caller supplies it because only the caller knows whether there is one: the
+ * new-post form drops its override and inherits again, while a created post
+ * has no null to fall back to (`stage_settings: null` on a row means "run
+ * every stage unattended", not "ask the profile").
  */
 export const PipelineGatesCard = ({
   profile,
+  title = "Pipeline",
   subject = "This run",
   value = null,
   onChange,
+  onUseProfileGates,
 }: {
   profile: Profile | null;
+  title?: string;
   subject?: string;
   value?: StageSettings | null;
   onChange?: (next: StageSettings | null) => void;
+  onUseProfileGates?: () => void;
 }) => {
   const settings = value ?? profile?.default_stage_settings;
   const modes = STAGES.map((stage) => ({
@@ -87,7 +97,7 @@ export const PipelineGatesCard = ({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Pipeline</CardTitle>
+        <CardTitle className="text-base">{title}</CardTitle>
         <CardDescription>
           Where {lowerFirst(subject)} will pause and wait for you
         </CardDescription>
@@ -148,7 +158,7 @@ export const PipelineGatesCard = ({
               } without stopping.`}
         </p>
 
-        {onChange && value && (
+        {onUseProfileGates && (
           <div
             data-testid="gate-override"
             className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2"
@@ -161,7 +171,7 @@ export const PipelineGatesCard = ({
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => onChange(null)}
+              onClick={onUseProfileGates}
             >
               Use the profile&apos;s gates
             </Button>

@@ -1023,9 +1023,17 @@ criterion 9's bar are named at the bottom with what is owed to `SUMMARY.md` inst
       real worker: parked at 04:19:16.911, released by the browser's approve button at
       04:19:50.324, and the page reads `Waited 33.4s for review before this step ran.` across
       two engine retries. `ui/p45-*.png`. [evidence](evidence/p4.md#p45)
-- [ ] **P4.6** A created post's gates cannot be edited. `PATCH /api/posts/{id}` takes
-      `stage_settings` and keeps it as sent, but the picker added at P2.114 is on `/posts/new`
-      only, so a post that should never have had a gate has to be recreated.
+- [x] **P4.6** A created post's gates can be edited. `/posts/[id]` had no reading of
+      `stage_settings` at all, not a read-only one, so the only account of a post's gates
+      after creation was the run trace saying the run had already stopped. The page now
+      renders the same `PipelineGatesCard` as `/posts/new`, under the run trace, writing the
+      same column through `PATCH /api/posts/{id}`, which needed no change. The card's reset
+      control moved from a derivation (`onChange && value` -> `onChange(null)`) to a
+      caller-supplied `onUseProfileGates`, because `stage_settings: null` on a created row
+      means "run every stage unattended", not "ask the profile". Four failing-first UI tests,
+      plus a real-database case pinning that a gate saved after creation is what the worker
+      reads (all six steps call `loadPipelineState()`). Proven in a browser on a real row,
+      read back out of Postgres. `ui/p46-*.png`. [evidence](evidence/p4.md#p46)
 - [ ] **P4.7** The `posts` rows already written with `profile_id = NULL` are unreachable and
       undeletable through the app. P2.97 closed the writers; this is a decision on the
       existing rows, leave them or name them in a one-off migration.

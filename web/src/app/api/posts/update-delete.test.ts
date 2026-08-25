@@ -30,6 +30,8 @@ import { eq, inArray, like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
 import { closeDb, getDb, internalLinks, postMedia, posts, websiteProfiles } from "@/db"
+import { loadPipelineState } from "@/mastra/post-state"
+import { stageNeedsReview } from "@/mastra/steps/stage-io"
 import { ABSENT_POST_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
@@ -214,6 +216,57 @@ describe("PATCH /api/posts/{post_id}", () => {
     expect(row.niche).toBeNull()
     expect(row.relatedKeywords).toBeNull()
     expect(row.stageSettings).toBeNull()
+  })
+
+  /**
+   * The layer under the per-post gate picker added at ledger item P4.6. The
+   * picker is new, the endpoint is not, so this passes at the commit before
+   * it too: what it pins is that a gate saved after the post was created is
+   * what the worker reads, because every one of the six steps calls
+   * `loadPipelineState()` at the top of its `execute` rather than carrying the
+   * gates in the run's snapshot. Without that, an edit made while a run is in
+   * flight would change nothing until the next run.
+   */
+  it("hands a gate saved after creation to the state the steps run on", async () => {
+    const mine = await insertProfile(user.userId)
+    const post = await insertPost({
+      slug: `${PREFIX}gates`,
+      profileId: mine,
+      stageSettings: {
+        research: "auto",
+        outline: "auto",
+        write: "auto",
+        edit: "auto",
+        images: "auto",
+        ready: "auto",
+      },
+    })
+    const before = await loadPipelineState(post.id)
+    expect(stageNeedsReview("outline", { postId: post.id }, before.stageSettings)).toBe(false)
+
+    const response = await patch(
+      post.id,
+      {
+        stage_settings: {
+          research: "auto",
+          outline: "review",
+          write: "auto",
+          edit: "auto",
+          images: "auto",
+          ready: "auto",
+        },
+      },
+      user.cookie,
+    )
+    expect(response.status).toBe(200)
+
+    const after = await loadPipelineState(post.id)
+    expect(after.stageSettings.outline).toBe("review")
+    expect(stageNeedsReview("outline", { postId: post.id }, after.stageSettings)).toBe(true)
+    // The five the edit did not name still run unattended: a `stage_settings`
+    // with a hole in it would have gated them, since `DEFAULT_GATE_MODE` reads
+    // an unnamed stage as `review`.
+    expect(stageNeedsReview("write", { postId: post.id }, after.stageSettings)).toBe(false)
   })
 
   it("ignores keys PostUpdate does not declare, so slug and profile_id are immovable", async () => {

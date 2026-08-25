@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { STAGES } from "./api";
-import { STAGE_LABELS, stageLabel } from "./stages";
+import { STAGE_LABELS, stageLabel, stageModeSentence } from "./stages";
 
 describe("STAGE_LABELS", () => {
   it("names every stage the pipeline runs", () => {
@@ -58,6 +58,16 @@ function sourceFiles(dir: string): string[] {
     return [path];
   });
 }
+
+describe("stageModeSentence", () => {
+  it("reads as a sentence for all three modes", () => {
+    expect(stageModeSentence("outline", "auto")).toBe("Outline will run automatically.");
+    expect(stageModeSentence("outline", "review")).toBe("Outline will wait for review.");
+    expect(stageModeSentence("images", "approve_only")).toBe(
+      "Images will wait for approval."
+    );
+  });
+});
 
 describe("the stage names have one owner", () => {
   it("finds no second stage label map under src/", () => {

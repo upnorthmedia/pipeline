@@ -569,6 +569,9 @@ export default function NewPostPage() {
           profile={selectedProfile}
           value={stageSettings}
           onChange={setStageSettings}
+          onUseProfileGates={
+            stageSettings ? () => setStageSettings(null) : undefined
+          }
         />
 
         <Separator />

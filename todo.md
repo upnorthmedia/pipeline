@@ -90,13 +90,18 @@
   gate approval route built for P2.109 has to survive the same double signal. Found under
   polish ledger P2.110.
 
-- [confirmed] 2026-08-25 `PATCH /api/posts/{id}` is the only write path that still cannot
-  clear a post's gates on its own terms. `src/app/api/posts/[id]/route.ts` takes
-  `stage_settings` as a nullable object with no prefill in front of it, so the value is kept
-  as sent, but nothing in the UI edits a created post's gates: the picker added under polish
-  ledger P2.114 is on `/posts/new` only, and `/posts/[id]` shows the run's gates without
-  offering to change them. A post parked at a gate can be approved, and a post that should
-  never have had one has to be recreated. Found under P2.114.
+- [confirmed] 2026-08-25 Clearing the gate of the stage a run is already parked at does not
+  release the run. The suspended workflow resumes only through
+  `POST /api/posts/{id}/approve`, so after setting `outline` back to `auto` on a post parked
+  at Outline, the gates card reads `This post will go from Research to Ready without
+  stopping.` while the row is still `stage_status.outline = "review"` and the approval banner
+  is still on screen. Two true statements that read as one contradiction. Found under P4.6.
+
+- [confirmed] 2026-08-25 The gates card on `/posts/[id]` offers no way back to the profile's
+  gates and no link to the profile. `/posts/new` has both, because it holds the profile it
+  prefilled from; the post page never fetches one (it has `profile_id` and nothing else), so
+  a reader who wants the profile's gates back on a post has to set six selects by hand.
+  Found under P4.6.
 
 - [confirmed] 2026-08-25 Two em dashes survive in shipped UI copy, which the repo's own
   convention forbids: `Ready — Live Preview` in `web/src/app/posts/[id]/page.tsx` and the `—`

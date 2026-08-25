@@ -43,6 +43,17 @@ export const STAGE_MODE_LABELS: Record<StageMode, string> = {
   approve_only: "Wait for approval",
 };
 
+/**
+ * What a gate change did, as a sentence: "Outline will wait for review."
+ *
+ * The confirmation the per-post gate picker on `/posts/[id]` reports, kept
+ * beside the labels it is built from so the mode never has two names.
+ */
+export function stageModeSentence(stage: PipelineStage, mode: StageMode): string {
+  const label = STAGE_MODE_LABELS[mode] ?? mode;
+  return `${STAGE_LABELS[stage]} will ${label.charAt(0).toLowerCase()}${label.slice(1)}.`;
+}
+
 /** A mode read off a row that is only typed as a string, unrecognised values included. */
 export function stageModeLabel(mode: string): string {
   return (STAGE_MODE_LABELS as Record<string, string>)[mode] ?? mode;
