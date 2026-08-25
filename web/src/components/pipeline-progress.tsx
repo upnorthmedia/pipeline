@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { PipelineStage, StageStatusMap } from "@/lib/api";
 import { STAGES } from "@/lib/api";
+import { resolveStageStatus } from "@/lib/run-state";
 import { STAGE_LABELS, stageStatusLabel } from "@/lib/stages";
 
 const STAGE_ICONS: Record<PipelineStage, React.ComponentType<{ className?: string }>> = {
@@ -80,7 +81,7 @@ const STATUS_STYLES: Record<string, StatusStyle> = {
 };
 
 export const PipelineProgress = ({
-  stageStatus,
+  stageStatus: column,
   currentStage,
   compact = false,
 }: {
@@ -88,6 +89,12 @@ export const PipelineProgress = ({
   currentStage: string;
   compact?: boolean;
 }) => {
+  // Read here rather than by each caller, because this component already holds
+  // the other half of the answer: a stage the map still calls running under a
+  // run the worker gave up on is a stage that died, and painting it as an
+  // amber spinner is what made a dead run look busy on both screens that show
+  // these dots. See `resolveStageStatus()`.
+  const stageStatus = resolveStageStatus({ currentStage, stageStatus: column });
   const completedCount = STAGES.filter(
     (s) => stageStatus[s] === "complete"
   ).length;

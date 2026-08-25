@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { STAGES, type PostStage, type StageStatusMap } from "./api";
-import { deriveRunState, resumeStage } from "./run-state";
+import { deriveRunState, resolveStageStatus, resumeStage } from "./run-state";
 
 const state = (currentStage: PostStage, stageStatus: StageStatusMap = {}) =>
   deriveRunState({ currentStage, stageStatus });
@@ -68,13 +68,19 @@ describe("deriveRunState", () => {
     expect(s.failedStages).toEqual([]);
   });
 
-  it("lets the worker's terminal failure stamp outrank a stage left stuck on running", () => {
-    // `markPipelineFailed()` writes `current_stage = "failed"` without touching
-    // `stage_status`, so the stage that threw is still recorded as running. The
-    // run is over; the map is stale.
+  it("names the stage a run died in even when only the row's stamp says it died", () => {
+    // This case used to assert `label: "Failed"`, on the grounds that
+    // `markPipelineFailed()` wrote `current_stage` without touching
+    // `stage_status`. It writes both now, and rows written before it did (and
+    // failures the engine could not pin on a step) are reconciled by
+    // `resolveStageStatus()`, so a stage still recorded as running under a
+    // terminal stamp is a stage that failed, and saying so is strictly more
+    // than the old label said.
     expect(state("failed", { research: "running" })).toMatchObject({
       kind: "failed",
-      label: "Failed",
+      label: "Failed at Research",
+      failedStages: ["research"],
+      runningStage: null,
     });
   });
 
@@ -164,5 +170,31 @@ describe("resumeStage", () => {
   // A key outside the six is not a stage, and the handler ignores it too.
   it("ignores a key that is not one of the six stages", () => {
     expect(resumeStage({ publish: "failed" } as StageStatusMap)).toBe("research");
+  });
+});
+
+describe("resolveStageStatus", () => {
+  it("reads a stage still marked running under a terminal failure as failed", () => {
+    expect(
+      resolveStageStatus({
+        currentStage: "failed",
+        stageStatus: { research: "complete", write: "running" },
+      }),
+    ).toEqual({ research: "complete", write: "failed" });
+  });
+
+  it("leaves every other status on a failed run alone", () => {
+    const stageStatus: StageStatusMap = {
+      research: "complete",
+      outline: "failed",
+      write: "pending",
+    };
+    expect(resolveStageStatus({ currentStage: "failed", stageStatus })).toEqual(stageStatus);
+  });
+
+  it("returns the map untouched for a run that has not been given up on", () => {
+    const stageStatus: StageStatusMap = { research: "running" };
+    expect(resolveStageStatus({ currentStage: "research", stageStatus })).toBe(stageStatus);
+    expect(resolveStageStatus({ currentStage: "paused", stageStatus })).toBe(stageStatus);
   });
 });

@@ -730,6 +730,83 @@ describe("PostDetailPage stage failures", () => {
 });
 
 /**
+ * Ledger item P5.1, the stage-level twin of P4.9a. A run the worker gave up on
+ * leaves the stage it died in recorded as `running`: `markStageRunning()` wrote
+ * it on the way into the step and, before P5.1, nothing moved it, because
+ * `markPipelineFailed()` only stamped `current_stage`. Three readers on this
+ * one page took that literally, so a dead run had a spinning progress dot, a
+ * tab reading `Running Write...` and a run-trace row counting an elapsed clock
+ * up, four inches under a header badge that said the run had failed.
+ */
+describe("PostDetailPage a run the worker gave up on", () => {
+  const deadRun = () =>
+    makePost({
+      current_stage: "failed",
+      stage_status: {
+        research: "complete",
+        outline: "complete",
+        write: "running",
+      },
+      research_content: "notes",
+      execution_logs: [
+        {
+          ts: "2026-08-24T09:50:00Z",
+          stage: "write",
+          level: "info",
+          event: "stage_start",
+          message: "Running write",
+          data: {},
+        },
+        {
+          ts: "2026-08-24T09:59:00Z",
+          stage: "write",
+          level: "error",
+          event: "stage_error",
+          message: "Pipeline failed after 3 attempts: Anthropic returned 529",
+          data: { error: "Anthropic returned 529", attempts: 3, moved_to_dlq: true },
+        },
+      ],
+    });
+
+  beforeEach(() => {
+    mockGet.mockResolvedValue(deadRun());
+  });
+
+  it("does not leave the run trace calling the stage it died in running", async () => {
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Run Trace")).toBeInTheDocument();
+    });
+
+    const trace = within(screen.getByRole("table"));
+    expect(trace.queryByText("Running")).not.toBeInTheDocument();
+    // Two of the six rows: `write` died and nothing after it started.
+    expect(trace.getAllByText("Failed")).toHaveLength(1);
+    expect(screen.queryByLabelText("Run in progress")).not.toBeInTheDocument();
+  });
+
+  it("names the stage the run died in on the badge, and offers its re-run", async () => {
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Failed at Write")).toBeInTheDocument();
+    });
+    const banner = screen.getByRole("alert");
+    expect(within(banner).getByText("Anthropic returned 529")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Re-run Write" })).toBeInTheDocument();
+  });
+
+  it("stops the progress dot spinning on the stage the run died in", async () => {
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Run Trace")).toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText("Write: Failed")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Write: Running")).not.toBeInTheDocument();
+  });
+});
+
+/**
  * Item P3.2c. `images` is the one stage that reports its progress per item,
  * and the two names it publishes were dropped by `EventSource` before they
  * reached this page. Nothing refetches the row until the stage ends, so

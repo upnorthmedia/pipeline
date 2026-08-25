@@ -63,7 +63,12 @@ import {
   STAGES,
 } from "@/lib/api";
 import { STAGE_LABELS, stageLabel, stageModeSentence } from "@/lib/stages";
-import { deriveRunState, isPausedBeforeFinish, resumeStage } from "@/lib/run-state";
+import {
+  deriveRunState,
+  isPausedBeforeFinish,
+  resolveStageStatus,
+  resumeStage,
+} from "@/lib/run-state";
 import { buildRunTrace, type LiveImage } from "@/lib/run-trace";
 import { PublishStallBadge } from "@/components/publish-stall-badge";
 import {
@@ -611,14 +616,25 @@ export default function PostDetailPage() {
     );
   }
 
-  const isRunning = STAGES.some((s) => post.stage_status[s] === "running");
+  // The stage map as this page should read it. A run the worker gave up on
+  // leaves the stage it died in recorded as `running` whenever the engine's
+  // terminal event named no step, and every row written before ledger item
+  // P5.1 does too, so the raw column would have this page spinning a dot,
+  // counting an elapsed clock and offering a read-only editor for a stage that
+  // has been dead for days. Read once and passed down, so the header badge,
+  // the progress dots, the run trace and the tabs cannot disagree.
+  const stageStatus = resolveStageStatus({
+    currentStage: post.current_stage,
+    stageStatus: post.stage_status,
+  });
+  const isRunning = STAGES.some((s) => stageStatus[s] === "running");
   const isComplete = post.current_stage === "complete";
   // The two columns read together, which is the only way to tell a run that
   // finished from one that finished without its pictures: `markPipelineComplete()`
   // stamps `complete` unconditionally. See `src/lib/run-state.ts`.
   const runState = deriveRunState({
     currentStage: post.current_stage,
-    stageStatus: post.stage_status,
+    stageStatus,
   });
   // What each failed stage actually reported, folded out of the same
   // `execution_logs` column the run trace below reads, so the banner and the
@@ -626,7 +642,7 @@ export default function PostDetailPage() {
   const stageFailures = runState.failedStages.map((stage) => {
     const row = buildRunTrace({
       entries: post.execution_logs,
-      stageStatus: post.stage_status,
+      stageStatus,
     }).stages.find((s) => s.stage === stage);
     return {
       stage,
@@ -660,13 +676,13 @@ export default function PostDetailPage() {
 
   // The stage the header's re-run will start from, derived the way the handler
   // derives it so the button cannot promise a stage the run does not begin at.
-  const resumeFrom = resumeStage(post.stage_status);
+  const resumeFrom = resumeStage(stageStatus);
   // A pause that landed after `ready` rather than in front of a stage. The
   // header's re-run is wrong for it (there is no stage left to re-run) and so
   // is the badge's usual sentence, so both come from this one derivation.
   const pausedBeforeFinish = isPausedBeforeFinish({
     currentStage: post.current_stage,
-    stageStatus: post.stage_status,
+    stageStatus,
   });
   // A post nothing has ever executed against: no stage has moved off
   // `pending` and no stage column holds output. Posts normally start on
@@ -674,7 +690,7 @@ export default function PostDetailPage() {
   // worker, which is exactly when an operator needs a way to start one.
   const neverRan =
     STAGES.every((s) => {
-      const status = post.stage_status[s];
+      const status = stageStatus[s];
       return !status || status === "pending";
     }) && STAGES.every((s) => !post[STAGE_CONTENT_FIELDS[s]]);
 
@@ -698,7 +714,7 @@ export default function PostDetailPage() {
               </span>
               <RunStateBadge
                 currentStage={post.current_stage}
-                stageStatus={post.stage_status}
+                stageStatus={stageStatus}
               />
               {post.wp_publish_status === "published" && post.wp_post_url && (
                 <a
@@ -984,7 +1000,7 @@ export default function PostDetailPage() {
         <CardContent className="py-4">
           <div className="flex items-center justify-center">
             <PipelineProgress
-              stageStatus={post.stage_status}
+              stageStatus={stageStatus}
               currentStage={post.current_stage}
             />
           </div>
@@ -994,7 +1010,7 @@ export default function PostDetailPage() {
       {/* Run Trace */}
       <RunTrace
         executionLogs={post.execution_logs}
-        stageStatus={post.stage_status}
+        stageStatus={stageStatus}
         liveStart={liveStart}
         liveImages={liveImages}
         publish={
@@ -1115,7 +1131,7 @@ export default function PostDetailPage() {
                     <Card className="py-0">
                       <CardContent className="py-12 text-center">
                         <p className="text-muted-foreground text-sm">
-                          {post.stage_status[stage] === "running"
+                          {stageStatus[stage] === "running"
                             ? "Running Ready..."
                             : "No ready content yet"}
                         </p>
@@ -1142,7 +1158,7 @@ export default function PostDetailPage() {
                         onSave={handleSave}
                         height="500px"
                         readOnly={
-                          post.stage_status[stage] === "running"
+                          stageStatus[stage] === "running"
                         }
                       />
                     </CardContent>
@@ -1151,7 +1167,7 @@ export default function PostDetailPage() {
                   <Card className="py-0">
                     <CardContent className="py-12 text-center">
                       <p className="text-muted-foreground text-sm">
-                        {post.stage_status[stage] === "running"
+                        {stageStatus[stage] === "running"
                           ? `Running ${STAGE_LABELS[stage]}...`
                           : `No ${STAGE_LABELS[stage].toLowerCase()} content yet`}
                       </p>

@@ -174,11 +174,14 @@ export async function recordRunFailure(event: Event, pubsub: PubSub): Promise<vo
 
   const message = messageOf(event.data)
   const attempts = executionsBeforeFailure()
-  await markPipelineFailed(postId, message, attempts)
+  // Read before the write rather than after it: the row write is what stamps
+  // the stage the run died in, so the stage that goes on the announcement and
+  // the stage that goes on the row are the same derivation, not two.
+  const stage = failedStageOf(event.data)
+  await markPipelineFailed(postId, message, attempts, stage)
 
   if (!firstReportOf(event.runId)) return
 
-  const stage = failedStageOf(event.data)
   await publishPipelineEvent(pubsub, postId, "stage_error", {
     stage,
     error: message,

@@ -21,6 +21,7 @@ import {
   STAGE_CONTENT_MAP,
   STAGES,
   STATUS_COMPLETE,
+  STATUS_FAILED,
   STATUS_REVIEW,
   STATUS_RUNNING,
   pipelineContextSchema,
@@ -334,11 +335,23 @@ export async function markPipelineComplete(postId: string): Promise<void> {
  * The merge is `||` against `coalesce(stage_logs, '{}')` for the same reason
  * `mergeStageStatus` is: the column is nullable, and every stage's own log
  * entry has to survive the write.
+ *
+ * `stage` is the one thing here Python had no equivalent for, and it closes the
+ * lie the two-column split left behind. `markStageRunning()` writes
+ * `stage_status[stage] = "running"` on the way into a step and only
+ * `saveStageOutput()` moves it, so a step that threw its last attempt left the
+ * stage recorded as executing forever: the post page's progress dots span, its
+ * stage tab said "Running Write...", and the run trace counted an elapsed clock
+ * up under a header that already read "Failed". The stamp is merged rather than
+ * written over the map so the stages that did finish keep their record, and it
+ * is skipped when the engine's terminal event names no step, which is the case
+ * `resolveStageStatus()` in `src/lib/run-state.ts` covers for every reader.
  */
 export async function markPipelineFailed(
   postId: string,
   message: string,
   attempts: number,
+  stage: Stage | "" = "",
 ): Promise<void> {
   const now = new Date()
   const error = { message, attempts, failed_at: now.toISOString() }
@@ -347,6 +360,7 @@ export async function markPipelineFailed(
     .set({
       currentStage: CURRENT_STAGE_FAILED,
       stageLogs: sql`coalesce(${posts.stageLogs}, '{}'::jsonb) || ${JSON.stringify({ _error: error })}::jsonb`,
+      ...(stage ? { stageStatus: mergeStageStatus({ [stage]: STATUS_FAILED }) } : {}),
       updatedAt: now,
     })
     .where(eq(posts.id, postId))

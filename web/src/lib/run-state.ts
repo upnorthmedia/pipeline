@@ -17,8 +17,9 @@
  * reads both and is the only thing the UI asks.
  *
  * **Precedence.** The two row states that are written *over* a run in flight
- * come first, because they leave `stage_status` stale: `markPipelineFailed()`
- * stamps `failed` while the stage that threw still reads `running`, and a pause
+ * come first, because they can leave `stage_status` stale: a terminal failure
+ * whose step the engine could not name leaves the stage that threw reading
+ * `running` (`resolveStageStatus()` below reconciles that one), and a pause
  * lands on `current_stage` while the stage it interrupted is still finishing.
  * After those it is
  * the order a reader needs rather than the order the columns are written: what
@@ -71,22 +72,54 @@ function joinStageNames(stages: PipelineStage[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
 }
 
+/**
+ * The stage map as a reader should show it, which on a run the worker gave up
+ * on is not quite what the column says.
+ *
+ * `markPipelineFailed()` stamps the stage the run died in since polish ledger
+ * item P5.1, so for rows written after it this is a no-op. Two cases are left
+ * for it. The engine's terminal event does not always name the step that threw,
+ * and then the recorder has nothing to stamp; and every row written before that
+ * fix still records the stage it died in as `running`. Both render as a stage
+ * still executing: a spinning dot, a tab reading `Running Write...`, and an
+ * elapsed clock on the run trace counting up under a header that says `Failed`.
+ *
+ * A run that has been given up on is executing nothing, so a stage the map
+ * still calls `running` is the stage it died in. Every other status is left
+ * alone: `complete` is what those stages did, and `pending` is what the stages
+ * after it never started.
+ *
+ * The same object is returned when nothing changes, so a caller can pass it
+ * straight down without giving React a new reference on every render.
+ */
+export function resolveStageStatus(post: {
+  /** Widened to `string` because `PipelineProgress` is handed the raw column. */
+  currentStage: string
+  stageStatus: StageStatusMap
+}): StageStatusMap {
+  if (post.currentStage !== "failed") return post.stageStatus
+  const stuck = STAGES.filter((stage) => post.stageStatus[stage] === "running")
+  if (stuck.length === 0) return post.stageStatus
+  return { ...post.stageStatus, ...Object.fromEntries(stuck.map((stage) => [stage, "failed"])) }
+}
+
 export function deriveRunState(post: {
   currentStage: PostStage
   stageStatus: StageStatusMap
 }): RunState {
-  const { currentStage, stageStatus } = post
+  const { currentStage } = post
+  const stageStatus = resolveStageStatus(post)
   const failedStages = STAGES.filter((stage) => stageStatus[stage] === "failed")
   const reviewStages = STAGES.filter((stage) => stageStatus[stage] === "review")
   const runningStage = STAGES.find((stage) => stageStatus[stage] === "running") ?? null
   const base = { failedStages, reviewStages, runningStage }
 
   // Two row states outrank the stage map because they are written *over* a
-  // run that was mid-flight and leave its `stage_status` untouched.
-  // `markPipelineFailed()` stamps `failed` on a run the worker gave up on
-  // while the stage that threw is still recorded as `running`, and a pause
-  // writes `current_stage` while the stage it interrupted is still finishing.
-  // Reading the map first left a dead run reading "Running Research" for good.
+  // run that was mid-flight. A pause writes `current_stage` while the stage it
+  // interrupted is still finishing, and a terminal failure is the row's own
+  // account of a run nothing is executing any more. Reading the map first left
+  // a dead run reading "Running Research" for good; reading it through
+  // `resolveStageStatus()` is what now lets the failed branch name the stage.
   if (currentStage === "failed") {
     return {
       ...base,

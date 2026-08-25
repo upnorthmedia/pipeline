@@ -57,16 +57,18 @@
   the screen no longer shows. Small, and the row is one press from being cleaned, so it is
   filed rather than chased. Found under P2.117.
 
-- [confirmed] 2026-08-24 A stage that died into the dead-letter queue is still called
-  `Running` by the run trace, with an elapsed clock that counts forever. Reproduced on
-  `2ed65d71-e3b0-497c-bf13-303f87ad30dd`: three attempts failed on a missing Perplexity key,
-  `recordRunFailure()` wrote `current_stage = 'failed'` and a `stage_error` entry, and
-  `stage_status.research` was left on `running`. The page header reads `Failed` from
-  `deriveRunState()` and the trace four inches below reads `Running` at `7m 7s`, because
-  `buildRunTrace()` takes each row's status straight from `stage_status`. This is the
-  stage-level twin of polish ledger P4.9. Either the failure recorder should stamp the stage
-  it failed, or the trace should read a run-level failure over a stale `running`. Found under
-  P4.5.
+- [investigate] 2026-08-25 The `Running <Stage>...` empty state and the read-only editor on
+  the stage tabs of `/posts/[id]` look unreachable: the tab trigger is `disabled` for a stage
+  with no content, and a stage that is running has produced none yet, so nothing can select
+  the tab that would show either. Found while closing polish ledger P5.1, where a test
+  written against that copy could not reach it. If it is dead, delete both branches; if
+  `activeTab` can land there another way, say how.
+
+- [investigate] 2026-08-25 `GET /api/analytics/dashboard` and `GET /api/queue` read
+  `stage_status` server side without `resolveStageStatus()` (polish ledger P5.1), so they are
+  the two remaining readers of the raw column. Neither is wrong today, because the dashboard
+  already counts a `failed` row's unfinished stage as incomplete and the queue counts by run
+  state, but a third rule added to either would have to be added twice. Found under P5.1.
 
 - [investigate] 2026-08-24 A run parked at a gate that is cancelled rather than approved
   leaves an open `stage_review` entry with no `stage_start` behind it. P4.5 makes the release
@@ -143,7 +145,7 @@
   publish with no cap, so an account that lost a worker for a day gets an unbounded list at
   the top of the tab. No account here has ever had more than two. Found while closing P4.9b.
 
-- [confirmed] 2026-08-25 The posts list marks a stalled publish only on the rows it is
+- [investigate] 2026-08-25 The posts list marks a stalled publish only on the rows it is
   currently holding, because the 30 second tick added at polish ledger P4.9a is gated on
   `publishInFlight` over `postList`. A stalled publish filtered out of the current view is
   invisible until the filter changes. The list has no pagination today, so nothing is

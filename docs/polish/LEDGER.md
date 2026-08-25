@@ -1093,6 +1093,68 @@ environment; `@mastra/core@1.61.0` signals a failed `EventedExecutionEngine.exec
 which is upstream; and `QueueMonitor.test.tsx` prints 16 React `act(...)` warnings, which is
 test-output noise rather than a product defect. The `[investigate]` entries stay as leads.
 
+## P5. Criterion 9, second pass
+
+P4 closed every `[confirmed]` entry `todo.md` held when it was written, and
+closing them filed residuals, so the file has `[confirmed]` entries again. This
+is the second enumeration, severity ordered: what a reader is told wrongly
+first, then what a reader cannot do, then the writers. Evidence for the whole
+section is in [`evidence/p5.md`](evidence/p5.md).
+
+- [x] **P5.1** A run the worker gave up on was reported as still executing the
+      stage it died in, by three readers on one screen: a spinning progress dot,
+      a run-trace row reading `Write / Running / 365m 13s`, and a `Pause` button,
+      all under a header badge saying `Failed`. The cause is a row that says both
+      things: `markStageRunning()` writes `running` on the way into a step,
+      `saveStageOutput()` is the only thing that moves it, and a step that throws
+      its last attempt never reaches it, while `markPipelineFailed()` stamped
+      `current_stage` and `stage_logs._error` and nothing else. Nothing in the
+      port had ever written `stage_status[stage] = "failed"` for a stage that
+      threw, which is also why the badge read a bare `Failed` and the page
+      offered no `Re-run`. Fixed on both sides: `markPipelineFailed()` merges the
+      stamp for the stage the engine named, and `resolveStageStatus()` in
+      `src/lib/run-state.ts` reconciles the two cases the writer cannot reach
+      (rows written before this, and a terminal event that names no step) for
+      `deriveRunState()`, `PipelineProgress` and `/posts/[id]`. Proven on a real
+      failing run in `failure-recorder.test.ts` and in a browser at HEAD and
+      after: the badge now reads `Failed at Write`, with the reason and
+      `Re-run Write` beside it. `ui/p51-*.png`. [evidence](evidence/p5.md#p51)
+- [ ] **P5.2** `GET /api/analytics/dashboard` counts a post whose publish died as
+      complete, so the completion rate and the Posts by Stage chart contradict
+      the stalled-publish card P4.9b put directly above them.
+- [ ] **P5.3** Clearing the gate of the stage a run is already parked at does not
+      release the run, so the gates card reads `This post will go from Research
+      to Ready without stopping.` over a row that is still suspended with the
+      approval banner on screen.
+- [ ] **P5.4** Deleting a profile is one unconfirmed, irreversible click in the
+      `/profiles` row menu, and the row shows no post count before the press.
+      P4.7 blocked only the case that destroys posts. Batch with: there is no
+      "delete this profile and its posts" path anywhere, so an account with fifty
+      posts on one profile has to clear them from `/` twenty at a time.
+- [ ] **P5.5** A run paused after its last stage can only be finished from
+      `/posts/[id]`: the posts list and `/monitor` get the right badge from
+      `isPausedBeforeFinish()` but neither carries the `Finish this run` button.
+- [ ] **P5.6** The posts list at `/` subscribes to no event feed, so a pause or a
+      stage that finished elsewhere is invisible until the reader navigates or
+      reloads.
+- [ ] **P5.7** The gates card on `/posts/[id]` offers no way back to the
+      profile's gates and no link to the profile, so restoring them means setting
+      six selects by hand.
+- [ ] **P5.8** Ten icon-only `<Button size="icon">` elements carry no accessible
+      name, which is ten controls no test can press. Filed for testability: this
+      has blocked a test in three separate iterations.
+- [ ] **P5.9** `web/src/mastra/scripts/full-pipeline.mjs` inserts its post with no
+      `profile_id`, by fixed id, and leaves the row behind, which makes it the
+      last writer of posts nobody can reach after P4.7 closed the two routes.
+
+Named here rather than given an item, and owed to `SUMMARY.md` as gaps: the
+Railway pre-deploy migration hook has never been watched running (no deployed
+environment exists); `@mastra/core@1.61.0` signals a failed
+`EventedExecutionEngine.execute()` twice, which is upstream; the posts list marks
+a stalled publish only on the rows it currently holds, which is latent until the
+list gains pagination; and `QueueMonitor.test.tsx` prints 16 React `act(...)`
+warnings, which is test-output noise rather than a product defect.
+
 ## Done
 
 - [ ] `cd web && pnpm exec tsc --noEmit`, `pnpm lint`, `pnpm test`, `pnpm build` all exit 0

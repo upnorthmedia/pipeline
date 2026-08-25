@@ -113,6 +113,21 @@ describe("PipelineProgress", () => {
       expect(redRing).toBeInTheDocument();
     });
 
+    it("stops spinning a stage the run died in, and names it failed", () => {
+      // Polish ledger P5.1. `markPipelineFailed()` stamps the stage it can
+      // name, but rows written before it did, and failures whose step the
+      // engine could not identify, still record the stage as running under
+      // `current_stage = "failed"`. Painting an amber spinner on a dead run is
+      // the same lie the run trace's elapsed clock was telling.
+      const stageStatus: StageStatusMap = { research: "complete", write: "running" };
+      const { container } = renderWithProviders(
+        <PipelineProgress stageStatus={stageStatus} currentStage="failed" />
+      );
+      expect(container.querySelector(".ring-amber-500\\/30")).not.toBeInTheDocument();
+      expect(container.querySelector(".ring-red-500\\/30")).toBeInTheDocument();
+      expect(screen.getByLabelText("Write: Failed")).toBeInTheDocument();
+    });
+
     it("highlights active stage with ring-offset", () => {
       const stageStatus: StageStatusMap = { research: "running" };
       const { container } = renderWithProviders(

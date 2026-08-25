@@ -70,6 +70,9 @@ const BOOM = "provider exploded mid-draft"
 const POST_ID = "00000000-0000-4000-8000-0000000005e7"
 /** The row the hand-built events in the second suite write to. */
 const UNIT_POST_ID = "00000000-0000-4000-8000-0000000005e8"
+/** Rows of their own for the two `stage_status` cases, which start mid-run. */
+const STAGE_STAMP_POST_ID = "00000000-0000-4000-8000-0000000005e9"
+const NO_STAMP_POST_ID = "00000000-0000-4000-8000-0000000005ea"
 
 /** A `stage_logs` entry written before the failure, to prove the merge keeps it. */
 const EXISTING_LOG = { model: "stub-research", tokens_in: 100, tokens_out: 20 }
@@ -136,7 +139,11 @@ let failedRow: typeof posts.$inferSelect
  */
 let engineErrors: EngineStepErrors
 
-async function insertPost(id: string, stageLogs: Record<string, unknown>) {
+async function insertPost(
+  id: string,
+  stageLogs: Record<string, unknown>,
+  stageStatus: Record<string, string> = {},
+) {
   await db.delete(posts).where(eq(posts.id, id))
   await db.insert(posts).values({
     id,
@@ -153,7 +160,7 @@ async function insertPost(id: string, stageLogs: Record<string, unknown>) {
       images: "auto",
       ready: "auto",
     },
-    stageStatus: {},
+    stageStatus,
     stageLogs,
   })
 }
@@ -219,6 +226,8 @@ const RUN_WITH_STAGE = "33333333-3333-4333-8333-333333333333"
 const RUN_REPEAT = "33333333-3333-4333-8333-333333333334"
 const RUN_LOG_STAGE = "33333333-3333-4333-8333-333333333335"
 const RUN_LOG_REPEAT = "33333333-3333-4333-8333-333333333336"
+const RUN_STAGE_STAMP = "33333333-3333-4333-8333-333333333337"
+const RUN_NO_STAMP = "33333333-3333-4333-8333-333333333338"
 
 /** A `workflow.fail` event shaped exactly as the engine publishes one. */
 function failEvent(overrides: {
@@ -318,6 +327,8 @@ afterAll(async () => {
   await productionPubsub.close()
   await db.delete(posts).where(eq(posts.id, POST_ID))
   await db.delete(posts).where(eq(posts.id, UNIT_POST_ID))
+  await db.delete(posts).where(eq(posts.id, STAGE_STAMP_POST_ID))
+  await db.delete(posts).where(eq(posts.id, NO_STAMP_POST_ID))
   await closeDb()
   vi.restoreAllMocks()
 })
@@ -410,6 +421,19 @@ describe("a pipeline run that fails", () => {
 
   it("announces it once, though the engine published the failure more than once", () => {
     expect(stageErrorsFor(POST_ID)).toHaveLength(1)
+  })
+
+  it("stamps the stage that threw as failed, so nothing is left calling it running", () => {
+    // `markStageRunning()` wrote `write: "running"` on the way into the step
+    // and nothing else ever moves it: before this, a run that died left the
+    // stage it died in recorded as executing, which the post page's progress
+    // dots, its stage tabs and the run trace all read literally and rendered
+    // as a spinner with a clock counting up under a header saying "Failed".
+    const stageStatus = (failedRow.stageStatus ?? {}) as Record<string, string>
+    expect(stageStatus.write).toBe("failed")
+    // The stages that did finish keep their own record.
+    expect(stageStatus.research).toBe("complete")
+    expect(stageStatus.outline).toBe("complete")
   })
 
   it("stamps the row failed before it announces", () => {
@@ -582,6 +606,38 @@ describe("recordRunFailure", () => {
     // Python's own answer for a full-pipeline failure, and what the dashboard
     // renders as "Pipeline failed".
     expect(announced[0].stage).toBe("")
+  })
+
+  it("stamps the named stage failed on the row, without disturbing the others", async () => {
+    await insertPost(STAGE_STAMP_POST_ID, {}, { research: "complete", edit: "running" })
+    await recordRunFailure(
+      failEvent({
+        runId: RUN_STAGE_STAMP,
+        input: { postId: STAGE_STAMP_POST_ID },
+        steps: { edit: { status: "failed" } },
+      }),
+      recorder,
+    )
+    expect((await readPost(STAGE_STAMP_POST_ID)).stageStatus).toEqual({
+      research: "complete",
+      edit: "failed",
+    })
+  })
+
+  it("leaves stage_status alone when no step result names a stage", async () => {
+    // The branch that makes a reader-side derivation necessary rather than
+    // optional: the engine does not always identify the step that threw, and
+    // then the only honest thing the recorder can write is `current_stage`.
+    // `resolveStageStatus()` in `src/lib/run-state.ts` is what stops the row
+    // below from being rendered as a stage still executing.
+    await insertPost(NO_STAMP_POST_ID, {}, { research: "running" })
+    await recordRunFailure(
+      failEvent({ runId: RUN_NO_STAMP, input: { postId: NO_STAMP_POST_ID } }),
+      recorder,
+    )
+    const row = await readPost(NO_STAMP_POST_ID)
+    expect(row.currentStage).toBe("failed")
+    expect(row.stageStatus).toEqual({ research: "running" })
   })
 
   it("names the stage whose own step result failed", async () => {
