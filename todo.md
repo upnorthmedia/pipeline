@@ -67,6 +67,9 @@
   instead of starting a second run"; nothing exercises that outside `review-gates.test.ts`. A
   gate approval route has to poll `getWorkflowRunById` rather than await the resume, for the
   reason `evented-resume.test.ts` pins. Found at polish ledger P2.16. Ledger item P2.109.
+  Half done at P2.109a: `src/mastra/gate-approval.ts` finds the run a post is parked on and
+  releases it, with seven tests on real gated runs. Still true that nothing *calls* it, so the
+  entry stands until P2.109b lands the route and the approve action.
 
 - [confirmed] 2026-08-24 `@mastra/core@1.61.0` signals a failed `EventedExecutionEngine.execute()`
   twice. Its `catch` calls `rejectResult(err)` and then `throw err`, and the `await

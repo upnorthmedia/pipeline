@@ -814,6 +814,24 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       that throws after approval may re-suspend at the same gate. Also has to survive the
       engine double-signalling a failed resume (`rejectResult` then `throw`, leaving an
       unhandled rejection), recorded in `todo.md` under P2.110.
+  - [x] **P2.109a** The mechanism: from a post id, in a process that never saw the run, find
+        the run that is parked and release it. `startPipeline()` now tags a run with the post
+        id as its `resourceId`, which is the only durable link between the two (the run id it
+        returns is discarded by every caller), and `src/mastra/gate-approval.ts` reads that
+        tag back. The stage and mode come from the suspend payload rather than from the
+        `suspendedPaths` key, because for the `images` gate that key is the nested workflow;
+        the resume names no step at all, since the engine rebuilds
+        `["images", "images-manifest"]` from the snapshot. Seven tests on real gated runs,
+        including the parent's other claim measured: starting a post again parks a second run
+        and orphans the first. A first draft that also matched on the `postId` inside every
+        suspended snapshot was removed after it resumed a two-day-old orphan; runs suspended
+        before this commit are therefore not releasable by post id, stated as a gap.
+        [evidence](evidence/p2.md#p2109a)
+  - [ ] **P2.109b** The route and the UI that call it: an approval endpoint scoped to the
+        caller, the post row moved off `review` so the dashboard does not read stale, an
+        approve action wherever a gate is shown, and the profile picker's `review` and
+        `approve_only` modes offered again now that something can release them (the comment
+        in `src/app/profiles/[id]/page.tsx` disabling them cites exactly this).
 - [x] **P2.110** `[confirmed 2026-08-24]` Five of the seven workflow registration keys in
       `web/src/mastra/index.ts` differ from the workflow's own `id`, and a resume resolves by
       id, so those five would answer `MASTRA_GET_WORKFLOW_BY_ID_NOT_FOUND` the moment a step

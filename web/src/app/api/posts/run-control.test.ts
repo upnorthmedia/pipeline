@@ -33,7 +33,7 @@ import { RedisStreamsPubSub } from "@mastra/redis-streams"
 import { eq, like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
-import { closeDb, getDb, posts, websiteProfiles } from "@/db"
+import { closeDb, getDb, getPool, posts, websiteProfiles } from "@/db"
 import { STAGE_CONTENT_MAP } from "@/mastra/state"
 import { ABSENT_POST_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
@@ -407,6 +407,26 @@ describe("POST /api/posts/{post_id}/run", () => {
     const event = await waitForStart(post.id)
     expect(event.type).toBe("workflow.start")
     expect((event.data?.prevResult?.output as { stages?: unknown }).stages).toBeUndefined()
+  })
+
+  /**
+   * The run id `startPipeline()` returns is discarded by every caller, so the
+   * only thing that links a post to the run executing it is the run's
+   * `resourceId`. `gate-approval.ts` reads exactly this column to find the run
+   * a post is parked on, and it is set here or nowhere.
+   */
+  it("tags the run with the post id it was started for", async () => {
+    const { startPipeline } = await import("@/mastra/start-pipeline")
+    start.mode = "real"
+    const orphan = randomUUID()
+
+    const runId = await startPipeline(orphan, ["outline"] as never)
+
+    const { rows } = await getPool().query<{ resourceId: string | null }>(
+      'select "resourceId" from mastra_workflow_snapshot where run_id = $1',
+      [runId],
+    )
+    expect(rows[0]?.resourceId).toBe(orphan)
   })
 
   it("carries a named stage selection across the bus", async () => {

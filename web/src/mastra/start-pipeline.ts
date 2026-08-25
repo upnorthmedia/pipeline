@@ -20,7 +20,12 @@ import { mastra } from "./index"
 import type { Stage } from "./state"
 
 export async function startPipeline(postId: string, stages?: Stage[]): Promise<string> {
-  const run = await mastra.getWorkflow("pipeline").createRun()
+  // The post id is also the run's `resourceId`, which is the only durable link
+  // from a post back to the run executing it: the id this returns is thrown
+  // away by every caller, and a run parked at a review gate has to be findable
+  // from a later request, in a later process, that holds nothing else.
+  // `gate-approval.ts` is the reader.
+  const run = await mastra.getWorkflow("pipeline").createRun({ resourceId: postId })
   const { runId } = await run.startAsync({ inputData: { postId, stages } })
   return runId
 }
