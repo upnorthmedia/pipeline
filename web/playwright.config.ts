@@ -24,7 +24,7 @@ export default defineConfig({
   projects: [
     // Signs the one e2e account in against the real BetterAuth endpoints and
     // writes its cookie jar. Every other project inherits that jar, because
-    // src/middleware.ts sends a cookieless request to /auth/sign-in.
+    // src/proxy.ts sends a cookieless request to /auth/sign-in.
     { name: "setup", testMatch: /.*\.setup\.ts/ },
     {
       name: "chromium",

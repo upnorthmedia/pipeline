@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 import { Sidebar, MobileSidebar } from "@/components/sidebar";
 
-/** The routes a visitor with no session can reach, per `src/middleware.ts`. */
+/** The routes a visitor with no session can reach, per `src/proxy.ts`. */
 const SIGNED_OUT_ROUTE = "/auth";
 
 const isSignedOutRoute = (pathname: string | null) =>

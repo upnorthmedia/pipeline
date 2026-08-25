@@ -23,7 +23,7 @@ import path from "node:path"
 import sharp from "sharp"
 import { describe, expect, it } from "vitest"
 
-import { config as middlewareConfig } from "@/middleware"
+import { config as proxyConfig } from "@/proxy"
 
 const WEB = path.resolve(__dirname, "../..")
 
@@ -133,11 +133,11 @@ describe("the brand mark", () => {
   it("is served to a browser that has no session", () => {
     // The sign-in page renders the sidebar and asks for the favicon, and a PWA
     // installer fetches the manifest icons with no cookies at all. Every one of
-    // those requests goes through `src/middleware.ts`, which redirects anything
+    // those requests goes through `src/proxy.ts`, which redirects anything
     // its matcher covers to `/auth/sign-in`, and a 307 to an HTML page is a
     // broken image. Next compiles the matcher to a regex over the pathname; the
     // form used here is simple enough to rebuild verbatim.
-    const matcher = new RegExp(`^${middlewareConfig.matcher[0]}$`)
+    const matcher = new RegExp(`^${proxyConfig.matcher[0]}$`)
     const served = [
       "/icon.svg",
       "/icon0.svg",

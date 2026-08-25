@@ -5,7 +5,7 @@
  * healthcheck path answers HTTP 200 (docs.railway.com/guides/healthchecks:
  * "Railway will query the endpoint until it receives an HTTP 200 response"),
  * and `railway.web.json` points at this path. `/` cannot be used: the
- * middleware redirects an unauthenticated request to `/auth/sign-in`, so a
+ * the proxy redirects an unauthenticated request to `/auth/sign-in`, so a
  * probe there gets a 307.
  *
  * Deliberately liveness, not readiness: it opens no database or Redis
@@ -15,7 +15,7 @@
  * whether Postgres is reachable is what the dashboard's own error states are
  * for.
  *
- * `/api/*` is outside the middleware matcher, so no session is required here.
+ * `/api/*` is outside the proxy matcher, so no session is required here.
  */
 import { withServerError } from "@/lib/route-error"
 

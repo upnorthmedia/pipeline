@@ -14,7 +14,7 @@ beforeEach(() => {
 });
 
 /**
- * `src/middleware.ts` sends every cookieless request to `/auth/sign-in`, so
+ * `src/proxy.ts` sends every cookieless request to `/auth/sign-in`, so
  * `/auth/*` is the only route a visitor without a session can be on, and every
  * nav link the chrome draws there bounces straight back to it. The chrome is
  * not rendered on those routes rather than painted over: it used to be in the

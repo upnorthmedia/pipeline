@@ -4,7 +4,7 @@ import { test, expect } from "@playwright/test"
  * The precondition every other spec rests on.
  *
  * If the `setup` project's storage state stops being applied, the suite does
- * not error: `src/middleware.ts` quietly serves the sign-in page for every
+ * not error: `src/proxy.ts` quietly serves the sign-in page for every
  * route, and each spec fails on whatever dashboard element it happened to name
  * first. These two tests fail with the actual reason instead.
  */

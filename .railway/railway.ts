@@ -108,7 +108,7 @@ export default defineRailway(() => {
     preDeployCommand,
     // `/` redirects an unauthenticated request to `/auth/sign-in`, and Railway
     // waits for an HTTP 200 before switching traffic, so the probe needs a path
-    // outside the middleware matcher.
+    // outside the proxy matcher.
     healthcheck: "/api/health",
     healthcheckTimeout: 300,
     replicas: 1,

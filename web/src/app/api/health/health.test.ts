@@ -6,7 +6,7 @@
  */
 import { describe, expect, it, vi } from "vitest"
 
-import { config as middlewareConfig } from "@/middleware"
+import { config as proxyConfig } from "@/proxy"
 
 import { GET } from "./route"
 
@@ -28,8 +28,8 @@ describe("GET /api/health", () => {
     getPool.mockRestore()
   })
 
-  it("is outside the middleware matcher, so an unauthenticated probe reaches it", () => {
-    const [matcher] = middlewareConfig.matcher
+  it("is outside the proxy matcher, so an unauthenticated probe reaches it", () => {
+    const [matcher] = proxyConfig.matcher
     const pattern = new RegExp(`^${matcher}$`)
 
     expect(pattern.test("/api/health")).toBe(false)

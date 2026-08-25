@@ -41,14 +41,6 @@
   column stays nullable for the rows that predate it. Needs a decision on the existing rows:
   leave them, or a one-off cleanup that names them in a migration.
 
-- [confirmed] 2026-08-24 Next 16 deprecates the `middleware` file convention and every dev
-  server boot says so: `⚠ The "middleware" file convention is deprecated. Please use "proxy"
-  instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy`. `web/src/middleware.ts`
-  is the only thing standing between an anonymous request and every page (P0.5a), so this is not
-  a warning to sit on until it becomes an error: the rename has to be done deliberately, with the
-  e2e suite's signed-out redirect test as the guard. Found at polish ledger P0.6b-i. Ledger
-  item P2.101.
-
 - [investigate] 2026-08-24 `src/mastra/worker-health.test.ts` > "reports a worker that is
   subscribed and waiting as alive" failed once in a full `pnpm test` run and passed in the
   next full run with no code between them (`expected false to be true` on `workerAlive`). One

@@ -1,7 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
 
-export function middleware(request: NextRequest) {
-  // Lightweight cookie check — full session validation happens server-side
+/**
+ * The Next 16 name for what used to be `src/middleware.ts`. The `middleware`
+ * file convention is deprecated and the bundler warns on every dev boot and
+ * every build; both files present at once is error E900, so the rename is a
+ * move, never a copy.
+ *
+ * Two things change with the name. The handler has to be exported as `proxy`
+ * (or as the default), because that is what `build/templates/middleware.js`
+ * looks for and a missing export is a boot failure rather than a type error.
+ * And a proxy file always runs on the Node.js runtime instead of the edge one,
+ * which is why no `runtime` may appear in the config below: Next raises E394
+ * for one here. `src/proxy.test.ts` pins both.
+ */
+export function proxy(request: NextRequest) {
+  // Lightweight cookie check: full session validation happens server-side.
   const sessionCookie =
     request.cookies.get("better-auth.session_token") ||
     request.cookies.get("__Secure-better-auth.session_token")

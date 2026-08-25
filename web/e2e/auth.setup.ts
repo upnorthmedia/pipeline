@@ -3,7 +3,7 @@ import { test as setup, expect, type APIRequestContext } from "@playwright/test"
 import { E2E_USER, STORAGE_STATE } from "./e2e-user"
 
 /**
- * Every page under `/` is behind `src/middleware.ts`, which redirects any
+ * Every page under `/` is behind `src/proxy.ts`, which redirects any
  * request without a `better-auth.session_token` cookie to `/auth/sign-in`.
  * Before this project existed the whole Playwright suite ran unauthenticated
  * and so asserted against the sign-in page, which is why 31 of 35 tests failed

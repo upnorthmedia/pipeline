@@ -736,10 +736,17 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       short a table. The plugin's one unconditional contribution, `auth_users.stripeCustomerId`,
       is present. Both facts are now asserted on the scratch database in
       `migration-scripts.test.ts`. [evidence](evidence/p2.md#p2100-and-p2102)
-- [ ] **P2.101** `[confirmed 2026-08-24]` Next 16 deprecates the `middleware` file convention
-      and says so on every dev boot. `web/src/middleware.ts` is the only thing between an
-      anonymous request and every page, so the rename to `proxy` has to be deliberate, with
-      the e2e signed-out redirect test as the guard.
+- [x] **P2.101** `[confirmed 2026-08-24]` Next 16 deprecates the `middleware` file convention
+      and says so on every dev boot, and on every `pnpm build` too. `web/src/middleware.ts` is
+      the only thing between an anonymous request and every page, so the rename to `proxy` has
+      to be deliberate, with the e2e signed-out redirect test as the guard. Renamed to
+      `src/proxy.ts` with the export renamed to match: the entry template reads
+      `mod.proxy || mod.default`, so a move that forgets the export is a boot failure `tsc`
+      cannot see. A proxy file also runs on the Node.js runtime rather than the edge one and
+      may declare no `runtime`; this one declares none and touches only `request.cookies` and
+      `NextResponse`. New `src/proxy.test.ts` reads the filename constants and `isProxyFile()`
+      out of the installed Next and adds the redirect's first unit coverage.
+      [evidence](evidence/p2.md#p2101)
 - [x] **P2.102** `[confirmed 2026-08-24]` Signing up logs a BetterAuth ERROR on every account
       when `STRIPE_SECRET_KEY` is unset: the mock key in `src/lib/auth.ts` reaches Stripe's
       API rather than short-circuiting. The sign-up succeeds, so it is noise, but it is an
