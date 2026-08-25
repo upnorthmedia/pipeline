@@ -141,8 +141,17 @@ function StageRow({
   // A gate is the one status on this table that is waiting on the reader
   // rather than on a machine, so it is the one that gets a control.
   const waiting = row.status === "review" && onApprove !== undefined;
+  // A gate the run has already been let through. The wait is reported only
+  // once it is over: while the run is parked the status column and the release
+  // control below already say so, and an elapsed clock for it would freeze,
+  // since the ticker on this card runs only while something is executing.
+  const waited = row.review?.waitedS ?? null;
   const hasDetail =
-    row.retries.length > 0 || row.error !== null || row.images !== null || waiting;
+    row.retries.length > 0 ||
+    row.error !== null ||
+    row.images !== null ||
+    waited !== null ||
+    waiting;
 
   return (
     <>
@@ -187,6 +196,12 @@ function StageRow({
                 >
                   <Images className="mt-0.5 h-3 w-3 shrink-0" />
                   <span>{imageProgressText(row.images)}</span>
+                </p>
+              )}
+              {waited !== null && (
+                <p className="flex items-start gap-1.5 text-xs text-sky-600 dark:text-sky-500">
+                  <PauseCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                  <span>Waited {formatDuration(waited)} for review before this step ran.</span>
                 </p>
               )}
               {row.retries.map((retry) => (

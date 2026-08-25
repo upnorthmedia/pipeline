@@ -602,3 +602,98 @@ describe("buildRunTrace image progress", () => {
     expect(result.stages[4].images).toEqual({ generated: 1, failed: 0 })
   })
 })
+
+/**
+ * Ledger item P4.5. A gate used to leave nothing behind: `reviewGate()`
+ * published a `stage_review` frame and wrote no entry, so once the reviewer
+ * released the stage there was no record on the row that the run had ever
+ * waited, and a reader who opened the post afterwards saw a run that looked
+ * like it had gone straight through.
+ */
+describe("a stage that waited at a review gate", () => {
+  function review(stage: string, ts = "2026-08-23T09:00:00.000Z", mode = "review") {
+    return {
+      ts,
+      stage,
+      level: "info",
+      event: "stage_review",
+      message: `Stage ${stage} paused for review`,
+      data: { mode },
+    }
+  }
+
+  it("records the wait while the run is still parked at it", () => {
+    const result = trace([review("outline", "2026-08-23T09:00:00.000Z")], {
+      research: "complete",
+      outline: "review",
+    })
+    expect(result.stages[1].review).toEqual({
+      at: "2026-08-23T09:00:00.000Z",
+      releasedAt: null,
+      waitedS: null,
+    })
+  })
+
+  it("closes the wait with the stage_start the release caused, and times it", () => {
+    const result = trace(
+      [
+        review("outline", "2026-08-23T09:00:00.000Z"),
+        start("outline", "2026-08-23T09:04:12.000Z"),
+        complete("outline", {}, "2026-08-23T09:05:00.000Z"),
+      ],
+      { outline: "complete" },
+    )
+    expect(result.stages[1].review).toEqual({
+      at: "2026-08-23T09:00:00.000Z",
+      releasedAt: "2026-08-23T09:04:12.000Z",
+      waitedS: 252,
+    })
+  })
+
+  it("says nothing about a review for a stage that never waited", () => {
+    const result = trace([start("research"), complete("research")], { research: "complete" })
+    expect(result.stages[0].review).toBeNull()
+  })
+
+  it("keeps the wait across an engine retry, which is the same attempt", () => {
+    const result = trace(
+      [
+        review("write", "2026-08-23T09:00:00.000Z"),
+        start("write", "2026-08-23T09:01:00.000Z"),
+        {
+          ts: "2026-08-23T09:02:00.000Z",
+          stage: "write",
+          level: "warning",
+          event: "retry",
+          message: "Attempt 1 failed",
+          data: { attempt: 1, max_attempts: 3, error: "overloaded" },
+        },
+        start("write", "2026-08-23T09:02:30.000Z"),
+      ],
+      { write: "running" },
+    )
+    expect(result.stages[2].review).toMatchObject({
+      at: "2026-08-23T09:00:00.000Z",
+      releasedAt: "2026-08-23T09:01:00.000Z",
+    })
+    expect(result.stages[2].retries).toHaveLength(1)
+  })
+
+  it("drops the wait when the stage is started again by hand, which waited for nothing", () => {
+    // The rerun button starts one stage with `stages` named, and a named run
+    // never gates (`stageNeedsReview`). Carrying the old wait onto it would
+    // put a four minute review against an attempt nobody reviewed, the same
+    // argument `restartStage` makes about the previous attempt's numbers.
+    const result = trace(
+      [
+        review("edit", "2026-08-23T09:00:00.000Z"),
+        start("edit", "2026-08-23T09:04:00.000Z"),
+        complete("edit", {}, "2026-08-23T09:05:00.000Z"),
+        start("edit", "2026-08-24T09:00:00.000Z"),
+        complete("edit", {}, "2026-08-24T09:01:00.000Z"),
+      ],
+      { edit: "complete" },
+    )
+    expect(result.stages[3].review).toBeNull()
+  })
+})

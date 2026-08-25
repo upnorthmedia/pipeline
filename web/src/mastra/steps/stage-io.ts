@@ -217,6 +217,21 @@ export async function reviewGate(
   const mode = gateModeFor(stage, stageSettings) as ReviewMode
   const message = `Stage ${stage} paused for review`
   await markStageForReview(input.postId, stage)
+  // The row's own record that this run waited. Ledger item P4.5: the frame
+  // below is live only, so once a reviewer released the gate there was nothing
+  // left saying the run had ever stopped, and the run trace showed a stage
+  // that went straight through. Written between the row and the frame, in the
+  // position `announceStageStart` puts its entry, so the audit line a browser
+  // goes looking for after the frame is already on the row. Nothing writes a
+  // release entry to match it: the only way out of a gate is through it, so
+  // the stage's `stage_start` is the release (see `buildRunTrace`).
+  await appendExecutionLog(input.postId, {
+    stage,
+    level: "info",
+    event: "stage_review",
+    message,
+    data: { mode },
+  })
   // Row first, then the event, for the same reason `announceStageStart` does
   // it in that order: a browser reacts to the frame by refetching the post and
   // must not read a row that still calls the stage pending.

@@ -761,12 +761,26 @@ describe("what a run writes to execution_logs", () => {
     expect((await logsFor(SKIP_POST_ID)).map((entry) => entry.event)[0]).toBe("pipeline_start")
   })
 
-  it("records a run parked at its first gate as started and nothing more", async () => {
-    // The gate fires before `announceStageStart`, so `research` writes nothing.
-    // The run-level entry is the whole log, and it is the only evidence on the
-    // row that this run was ever picked up by a worker.
+  it("records a run parked at its first gate as started and then waiting", async () => {
+    // The gate fires before `announceStageStart`, so `research` never says it
+    // is running. It does say it is waiting: ledger item P4.5. Until that
+    // entry existed the run-level `pipeline_start` was the whole log, so once
+    // the reviewer released the gate the row held no evidence the run had ever
+    // waited and the run trace showed a stage that went straight through.
     const entries = await logsFor(GATE_POST_ID)
-    expect(entries.map((entry) => [entry.event, entry.stage])).toEqual([["pipeline_start", ""]])
+    expect(entries.map((entry) => [entry.event, entry.stage])).toEqual([
+      ["pipeline_start", ""],
+      ["stage_review", "research"],
+    ])
+  })
+
+  it("carries the gate's mode and the message the frame carried", async () => {
+    const [, gate] = await logsFor(GATE_POST_ID)
+    expect(gate).toMatchObject({
+      level: "info",
+      message: "Stage research paused for review",
+      data: { mode: "review" },
+    })
   })
 
   it("carries each stage's progress lines, in the order the node wrote them", async () => {

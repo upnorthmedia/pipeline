@@ -73,6 +73,26 @@ export interface LiveImage {
   outcome: "generated" | "failed"
 }
 
+/**
+ * The wait a review gate imposed on one stage.
+ *
+ * A gate is the one thing that happens to a run that costs no tokens and
+ * leaves no output, so before ledger item P4.5 it left no trace at all: the
+ * suspend published a `stage_review` frame and wrote nothing to the row, and a
+ * reader who opened the post after the reviewer released it saw a run that
+ * looked like it had gone straight through. `reviewGate()` now stores the
+ * entry, and the release is the `stage_start` behind it, since the only way
+ * out of a gate is through it.
+ */
+export interface TraceReview {
+  /** ISO timestamp the run parked at the gate. */
+  at: string | null
+  /** ISO timestamp the released stage started, or null while it is still parked. */
+  releasedAt: string | null
+  /** Seconds between the two, or null while the gate is still holding the run. */
+  waitedS: number | null
+}
+
 /** One `retry` entry: an attempt that threw while the engine still had attempts left. */
 export interface TraceRetry {
   attempt: number
@@ -100,6 +120,8 @@ export interface StageTrace {
    * `images` stage that has published no per-image line yet.
    */
   images: ImageProgress | null
+  /** The review gate this attempt waited at, or null for a stage that never gated. */
+  review: TraceReview | null
 }
 
 /**
@@ -204,6 +226,7 @@ function emptyStage(stage: PipelineStage): StageTrace {
     retries: [],
     error: null,
     images: null,
+    review: null,
   }
 }
 
@@ -359,14 +382,34 @@ export function buildRunTrace(input: {
     const row = rows.get(entry.stage) as StageTrace
 
     switch (event) {
-      case "stage_start":
-        restartStage(row, ts, lastEventFor.get(entry.stage) === "retry")
+      case "stage_review":
+        row.review = { at: ts, releasedAt: null, waitedS: null }
+        break
+      case "stage_start": {
+        // An engine retry is the same attempt one failure later, so it keeps
+        // both the retry history and the gate this attempt waited at. Any
+        // other restart is the rerun button, which names its stages and so
+        // never gates: carrying the old wait onto it would put a four minute
+        // review against an attempt nobody reviewed, which is the argument
+        // `restartStage` already makes about the previous attempt's numbers.
+        const retrying = lastEventFor.get(entry.stage) === "retry"
+        restartStage(row, ts, retrying)
+        // The release is this entry. Nothing writes one of its own, and
+        // nothing needs to: the only way out of a gate is through it, so the
+        // stage starting is the reviewer having said yes.
+        if (row.review && row.review.releasedAt === null) {
+          row.review.releasedAt = ts
+          row.review.waitedS = secondsBetween(row.review.at, ts)
+        } else if (!retrying) {
+          row.review = null
+        }
         if (entry.stage === "images") {
           imageOutcomes.clear()
           keylessImages = 0
           imagesStartedAt = ts
         }
         break
+      }
       case "image_generated":
       case "image_failed":
         imageOutcomes.set(

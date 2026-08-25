@@ -47,13 +47,37 @@
   the screen no longer shows. Small, and the row is one press from being cleaned, so it is
   filed rather than chased. Found under P2.117.
 
-- [confirmed] 2026-08-24 `stage_review` is a live frame only, never written to
-  `execution_logs`. `reviewGate()` publishes it so the dashboard learns a run has parked
-  without a reload (ledger P2.109b), but a reader who opens the post after the gate was
-  released sees no trace that the run ever waited, and neither does the run trace, which is
-  built from `execution_logs`. While the run is parked the only record is
-  `stage_status[stage] = "review"` on the row. Every other announcement (`stage_start`,
-  `stage_complete`, `stage_error`) writes an entry beside its frame. Found under P2.109b.
+- [confirmed] 2026-08-24 A stage that died into the dead-letter queue is still called
+  `Running` by the run trace, with an elapsed clock that counts forever. Reproduced on
+  `2ed65d71-e3b0-497c-bf13-303f87ad30dd`: three attempts failed on a missing Perplexity key,
+  `recordRunFailure()` wrote `current_stage = 'failed'` and a `stage_error` entry, and
+  `stage_status.research` was left on `running`. The page header reads `Failed` from
+  `deriveRunState()` and the trace four inches below reads `Running` at `7m 7s`, because
+  `buildRunTrace()` takes each row's status straight from `stage_status`. This is the
+  stage-level twin of polish ledger P4.9. Either the failure recorder should stamp the stage
+  it failed, or the trace should read a run-level failure over a stale `running`. Found under
+  P4.5.
+
+- [investigate] 2026-08-24 A run parked at a gate that is cancelled rather than approved
+  leaves an open `stage_review` entry with no `stage_start` behind it. P4.5 makes the release
+  the `stage_start`, so an abandoned gate correctly reports no wait, but nothing anywhere
+  says the gate was abandoned rather than still waiting. Check what `run.cancel()` leaves on
+  the row and whether the trace should name it. Found under P4.5.
+
+- [investigate] 2026-08-24 One `pnpm test` run in five failed one test, twelve seconds after
+  a live Mastra worker and a Next dev server that had been executing a real run against the
+  same Redis and database were killed. Four runs on the same commit with nothing running
+  beside them are clean, and the failing file's name was lost to a `tail -6`. P0.3 proved
+  determinism with a worker up and with one never started; the untested third case is a
+  worker that has just gone away, whose `mastra-orchestration` consumer group may still hold
+  pending entries. Reproduce by starting a worker, running a real pipeline run, killing it,
+  and running the suite immediately, capturing the full output. Found under P4.5.
+
+- [investigate] 2026-08-24 The logs tab on `/monitor` renders `entry.event` raw, so the
+  `stage_review` entries P4.5 added read as the literal string `stage_review`, as do
+  `pipeline_start`, `publish_error` and the rest. Polish ledger P3.3 owns raw enum values in
+  the UI; this is one table's worth of them, and a label map beside `STAGE_STATUS_LABELS`
+  would cover it. Found under P4.5.
 
 - [confirmed] 2026-08-24 `@mastra/core@1.61.0` signals a failed `EventedExecutionEngine.execute()`
   twice. Its `catch` calls `rejectResult(err)` and then `throw err`, and the `await

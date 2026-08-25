@@ -1006,9 +1006,23 @@ criterion 9's bar are named at the bottom with what is owed to `SUMMARY.md` inst
       a real row with a real worker: press, and `completed_at` is stamped by the worker with
       the `ready_content` md5 and the trace's 72,037 tokens / $2.62 unchanged.
       `ui/p44b-*.png`. [evidence](evidence/p4.md#p44b)
-- [ ] **P4.5** `stage_review` is a live frame only, never written to `execution_logs`, so a
+- [x] **P4.5** `stage_review` is a live frame only, never written to `execution_logs`, so a
       reader who opens a post after the gate was released sees no trace that the run ever
-      waited, and neither does the run trace.
+      waited, and neither does the run trace. `reviewGate()` now appends the entry between
+      the row write and the publish, in the position `announceStageStart()` puts its own.
+      Nothing writes a release entry to match it and nothing needs to: the only way out of a
+      gate is through it, so the stage's `stage_start` is the release, and `buildRunTrace()`
+      closes the wait on it into `StageTrace.review`. An engine retry keeps the wait (same
+      attempt, same signal `restartStage()` already uses for retries); the rerun button drops
+      it, because a named run never gates and a four minute review against an attempt nobody
+      reviewed is the same lie as the previous attempt's token counts. The trace reports the
+      wait only once it is over: while the run is parked the status column and the release
+      control already say so, and a second forever-counting clock is the P4.9 defect. An
+      existing test pinned the defect as the contract (`"records a run parked at its first
+      gate as started and nothing more"`) and now pins the fix. Proven on a real row with a
+      real worker: parked at 04:19:16.911, released by the browser's approve button at
+      04:19:50.324, and the page reads `Waited 33.4s for review before this step ran.` across
+      two engine retries. `ui/p45-*.png`. [evidence](evidence/p4.md#p45)
 - [ ] **P4.6** A created post's gates cannot be edited. `PATCH /api/posts/{id}` takes
       `stage_settings` and keeps it as sent, but the picker added at P2.114 is on `/posts/new`
       only, so a post that should never have had a gate has to be recreated.

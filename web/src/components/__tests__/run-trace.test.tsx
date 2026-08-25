@@ -222,6 +222,55 @@ describe("RunTrace", () => {
       expect(within(screen.getByRole("table")).getAllByText("Awaiting review").length).toBe(1);
     });
 
+    /**
+     * Ledger item P4.5. The gate published a frame and stored nothing, so a
+     * released stage read exactly like a stage that had never waited: the
+     * reader who was not watching at the time had no way to tell a run that
+     * went straight through from one that sat in front of a person for four
+     * minutes.
+     */
+    it("says how long a released stage waited, which its numbers do not", () => {
+      renderWithProviders(
+        <RunTrace
+          executionLogs={[
+            {
+              ts: "2026-08-23T09:00:00.000Z",
+              stage: "outline",
+              level: "info",
+              event: "stage_review",
+              message: "Stage outline paused for review",
+              data: { mode: "review" },
+            },
+            {
+              ts: "2026-08-23T09:04:12.000Z",
+              stage: "outline",
+              level: "info",
+              event: "stage_start",
+              message: "Starting outline...",
+            },
+            complete("outline"),
+          ]}
+          stageStatus={{ outline: "complete" }}
+        />
+      );
+
+      const table = within(screen.getByRole("table"));
+      expect(
+        table.getByText("Waited 4m 12s for review before this step ran.")
+      ).toBeInTheDocument();
+      // The stage's own duration is untouched by the wait: a gate costs time
+      // the run did not spend working, which is the whole reason the trace
+      // reports the two separately.
+      expect(table.getByText("41.2s")).toBeInTheDocument();
+    });
+
+    it("says nothing about a review on a stage that never waited", () => {
+      renderWithProviders(
+        <RunTrace executionLogs={[complete("research")]} stageStatus={{ research: "complete" }} />
+      );
+      expect(screen.queryByText(/for review before this step ran/)).not.toBeInTheDocument();
+    });
+
     it("puts the control on the parked stage and nowhere else", () => {
       const onApprove = vi.fn();
       renderWithProviders(
