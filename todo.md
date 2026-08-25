@@ -1,5 +1,14 @@
 # todo
 
+- [confirmed] 2026-08-25 The same three API-key defects fixed here on this branch are still
+  live on `master`, which is the pre-port FastAPI stack: `validate_perplexity()` in
+  `api/src/services/api_key_validator.py` sends `max_tokens=1` and gets a 400, and
+  `web/src/app/settings/page.tsx` there still hardcodes the `AIza` Gemini prefix as a
+  save-blocking error and calls the reveal endpoint for a key the operator has just typed.
+  (`master`'s reveal gate itself is fine: `request.client.host` under uvicorn is the real peer.)
+  Left alone deliberately, since the port replaces that stack, so this only matters if anything
+  ships from `master` first.
+
 - [confirmed] 2026-08-25 A stale or expired `better-auth.session_token` strands the user in the
   authenticated shell with no way out. `src/proxy.ts` gates pages on the cookie's presence
   rather than its validity (deliberate, validation is server-side), so every page answers 200
