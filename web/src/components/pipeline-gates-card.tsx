@@ -64,12 +64,21 @@ function joinStageNames(names: string[]): string {
  * new-post form drops its override and inherits again, while a created post
  * has no null to fall back to (`stage_settings: null` on a row means "run
  * every stage unattended", not "ask the profile").
+ *
+ * `parkedStages` is where the run has *already* stopped, which is a different
+ * question from where it will stop next and the one a reader of a suspended
+ * run is actually asking. Without it the summary reported a cleared gate as
+ * "without stopping" while the approval banner for that same stage was still
+ * on screen (ledger item P5.3). The caller passes `runState.reviewStages`, the
+ * derivation the banner and the header badge already read, so the three cannot
+ * disagree.
  */
 export const PipelineGatesCard = ({
   profile,
   title = "Pipeline",
   subject = "This run",
   value = null,
+  parkedStages = [],
   onChange,
   onUseProfileGates,
 }: {
@@ -77,6 +86,7 @@ export const PipelineGatesCard = ({
   title?: string;
   subject?: string;
   value?: StageSettings | null;
+  parkedStages?: PipelineStage[];
   onChange?: (next: StageSettings | null) => void;
   onUseProfileGates?: () => void;
 }) => {
@@ -86,6 +96,9 @@ export const PipelineGatesCard = ({
     mode: effectiveStageMode(stage, settings),
   }));
   const stopping = modes.filter((entry) => stageModeStopsRun(entry.mode));
+  const parked = STAGES.filter((stage) => parkedStages.includes(stage));
+  const stopsAhead = stopping.filter((entry) => !parked.includes(entry.stage));
+  const lastStageLabel = STAGE_LABELS[STAGES[STAGES.length - 1]];
 
   const setStage = (stage: PipelineStage, mode: string) => {
     const next = Object.fromEntries(
@@ -149,13 +162,23 @@ export const PipelineGatesCard = ({
         </ul>
 
         <p data-testid="gate-summary" className="text-sm text-muted-foreground">
-          {stopping.length > 0
-            ? `${subject} will stop at ${joinStageNames(
-                stopping.map(({ stage }) => STAGE_LABELS[stage])
-              )} and wait for you.`
-            : `${subject} will go from ${STAGE_LABELS[STAGES[0]]} to ${
-                STAGE_LABELS[STAGES[STAGES.length - 1]]
-              } without stopping.`}
+          {parked.length > 0
+            ? `${subject} is waiting for you at ${joinStageNames(
+                parked.map((stage) => STAGE_LABELS[stage])
+              )}. After that it will ${
+                stopsAhead.length > 0
+                  ? `stop at ${joinStageNames(
+                      stopsAhead.map(({ stage }) => STAGE_LABELS[stage])
+                    )} and wait for you.`
+                  : `run to ${lastStageLabel} without stopping.`
+              }`
+            : stopping.length > 0
+              ? `${subject} will stop at ${joinStageNames(
+                  stopping.map(({ stage }) => STAGE_LABELS[stage])
+                )} and wait for you.`
+              : `${subject} will go from ${
+                  STAGE_LABELS[STAGES[0]]
+                } to ${lastStageLabel} without stopping.`}
         </p>
 
         {onUseProfileGates && (

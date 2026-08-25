@@ -62,7 +62,12 @@ import {
   type StageSettings,
   STAGES,
 } from "@/lib/api";
-import { STAGE_LABELS, stageLabel, stageModeSentence } from "@/lib/stages";
+import {
+  STAGE_LABELS,
+  stageLabel,
+  stageModeSentence,
+  stageModeStopsRun,
+} from "@/lib/stages";
 import {
   deriveRunState,
   isPausedBeforeFinish,
@@ -507,24 +512,53 @@ export default function PostDetailPage() {
    * A run already under way picks this up at its next stage: every one of the
    * six steps calls `loadPipelineState(postId)` at the top of its `execute`,
    * so the gates come off the row rather than out of the run's snapshot.
+   *
+   * A run that has *already* stopped is the exception, and ledger item P5.3.
+   * The gate that parked it was read before it suspended, so no later row
+   * write reaches it: clearing the gate of the stage it is parked at saved a
+   * setting that said "no stops" over an approval banner still asking to be
+   * released. The row write cannot do it, so the release goes through the same
+   * route the banner's button uses, and only when the gate cleared is the one
+   * actually holding the run.
    */
   const handleGatesChange = async (next: StageSettings | null) => {
     if (!post || !next) return;
     const previous = post.stage_settings;
     const changed = STAGES.find((stage) => previous[stage] !== next[stage]);
+    const releases =
+      !!changed &&
+      runState.reviewStages.includes(changed) &&
+      !stageModeStopsRun(next[changed]);
     setPost((current) => (current ? { ...current, stage_settings: next } : current));
     try {
       await posts.update(postId, { stage_settings: next });
-      if (changed) {
-        toast.success(
-          stageModeSentence(changed, next[changed])
-        );
-      }
     } catch (e) {
       setPost((current) =>
         current ? { ...current, stage_settings: previous } : current
       );
       toast.error(apiErrorMessage(e, "The review gates could not be saved."));
+      return;
+    }
+    if (!changed || !releases) {
+      if (changed) toast.success(stageModeSentence(changed, next[changed]));
+      return;
+    }
+    try {
+      await posts.approve(postId);
+      toast.success(`${stageModeSentence(changed, next[changed])} The run is continuing.`);
+    } catch (e) {
+      // The setting was saved whatever happened to the release, so the message
+      // says so rather than reading as a failed save. A refused release is
+      // usually a run something else already moved, and the server's own words
+      // are better at saying which than anything this page could guess.
+      toast.error(
+        apiErrorMessage(
+          e,
+          "The gate was saved, but this run is still waiting. Use Approve and continue to release it."
+        )
+      );
+    } finally {
+      fetchPost();
     }
   };
 
@@ -1037,6 +1071,7 @@ export default function PostDetailPage() {
         title="Review gates"
         subject="This post"
         value={post.stage_settings}
+        parkedStages={runState.reviewStages}
         onChange={handleGatesChange}
       />
 

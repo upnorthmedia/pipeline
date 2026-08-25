@@ -1135,10 +1135,23 @@ section is in [`evidence/p5.md`](evidence/p5.md).
       route cases and in a browser at HEAD and after.
       `ui/p52-before-rate-contradicts-card.png`,
       `ui/p52-after-rate-names-the-gap.png`. [evidence](evidence/p5.md#p52)
-- [ ] **P5.3** Clearing the gate of the stage a run is already parked at does not
-      release the run, so the gates card reads `This post will go from Research
-      to Ready without stopping.` over a row that is still suspended with the
-      approval banner on screen.
+- [x] **P5.3** Clearing the gate of the stage a run is already parked at did not
+      release the run, so the gates card read `This post will go from Research
+      to Ready without stopping.` over a row that was still suspended with the
+      approval banner on screen. The gate that parked the run was read before it
+      suspended, so no later row write reaches it: `PATCH /api/posts/{id}` and a
+      suspended run are two stores and only one of them was being written.
+      `PipelineGatesCard` now takes `parkedStages` and says where the run is
+      stopped *now* before where it will stop next, from `runState.reviewStages`,
+      the derivation the banner and the header badge already read; and
+      `handleGatesChange` releases the run through `posts.approve()` when the
+      gate cleared is the one holding it. Proven with a real worker and a real
+      suspended run: `outline: review` before, `outline: running` after, and
+      `Waited 36.8s for review before this step ran.` in the trace.
+      `ui/p53-before-cleared-gate-still-parked.png`,
+      `ui/p53-after-parked-says-where-it-stopped.png`,
+      `ui/p53-after-cleared-gate-released-the-run.png`.
+      [evidence](evidence/p5.md#p53)
 - [ ] **P5.4** Deleting a profile is one unconfirmed, irreversible click in the
       `/profiles` row menu, and the row shows no post count before the press.
       P4.7 blocked only the case that destroys posts. Batch with: there is no

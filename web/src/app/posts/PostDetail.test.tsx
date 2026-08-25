@@ -1590,3 +1590,130 @@ describe("PostDetailPage gate settings", () => {
     );
   });
 });
+
+/**
+ * Ledger item P5.3. The gate that stopped a run is read at the top of the
+ * step, so a run that has already parked read its gate before it stopped:
+ * nothing in `PATCH /api/posts/{id}` reaches the suspended run, and clearing
+ * the gate of the stage it is parked at left the row saying "no stops" over an
+ * approval banner that was still on screen.
+ *
+ * Two things close it. The card says where the run is stopped *now* rather
+ * than only where it will stop next, and clearing the gate that is holding it
+ * releases the run through the same route the approval banner uses.
+ */
+describe("PostDetailPage clearing the gate a run is parked at", () => {
+  const mockUpdate = vi.mocked(posts.update);
+
+  const parkedPost = (overrides: Partial<Post> = {}) =>
+    makePost({
+      current_stage: "outline",
+      stage_status: { research: "complete", outline: "review" },
+      stage_settings: { ...defaultStageSettings, outline: "review" },
+      ...overrides,
+    });
+
+  /** The row after the release: the worker has picked the stage back up. */
+  const releasedPost = () =>
+    makePost({
+      current_stage: "outline",
+      stage_status: { research: "complete", outline: "running" },
+      stage_settings: defaultStageSettings,
+    });
+
+  beforeEach(() => {
+    mockGet.mockResolvedValue(parkedPost());
+    mockUpdate.mockImplementation(async (_id, data) =>
+      parkedPost(data as Partial<Post>)
+    );
+    mockApprove.mockResolvedValue({
+      status: "approved",
+      stage: "outline",
+      mode: "review",
+      post_id: "post-1",
+    });
+  });
+
+  it("says where the run is stopped now, not only where it will stop next", async () => {
+    renderWithProviders(<PostDetailPage />);
+
+    expect(await screen.findByTestId("gate-summary")).toHaveTextContent(
+      "This post is waiting for you at Outline. After that it will run to Ready without stopping."
+    );
+  });
+
+  it("releases the run when the gate holding it is cleared", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+    await screen.findByText("Outline is waiting for your approval");
+
+    mockGet.mockResolvedValue(releasedPost());
+    await user.click(await screen.findByRole("combobox", { name: "Outline" }));
+    await user.click(await screen.findByRole("option", { name: "Run automatically" }));
+
+    await waitFor(() =>
+      expect(mockUpdate).toHaveBeenCalledWith("post-1", {
+        stage_settings: defaultStageSettings,
+      })
+    );
+    await waitFor(() => expect(mockApprove).toHaveBeenCalledWith("post-1"));
+    // The release is the run continuing, not a second run: the two forward
+    // actions in the header both start one.
+    expect(mockRun).not.toHaveBeenCalled();
+    expect(mockRerun).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Outline is waiting for your approval")
+      ).not.toBeInTheDocument()
+    );
+    expect(screen.getByTestId("gate-summary")).toHaveTextContent(
+      "This post will go from Research to Ready without stopping."
+    );
+    expect(toast.success).toHaveBeenCalledWith(
+      "Outline will run automatically. The run is continuing."
+    );
+  });
+
+  it("leaves the run alone when the gate cleared is not the one holding it", async () => {
+    mockGet.mockResolvedValue(
+      parkedPost({
+        stage_settings: { ...defaultStageSettings, outline: "review", write: "review" },
+      })
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+    await screen.findByText("Outline is waiting for your approval");
+
+    await user.click(await screen.findByRole("combobox", { name: "Write" }));
+    await user.click(await screen.findByRole("option", { name: "Run automatically" }));
+
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalled());
+    expect(mockApprove).not.toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalledWith("Write will run automatically.");
+  });
+
+  /**
+   * A gate that cannot be turned into a gate to switch off: no snapshot, or a
+   * run released from another tab. The setting is saved either way, so the
+   * message says that and points at the control that is still on screen.
+   */
+  it("says the gate is saved but the run is still waiting when the release is refused", async () => {
+    mockApprove.mockRejectedValue(
+      new Error(JSON.stringify({ detail: "This post is not waiting for approval." }))
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+    await screen.findByText("Outline is waiting for your approval");
+
+    await user.click(await screen.findByRole("combobox", { name: "Outline" }));
+    await user.click(await screen.findByRole("option", { name: "Run automatically" }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("This post is not waiting for approval.")
+    );
+    expect(screen.getByText("Outline is waiting for your approval")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-summary")).toHaveTextContent(
+      "This post is waiting for you at Outline."
+    );
+  });
+});

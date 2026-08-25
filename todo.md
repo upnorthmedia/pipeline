@@ -102,12 +102,17 @@
   gate approval route built for P2.109 has to survive the same double signal. Found under
   polish ledger P2.110.
 
-- [confirmed] 2026-08-25 Clearing the gate of the stage a run is already parked at does not
-  release the run. The suspended workflow resumes only through
-  `POST /api/posts/{id}/approve`, so after setting `outline` back to `auto` on a post parked
-  at Outline, the gates card reads `This post will go from Research to Ready without
-  stopping.` while the row is still `stage_status.outline = "review"` and the approval banner
-  is still on screen. Two true statements that read as one contradiction. Found under P4.6.
+- [investigate] 2026-08-25 `PATCH /api/posts/{id}` still releases nothing. Polish ledger
+  P5.3 made `/posts/[id]` clear a gate and then call `POST /api/posts/{id}/approve` when the
+  gate cleared is the one holding a parked run, which covers the only editor of an existing
+  post's gates today. A caller that is not that page (a script, a future batch editor) still
+  saves the setting and leaves the run parked with no message. Decide whether the rule belongs
+  in the route, which would mean the mastra singleton in the generic post PATCH module graph
+  and three route test files that currently avoid it.
+
+- [investigate] 2026-08-25 The gate release on `/posts/[id]` is two requests, so it can half
+  succeed: the gate saved, the release refused or dropped. The message says so and points at
+  the approval banner's own button, but nothing reconciles it later. Found under P5.3.
 
 - [confirmed] 2026-08-25 The gates card on `/posts/[id]` offers no way back to the profile's
   gates and no link to the profile. `/posts/new` has both, because it holds the profile it
