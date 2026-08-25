@@ -65,19 +65,16 @@ import {
 import { STAGE_LABELS, stageLabel, stageModeSentence } from "@/lib/stages";
 import { deriveRunState, isPausedBeforeFinish, resumeStage } from "@/lib/run-state";
 import { buildRunTrace, type LiveImage } from "@/lib/run-trace";
-import { lastPublishError, publishStall } from "@/lib/publish-report";
-import { PUBLISH_TARGET_LABELS, publishTargetOf } from "@/lib/publishing";
+import { PublishStallBadge } from "@/components/publish-stall-badge";
+import {
+  lastPublishError,
+  publishColumnOf,
+  PUBLISH_STALL_TICK_MS,
+  rowPublishStall,
+} from "@/lib/publish-report";
 import { plainMessage } from "@/lib/plain-message";
 import { useSSE, type SSEEvent } from "@/hooks/use-sse";
 import { toast } from "sonner";
-
-/**
- * How often the page re-derives the stall window while a publish is in flight.
- * Well under `PUBLISH_STALL_AFTER_MS`, because the point of the tick is that
- * the banner appears without a reload, and coarse enough that a tab left open
- * on a publishing post is doing nothing measurable.
- */
-const PUBLISH_STALL_TICK_MS = 30_000;
 
 const STAGE_CONTENT_FIELDS: Record<PipelineStage, keyof Post> = {
   research: "research_content",
@@ -638,19 +635,9 @@ export default function PostDetailPage() {
     };
   });
   // The destination this post's `output_format` names, and what the last
-  // attempt at it did. The two status columns are independent and neither
-  // publish step clears the other, so a post that changed format can still
-  // carry its old destination's status; the format is what decides which one
-  // this page speaks about.
-  const target = publishTargetOf(post.output_format);
-  const publishTarget = target
-    ? {
-        target,
-        label: PUBLISH_TARGET_LABELS[target],
-        status:
-          target === "wordpress" ? post.wp_publish_status : post.nextjs_publish_status,
-      }
-    : null;
+  // attempt at it did. Shared with the posts list, which asks the same two
+  // questions of the same row and must not answer them differently.
+  const publishTarget = publishColumnOf(post);
   // Gated on the status column, not on the presence of an entry: a retry that
   // succeeded leaves the earlier failure's entry on the row forever.
   const publishFailure =
@@ -667,14 +654,7 @@ export default function PostDetailPage() {
    * `publishTarget` is: a status column left over from a destination this post
    * no longer publishes to is not something to raise an alarm about.
    */
-  const publishStalled = publishTarget
-    ? publishStall({
-        status: publishTarget.status,
-        updatedAt: post.updated_at,
-        executionLogs: post.execution_logs,
-        now,
-      })
-    : null;
+  const publishStalled = rowPublishStall(post, now);
   const wpStalled = publishTarget?.target === "wordpress" ? publishStalled : null;
   const nextjsStalled = publishTarget?.target === "nextjs" ? publishStalled : null;
 
@@ -772,13 +752,10 @@ export default function PostDetailPage() {
                 <Badge variant="destructive">Publish failed</Badge>
               )}
               {/* One badge for both destinations: only the one the post's
-                  format names can be stalled, so only one of them renders. */}
-              {publishStalled && (
-                <Badge variant="outline" className="text-amber-600 border-amber-600">
-                  <AlertCircle className="h-3 w-3 mr-1" />
-                  Publish stalled
-                </Badge>
-              )}
+                  format names can be stalled, so only one of them renders. The
+                  same component the posts list uses, so an operator who
+                  followed the badge here finds the words it had. */}
+              <PublishStallBadge post={post} now={now} />
               {saving && (
                 <span className="text-xs text-muted-foreground animate-pulse">
                   Saving...
@@ -1022,7 +999,11 @@ export default function PostDetailPage() {
         liveImages={liveImages}
         publish={
           publishTarget
-            ? { target: publishTarget.target, status: publishTarget.status ?? "pending" }
+            ? {
+                target: publishTarget.target,
+                status: publishTarget.status ?? "pending",
+                stall: publishStalled,
+              }
             : null
         }
         onApprove={handleApprove}

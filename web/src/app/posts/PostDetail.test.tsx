@@ -1302,6 +1302,34 @@ describe("PostDetailPage stalled publishing", () => {
     expect(within(banner).getByText(/the worker died partway through/i)).toBeInTheDocument();
   });
 
+  /**
+   * Ledger item P4.9a. The banner and the run trace read the same row, so
+   * before this they contradicted each other on one screen: the banner said
+   * the publish had stopped responding while the table beside it said
+   * `Running` with a clock counting up and the card's `Run in progress` pulse
+   * lit. Both now come from the one `rowPublishStall()` call this page makes.
+   */
+  it("does not leave the run trace calling the same publish running", async () => {
+    mockGet.mockResolvedValue(
+      makeCompletedPost({
+        output_format: "wordpress",
+        wp_publish_status: "publishing",
+        updated_at: minutesAgo(40),
+        execution_logs: [startEntry(minutesAgo(38))],
+      })
+    );
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Publish stalled")).toBeInTheDocument();
+    });
+    const trace = within(screen.getByRole("table"));
+    expect(trace.getByText("Publish to WordPress")).toBeInTheDocument();
+    expect(trace.getByText("Stalled")).toBeInTheDocument();
+    expect(trace.queryByText("Running")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Run in progress")).not.toBeInTheDocument();
+  });
+
   it("offers the retry the Publish button was not giving a stuck row", async () => {
     mockGet.mockResolvedValue(
       makeCompletedPost({

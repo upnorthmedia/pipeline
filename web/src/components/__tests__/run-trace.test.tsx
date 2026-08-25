@@ -368,6 +368,56 @@ describe("RunTrace", () => {
       expect(screen.getByText("Running")).toBeInTheDocument();
     });
 
+    /**
+     * Ledger item P4.9a. A publish that goes quiet keeps `publishing` in its
+     * status column forever, because the only thing that writes that column
+     * again is the step that died. So this row read `Running` with an elapsed
+     * clock counting up past the point where anything was going to move it,
+     * and the card's `Run in progress` pulse stayed lit beside it, on the same
+     * page whose banner already said the attempt had stopped responding.
+     *
+     * The page owns the decision (it holds `updated_at`, which this component
+     * is not given), so the stall arrives as a prop and the row reports it.
+     */
+    describe("a publish the page has called stalled", () => {
+      const stall = {
+        started: true,
+        short: "A worker picked this publish up and then stopped reporting on it for over 15 minutes.",
+        reason: "A worker picked this publish up and then stopped reporting on it for over 15 minutes. That usually means the worker died partway through. Nothing will move it on its own.",
+      };
+
+      function renderStalled() {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-08-23T11:00:06.000Z"));
+        renderWithProviders(
+          <RunTrace
+            executionLogs={[complete("ready"), wpStart]}
+            stageStatus={{ ready: "complete" }}
+            publish={{ target: "wordpress", status: "publishing", stall }}
+          />
+        );
+      }
+
+      it("says so instead of saying it is running", () => {
+        renderStalled();
+        const table = within(screen.getByRole("table"));
+        expect(table.getByText("Stalled")).toBeInTheDocument();
+        expect(table.queryByText("Running")).not.toBeInTheDocument();
+        expect(table.getByText(stall.short)).toBeInTheDocument();
+      });
+
+      it("stops the elapsed clock rather than counting up forever", () => {
+        renderStalled();
+        // Six seconds after `wpStart`, which is what the running row renders.
+        expect(screen.queryByText("6.0s")).not.toBeInTheDocument();
+      });
+
+      it("takes the run out of progress, since nothing is in progress", () => {
+        renderStalled();
+        expect(screen.queryByLabelText("Run in progress")).not.toBeInTheDocument();
+      });
+    });
+
     it("keeps the publish out of the run totals, which are stage measurements", () => {
       renderWithProviders(
         <RunTrace

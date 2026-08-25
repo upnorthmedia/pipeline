@@ -1060,11 +1060,25 @@ criterion 9's bar are named at the bottom with what is owed to `SUMMARY.md` inst
       adopted and `drizzle/README.md` says so. The two em dashes are gone from shipped copy.
       `ui/p48-delete-confirm-*.png`. [evidence](evidence/p4.md#p48)
 
-- [ ] **P4.9** A stalled publish is legible only on `/posts/[id]`. The posts list and
-      `/monitor` show nothing about one, and the run trace's `Publish to <target>` row counts
-      its elapsed clock up indefinitely rather than saying the attempt went quiet.
-      `publishStall()` in `src/lib/publish-report.ts` is the derivation those three readers
-      would call. Filed by P4.3.
+- [x] **P4.9a** The two readers that already hold the post row. The posts list showed a dead
+      publish as `Complete` and nothing else, and the run trace on `/posts/[id]` said
+      `Publish to WordPress / Running / 39m 11s` with the `Run in progress` pulse lit, eight
+      rows under the banner on the same screen saying the attempt had stopped responding.
+      `publishColumnOf()` and `rowPublishStall()` in `src/lib/publish-report.ts` are now the
+      one derivation both screens ask, and `/posts/[id]` gave up its own copy of the target
+      selection to use them, so a badge on the list and the banner on the post cannot
+      disagree. `PublishStall` gained `short` (the row) beside `reason` (the banner and the
+      tooltip), built from it. The trace row reports the stall, stops the clock, and drops
+      out of `running`. The list gained the post page's 30 second tick, gated on a row being
+      mid-publish, because a stall arrives with no event behind it: proven in the browser by
+      moving a row to 15 seconds inside the window and watching it flip 45 seconds later with
+      no third `GET /api/posts`. `ui/p49a-*.png`. [evidence](evidence/p4.md#p49a)
+
+- [ ] **P4.9b** `/monitor` still shows nothing about a stalled publish. Unlike the two
+      readers in P4.9a it holds no post rows: `OverviewTab` reads `GET /api/queue` and
+      `GET /api/analytics/dashboard`, both of which group the caller's posts over
+      `current_stage` and never look at a publish column, so the aggregate has to learn to
+      report one before the tab can show it. Filed by P4.3, split at P4.9a.
 
 Named here rather than fixed, and owed to `SUMMARY.md` as gaps: the Railway pre-deploy
 migration hook has never been watched running, because this project has no deployed Railway

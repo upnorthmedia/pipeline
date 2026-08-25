@@ -34,7 +34,11 @@
  * faithfully sums.
  */
 import { STAGES, type PipelineStage, type StageStatus, type StageStatusMap } from "./api"
-import { publishFailureReason, publishTargetOfMessage } from "./publish-report"
+import {
+  publishFailureReason,
+  publishTargetOfMessage,
+  type PublishStall,
+} from "./publish-report"
 import type { PublishTarget } from "./publishing"
 
 /**
@@ -154,6 +158,18 @@ export interface PublishTrace {
    * retry that succeeded leaves the earlier failure's entry in place forever.
    */
   error: string | null
+  /**
+   * Set when the attempt this row describes has stopped moving. `status` still
+   * reads `running` under it, because the column the worker owns still says
+   * `publishing` and this module does not overwrite the row's own record; what
+   * changes is that a reader with a stall in hand must not present the leg as
+   * making progress.
+   *
+   * Decided by the caller rather than here: the clock it needs is `updated_at`
+   * on the post row, which this module is not given, and the page holding it
+   * also renders the banner, so the two accounts come from one derivation.
+   */
+  stall: PublishStall | null
 }
 
 export interface RunTrace {
@@ -321,7 +337,7 @@ export function buildRunTrace(input: {
    * nowhere. Read off the row for the same reason `stageStatus` is: the column
    * is the pipeline's own record and the log is the audit trail behind it.
    */
-  publish?: { target: PublishTarget; status: string } | null
+  publish?: { target: PublishTarget; status: string; stall?: PublishStall | null } | null
   /**
    * The per-image frames this page has seen since the `images` stage started,
    * for the same reason `liveStart` exists: the fan-out's lines reach the
@@ -515,14 +531,15 @@ export function buildRunTrace(input: {
  * this one's, since it is the only account there is.
  */
 function buildPublishTrace(
-  column: { target: PublishTarget; status: string } | null | undefined,
+  column: { target: PublishTarget; status: string; stall?: PublishStall | null } | null | undefined,
   attempt: PublishAttempt | null,
 ): PublishTrace | null {
   if (!column) return null
   const status = PUBLISH_COLUMN_STATUS[column.status] ?? "pending"
+  const stall = column.stall ?? null
   const mine = attempt && (attempt.target === null || attempt.target === column.target)
   if (!mine || !attempt) {
-    return { target: column.target, status, startedAt: null, durationS: null, error: null }
+    return { target: column.target, status, startedAt: null, durationS: null, error: null, stall }
   }
   return {
     target: column.target,
@@ -530,5 +547,6 @@ function buildPublishTrace(
     startedAt: attempt.startedAt,
     durationS: secondsBetween(attempt.startedAt, attempt.finishedAt),
     error: attempt.error,
+    stall,
   }
 }

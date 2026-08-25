@@ -51,6 +51,7 @@ import {
   type StageTrace,
   type TraceStatus,
 } from "@/lib/run-trace";
+import type { PublishStall } from "@/lib/publish-report";
 import { PUBLISH_TARGET_LABELS, type PublishTarget } from "@/lib/publishing";
 import { STAGE_LABELS, STAGE_STATUS_LABELS } from "@/lib/stages";
 
@@ -253,16 +254,29 @@ function StageRow({
  * empty cell reads as a value that failed to load.
  */
 function PublishRow({ row, now }: { row: PublishTrace; now: number }) {
-  const elapsed = row.status === "running" ? elapsedSeconds(row.startedAt, now) : null;
+  // The clock stops the moment the page calls the attempt stalled. It is an
+  // elapsed clock, not a duration: counting it up past the window would say
+  // the publish is still taking time, when what has happened is that nothing
+  // is measuring it any more.
+  const elapsed =
+    row.status === "running" && row.stall === null ? elapsedSeconds(row.startedAt, now) : null;
+  const detail = row.stall?.short ?? row.error;
 
   return (
     <>
-      <TableRow className={cn(row.error !== null && "border-b-0")}>
+      <TableRow className={cn(detail !== null && "border-b-0")}>
         <TableCell className="font-medium">
           Publish to {PUBLISH_TARGET_LABELS[row.target]}
         </TableCell>
         <TableCell>
-          <StatusCell status={row.status} />
+          {row.stall !== null ? (
+            <span className="inline-flex items-center gap-1.5 text-xs text-amber-500">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              Stalled
+            </span>
+          ) : (
+            <StatusCell status={row.status} />
+          )}
         </TableCell>
         <TableCell className="font-mono text-xs text-muted-foreground">
           <span aria-hidden>&mdash;</span>
@@ -283,12 +297,17 @@ function PublishRow({ row, now }: { row: PublishTrace; now: number }) {
           <span aria-hidden>&mdash;</span>
         </TableCell>
       </TableRow>
-      {row.error !== null && (
+      {detail !== null && (
         <TableRow className="hover:bg-transparent">
           <TableCell colSpan={6} className="pt-0">
-            <p className="flex items-start gap-1.5 pl-1 text-xs text-red-500">
+            <p
+              className={cn(
+                "flex items-start gap-1.5 pl-1 text-xs",
+                row.stall !== null ? "text-amber-600 dark:text-amber-500" : "text-red-500"
+              )}
+            >
               <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
-              <span className="break-all">{row.error}</span>
+              <span className="break-all">{detail}</span>
             </p>
           </TableCell>
         </TableRow>
@@ -316,11 +335,12 @@ export function RunTrace({
    */
   liveImages?: readonly LiveImage[];
   /**
-   * The destination this post's `output_format` names and its status column,
-   * or nothing for a format that publishes nowhere. The post page owns that
-   * decision: the format is on the row it already holds.
+   * The destination this post's `output_format` names, its status column, and
+   * whether the attempt has stopped moving, or nothing for a format that
+   * publishes nowhere. The post page owns all three: the format is on the row
+   * it already holds, and so is the `updated_at` the stall is measured from.
    */
-  publish?: { target: PublishTarget; status: string } | null;
+  publish?: { target: PublishTarget; status: string; stall?: PublishStall | null } | null;
   /**
    * Release the gate a stage is parked at. Omitted where nothing can act on
    * it, which is what keeps the button out of a read-only trace: a stage row
@@ -335,8 +355,12 @@ export function RunTrace({
     liveImages,
     publish,
   });
+  // A stalled publish is not running, whatever its status column still says:
+  // the pulse and the one-second ticker below both exist to show something
+  // moving, and this is the case where nothing is.
   const running =
-    trace.stages.some((row) => row.status === "running") || trace.publish?.status === "running";
+    trace.stages.some((row) => row.status === "running") ||
+    (trace.publish?.status === "running" && trace.publish.stall === null);
 
   // One tick a second, and only while something is actually running: the
   // elapsed column is the only thing on this card that changes without an

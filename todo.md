@@ -119,11 +119,12 @@
   reader who spots one on a list has to open the post. Same reader gap polish ledger P4.9
   names for a stalled publish. Found while closing P4.4b.
 
-- [confirmed] 2026-08-24 The posts list at `/` holds no event feed open, so a pause, a stall
-  or a stage that finished elsewhere is invisible on it until the reader navigates or reloads.
-  `run_paused` (P4.4a) and `publishStall()` (P4.3) are both derivations the list would use;
-  the list subscribes to nothing at all. Same reader gap polish ledger P4.9 names for a
-  stalled publish. Found while closing P4.4a.
+- [confirmed] 2026-08-24 The posts list at `/` holds no event feed open, so a pause or a
+  stage that finished elsewhere is invisible on it until the reader navigates or reloads.
+  `run_paused` (P4.4a) is a derivation the list would use; the list subscribes to nothing at
+  all. A stalled publish is the exception since polish ledger P4.9a, and only because it is
+  the one state with no event behind it, so the fix there was a clock rather than a
+  subscription. Found while closing P4.4a.
 
 - [investigate] 2026-08-24 A retry of a WordPress publish that died mid-flight can create a
   second post on the site. `wp_post_id` is written only after `createPost` returns, so an
@@ -132,11 +133,25 @@
   `XAUTOCLAIM` rather than by a person. Unverified against a real site: nothing in this repo
   has ever published to one. Found while closing polish ledger P4.3.
 
-- [confirmed] 2026-08-24 A stalled publish is legible only on `/posts/[id]`. The posts list
-  and `/monitor` show nothing about it, and the run trace's `Publish to <target>` row still
-  counts its elapsed clock up indefinitely rather than saying the attempt went quiet. Polish
-  ledger P4.3 added `publishStall()` in `src/lib/publish-report.ts`; those three readers do
-  not call it. Found while closing P4.3.
+- [confirmed] 2026-08-25 `/monitor` shows nothing about a stalled publish. The posts list and
+  the run trace were fixed at polish ledger P4.9a, which is why this entry is now about one
+  reader: unlike those two, `OverviewTab` holds no post rows. It reads `GET /api/queue` and
+  `GET /api/analytics/dashboard`, both of which group the caller's posts over `current_stage`
+  and never touch `wp_publish_status` or `nextjs_publish_status`, so the aggregate has to
+  report a publish before the tab can. Polish ledger P4.9b owns it.
+
+- [confirmed] 2026-08-25 The posts list marks a stalled publish only on the rows it is
+  currently holding, because the 30 second tick added at polish ledger P4.9a is gated on
+  `publishInFlight` over `postList`. A stalled publish filtered out of the current view is
+  invisible until the filter changes. The list has no pagination today, so nothing is
+  currently hidden by this; it becomes a defect the day one is added. Found while closing
+  P4.9a.
+
+- [investigate] 2026-08-25 `PublishStallBadge` carries the reason as a `title`, which a
+  touch device never shows, so on a phone the posts list says `Publish stalled` and nothing
+  else. The post page behind the row has the full banner. Worth checking whether any of this
+  app is used on a phone before spending an iteration on a popover. Found while closing
+  P4.9a.
 
 - [investigate] 2026-08-24 The run trace does not update during a publish. `use-sse.ts`
   refetches the post on `stage_complete`, `stage_error` and `pipeline_complete`;

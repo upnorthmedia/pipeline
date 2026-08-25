@@ -3,9 +3,24 @@ import { describe, it, expect } from "vitest";
 import {
   lastPublishError,
   lastPublishStartAt,
+  publishColumnOf,
   PUBLISH_STALL_AFTER_MS,
   publishStall,
+  rowPublishStall,
+  type PostPublishRow,
 } from "./publish-report";
+
+/** A post row carrying only the five fields the two derivations read. */
+function makeRow(overrides: Partial<PostPublishRow> = {}): PostPublishRow {
+  return {
+    output_format: "markdown",
+    wp_publish_status: null,
+    nextjs_publish_status: null,
+    updated_at: null,
+    execution_logs: [],
+    ...overrides,
+  };
+}
 
 /** The shape `appendExecutionLog` stores, with the keys it always writes. */
 function entry(event: string, message: string): Record<string, unknown> {
@@ -189,6 +204,67 @@ describe("publishStall", () => {
     ).toBeNull();
     expect(
       publishStall({ status: "publishing", updatedAt: "not a date", executionLogs: [], now: NOW })
+    ).toBeNull();
+  });
+});
+
+/**
+ * Ledger item P4.9a. Two screens read a stalled publish off a post row and
+ * both need the same two answers out of it: which destination the row is
+ * publishing to, and whether that attempt has stopped moving. The pair lives
+ * here rather than on either page, because a badge on the list that disagreed
+ * with the banner on the detail page would be worse than neither.
+ */
+describe("publishColumnOf", () => {
+  it("names the destination the format points at, with its own status column", () => {
+    expect(
+      publishColumnOf(
+        makeRow({
+          output_format: "wordpress",
+          wp_publish_status: "publishing",
+          nextjs_publish_status: "failed",
+        })
+      )
+    ).toEqual({ target: "wordpress", label: "WordPress", status: "publishing" });
+    expect(
+      publishColumnOf(
+        makeRow({
+          output_format: "nextjs",
+          wp_publish_status: "failed",
+          nextjs_publish_status: "pending",
+        })
+      )
+    ).toEqual({ target: "nextjs", label: "Next.js", status: "pending" });
+  });
+
+  it("names nothing for a format that publishes nowhere", () => {
+    expect(publishColumnOf(makeRow({ output_format: "markdown" }))).toBeNull();
+    expect(publishColumnOf(makeRow({ output_format: "both" }))).toBeNull();
+  });
+});
+
+describe("rowPublishStall", () => {
+  const REQUESTED = "2026-08-24T12:00:00Z";
+  const NOW = Date.parse(REQUESTED) + PUBLISH_STALL_AFTER_MS;
+
+  it("reads the column the post's format names and nothing else", () => {
+    const row = makeRow({
+      output_format: "wordpress",
+      wp_publish_status: "publishing",
+      nextjs_publish_status: "publishing",
+      updated_at: REQUESTED,
+    });
+    expect(rowPublishStall(row, NOW)?.started).toBe(false);
+    // The same row published as markdown has no destination to stall.
+    expect(rowPublishStall({ ...row, output_format: "markdown" }, NOW)).toBeNull();
+  });
+
+  it("says nothing about a post that has never been published", () => {
+    expect(
+      rowPublishStall(
+        makeRow({ output_format: "wordpress", wp_publish_status: null, updated_at: REQUESTED }),
+        NOW
+      )
     ).toBeNull();
   });
 });

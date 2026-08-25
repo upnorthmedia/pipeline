@@ -15,7 +15,7 @@
  * and comes off.
  */
 import { plainMessage } from "@/lib/plain-message";
-import type { PublishTarget } from "@/lib/publishing";
+import { publishTargetOf, PUBLISH_TARGET_LABELS, type PublishTarget } from "@/lib/publishing";
 
 /**
  * Every message prefix the two publish steps write, and the destination each
@@ -116,7 +116,17 @@ export function lastPublishStartAt(executionLogs: unknown): string | null {
 export interface PublishStall {
   /** True once a worker announced it had the post, false while it was only queued. */
   started: boolean;
-  /** The sentence the banner and the badge tooltip carry. */
+  /**
+   * What happened, in one clause. This is what a row in a table gets, where
+   * the screen has already said which post and which destination and has no
+   * space to say it twice.
+   */
+  short: string;
+  /**
+   * The same fact with what it usually means and what it means for the
+   * reader, for the banner and for a tooltip, which are the two places with
+   * room for it.
+   */
   reason: string;
 }
 
@@ -166,12 +176,86 @@ export function publishStall(input: {
   // same on every render of a page that keeps re-deriving it.
   const windowText = `${PUBLISH_STALL_AFTER_MS / 60_000} minutes`;
 
+  // One set of words, built once: the long form is the short form with what it
+  // usually means behind it, so a badge and a banner on the same post cannot
+  // describe it differently.
+  const short = started
+    ? `A worker picked this publish up and then stopped reporting on it for over ${windowText}.`
+    : `This publish has been queued for over ${windowText} and no worker has picked it up.`;
+  const because = started
+    ? "That usually means the worker died partway through."
+    : "That usually means no worker is running.";
+
   return {
     started,
-    reason: started
-      ? `A worker picked this publish up and then stopped reporting on it for over ${windowText}, ` +
-        "which usually means the worker died partway through. Nothing will move it on its own."
-      : `This publish has been queued for over ${windowText} and no worker has picked it up, ` +
-        "which usually means no worker is running. Nothing will move it on its own.",
+    short,
+    reason: `${short} ${because} Nothing will move it on its own.`,
   };
 }
+
+/**
+ * The five fields on a post row that say where it publishes and whether that
+ * attempt is still moving. Declared as its own shape rather than as `Post`
+ * because `GET /api/posts` and `GET /api/posts/{id}` both serve the same row
+ * and neither screen should have to hold the whole of it to ask this.
+ */
+export interface PostPublishRow {
+  output_format: string;
+  wp_publish_status: string | null;
+  nextjs_publish_status: string | null;
+  updated_at: string | null;
+  execution_logs: unknown;
+}
+
+/** The destination a post publishes to, and the status column that tracks it. */
+export interface PublishColumn {
+  target: PublishTarget;
+  /** The destination's name, for a sentence that already says what is being done to it. */
+  label: string;
+  /** The column's value, which is null on a post nothing has ever tried to publish. */
+  status: string | null;
+}
+
+/**
+ * Which of the two status columns speaks for this post, or null for a format
+ * that publishes nowhere.
+ *
+ * The columns are independent and neither publish step clears the other, so a
+ * post that changed format still carries its old destination's status. The
+ * format is what decides, on every screen, which one is the post's own.
+ */
+export function publishColumnOf(post: PostPublishRow): PublishColumn | null {
+  const target = publishTargetOf(post.output_format);
+  if (target === null) return null;
+  return {
+    target,
+    label: PUBLISH_TARGET_LABELS[target],
+    status: target === "wordpress" ? post.wp_publish_status : post.nextjs_publish_status,
+  };
+}
+
+/**
+ * `publishStall()` for callers holding a post row: the same question asked of
+ * the destination the row's own format names.
+ */
+export function rowPublishStall(post: PostPublishRow, now: number): PublishStall | null {
+  const column = publishColumnOf(post);
+  if (column === null) return null;
+  return publishStall({
+    status: column.status,
+    updatedAt: post.updated_at,
+    executionLogs: post.execution_logs,
+    now,
+  });
+}
+
+/**
+ * How often a screen showing a publish re-derives the stall window.
+ *
+ * Well under `PUBLISH_STALL_AFTER_MS`, because the point of the tick is that
+ * the stall appears without a reload: a publish that has gone quiet publishes
+ * no event, so nothing else on the page is going to re-render it. Coarse
+ * enough that a tab left open on a publishing post is doing nothing
+ * measurable.
+ */
+export const PUBLISH_STALL_TICK_MS = 30_000;

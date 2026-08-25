@@ -57,6 +57,8 @@ import {
 import { useLatestRequest } from "@/hooks/use-latest-request";
 import { PipelineProgress } from "@/components/pipeline-progress";
 import { RunStateBadge } from "@/components/run-state-badge";
+import { PublishStallBadge } from "@/components/publish-stall-badge";
+import { publishColumnOf, PUBLISH_STALL_TICK_MS } from "@/lib/publish-report";
 import {
   posts,
   profiles,
@@ -175,6 +177,28 @@ export default function PostsPage() {
   useEffect(() => {
     profiles.list().then(setProfileList).catch(() => {});
   }, []);
+
+  /**
+   * The clock the stall badge is measured against.
+   *
+   * A publish that dies with its worker publishes no further event, and this
+   * list refetches only on a feed frame or a filter change, so the render that
+   * would have to notice the stall window closing is a render nothing else was
+   * ever going to schedule. This interval is the only thing that makes it
+   * happen, and it runs only while a row is actually mid-publish, so a list of
+   * finished posts schedules nothing.
+   */
+  const [now, setNow] = useState(() => Date.now());
+  const publishInFlight = postList.some((post) => {
+    const status = publishColumnOf(post)?.status;
+    return status === "pending" || status === "publishing";
+  });
+  useEffect(() => {
+    if (!publishInFlight) return;
+    setNow(Date.now());
+    const tick = setInterval(() => setNow(Date.now()), PUBLISH_STALL_TICK_MS);
+    return () => clearInterval(tick);
+  }, [publishInFlight]);
 
   // The empty state explains rows that are not there, so it reads the query
   // those rows came from: a cleared search must not read as an empty account
@@ -468,10 +492,16 @@ export default function PostsPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <RunStateBadge
-                currentStage={post.current_stage}
-                stageStatus={post.stage_status}
-              />
+                      <div className="flex flex-col items-start gap-1">
+                        <RunStateBadge
+                          currentStage={post.current_stage}
+                          stageStatus={post.stage_status}
+                        />
+                        {/* Below the run state rather than instead of it: the
+                            run is finished and the publish after it is not,
+                            which are two facts and not one. */}
+                        <PublishStallBadge post={post} now={now} />
+                      </div>
                     </TableCell>
                     <TableCell>
                       <PipelineProgress

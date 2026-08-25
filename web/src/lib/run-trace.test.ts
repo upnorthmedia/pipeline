@@ -335,7 +335,32 @@ describe("buildRunTrace publish leg", () => {
       startedAt: null,
       durationS: null,
       error: null,
+      stall: null,
     })
+  })
+
+  /**
+   * Ledger item P4.9a. The stall is the caller's decision, because the clock
+   * it is measured from is `updated_at` on the post row and this module is
+   * given the log. What this module owes is that the decision reaches the row
+   * unchanged, including on the branch where the log has no attempt to time.
+   */
+  it("carries the caller's stall onto the leg, timed attempt or not", () => {
+    const stall = { started: true, short: "went quiet.", reason: "went quiet. and so on." }
+    expect(
+      buildRunTrace({
+        entries: [WP_START],
+        stageStatus: {},
+        publish: { target: "wordpress", status: "publishing", stall },
+      }).publish
+    ).toMatchObject({ status: "running", stall })
+    expect(
+      buildRunTrace({
+        entries: [],
+        stageStatus: {},
+        publish: { target: "wordpress", status: "pending", stall },
+      }).publish
+    ).toMatchObject({ status: "pending", stall })
   })
 
   it("maps the publishing column onto a running leg with its start time", () => {

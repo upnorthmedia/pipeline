@@ -551,3 +551,98 @@ describe("PostsPage search", () => {
     await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
   });
 });
+
+/**
+ * Ledger item P4.9a. A publish that dies with its worker leaves the status
+ * column on `publishing` and publishes no further event, so the row it belongs
+ * to went on reading exactly like a finished post everywhere except the post's
+ * own page. This list is where an operator looks first, and it said nothing.
+ */
+describe("PostsPage stalled publishing", () => {
+  /** `appendExecutionLog`'s stored shape for the entry a worker writes on pickup. */
+  function startEntry(ts: string) {
+    return {
+      ts,
+      stage: "",
+      level: "info",
+      event: "publish_start",
+      message: "Publishing to WordPress...",
+    };
+  }
+
+  function minutesAgo(minutes: number): string {
+    return new Date(Date.now() - minutes * 60_000).toISOString();
+  }
+
+  function stalledPost(overrides: Partial<Post> = {}): Post {
+    return makePost({
+      id: "stalled",
+      topic: "Stalled Post",
+      slug: "stalled-post",
+      current_stage: "complete",
+      output_format: "wordpress",
+      wp_publish_status: "publishing",
+      updated_at: minutesAgo(40),
+      execution_logs: [startEntry(minutesAgo(38))],
+      ...overrides,
+    });
+  }
+
+  it("marks the row whose publish stopped moving, and says why", async () => {
+    mockPostsList.mockResolvedValue([stalledPost()]);
+    renderWithProviders(<PostsPage />);
+
+    const badge = await screen.findByText("Publish stalled");
+    expect(badge.closest("[title]")?.getAttribute("title")).toMatch(
+      /the worker died partway through/i
+    );
+  });
+
+  it("leaves a publish still inside its window alone", async () => {
+    mockPostsList.mockResolvedValue([
+      stalledPost({ updated_at: minutesAgo(2), execution_logs: [startEntry(minutesAgo(2))] }),
+    ]);
+    renderWithProviders(<PostsPage />);
+
+    await waitFor(() => expect(screen.getByText("Stalled Post")).toBeInTheDocument());
+    expect(screen.queryByText("Publish stalled")).not.toBeInTheDocument();
+  });
+
+  /**
+   * The two status columns are independent and neither publish step clears the
+   * other, so a post moved to `markdown` still carries WordPress's. Marking it
+   * would be raising an alarm about a destination the post no longer has.
+   */
+  it("says nothing about a status column the post's format no longer names", async () => {
+    mockPostsList.mockResolvedValue([stalledPost({ output_format: "markdown" })]);
+    renderWithProviders(<PostsPage />);
+
+    await waitFor(() => expect(screen.getByText("Stalled Post")).toBeInTheDocument());
+    expect(screen.queryByText("Publish stalled")).not.toBeInTheDocument();
+  });
+
+  /**
+   * The window closes with no event behind it, so the render that notices it
+   * is a render nothing else was going to schedule: this list has no poll.
+   */
+  it("marks a row that goes quiet while the tab is open, without a refetch", async () => {
+    vi.useFakeTimers();
+    try {
+      mockPostsList.mockResolvedValue([
+        stalledPost({ updated_at: minutesAgo(14), execution_logs: [startEntry(minutesAgo(14))] }),
+      ]);
+      renderWithProviders(<PostsPage />);
+      await vi.waitFor(() => expect(screen.getByText("Stalled Post")).toBeInTheDocument());
+      expect(screen.queryByText("Publish stalled")).not.toBeInTheDocument();
+
+      const callsBefore = mockPostsList.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2 * 60_000);
+      });
+      expect(screen.getByText("Publish stalled")).toBeInTheDocument();
+      expect(mockPostsList.mock.calls.length).toBe(callsBefore);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
