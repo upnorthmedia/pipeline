@@ -37,7 +37,7 @@ import { createStep } from "@mastra/core/workflows/evented"
 import { applyAutoPublishHook } from "../auto-publish"
 import { appendExecutionLog } from "../execution-log"
 import { publishPipelineEvent } from "../pipeline-events"
-import { markPipelineComplete } from "../post-state"
+import { isRunPaused, markPipelineComplete } from "../post-state"
 import { recordRunCompleted } from "../worker-health"
 import { stageStepOutputSchema } from "./stage-io"
 
@@ -51,7 +51,14 @@ export const pipelineCompleteStep = createStep({
     // `current_stage` for it; restamping `completed_at` here would move the
     // finish time of a post that finished days ago every time one stage is
     // rerun from the dashboard.
-    if (!inputData.stages) {
+    // An operator who paused the run during `ready` stopped it before the last
+    // thing a run does, which is this step: the stamp, the auto-publish and the
+    // `pipeline_complete` frame. `ready` is the only stage with no stage after
+    // it to read the pause, so it is read here instead, and the run ends with
+    // the row saying what the operator asked for. Ledger item P2.115.
+    // `recordRunCompleted()` below still fires: the *worker* finished a run,
+    // which is what that counter is about.
+    if (!inputData.stages && !(await isRunPaused(inputData.postId))) {
       await markPipelineComplete(inputData.postId)
       // The rest of `_post_completion_hook`: mark the post for publishing if
       // its format and its profile ask for it, then read back what the caller

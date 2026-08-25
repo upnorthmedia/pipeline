@@ -18,8 +18,9 @@
  *
  * **Precedence.** The two row states that are written *over* a run in flight
  * come first, because they leave `stage_status` stale: `markPipelineFailed()`
- * stamps `failed` while the stage that threw still reads `running`, and the
- * pause endpoint overwrites `current_stage` and nothing else. After those it is
+ * stamps `failed` while the stage that threw still reads `running`, and a pause
+ * lands on `current_stage` while the stage it interrupted is still finishing.
+ * After those it is
  * the order a reader needs rather than the order the columns are written: what
  * is happening now, then what is waiting on a person, then what went wrong,
  * then the resting states. So a run still executing reads as running even when
@@ -83,9 +84,9 @@ export function deriveRunState(post: {
   // Two row states outrank the stage map because they are written *over* a
   // run that was mid-flight and leave its `stage_status` untouched.
   // `markPipelineFailed()` stamps `failed` on a run the worker gave up on
-  // while the stage that threw is still recorded as `running`, and the pause
-  // endpoint overwrites `current_stage` and nothing else. Reading the map
-  // first left a dead run reading "Running Research" for good.
+  // while the stage that threw is still recorded as `running`, and a pause
+  // writes `current_stage` while the stage it interrupted is still finishing.
+  // Reading the map first left a dead run reading "Running Research" for good.
   if (currentStage === "failed") {
     return {
       ...base,
@@ -96,7 +97,26 @@ export function deriveRunState(post: {
   }
 
   if (currentStage === "paused") {
-    return { ...base, kind: "paused", label: "Paused", detail: null }
+    // A pause is a stage-boundary signal, not an interrupt: the stage that was
+    // executing when the button was pressed runs to completion and commits its
+    // column, and the run ends in front of the next one (`pauseGate()` in
+    // `src/mastra/steps/stage-io.ts`). So while that stage is still marked
+    // running there is a provider call in flight, and saying "Paused" over it
+    // is the lie ledger item P2.115 was filed for.
+    if (runningStage) {
+      return {
+        ...base,
+        kind: "paused",
+        label: "Pausing",
+        detail: `${STAGE_LABELS[runningStage]} is finishing. Nothing after it will start.`,
+      }
+    }
+    return {
+      ...base,
+      kind: "paused",
+      label: "Paused",
+      detail: "The run stopped here. Start it again to carry on from this stage.",
+    }
   }
 
   if (runningStage) {

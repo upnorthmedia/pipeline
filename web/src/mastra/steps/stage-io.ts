@@ -21,6 +21,7 @@
 import type { PubSub } from "@mastra/core/events"
 import { z } from "zod"
 
+import { STAGE_LABELS } from "../../lib/stages"
 import { pythonRound } from "../analytics/python-round"
 import { appendExecutionLog, nowIso, stageCostUsd } from "../execution-log"
 import type { LogLevel } from "../execution-log"
@@ -31,7 +32,7 @@ import {
   markStageRunning,
 } from "../post-state"
 import { settingsUserIdForPost, stageRequestContext } from "../stage-models"
-import { MAX_ATTEMPTS, STAGES, STATUS_COMPLETE } from "../state"
+import { CURRENT_STAGE_PAUSED, MAX_ATTEMPTS, STAGES, STATUS_COMPLETE } from "../state"
 import type { Stage } from "../state"
 
 /**
@@ -231,6 +232,58 @@ export async function reviewGate(
     message,
   })
   return { stage, mode, message }
+}
+
+/**
+ * Stop the run here if an operator has paused the post.
+ *
+ * Returns the output the step should `bail()` with, or `null` when the run may
+ * carry on. Ledger item P2.115: until this existed, pausing was a label. The
+ * pause endpoints write `current_stage = "paused"` and nothing else, nothing in
+ * the worker read it, and so the stage in flight finished, the next one started
+ * and the six-stage run went all the way to `complete` while the dashboard's
+ * badge said `Paused`. Every stage after the button press was billed to a
+ * provider the operator had just asked to stop.
+ *
+ * The check sits with the review gate, before anything the stage spends, for
+ * the same reason the gate does: a stopped stage must bill nothing. That makes
+ * the pause a stage-boundary signal rather than an interrupt. The stage that
+ * was executing when the button was pressed runs to completion and commits its
+ * column, which is deliberate: killing a provider call mid-flight would pay for
+ * the tokens and throw the answer away, and `deriveRunState()` says so on
+ * screen ("Pausing", naming the stage that is finishing) rather than claiming
+ * the run has already stopped.
+ *
+ * `bail()` rather than a thrown error or a `suspend()`. A pause is not a
+ * failure, so the run must not be retried, must not be stamped
+ * `current_stage = "failed"` and must not reach `pipeline-complete`, which
+ * would stamp it complete over the operator's pause. It is not a suspend
+ * either: a suspended run holds a snapshot open for a resume that may never
+ * come, and `resume-all` restarts the pipeline rather than resuming a handle.
+ * `bail()` ends the run cleanly at this step, leaving `current_stage` where the
+ * operator put it and `stage_status` recording exactly what committed.
+ *
+ * Reading `state.currentStage` is what makes every start endpoint a release:
+ * `/run`, `/rerun`, `/restart`, `/run-all`, `resume-all` and the dead-letter
+ * retry all write `current_stage` before they start anything, so a started run
+ * never sees the pause it was started to clear.
+ */
+export async function pauseGate(
+  mastra: StageLogContext,
+  stage: Stage,
+  input: StageStepInput,
+  state: { currentStage: string },
+): Promise<StageStepOutput | null> {
+  if (state.currentStage !== CURRENT_STAGE_PAUSED) return null
+
+  await publishStageLog(
+    mastra,
+    input.postId,
+    stage,
+    `Run paused before ${STAGE_LABELS[stage]}. Nothing after this point ran.`,
+    { level: "warning" },
+  )
+  return skippedStageOutput(input, stage)
 }
 
 /**

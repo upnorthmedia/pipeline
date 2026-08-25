@@ -7,18 +7,19 @@
  * touched. A post already `"complete"`, `"failed"`, `"paused"` or carrying a
  * null stage is left alone and is not counted.
  *
- * Pausing stays a label rather than a control signal, exactly as it is on the
- * per-post endpoint: nothing reads `"paused"` except the queue counts and
- * `POST /api/queue/resume-all`, so a stage already executing runs to
- * completion. The stage the post was on is overwritten, not remembered, which
- * is why `resume-all` has to recover the next stage from `stage_status`.
+ * The value means what it means on the per-post endpoint, which since ledger
+ * item P2.115 is a control signal every stage step reads before it spends
+ * anything: each run stops in front of its next stage rather than carrying on
+ * to the end. The stage in flight still finishes, and the stage the post was on
+ * is overwritten rather than remembered, which is why `resume-all` has to
+ * recover the next stage from `stage_status`.
  */
 import { and, eq, inArray } from "drizzle-orm"
 
 import { getDb, posts, websiteProfiles } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import { withServerError } from "@/lib/route-error"
-import { STAGES } from "@/mastra/state"
+import { CURRENT_STAGE_PAUSED, STAGES } from "@/mastra/state"
 
 /** Python's `["pending", *STAGES]`. */
 const PAUSABLE: string[] = ["pending", ...STAGES]
@@ -41,7 +42,7 @@ async function postHandler(request: Request): Promise<Response> {
   if (rows.length > 0) {
     await db
       .update(posts)
-      .set({ currentStage: "paused", updatedAt: new Date() })
+      .set({ currentStage: CURRENT_STAGE_PAUSED, updatedAt: new Date() })
       .where(
         inArray(
           posts.id,
@@ -50,7 +51,7 @@ async function postHandler(request: Request): Promise<Response> {
       )
   }
 
-  return Response.json({ status: "paused", count: rows.length }, { status: 200 })
+  return Response.json({ status: CURRENT_STAGE_PAUSED, count: rows.length }, { status: 200 })
 }
 
 export const POST = withServerError(postHandler)

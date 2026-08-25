@@ -89,16 +89,19 @@ describe("deriveRunState", () => {
     expect(state("paused", { research: "complete" })).toMatchObject({
       kind: "paused",
       label: "Paused",
+      detail: "The run stopped here. Start it again to carry on from this stage.",
     });
   });
 
-  it("reports paused over the stage the pause left running", () => {
-    // Pausing overwrites `current_stage` and nothing else, so the stage the
-    // post was on stays `running` in the map. The label the operator set is
-    // what the row says about itself.
+  it("says it is still pausing while the interrupted stage finishes", () => {
+    // Ledger item P2.115: a pause stops the run at the next stage boundary, so
+    // a stage still marked `running` is still calling a provider and still
+    // billing. This read "Paused" over it, which is the one thing the badge
+    // must not say while money is being spent.
     expect(state("paused", { write: "running" })).toMatchObject({
       kind: "paused",
-      label: "Paused",
+      label: "Pausing",
+      detail: "Write is finishing. Nothing after it will start.",
     });
   });
 

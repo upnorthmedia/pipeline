@@ -20,6 +20,7 @@ import {
   gateResumeSchema,
   gateSuspendSchema,
   markRerunComplete,
+  pauseGate,
   publishStageLog,
   recordStageRetry,
   reviewGate,
@@ -36,10 +37,15 @@ export const outlineStep = createStep({
   outputSchema: stageStepOutputSchema,
   resumeSchema: gateResumeSchema,
   suspendSchema: gateSuspendSchema,
-  execute: async ({ inputData, mastra, resumeData, suspend, retryCount, abortSignal }) => {
+  execute: async ({ inputData, mastra, resumeData, suspend, bail, retryCount, abortSignal }) => {
     try {
       const { postId } = inputData
       const state = await loadPipelineState(postId)
+      // Before the skip check, because a paused run stops here whatever this
+      // stage would have done: `pauseGate()` ends the run rather than the
+      // stage, so nothing after it runs either.
+      const paused = await pauseGate(mastra, "outline", inputData, state)
+      if (paused) return bail(paused)
       if (!shouldRunStage("outline", inputData, state.stageStatus)) {
         return skippedStageOutput(inputData, "outline")
       }

@@ -861,11 +861,17 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       it names no destination any publish step handles. `drizzle/0003` moves both defaults to
       `markdown` and rewrites the rows; the picker also names an unoffered value rather than
       rendering nothing, because the column takes any string. [evidence](evidence/p3.md#p35a)
-- [ ] **P2.115** `[confirmed 2026-08-24]` Pausing is a label, not a control signal: the pause
+- [x] **P2.115** `[confirmed 2026-08-24]` Pausing is a label, not a control signal: the pause
       route writes `current_stage = "paused"` and nothing else, and no worker reads it, so the
       running stage finishes and the next one starts. `deriveRunState()` puts `paused` above
       the stage map (a pause leaves a stale `running` entry behind), so the badge now says
-      `Paused` over a stage that is still billing. Found by P3.2a.
+      `Paused` over a stage that is still billing. Found by P3.2a. The cause was deeper than
+      "nothing reads it": the finishing stage's own `saveStageOutput()` wrote
+      `current_stage = <stage>` back over the pause, so no reader could have seen it. Every
+      run-side write now leaves `"paused"` alone, every stage step ends the run in front of
+      itself rather than running, and the badge reads `Pausing` while the interrupted stage
+      finishes. Proven on real gated pipeline runs, and `/run-all` (the one start endpoint
+      that wrote no `current_stage`) now releases the pause. [evidence](evidence/p2.md#p2115)
 - [ ] **P2.114** `[confirmed 2026-08-24]` `applyProfilePrefill` makes a per-post gate edit
       unexpressible: it copies the profile's `default_stage_settings` over any submitted
       `stage_settings` equal to the schema default, and that default is six `auto`s, so

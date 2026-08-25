@@ -86,15 +86,14 @@
   `/posts/new` is read-only and links to the profile instead of offering an edit. Ledger item
   P2.114.
 
-- [confirmed] 2026-08-24 Pausing a post is a label, not a control signal, and the dashboard now
-  states the label as if it were the fact. `POST /api/posts/{id}/pause`
-  (`web/src/app/api/posts/[id]/pause/route.ts`) writes `current_stage = "paused"` and nothing
-  else, and its own docblock records that no worker reads that value, so the stage already
-  executing runs to completion and the next stage still starts. `deriveRunState()`
-  (`web/src/lib/run-state.ts`, polish ledger P3.2a) puts `paused` above the stage map, because
-  the pause overwrites `current_stage` while leaving a stale `running` entry behind, so a paused
-  post reads `Paused` over a stage that is still billing. Either make the pause reach the worker
-  or say what it actually does. Found at polish ledger P3.2a. Ledger item P2.115.
+- [confirmed] 2026-08-24 A run that stops for a pause publishes no event, so a second tab
+  watching the same post shows it running until the reader reloads. Pausing itself is a real
+  control signal since polish ledger P2.115 (every stage step ends the run in front of itself,
+  and `currentStageUnlessPaused()` in `web/src/mastra/post-state.ts` stops the finishing stage
+  erasing the flag), and the tab that made the request refetches, but nothing goes onto the
+  bus: `stage_review` got a frame under P2.109b and a pause did not. Also unsaid on screen: a
+  pause during `ready` leaves all six stages complete with `current_stage = "paused"` and no
+  `completed_at`, which reads as unfinished. Found while closing P2.115.
 
 - [confirmed] 2026-08-24 A publish that dies with its worker is reported as still publishing,
   forever. `wp_publish_status` / `nextjs_publish_status` move to `publishing` before the step

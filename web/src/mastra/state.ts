@@ -73,6 +73,18 @@ export const CURRENT_STAGE_COMPLETE = "complete"
 export const CURRENT_STAGE_FAILED = "failed"
 
 /**
+ * The value `current_stage` carries once an operator has asked the run to stop.
+ *
+ * Written by `POST /api/posts/{id}/pause` and `POST /api/queue/pause-all`, read
+ * by every stage step before it spends anything (`pauseGate()` in
+ * `steps/stage-io.ts`) and by `POST /api/queue/resume-all`, which is what puts
+ * the row back on a stage name. It belongs to `current_stage`'s vocabulary
+ * alone: no stage is ever `stage_status[stage] = "paused"`, because a stage is
+ * either running, waiting on a reviewer, or not started.
+ */
+export const CURRENT_STAGE_PAUSED = "paused"
+
+/**
  * The value `stage_status[stage]` carries while a run is parked at that
  * stage's review gate.
  *

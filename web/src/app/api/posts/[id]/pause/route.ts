@@ -1,17 +1,29 @@
 /**
  * Port of `POST /api/posts/{post_id}/pause` in `api/src/api/posts.py`.
  *
- * Pausing is a label, not a control signal: Python wrote `"paused"` into
- * `current_stage` and nothing else. No worker reads that value, so a stage
- * already executing runs to completion and the next stage still starts; what
- * the flag actually does is stop the post appearing as in-flight in the posts
- * list and the queue counts, and give `POST /api/queue/resume-all` something
- * to find. The port keeps that exactly, including the loss of the stage the
- * post was on: `current_stage` is overwritten, not remembered.
+ * One write, `current_stage = "paused"`, exactly as Python made it. What
+ * changed under ledger item P2.115 is what that value now means. In Python it
+ * was a label: no worker read it, so the stage in flight finished, the next one
+ * started and the run went all the way to `complete` with the dashboard's badge
+ * saying `Paused`. Every stage step now reads it before it spends anything
+ * (`pauseGate()` in `src/mastra/steps/stage-io.ts`) and ends the run rather
+ * than running, and every write a run makes to `current_stage` leaves the value
+ * alone (`currentStageUnlessPaused()` in `src/mastra/post-state.ts`), which is
+ * what stops the finishing stage from erasing it.
+ *
+ * It stays a stage-boundary signal rather than an interrupt: the stage that was
+ * executing when the button was pressed runs to completion and commits its
+ * column, because killing a provider call mid-flight pays for the tokens and
+ * throws the answer away. `deriveRunState()` says so on screen, reading
+ * "Pausing" and naming that stage until it lands.
+ *
+ * The stage the post was on is still overwritten rather than remembered, which
+ * is why `POST /api/queue/resume-all` recovers it from `stage_status`.
  *
  * It is also the one pipeline-control endpoint that enqueues nothing.
  */
 import { getDb, posts } from "@/db"
+import { CURRENT_STAGE_PAUSED } from "@/mastra/state"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import { withServerError } from "@/lib/route-error"
 
@@ -33,13 +45,13 @@ async function postHandler(
   const db = getDb()
   const updated = await db
     .update(posts)
-    .set({ currentStage: "paused", updatedAt: new Date() })
+    .set({ currentStage: CURRENT_STAGE_PAUSED, updatedAt: new Date() })
     .where(ownedByCaller(id, user.id))
     .returning({ id: posts.id })
 
   if (updated.length === 0) return postNotFound()
 
-  return Response.json({ status: "paused", post_id: updated[0].id }, { status: 200 })
+  return Response.json({ status: CURRENT_STAGE_PAUSED, post_id: updated[0].id }, { status: 200 })
 }
 
 export const POST = withServerError(postHandler)

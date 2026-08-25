@@ -38,6 +38,7 @@ import {
   announceStageStart,
   gateResumeSchema,
   gateSuspendSchema,
+  pauseGate,
   publishStageLog,
   recordStageRetry,
   reviewGate,
@@ -196,22 +197,34 @@ export const imagesManifestStep = createStep({
       const stageStartedAtMs = Date.now()
 
       const state = await loadPipelineState(postId)
+      const nothingRan = {
+        postId,
+        stages: inputData.stages,
+        skipped: true,
+        stageStartedAtMs,
+        model: "",
+        tokensIn: 0,
+        tokensOut: 0,
+        parseFailed: false,
+        manifest: {},
+        images: [],
+      }
+
+      // A paused run leaves this stage by the same door a skipped one does,
+      // which is the one thing this stage does differently from the other five.
+      // They `bail()` and the run ends there; `images` is a nested workflow, so
+      // a bail here would end only the fan-out and the parent would carry on
+      // into `ready`. Returning the skipped shape costs nothing (no manifest
+      // call, no image, no write, the fan-out gets an empty array) and `ready`,
+      // which is a step of the parent, reads the same pause a moment later and
+      // ends the run. `pauseGate()` still logs against `images`, so the trace
+      // says where the run actually stopped.
+      if (await pauseGate(mastra, "images", inputData, state)) return nothingRan
       if (!shouldRunStage("images", inputData, state.stageStatus)) {
         // The `continue` in Python's stage loop, expressed one step earlier than
         // the other stages express it: the skip has to be decided before the
         // manifest call, and the two steps behind the fan-out read it from here.
-        return {
-          postId,
-          stages: inputData.stages,
-          skipped: true,
-          stageStartedAtMs,
-          model: "",
-          tokensIn: 0,
-          tokensOut: 0,
-          parseFailed: false,
-          manifest: {},
-          images: [],
-        }
+        return nothingRan
       }
 
       // The gate sits immediately after the skip check and before anything the

@@ -17,6 +17,7 @@ import { getDb, internalLinks, posts } from "../db"
 import {
   CURRENT_STAGE_COMPLETE,
   CURRENT_STAGE_FAILED,
+  CURRENT_STAGE_PAUSED,
   STAGE_CONTENT_MAP,
   STAGES,
   STATUS_COMPLETE,
@@ -158,6 +159,45 @@ function mergeStageStatus(patch: Record<string, string>) {
 }
 
 /**
+ * `current_stage = <stage>`, unless an operator has paused the run.
+ *
+ * Every write a run makes to `current_stage` goes through this, and that is
+ * what makes the pause the run reads (`pauseGate()` in `steps/stage-io.ts`)
+ * survive long enough to be read. Ledger item P2.115 called the pause a label
+ * because nothing consumed it; the deeper half, found by putting a probe in
+ * front of each stage, is that nothing *could*: a pause pressed while a stage
+ * was executing was erased by that same stage's own completion write, which
+ * set `current_stage` back to the stage name. The column went
+ * `research` -> `paused` -> `research` inside one stage, so the next stage read
+ * a value the operator had already overwritten.
+ *
+ * A `case` expression rather than a predicate on the statement, because these
+ * writes also carry the stage's content and its `stage_status` entry and those
+ * must land whether the run was paused or not: the stage did the work and the
+ * post must keep it.
+ *
+ * `"paused"` therefore moves only when a request moves it. Every start
+ * endpoint writes `current_stage` before it starts anything, which is what
+ * releases the pause.
+ */
+function currentStageUnlessPaused(stage: string) {
+  return sql`case when ${posts.currentStage} = ${CURRENT_STAGE_PAUSED} then ${CURRENT_STAGE_PAUSED} else ${stage} end`
+}
+
+/**
+ * Whether an operator has paused this run, read from the row rather than from
+ * a `PipelineState` because the one caller that asks without one is
+ * `pipeline-complete`, which holds only the previous step's output.
+ */
+export async function isRunPaused(postId: string): Promise<boolean> {
+  const [row] = await getDb()
+    .select({ currentStage: posts.currentStage })
+    .from(posts)
+    .where(eq(posts.id, postId))
+  return row?.currentStage === CURRENT_STAGE_PAUSED
+}
+
+/**
  * Commit a stage's output to its column, advance `current_stage`, and (when the
  * caller has one) merge its `stage_status` entries in so the dashboard's
  * progress view stays in step.
@@ -176,7 +216,7 @@ export async function saveStageOutput(
     // Strings land in text columns, objects in the `image_manifest` JSONB
     // column, exactly as Python passed content through untouched.
     [contentColumnByStage[stage]]: content,
-    currentStage: stage,
+    currentStage: currentStageUnlessPaused(stage),
     updatedAt: new Date(),
   }
   if (stageStatusPatch !== undefined) values.stageStatus = mergeStageStatus(stageStatusPatch)
@@ -205,7 +245,7 @@ export async function markStageRunning(postId: string, stage: Stage): Promise<vo
     .update(posts)
     .set({
       stageStatus: mergeStageStatus({ [stage]: STATUS_RUNNING }),
-      currentStage: stage,
+      currentStage: currentStageUnlessPaused(stage),
       updatedAt: new Date(),
     })
     .where(eq(posts.id, postId))
@@ -225,7 +265,7 @@ export async function markStageForReview(postId: string, stage: Stage): Promise<
     .update(posts)
     .set({
       stageStatus: mergeStageStatus({ [stage]: STATUS_REVIEW }),
-      currentStage: stage,
+      currentStage: currentStageUnlessPaused(stage),
       updatedAt: new Date(),
     })
     .where(eq(posts.id, postId))

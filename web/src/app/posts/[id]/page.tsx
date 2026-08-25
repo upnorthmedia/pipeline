@@ -325,10 +325,16 @@ export default function PostDetailPage() {
     [post, activeTab, postId, fetchAnalytics]
   );
 
+  /**
+   * Pausing stops the run at its next stage boundary: the stage in flight
+   * finishes and commits, and nothing after it starts (ledger item P2.115). The
+   * toast says that rather than "Paused", because the run is not stopped yet
+   * and the badge beside it will read "Pausing" until the stage lands.
+   */
   const handlePause = async () => {
     try {
       await posts.pause(postId);
-      toast.success("Paused");
+      toast.success("Pausing after the current stage");
       fetchPost();
     } catch (e) {
       toast.error(apiErrorMessage(e, "The run could not be paused."));
@@ -633,7 +639,10 @@ export default function PostDetailPage() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {isRunning && (
+          {/* Not offered once the run is already stopping: a stage is still
+              marked running while the pause takes effect, so `isRunning` alone
+              put a `Pause` button next to a badge reading `Pausing`. */}
+          {isRunning && runState.kind !== "paused" && (
             <Button variant="outline" size="sm" onClick={handlePause}>
               <Pause className="h-3.5 w-3.5 mr-1.5" />
               Pause

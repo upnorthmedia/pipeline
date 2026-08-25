@@ -17,9 +17,10 @@ import type { StageSettingsJson } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import { withServerError } from "@/lib/route-error"
 import { startPipeline } from "@/mastra/start-pipeline"
-import { STAGES, STATUS_COMPLETE } from "@/mastra/state"
+import { CURRENT_STAGE_COMPLETE, CURRENT_STAGE_PAUSED, STAGES, STATUS_COMPLETE } from "@/mastra/state"
 
 import { isUuid, ownedByCaller, postNotFound, unprocessableUuid } from "../../params"
+import { nextStage } from "../../run-control"
 
 async function postHandler(
   request: Request,
@@ -35,6 +36,7 @@ async function postHandler(
   const rows = await db
     .select({
       id: posts.id,
+      currentStage: posts.currentStage,
       stageStatus: posts.stageStatus,
       stageSettings: posts.stageSettings,
     })
@@ -53,7 +55,20 @@ async function postHandler(
 
   await db
     .update(posts)
-    .set({ stageSettings, updatedAt: new Date() })
+    .set({
+      stageSettings,
+      // Asking for the run is what releases a pause, and every other start
+      // endpoint releases it by writing `current_stage` before it starts
+      // anything. This one wrote only `stage_settings`, which was harmless
+      // while a pause was a label and is not now that a run reads it (ledger
+      // item P2.115): "Run all stages" on a paused post would start a run that
+      // stopped again at its first stage. The value is the stage the run will
+      // actually begin at, which is what `/run` writes too.
+      ...(rows[0].currentStage === CURRENT_STAGE_PAUSED
+        ? { currentStage: nextStage(stageStatus) ?? CURRENT_STAGE_COMPLETE }
+        : {}),
+      updatedAt: new Date(),
+    })
     .where(ownedByCaller(id, user.id))
 
   await startPipeline(rows[0].id)

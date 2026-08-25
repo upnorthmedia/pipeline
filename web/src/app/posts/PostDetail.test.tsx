@@ -201,6 +201,26 @@ describe("PostDetailPage", () => {
     });
   });
 
+  /**
+   * Ledger item P2.115. The pause stops the run at its next stage boundary, so
+   * the stage in flight is still `running` while it takes effect: the badge has
+   * to say that rather than "Paused", and the button that asks for a pause has
+   * nothing left to ask for.
+   */
+  it("reads Pausing, and drops the Pause button, while the interrupted stage finishes", async () => {
+    const post = makePost({
+      current_stage: "paused",
+      stage_status: { research: "complete", outline: "running" },
+    });
+    mockGet.mockResolvedValue(post);
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Pausing")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
+  });
+
   it("shows Export dropdown when content is available", async () => {
     const post = makeCompletedPost();
     mockGet.mockResolvedValue(post);

@@ -538,6 +538,34 @@ describe("POST /api/posts/{post_id}/run-all", () => {
     expect((await readPost(post.id)).stageSettings).toEqual(GATED_STAGE_SETTINGS)
   })
 
+  /**
+   * Ledger item P2.115. A paused run now stops at its next stage boundary, so
+   * a start endpoint that leaves `current_stage = "paused"` starts a run that
+   * stops again at its first stage and does nothing at all. This was the one
+   * of the six that wrote no `current_stage`.
+   */
+  it("releases a pause, writing the stage the run will start at", async () => {
+    const post = await insertPost(user.userId, {
+      currentStage: "paused",
+      stageStatus: { research: "complete" },
+    })
+
+    await all(post.id, user.cookie)
+
+    expect((await readPost(post.id)).currentStage).toBe("outline")
+  })
+
+  it("leaves current_stage alone on a post that is not paused", async () => {
+    const post = await insertPost(user.userId, {
+      currentStage: "write",
+      stageStatus: { research: "complete" },
+    })
+
+    await all(post.id, user.cookie)
+
+    expect((await readPost(post.id)).currentStage).toBe("write")
+  })
+
   it("publishes a real workflow.start for a post with nothing left to run", async () => {
     // Every stage complete, so the run this starts skips all six and reaches
     // only the completion step: a real enqueue that cannot call a provider.
