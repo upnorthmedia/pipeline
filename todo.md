@@ -41,13 +41,11 @@
   column stays nullable for the rows that predate it. Needs a decision on the existing rows:
   leave them, or a one-off cleanup that names them in a migration.
 
-- [confirmed] 2026-08-24 Nothing scans for or repairs `website_profiles` rows that already
-  hold a credentialed `wp_url` or `website_url`. P2.107 refuses new ones and reports the
-  stored ones on the three `/wordpress/*` endpoints, but a row can sit with a plaintext
-  password in it indefinitely. Needs a decision: leave them, or a one-off migration that
-  strips the userinfo and names the rows it touched. Everything that reads such a row now
-  reports it instead of leaking it (`WordPressClient`'s constructor refuses one), so this is
-  a data-hygiene item rather than a live leak.
+- [investigate] 2026-08-24 A credentialed `website_url` is still matched by the profiles
+  list search, which reads `profile.website_url` while the row renders the stripped value
+  (ledger P2.117). Typing the password finds the profile, which is a thin oracle for a value
+  the screen no longer shows. Small, and the row is one press from being cleaned, so it is
+  filed rather than chased. Found under P2.117.
 
 - [confirmed] 2026-08-24 `stage_review` is a live frame only, never written to
   `execution_logs`. `reviewGate()` publishes it so the dashboard learns a run has parked

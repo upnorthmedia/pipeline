@@ -896,12 +896,18 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       The live suite now waits for the consumer, and both health assertions carry the raw
       `XINFO CONSUMERS` output so a future failure names its own cause.
       [evidence](evidence/p2.md#p2116)
-- [ ] **P2.117** `[confirmed 2026-08-24]` Nothing scans for or repairs `website_profiles` rows
+- [x] **P2.117** `[confirmed 2026-08-24]` Nothing scans for or repairs `website_profiles` rows
       that already hold a credentialed `wp_url` or `website_url`. P2.107 refuses new ones and
       every reader now reports one rather than leaking it, so this is data hygiene rather
-      than a live leak, but a plaintext password can sit in the column indefinitely. Needs a
-      decision before any code: leave the rows, or a one-off migration that strips the
-      userinfo and names what it touched. Found under P2.107.
+      than a live leak, but a plaintext password can sit in the column indefinitely. Found
+      under P2.107. Decided against a migration: the value is the operator's, `wp_url` is
+      concatenated onto rather than parsed, and stripping userinfo silently would turn
+      P2.107's stated reason into an unexplained authentication failure. The row announces
+      itself instead. The list prints the stripped URL with a `Password in URL` flag on the
+      affected row only, the detail header prints and links the stripped value, and both URL
+      fields carry the reason and a `Remove them` button that strips in place, saved only when
+      the operator saves. Proven end to end on a row written straight into Postgres.
+      [evidence](evidence/p2.md#p2117)
 
 - [x] **P2.C1** Cleanup batch, one iteration for both: P2.79 (no `typecheck` script in
       `web/package.json`, so the objective's literal `pnpm -C web tsc --noEmit` exits 254) and

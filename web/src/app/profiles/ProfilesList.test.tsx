@@ -250,3 +250,39 @@ describe("ProfilesPage", () => {
     expect(mockPush).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * A row written before the write endpoints refused userinfo (P2.107) still
+ * holds a plain-text password, and this list is the one screen where every
+ * profile is visible at once, so it is where such a row has to announce
+ * itself. It printed `profile.website_url` verbatim, which put the password on
+ * screen and said nothing about it.
+ */
+describe("ProfilesPage, a stored URL carrying a password", () => {
+  const credentialed: Profile[] = [
+    makeProfile({
+      id: "prof-1",
+      name: "Old Site",
+      website_url: "https://admin:hunter2@old.example.com",
+    }),
+    makeProfile({ id: "prof-2", name: "Clean Site", website_url: "https://clean.example.com" }),
+  ];
+
+  beforeEach(() => {
+    mockList.mockResolvedValue(credentialed);
+  });
+
+  it("does not print the password anywhere on the list", async () => {
+    renderWithProviders(<ProfilesPage />);
+    await screen.findByText("Old Site");
+    expect(document.body.textContent).not.toContain("hunter2");
+    expect(screen.getByText("https://old.example.com")).toBeInTheDocument();
+  });
+
+  it("names the problem on the affected row and only that row", async () => {
+    renderWithProviders(<ProfilesPage />);
+    const flags = await screen.findAllByText("Password in URL");
+    expect(flags).toHaveLength(1);
+    expect(flags[0].closest("tr")).toHaveTextContent("Old Site");
+  });
+});

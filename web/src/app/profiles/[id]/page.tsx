@@ -63,6 +63,11 @@ import {
 import { useLatestRequest } from "@/hooks/use-latest-request";
 import { STAGE_LABELS, STAGE_MODE_LABELS, stageModeOptions } from "@/lib/stages";
 import { plainMessage } from "@/lib/plain-message";
+import {
+  URL_CREDENTIALS_WARNING,
+  hasUrlCredentials,
+  stripUrlCredentials,
+} from "@/lib/url-credentials";
 import { OutputFormatSelect } from "@/components/output-format-select";
 import { publishTargets, type FormatAvailabilityMap } from "@/lib/publishing";
 import { toast } from "sonner";
@@ -125,6 +130,46 @@ const STATUS_LABELS: Record<ConnectionStatus["kind"], string> = {
   connected: "Connected",
   failed: "Not connecting",
 };
+
+/**
+ * A profile written before the write endpoints refused userinfo (P2.107) can
+ * still hold `https://user:pass@host` in `website_url` or `wp_url`. Saving the
+ * profile at all is refused until it comes out, so the field has to say what is
+ * wrong and take it out, rather than leaving the operator to work out which
+ * characters belong to the credential. Nothing is stripped without the press:
+ * the value is theirs, and the removal is only saved when they save.
+ */
+function UrlCredentialsWarning({
+  value,
+  onStrip,
+  testId,
+}: {
+  value: string;
+  onStrip: (cleaned: string) => void;
+  testId: string;
+}) {
+  if (!hasUrlCredentials(value)) return null;
+  return (
+    <div
+      data-testid={testId}
+      className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400"
+    >
+      <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-px" aria-hidden="true" />
+      <div className="space-y-1">
+        <p>{URL_CREDENTIALS_WARNING}</p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-6 px-2 text-xs"
+          onClick={() => onStrip(stripUrlCredentials(value))}
+        >
+          Remove them
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 function ConnectionBadge({ status }: { status: ConnectionStatus }) {
   const label = STATUS_LABELS[status.kind];
@@ -754,13 +799,18 @@ export default function ProfileDetailPage() {
           <h1 className="text-xl font-semibold tracking-tight">{profile.name}</h1>
           <div className="flex items-center gap-1.5 mt-0.5 text-sm text-muted-foreground">
             <Globe className="h-3.5 w-3.5 shrink-0" />
+            {/* Stripped for both the label and the href: printing a stored
+                password here would put it on screen and in the browser's
+                history, and `fetch` and the crawler drop the userinfo anyway.
+                The field below is where the credential is still visible, and
+                where it can be taken out. */}
             <a
-              href={profile.website_url}
+              href={stripUrlCredentials(profile.website_url)}
               target="_blank"
               rel="noopener noreferrer"
               className="hover:underline truncate"
             >
-              {profile.website_url}
+              {stripUrlCredentials(profile.website_url)}
             </a>
             <ExternalLink className="h-3 w-3 shrink-0" />
           </div>
@@ -829,6 +879,11 @@ export default function ProfileDetailPage() {
                       onChange={(e) => setWebsiteUrl(e.target.value)}
                       placeholder="https://example.com"
                       required
+                    />
+                    <UrlCredentialsWarning
+                      value={websiteUrl}
+                      onStrip={setWebsiteUrl}
+                      testId="website-url-credentials"
                     />
                   </div>
                 </div>
@@ -950,6 +1005,11 @@ export default function ProfileDetailPage() {
                         value={wpUrl}
                         onChange={(e) => setWpUrl(e.target.value)}
                         placeholder="https://yoursite.com"
+                      />
+                      <UrlCredentialsWarning
+                        value={wpUrl}
+                        onStrip={setWpUrl}
+                        testId="wp-url-credentials"
                       />
                     </div>
                     <div className="space-y-2">

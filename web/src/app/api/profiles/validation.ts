@@ -18,6 +18,7 @@
 import { z } from "zod"
 
 import type { StageSettingsJson, websiteProfiles } from "@/db"
+import { hasUrlCredentials } from "@/lib/url-credentials"
 
 import { outputFormatField } from "../output-format"
 import { jsonObject, pydanticInt } from "../pydantic"
@@ -61,19 +62,6 @@ function parseHttpUrl(raw: string): URL | "invalid" | "scheme" {
 }
 
 /**
- * Userinfo (`https://user:pass@host`), which both columns refuse. Empty
- * userinfo is not a credential: the WHATWG parser reads `https://@example.com`
- * as `https://example.com/` with both halves empty, so the `@` alone is
- * harmless and only a value is refused.
- *
- * `wordPressUrlHasCredentials` in `@/mastra/wordpress` is the same test on an
- * unparsed string, for the callers that have not parsed one.
- */
-function hasCredentials(url: URL): boolean {
-  return url.username !== "" || url.password !== ""
-}
-
-/**
  * `website_url` seeds the sitemap crawl and is the base the internal-link
  * resolver resolves relative hrefs against. Neither can say anything to
  * anyone when it is not a URL: the crawl records a failed run and the resolver
@@ -88,7 +76,7 @@ function checkWebsiteUrl(value: string, ctx: z.RefinementCtx): void {
   const parsed = parseHttpUrl(value)
   if (parsed === "invalid") ctx.addIssue({ code: "custom", message: WEBSITE_URL_INVALID })
   else if (parsed === "scheme") ctx.addIssue({ code: "custom", message: WEBSITE_URL_SCHEME })
-  else if (hasCredentials(parsed)) {
+  else if (hasUrlCredentials(value)) {
     ctx.addIssue({ code: "custom", message: WEBSITE_URL_CREDENTIALS })
   }
 }
@@ -128,7 +116,7 @@ function checkWpUrl(value: string, ctx: z.RefinementCtx): void {
     ctx.addIssue({ code: "custom", message: WP_URL_SCHEME })
     return
   }
-  if (hasCredentials(parsed)) {
+  if (hasUrlCredentials(value)) {
     ctx.addIssue({ code: "custom", message: WP_URL_CREDENTIALS })
     return
   }

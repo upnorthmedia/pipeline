@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, screen, waitFor, fireEvent } from "@testing-library/react";
+import { act, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ProfileDetailPage from "./[id]/page";
 import { renderWithProviders } from "@/test/render";
@@ -1029,5 +1029,73 @@ describe("ProfileDetailPage ownership boundary", () => {
         /Copied onto every post created from this profile, in New Post and Batch Create\./
       )
     ).toBeInTheDocument();
+  });
+});
+
+/**
+ * P2.117. Rows written before the write endpoints refused userinfo still hold
+ * a plain-text password in `website_url` or `wp_url`. Saving one is already
+ * refused, so the profile is stuck until the credential comes out; the page
+ * has to say so and take it out in one press rather than leaving the operator
+ * to work out which characters to delete.
+ */
+describe("ProfileDetailPage, a stored URL carrying a password", () => {
+  it("names the problem under the Website URL field and clears it in one press", async () => {
+    mockGet.mockResolvedValue(
+      makeProfile({ website_url: "https://admin:hunter2@old.example.com/blog" }),
+    );
+    mockUpdate.mockResolvedValue(makeProfile({ website_url: "https://old.example.com/blog" }));
+    const user = userEvent.setup();
+    await renderOnTab("Site");
+
+    const field = await screen.findByLabelText(/Website URL/);
+    expect(field).toHaveValue("https://admin:hunter2@old.example.com/blog");
+    const warning = screen.getByTestId("website-url-credentials");
+    expect(warning).toHaveTextContent(/username and password/i);
+
+    await user.click(within(warning).getByRole("button", { name: /Remove them/i }));
+    expect(field).toHaveValue("https://old.example.com/blog");
+    expect(screen.queryByTestId("website-url-credentials")).not.toBeInTheDocument();
+  });
+
+  it("names the problem under the WordPress URL field and clears it in one press", async () => {
+    mockGet.mockResolvedValue(
+      makeProfile({
+        wp_url: "https://editor:secret@wp.example",
+        wp_username: "editor",
+        wp_app_password_set: true,
+      }),
+    );
+    const user = userEvent.setup();
+    await renderOnTab("Publishing");
+
+    const field = await screen.findByLabelText("WordPress URL");
+    expect(field).toHaveValue("https://editor:secret@wp.example");
+    const warning = screen.getByTestId("wp-url-credentials");
+    expect(warning).toHaveTextContent(/username and password/i);
+
+    await user.click(within(warning).getByRole("button", { name: /Remove them/i }));
+    expect(field).toHaveValue("https://wp.example");
+    expect(screen.queryByTestId("wp-url-credentials")).not.toBeInTheDocument();
+  });
+
+  it("says nothing about credentials for a profile that has none", async () => {
+    mockGet.mockResolvedValue(wpProfile());
+    await renderOnTab("Site");
+    expect(screen.queryByTestId("website-url-credentials")).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("tab", { name: "Publishing" }));
+    expect(screen.queryByTestId("wp-url-credentials")).not.toBeInTheDocument();
+  });
+});
+
+describe("ProfileDetailPage header, a stored URL carrying a password", () => {
+  it("keeps the password out of the header link and its href", async () => {
+    mockGet.mockResolvedValue(
+      makeProfile({ website_url: "https://admin:hunter2@old.example.com/blog" }),
+    );
+    renderWithProviders(<ProfileDetailPage />);
+    const link = await screen.findByRole("link", { name: /old\.example\.com/ });
+    expect(link).toHaveTextContent("https://old.example.com/blog");
+    expect(link).toHaveAttribute("href", "https://old.example.com/blog");
   });
 });

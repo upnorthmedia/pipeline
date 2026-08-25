@@ -49,6 +49,11 @@ import {
   type Profile,
   type ProfileCreate,
 } from "@/lib/api";
+import {
+  URL_CREDENTIALS_WARNING,
+  hasUrlCredentials,
+  stripUrlCredentials,
+} from "@/lib/url-credentials";
 import { toast } from "sonner";
 
 function timeAgo(dateStr: string): string {
@@ -379,8 +384,17 @@ export default function ProfilesPage() {
                   </TableCell>
                   <TableCell>
                     <span className="text-sm text-muted-foreground">
-                      {profile.website_url}
+                      {stripUrlCredentials(profile.website_url)}
                     </span>
+                    {hasUrlCredentials(profile.website_url) && (
+                      <span
+                        className="ml-2 inline-flex items-center gap-1 rounded border border-amber-500/40 px-1.5 py-0.5 align-middle text-[11px] text-amber-600 dark:text-amber-400"
+                        title={URL_CREDENTIALS_WARNING}
+                      >
+                        <AlertCircle className="h-3 w-3" aria-hidden="true" />
+                        Password in URL
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <CrawlStatusBadge status={profile.crawl_status} />
