@@ -325,16 +325,33 @@ describe("POST /api/queue/resume-all", () => {
     expect(start.calls).toEqual([{ postId: id, stages: ["research"] }])
   })
 
-  it("marks an all-complete post 'complete' and starts nothing for it", async () => {
+  it("marks an all-complete post 'complete'", async () => {
     const id = await insertPost(profileId, {
       currentStage: "paused",
       stageStatus: ALL_COMPLETE,
     })
-    // It still counts: `count` is the number of paused posts, not the number
-    // of runs started.
     expect(await body(await resume(user.cookie))).toEqual({ status: "resumed", count: 1 })
     expect((await readPost(id)).currentStage).toBe("complete")
-    expect(start.calls).toEqual([])
+  })
+
+  /**
+   * Ledger item P5.5. A pause that landed after `ready` has no next stage, and
+   * the port answered that by writing `complete` and starting nothing, which
+   * is the row a full run leaves minus everything `pipeline-complete` does:
+   * no `completed_at`, no auto-publish, no `pipeline_complete` frame. That
+   * made "Resume All" the one control on `/monitor` that silently finished a
+   * run badly, and it was the reason the finish could only be had from
+   * `/posts/[id]`. The full form is what `POST /run-all` starts for the same
+   * row: it skips all six complete stages and reaches only the finish.
+   */
+  it("starts the full form for an all-complete post, so its finish actually runs", async () => {
+    const id = await insertPost(profileId, {
+      currentStage: "paused",
+      stageStatus: ALL_COMPLETE,
+    })
+    expect(await body(await resume(user.cookie))).toEqual({ status: "resumed", count: 1 })
+    expect((await readPost(id)).currentStage).toBe("complete")
+    expect(start.calls).toEqual([{ postId: id, stages: undefined }])
   })
 
   it("enqueues the single-stage form, so the resumed stage skips its review gate", async () => {
@@ -361,7 +378,10 @@ describe("POST /api/queue/resume-all", () => {
     expect((await readPost(a)).currentStage).toBe("outline")
     expect((await readPost(b)).currentStage).toBe("complete")
     expect((await readPost(c)).currentStage).toBe("research")
-    expect(start.calls.map((call) => call.postId).sort()).toEqual([a, c].sort())
+    // Every paused post is started, including the one with no stage left: `b`
+    // is the full form and the other two name their stage. Ledger item P5.5.
+    expect(start.calls.map((call) => call.postId).sort()).toEqual([a, b, c].sort())
+    expect(start.calls.find((call) => call.postId === b)?.stages).toBeUndefined()
   })
 
   it("does not resume another user's paused post", async () => {

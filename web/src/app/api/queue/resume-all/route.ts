@@ -9,9 +9,9 @@
  * Two details of the Python loop are load-bearing and preserved:
  *
  * - a post whose six stages are all complete has no next stage, so it is
- *   written to `current_stage = "complete"` and nothing is started for it. It
- *   still counts towards the response's `count`, which is the number of posts
- *   that were paused, not the number of runs started.
+ *   written to `current_stage = "complete"`. It still counts towards the
+ *   response's `count`, which is the number of posts that were paused, not
+ *   the number of runs started.
  * - the enqueue names the stage (`enqueue_job("run_pipeline_stage", id,
  *   next_stage)`), so it is the single-stage form: `run_pipeline_stage` turned
  *   a named stage into `stages=[stage]` and ran it with no gate checks.
@@ -40,14 +40,16 @@ async function postHandler(request: Request): Promise<Response> {
     .innerJoin(websiteProfiles, eq(posts.profileId, websiteProfiles.id))
     .where(and(eq(websiteProfiles.userId, user.id), eq(posts.currentStage, "paused")))
 
-  const resumed: { id: string; stage: Stage }[] = []
+  // The stage each post resumes at, or `null` for a post that has no stage
+  // left. Both shapes are started; only the first names a stage.
+  const resumed: { id: string; stage: Stage | null }[] = []
 
   // Python committed the whole batch once, after the loop, so either every
   // post moves off "paused" or none does. A transaction keeps that.
   await db.transaction(async (tx) => {
     for (const row of rows) {
       const stage = nextStage(row.stageStatus)
-      if (stage) resumed.push({ id: row.id, stage })
+      resumed.push({ id: row.id, stage })
       await tx
         .update(posts)
         .set({ currentStage: stage ?? "complete", updatedAt: new Date() })
@@ -60,8 +62,16 @@ async function postHandler(request: Request): Promise<Response> {
   // after the transaction closes that window. Nothing observable changes: the
   // workflow derives the stages it runs from `stage_status`, not from
   // `current_stage`.
+  // A post with no stage left is a pause that landed after `ready` rather
+  // than in front of a stage (`isPausedBeforeFinish()`). Python started
+  // nothing for it, which left the row a full run leaves minus everything
+  // `pipeline-complete` does: no `completed_at`, no auto-publish and no
+  // `pipeline_complete` frame. Resuming a run has to reach its finish, so it
+  // is started in the full form, the one `POST /api/posts/{id}/run-all` uses
+  // for the same row: no stage selection, so the six complete stages are
+  // skipped and only the finish runs. Ledger item P5.5.
   for (const { id, stage } of resumed) {
-    await startPipeline(id, [stage])
+    await startPipeline(id, stage ? [stage] : undefined)
   }
 
   return Response.json({ status: "resumed", count: rows.length }, { status: 200 })

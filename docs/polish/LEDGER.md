@@ -1172,9 +1172,27 @@ section is in [`evidence/p5.md`](evidence/p5.md).
       `ui/p54-after-confirm-names-the-posts.png`,
       `ui/p54-after-confirm-empty-profile.png`.
       [evidence](evidence/p5.md#p54)
-- [ ] **P5.5** A run paused after its last stage can only be finished from
-      `/posts/[id]`: the posts list and `/monitor` get the right badge from
-      `isPausedBeforeFinish()` but neither carries the `Finish this run` button.
+- [x] **P5.5** A run paused after its last stage could only be finished from
+      `/posts/[id]`: the posts list and `/monitor` got the right badge from
+      `isPausedBeforeFinish()` and neither carried the `Finish this run` action.
+      `/monitor` was worse than missing it, because its one control for a
+      paused run was actively wrong: `POST /api/queue/resume-all` recovers each
+      post's next stage from `stage_status`, and a post with none was written
+      to `current_stage = "complete"` with nothing started, which is the row a
+      finished run leaves minus everything `pipeline-complete` does (no
+      `completed_at`, no auto-publish, no `pipeline_complete` frame). Faithful
+      to the Python loop and wrong for the reason P2.115 was wrong. Fixed on
+      both sides: `resume-all` now starts a post with no stage left in the full
+      form, the same start `POST /run-all` makes for that row, so the six
+      complete stages are skipped and only the finish runs; and the row menu on
+      `/` offers `Finish this run` in place of `Pause`, which a stopped run has
+      nothing to do with. Proven with a real worker: at HEAD `Resume All` left
+      `completed_at` null and `execution_logs` empty, after it the row carries
+      `pipeline_complete` and a stamp 67ms after `pipeline_start`, with no
+      `stage_start` for any of the six.
+      `ui/p55-before-list-menu-offers-pause.png`,
+      `ui/p55-after-list-menu-offers-finish.png`,
+      `ui/p55-after-finish-marked-complete.png`. [evidence](evidence/p5.md#p55)
 - [ ] **P5.6** The posts list at `/` subscribes to no event feed, so a pause or a
       stage that finished elsewhere is invisible until the reader navigates or
       reloads.

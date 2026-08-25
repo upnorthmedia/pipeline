@@ -17,6 +17,7 @@ vi.mock("@/lib/api", async () => {
       duplicate: vi.fn(),
       run: vi.fn(),
       pause: vi.fn(),
+      runAll: vi.fn(),
     },
     profiles: {
       list: vi.fn(),
@@ -644,5 +645,77 @@ describe("PostsPage stalled publishing", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * Ledger item P5.5. A run paused after its last stage is finished by
+ * `POST /run-all`, which is the one action that reaches `pipeline-complete`
+ * and so the one that stamps `completed_at` and starts the publish. Until now
+ * the only place that action existed was `/posts/[id]`, so a reader who saw
+ * `Paused before finishing` on this list had to open the post to act on it,
+ * and the row menu offered `Pause` on a run that was already stopped.
+ */
+describe("a run paused after its last stage", () => {
+  const pausedBeforeFinish = makePost({
+    id: "pbf",
+    topic: "Paused Before Finish",
+    slug: "paused-before-finish",
+    current_stage: "paused",
+    stage_status: {
+      research: "complete",
+      outline: "complete",
+      write: "complete",
+      edit: "complete",
+      images: "complete",
+      ready: "complete",
+    },
+  });
+
+  it("offers Finish this run in the row menu", async () => {
+    const user = userEvent.setup();
+    mockPostsList.mockResolvedValue([pausedBeforeFinish]);
+    renderWithProviders(<PostsPage />);
+    await screen.findByText("Paused Before Finish");
+
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Paused Before Finish" })
+    );
+    await user.click(
+      await screen.findByRole("menuitem", { name: /finish this run/i })
+    );
+
+    expect(vi.mocked(posts.runAll)).toHaveBeenCalledWith("pbf");
+  });
+
+  it("does not offer Pause on a run that is already stopped", async () => {
+    const user = userEvent.setup();
+    mockPostsList.mockResolvedValue([pausedBeforeFinish]);
+    renderWithProviders(<PostsPage />);
+    await screen.findByText("Paused Before Finish");
+
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Paused Before Finish" })
+    );
+    await screen.findByRole("menuitem", { name: /finish this run/i });
+    expect(
+      screen.queryByRole("menuitem", { name: /^pause$/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it("leaves the menu of a run that is still going alone", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<PostsPage />);
+    await screen.findByText("Third Post");
+
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Third Post" })
+    );
+    expect(
+      await screen.findByRole("menuitem", { name: /^pause$/i })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: /finish this run/i })
+    ).not.toBeInTheDocument();
   });
 });

@@ -671,7 +671,7 @@ export function OverviewTab() {
               title={
                 resumableCount === 0
                   ? "Nothing is paused."
-                  : "Starts every paused run again, from the stage it stopped at."
+                  : "Starts every paused run again, from the stage it stopped at. A run that was paused after its last stage runs its finish instead."
               }
             >
               <Play className="h-3.5 w-3.5 mr-1.5" />

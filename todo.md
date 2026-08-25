@@ -121,11 +121,17 @@
   a reader who wants the profile's gates back on a post has to set six selects by hand.
   Found under P4.6.
 
-- [confirmed] 2026-08-25 A run paused after its last stage can only be finished from
-  `/posts/[id]`. `isPausedBeforeFinish()` gives the posts list and `/monitor` the right badge
-  (both call `deriveRunState()`), but neither carries the `Finish this run` button, so a
-  reader who spots one on a list has to open the post. Same reader gap polish ledger P4.9
-  names for a stalled publish. Found while closing P4.4b.
+- [investigate] 2026-08-25 `Resume All` on `/monitor` is all-or-nothing, so a reader looking
+  at three paused runs cannot finish or resume just one from that screen. The tab holds no
+  post rows at all, which is the same shape P4.9b had to work around by adding a card. Found
+  while closing P5.5.
+
+- [investigate] 2026-08-25 The `Finish this run` item in the row menu on `/` decides from the
+  list's own `stage_status`, which is as fresh as the last fetch, so a run finished in
+  another tab leaves the item on screen and the press is a no-op run against a complete post.
+  Harmless today (`run-all` on a complete post skips all six stages and re-stamps
+  `completed_at`), but it is the same staleness class as the P5.4 dialog count. Found while
+  closing P5.5.
 
 - [confirmed] 2026-08-24 The posts list at `/` holds no event feed open, so a pause or a
   stage that finished elsewhere is invisible on it until the reader navigates or reloads.

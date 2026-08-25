@@ -10,6 +10,7 @@ import {
   Pause,
   MoreHorizontal,
   Copy,
+  CheckCircle2,
   ExternalLink,
   RefreshCw,
   FileSpreadsheet,
@@ -59,6 +60,7 @@ import { PipelineProgress } from "@/components/pipeline-progress";
 import { RunStateBadge } from "@/components/run-state-badge";
 import { PublishStallBadge } from "@/components/publish-stall-badge";
 import { publishColumnOf, PUBLISH_STALL_TICK_MS } from "@/lib/publish-report";
+import { isPausedBeforeFinish } from "@/lib/run-state";
 import {
   posts,
   profiles,
@@ -250,6 +252,24 @@ export default function PostsPage() {
       router.push(`/posts/${dup.id}`);
     } catch {
       toast.error("Failed to duplicate post");
+    }
+  };
+
+  /**
+   * The finish of a run that was paused after its last stage. `POST /run-all`
+   * is the only action that reaches `pipeline-complete`, which is where the
+   * `completed_at` stamp, the auto-publish and the `pipeline_complete` frame
+   * live; re-running `ready` would pay for the stage again and still not get
+   * there. Same call the banner on `/posts/[id]` makes, so the two places
+   * that offer the finish do the same thing. Ledger item P5.5.
+   */
+  const handleFinishRun = async (id: string) => {
+    try {
+      await posts.runAll(id);
+      toast.success("Finishing the run");
+      fetchPosts();
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "The run could not be finished."));
     }
   };
 
@@ -539,12 +559,27 @@ export default function PostsPage() {
                             <ExternalLink className="h-3.5 w-3.5 mr-2" />
                             Open
                           </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => posts.pause(post.id).then(() => fetchPosts())}
-                          >
-                            <Pause className="h-3.5 w-3.5 mr-2" />
-                            Pause
-                          </DropdownMenuItem>
+                          {/* A run paused after its last stage has nothing
+                              left to pause and one thing left to do, so the
+                              row offers that instead. Ledger item P5.5. */}
+                          {isPausedBeforeFinish({
+                            currentStage: post.current_stage,
+                            stageStatus: post.stage_status,
+                          }) ? (
+                            <DropdownMenuItem
+                              onClick={() => handleFinishRun(post.id)}
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5 mr-2" />
+                              Finish this run
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem
+                              onClick={() => posts.pause(post.id).then(() => fetchPosts())}
+                            >
+                              <Pause className="h-3.5 w-3.5 mr-2" />
+                              Pause
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuItem
                             onClick={() => handleDuplicate(post.id)}
                           >
