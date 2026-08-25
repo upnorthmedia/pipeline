@@ -41,13 +41,6 @@
   column stays nullable for the rows that predate it. Needs a decision on the existing rows:
   leave them, or a one-off cleanup that names them in a migration.
 
-- [investigate] 2026-08-24 `src/mastra/worker-health.test.ts` > "reports a worker that is
-  subscribed and waiting as alive" failed once in a full `pnpm test` run and passed in the
-  next full run with no code between them (`expected false to be true` on `workerAlive`). One
-  observation only, so it may be load rather than a defect, but the suite's determinism is a
-  Done criterion. Reproduce by running that file repeatedly under a loaded machine before
-  changing anything.
-
 - [confirmed] 2026-08-24 Nothing scans for or repairs `website_profiles` rows that already
   hold a credentialed `wp_url` or `website_url`. P2.107 refuses new ones and reports the
   stored ones on the three `/wordpress/*` endpoints, but a row can sit with a plaintext

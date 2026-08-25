@@ -884,11 +884,18 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       card on `/posts/new` is a picker per stage as a result, with an override note and a way
       back to the profile's gates; `/posts/batch` stays read-only. Proven end to end in a
       browser on two real posts. [evidence](evidence/p2.md#p2114)
-- [ ] **P2.116** `[investigate 2026-08-24]` `worker-health.test.ts` > "reports a worker that
+- [x] **P2.116** `[investigate 2026-08-24]` `worker-health.test.ts` > "reports a worker that
       is subscribed and waiting as alive" failed once in a full `pnpm test` run
       (`expected false to be true` on `workerAlive`) and passed in the next full run with no
       code between them. One observation, possibly load, but suite determinism is a Done
-      criterion. Found while closing P2.102.
+      criterion. Found while closing P2.102. The observed failure did not reproduce in seven
+      attempts, but the suite carried a real race with the same symptom:
+      `RedisStreamsPubSub.subscribe()` starts its read loop without awaiting it, and it is
+      that loop's first `XREADGROUP` that registers the consumer, so `startWorkers()` can
+      resolve with the group present and no consumer in it (12 of 20 bare reads, measured).
+      The live suite now waits for the consumer, and both health assertions carry the raw
+      `XINFO CONSUMERS` output so a future failure names its own cause.
+      [evidence](evidence/p2.md#p2116)
 - [ ] **P2.117** `[confirmed 2026-08-24]` Nothing scans for or repairs `website_profiles` rows
       that already hold a credentialed `wp_url` or `website_url`. P2.107 refuses new ones and
       every reader now reports one rather than leaking it, so this is data hygiene rather
@@ -935,4 +942,8 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       [evidence](evidence/p2.md#p2-triage). A fifth is owed by P2.103: a green CI run does not
       certify the live Perplexity, Anthropic or Gemini call paths, and seven of those nine
       tests have never run in this environment at all
-      ([evidence](evidence/p2.md#p2103)).
+      ([evidence](evidence/p2.md#p2103)). A sixth is owed by P2.116: `/api/queue/worker-status`
+      reports a freshly booted worker as dead for a few tens of milliseconds, because the
+      transport registers its consumer after `startWorkers()` has already resolved, and no
+      reader in another process can tell that window from a real outage
+      ([evidence](evidence/p2.md#p2116)).

@@ -12,6 +12,10 @@
  *     exercised against a real `mastra.startWorkers()`, because those three
  *     are claims about what Mastra does and nothing but Mastra can settle them.
  *
+ * The live suite waits for the worker to register as a consumer before it reads
+ * health; see `waitForConsumer` for why `startWorkers()` resolving is not that
+ * moment.
+ *
  * Requires `docker compose up -d db redis`.
  */
 import { Mastra } from "@mastra/core"
@@ -42,6 +46,38 @@ type RedisClient = ReturnType<typeof createClient>
 
 /** One connection for the assertions, independent of anything under test. */
 let client: RedisClient
+
+/**
+ * Block until a worker process is registered as a consumer of `streamKey`.
+ *
+ * `startWorkers()` resolving is not that moment. `RedisStreamsPubSub.subscribe()`
+ * awaits the `XGROUP CREATE` and the read connection, then starts its read loop
+ * without awaiting it (`sub.loop = this.#runReadLoop(sub)`), and it is that
+ * loop's first `XREADGROUP` that registers the consumer. So there is a window
+ * after `startWorkers()` in which the group exists and no consumer does, and a
+ * health read inside it answers `workerAlive: false` correctly.
+ *
+ * Measured on this machine with the event loop under load: reading health
+ * straight after `startWorkers()` found no consumer in 12 of 20 starts, and
+ * waiting first found one every time, worst case 75 ms. The suite below used to
+ * clear the window only by accident, on the `XINFO GROUPS` round trip that sits
+ * between the two lines.
+ */
+async function waitForConsumer(streamKey: string, timeoutMs = 15_000): Promise<number> {
+  const started = Date.now()
+  for (;;) {
+    const consumers = await client
+      .xInfoConsumers(streamKey, ORCHESTRATION_GROUP)
+      .catch(() => [] as unknown[])
+    if (consumers.length > 0) return Date.now() - started
+    if (Date.now() - started > timeoutMs) {
+      throw new Error(
+        `no consumer joined ${ORCHESTRATION_GROUP} on ${streamKey} within ${timeoutMs}ms`,
+      )
+    }
+    await sleep(25)
+  }
+}
 
 beforeAll(async () => {
   client = createClient({ url: process.env.REDIS_URL! })
@@ -166,6 +202,8 @@ describe("against a real Mastra worker", () => {
   const STEP_MS = WORKER_ALIVE_IDLE_LIMIT_MS + 5_000
 
   let groupNames: string[]
+  let consumerJoinedAfterMs: number
+  let idleConsumers: string
   let idleWorker: WorkerHealth
   let busyWorker: WorkerHealth
   let stoppedWorker: WorkerHealth
@@ -179,7 +217,16 @@ describe("against a real Mastra worker", () => {
     const groups = await client.xInfoGroups(streamKey)
     groupNames = groups.map((g) => String(g.name))
 
+    consumerJoinedAfterMs = await waitForConsumer(streamKey)
     idleWorker = await readWorkerHealth({ client, streamKey })
+    // Kept for the assertion message: a future failure should say whether Redis
+    // had no consumer at all or one the idle threshold rejected.
+    idleConsumers = JSON.stringify(
+      (await client.xInfoConsumers(streamKey, ORCHESTRATION_GROUP).catch(() => [])).map((c) => ({
+        name: String(c.name),
+        idle: Number(c.idle),
+      })),
+    )
 
     const run = await slowWorkflow.createRun()
     const started = run.start({ inputData: { ms: STEP_MS } })
@@ -216,8 +263,14 @@ describe("against a real Mastra worker", () => {
   })
 
   it("reports a worker that is subscribed and waiting as alive", () => {
-    expect(idleWorker.workerAlive).toBe(true)
-    expect(idleWorker.liveWorkers).toBe(1)
+    // `waitForConsumer` above establishes "subscribed", which is a precondition
+    // rather than the claim: what is asserted here is that the idle arithmetic
+    // counts that consumer, and counts it once. A worker that joined and was
+    // then rejected by the 15 s threshold, or a leftover consumer counted
+    // alongside it, both still fail.
+    expect(consumerJoinedAfterMs).toBeLessThan(WORKER_ALIVE_IDLE_LIMIT_MS)
+    expect(idleWorker.workerAlive, `consumers at the read: ${idleConsumers}`).toBe(true)
+    expect(idleWorker.liveWorkers, `consumers at the read: ${idleConsumers}`).toBe(1)
   })
 
   it(`reports a worker ${STEP_MS / 1000}s into a step as alive, not as dead`, () => {
