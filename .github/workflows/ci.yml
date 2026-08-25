@@ -113,6 +113,16 @@ jobs:
       - name: lint
         run: pnpm lint
 
+      # The whole suite, and three tests fewer than a developer machine runs.
+      # Ten files gate tests on the environment; the live-provider ones need
+      # `ANTHROPIC_API_KEY`, `PERPLEXITY_API_KEY` or `GEMINI_API_KEY`, and this
+      # job is given none of them, so the real Perplexity, Anthropic and Gemini
+      # call paths are the one part of the suite a green tick here does not
+      # cover. That is deliberate (ledger item P2.103): those tests bill a real
+      # provider call, two of them bill an image, and secrets are unavailable to
+      # a `pull_request` run from a fork, so the same tick would mean different
+      # things on different events. `src/test/env-gated-tests.test.ts` fails if
+      # a key ever appears in this file, because that changes the gap.
       - name: test
         run: pnpm test
 

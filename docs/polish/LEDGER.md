@@ -757,11 +757,19 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       runs only where there is an account to write a customer into. The plugin stays mounted
       and the schema is unchanged. `stripe-signup.test.ts` stubs `https.request`, so the guard
       needs no network. [evidence](evidence/p2.md#p2100-and-p2102)
-- [ ] **P2.103** `[investigate 2026-08-24]` CI skips 10 tests where a local run skips 7. The
+- [x] **P2.103** `[investigate 2026-08-24]` CI skips 10 tests where a local run skips 7. The
       three extra are the suites gated on a provider key, which CI has no value for, so the
       real Perplexity, Anthropic and Gemini call paths are the one part of the suite CI cannot
       certify. Decide deliberately: repository secrets on the default branch, or say so in
-      `SUMMARY.md`.
+      `SUMMARY.md`. Reproduces, with the cause misnamed: all three extra skips are gated on
+      `GEMINI_API_KEY` alone, and the seven Anthropic and Perplexity live tests skip on a
+      developer machine too, so CI did not create that half of the gap. Decided: no repository
+      secrets. Every one of these tests bills a real provider call (one bills an image),
+      secrets are unavailable to a fork's `pull_request` run, a network-dependent test cannot
+      hold Done condition 1's identical-results bar, and the credentials are the user's to
+      add. The gap is stated in the workflow's `test` step and owed to `SUMMARY.md`, and new
+      `src/test/env-gated-tests.test.ts` fails when a gate appears that the statement does not
+      cover or when a provider key reaches the workflow. [evidence](evidence/p2.md#p2103)
 - [ ] **P2.104** `[confirmed 2026-08-24]` The PWA has no maskable icon. `manifest.json` now
       declares `"any"`, which is truthful, but an installed app gets the platform's white
       badge behind the mark instead of the mark filling the tile. Needs a second full-bleed
@@ -863,4 +871,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
 - [ ] `docs/polish/SUMMARY.md` exists with an honest gap list. Four gaps are already owed to
       it by the 2026-08-24 P2 triage (dark-only product, the dead `posts.stage_logs` column,
       `web/src/` shipped in the production image, one Redis connection per open tab):
-      [evidence](evidence/p2.md#p2-triage).
+      [evidence](evidence/p2.md#p2-triage). A fifth is owed by P2.103: a green CI run does not
+      certify the live Perplexity, Anthropic or Gemini call paths, and seven of those nine
+      tests have never run in this environment at all
+      ([evidence](evidence/p2.md#p2103)).
