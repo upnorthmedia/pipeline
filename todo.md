@@ -83,17 +83,18 @@
   pause during `ready` leaves all six stages complete with `current_stage = "paused"` and no
   `completed_at`, which reads as unfinished. Found while closing P2.115.
 
-- [confirmed] 2026-08-24 A publish that dies with its worker is reported as still publishing,
-  forever. `wp_publish_status` / `nextjs_publish_status` move to `publishing` before the step
-  touches the destination and only the step itself writes them again, so a worker killed mid
-  publish leaves the column there with nothing to reconcile it. The post header says
-  `Publishing...` and, since polish ledger P3.2b-ii, the run trace shows a `Publish to
-  <target>` row whose elapsed clock counts up from the `publish_start` entry indefinitely. It
-  is the same shape as the stage case P2.91 fixed (a `SIGTERM` truncates the running step),
-  except that no `XAUTOCLAIM` recovers it, because the publish workflows declare no
-  `retryConfig` either. P2.91's drain narrows it the same way: a publish that finishes inside
-  `WORKER_DRAIN_TIMEOUT_MS` now completes rather than being truncated, and one that does not is
-  handed back to the group rather than parked. Found at polish ledger P3.2b-ii.
+- [investigate] 2026-08-24 A retry of a WordPress publish that died mid-flight can create a
+  second post on the site. `wp_post_id` is written only after `createPost` returns, so an
+  attempt killed between the request and that write leaves the row with no id and the next
+  attempt takes the `createPost` branch again. The same is true of a step re-delivered by
+  `XAUTOCLAIM` rather than by a person. Unverified against a real site: nothing in this repo
+  has ever published to one. Found while closing polish ledger P4.3.
+
+- [confirmed] 2026-08-24 A stalled publish is legible only on `/posts/[id]`. The posts list
+  and `/monitor` show nothing about it, and the run trace's `Publish to <target>` row still
+  counts its elapsed clock up indefinitely rather than saying the attempt went quiet. Polish
+  ledger P4.3 added `publishStall()` in `src/lib/publish-report.ts`; those three readers do
+  not call it. Found while closing P4.3.
 
 - [investigate] 2026-08-24 The run trace does not update during a publish. `use-sse.ts`
   refetches the post on `stage_complete`, `stage_error` and `pipeline_complete`;

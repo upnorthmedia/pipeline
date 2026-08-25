@@ -951,10 +951,23 @@ criterion 9's bar are named at the bottom with what is owed to `SUMMARY.md` inst
       `complete` row with an empty `stage_status` still counts, a row stamped `failed` over a
       running stage still does not. `ui/p4b-completion-rate-*.png`.
       [evidence](evidence/p4.md#p42)
-- [ ] **P4.3** A publish that dies with its worker reports `Publishing...` forever:
+- [x] **P4.3** A publish that dies with its worker reported `Publishing...` forever:
       `wp_publish_status` / `nextjs_publish_status` move to `publishing` before the step
-      touches the destination and only the step writes them again, and the publish workflows
-      declare no `retryConfig`, so no `XAUTOCLAIM` recovers one.
+      touches the destination and only the step writes them again, and the header's Publish
+      button is gated on `null` or `pending`, so the row had no control on the page at all.
+      The second half of this entry was wrong: both publish workflows do declare
+      `retryConfig`, and `XAUTOCLAIM` is the transport's own reclaim loop rather than
+      anything `retryConfig` keys off. What it needs is a live worker and `RECLAIM_IDLE_MS`
+      of idle time, so the honest statement is a window: inside 15 minutes a quiet publish
+      may still be recoverable without the reader, past it nothing will move the row.
+      `PUBLISH_STALL_AFTER_MS` is that same 15 minutes, pinned to `RECLAIM_IDLE_MS` by
+      `src/lib/publish-stall-window.test.ts`, and `publishStall()` measures it from the later
+      of `updated_at` and the last `publish_start` entry, which is also what tells "no worker
+      picked it up" apart from "a worker picked it up and died". The page now reads
+      `Publish stalled`, says which of the two it was, and carries the retry. A 30 second
+      tick while a publish is in flight is what makes the banner appear without a reload,
+      which is the whole case: a dead publish publishes no event.
+      `ui/p43c-*.png`. [evidence](evidence/p4.md#p43)
 - [ ] **P4.4** A run that stops for a pause publishes no event, so a second tab shows it
       running until the reader reloads. A pause during `ready` also leaves all six stages
       complete with `current_stage = "paused"` and no `completed_at`, which reads as
@@ -977,6 +990,12 @@ criterion 9's bar are named at the bottom with what is owed to `SUMMARY.md` inst
       `Connected to ${status.siteName}`; and `pnpm -C web db:migrate` cannot run against a
       dev database carried over from the Python stack, which `web/drizzle/README.md` does not
       say.
+
+- [ ] **P4.9** A stalled publish is legible only on `/posts/[id]`. The posts list and
+      `/monitor` show nothing about one, and the run trace's `Publish to <target>` row counts
+      its elapsed clock up indefinitely rather than saying the attempt went quiet.
+      `publishStall()` in `src/lib/publish-report.ts` is the derivation those three readers
+      would call. Filed by P4.3.
 
 Named here rather than fixed, and owed to `SUMMARY.md` as gaps: the Railway pre-deploy
 migration hook has never been watched running, because this project has no deployed Railway

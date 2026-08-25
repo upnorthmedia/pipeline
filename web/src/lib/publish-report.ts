@@ -78,3 +78,100 @@ export function lastPublishError(executionLogs: unknown): string | null {
 
   return null;
 }
+
+/**
+ * How long a publish may sit in `pending` or `publishing` before this app
+ * stops calling it in flight.
+ *
+ * The number is `RECLAIM_IDLE_MS` in `src/mastra/index.ts`, and
+ * `publish-stall-window.test.ts` fails if the two drift apart. That is the
+ * idle time after which `RedisStreamsPubSub`'s reclaim loop `XAUTOCLAIM`s a
+ * step message away from the consumer holding it, so inside the window a
+ * publish that has gone quiet may still be running, or about to be
+ * re-delivered to a worker that will finish it. Past the window either no
+ * worker is alive to reclaim it or the reclaimed copy went quiet too, and in
+ * both cases nothing is going to move the row without the reader.
+ */
+export const PUBLISH_STALL_AFTER_MS = 15 * 60_000;
+
+/**
+ * The `ts` of the most recent `publish_start` entry, which is when a worker
+ * last said it had this post in hand. Null when no worker ever said so.
+ */
+export function lastPublishStartAt(executionLogs: unknown): string | null {
+  if (!Array.isArray(executionLogs)) return null;
+
+  for (let i = executionLogs.length - 1; i >= 0; i--) {
+    const entry = executionLogs[i];
+    if (!isEntry(entry) || entry.event !== "publish_start") continue;
+    const ts = entry.ts;
+    if (typeof ts !== "string" || Number.isNaN(Date.parse(ts))) return null;
+    return ts;
+  }
+
+  return null;
+}
+
+/** A publish attempt that stopped moving, and what the reader is told about it. */
+export interface PublishStall {
+  /** True once a worker announced it had the post, false while it was only queued. */
+  started: boolean;
+  /** The sentence the banner and the badge tooltip carry. */
+  reason: string;
+}
+
+/**
+ * Whether the publish this row is carrying has gone quiet, and why that
+ * reads the way it does.
+ *
+ * The clock is the later of `updated_at`, stamped when the publish was asked
+ * for, and the last `publish_start` entry, written when a worker picked it up.
+ * Nothing in a publish stamps `updated_at` after the request (the step's own
+ * writes and `appendExecutionLog` both leave it alone), so those two are the
+ * whole record of when the attempt was last known to be moving, and taking the
+ * later of them is what keeps a slow but live publish out of this branch for
+ * the whole window rather than only for the queueing part of it.
+ */
+export function publishStall(input: {
+  status: string | null | undefined;
+  updatedAt: string | null | undefined;
+  executionLogs: unknown;
+  now: number;
+}): PublishStall | null {
+  if (input.status !== "pending" && input.status !== "publishing") return null;
+
+  const requestedAt = typeof input.updatedAt === "string" ? Date.parse(input.updatedAt) : NaN;
+  const startedRaw = lastPublishStartAt(input.executionLogs);
+  const startedAt = startedRaw === null ? NaN : Date.parse(startedRaw);
+
+  // A row with neither timestamp has no clock, so it cannot be called stalled:
+  // saying so would put the banner on every publish whose `updated_at` failed
+  // to serialise rather than on the ones that stopped.
+  if (Number.isNaN(requestedAt) && Number.isNaN(startedAt)) return null;
+
+  const lastMoved = Math.max(
+    Number.isNaN(requestedAt) ? -Infinity : requestedAt,
+    Number.isNaN(startedAt) ? -Infinity : startedAt,
+  );
+  if (input.now - lastMoved < PUBLISH_STALL_AFTER_MS) return null;
+
+  // `publish_start` is written before the destination is touched and after the
+  // status column moves to `publishing`, so the two agree on every row a
+  // worker actually reached, and the column alone is what decides here: an
+  // entry from an earlier attempt is older than `updated_at` and so cannot be
+  // the value `lastMoved` came from.
+  const started = !Number.isNaN(startedAt) && startedAt >= requestedAt;
+
+  // The window is named rather than the elapsed time, so the sentence is the
+  // same on every render of a page that keeps re-deriving it.
+  const windowText = `${PUBLISH_STALL_AFTER_MS / 60_000} minutes`;
+
+  return {
+    started,
+    reason: started
+      ? `A worker picked this publish up and then stopped reporting on it for over ${windowText}, ` +
+        "which usually means the worker died partway through. Nothing will move it on its own."
+      : `This publish has been queued for over ${windowText} and no worker has picked it up, ` +
+        "which usually means no worker is running. Nothing will move it on its own.",
+  };
+}

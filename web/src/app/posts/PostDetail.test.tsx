@@ -1137,3 +1137,156 @@ describe("the run controls on a post that has already run", () => {
     );
   });
 });
+
+/**
+ * Ledger item P4.3: a publish whose worker died reported `Publishing...`
+ * forever.
+ *
+ * The status column moves to `publishing` before the step touches the
+ * destination and only the step writes it again, so a worker that dies between
+ * those two points leaves the row on that value with nothing left in the
+ * process that owns it. `RedisStreamsPubSub`'s reclaim loop is the one thing
+ * that can re-deliver the step, and it needs a live worker and
+ * `RECLAIM_IDLE_MS` of idle time to do it, so the page has to be able to say
+ * that the attempt has gone past that window and give the reader the retry it
+ * was not offering: the Publish button is gated on `null` or `pending`, so a
+ * row stuck on `publishing` had no control on the page at all.
+ */
+describe("PostDetailPage stalled publishing", () => {
+  const mockPublish = vi.mocked(posts.publish);
+
+  /** `appendExecutionLog`'s stored shape for the entry a worker writes on pickup. */
+  function startEntry(ts: string) {
+    return {
+      ts,
+      stage: "",
+      level: "info",
+      event: "publish_start",
+      message: "Publishing to WordPress...",
+    };
+  }
+
+  function minutesAgo(minutes: number): string {
+    return new Date(Date.now() - minutes * 60_000).toISOString();
+  }
+
+  it("calls a publish whose worker went quiet stalled rather than running", async () => {
+    mockGet.mockResolvedValue(
+      makeCompletedPost({
+        output_format: "wordpress",
+        wp_publish_status: "publishing",
+        updated_at: minutesAgo(40),
+        execution_logs: [startEntry(minutesAgo(38))],
+      })
+    );
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Publish stalled")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Publishing...")).not.toBeInTheDocument();
+
+    const banner = screen.getByRole("alert");
+    expect(
+      within(banner).getByText("Publishing to WordPress stopped responding")
+    ).toBeInTheDocument();
+    expect(within(banner).getByText(/the worker died partway through/i)).toBeInTheDocument();
+  });
+
+  it("offers the retry the Publish button was not giving a stuck row", async () => {
+    mockGet.mockResolvedValue(
+      makeCompletedPost({
+        output_format: "wordpress",
+        wp_publish_status: "publishing",
+        updated_at: minutesAgo(40),
+        execution_logs: [startEntry(minutesAgo(38))],
+      })
+    );
+    mockPublish.mockResolvedValue({ status: "queued" });
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Publish stalled")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /try publishing again/i }));
+
+    await waitFor(() => {
+      expect(mockPublish).toHaveBeenCalledWith("post-1");
+    });
+    // The optimistic write puts the row back on `pending` *and* restamps the
+    // clock, so the banner it just retried from cannot survive the press.
+    expect(screen.queryByText("Publish stalled")).not.toBeInTheDocument();
+    expect(screen.getByText("Queued to publish")).toBeInTheDocument();
+  });
+
+  it("says a queued publish was never picked up, which is a different fault", async () => {
+    mockGet.mockResolvedValue(
+      makeCompletedPost({
+        output_format: "nextjs",
+        nextjs_publish_status: "pending",
+        updated_at: minutesAgo(40),
+      })
+    );
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Publish stalled")).toBeInTheDocument();
+    });
+    const banner = screen.getByRole("alert");
+    expect(
+      within(banner).getByText("Publishing to Next.js stopped responding")
+    ).toBeInTheDocument();
+    expect(within(banner).getByText(/no worker is running/i)).toBeInTheDocument();
+  });
+
+  it("leaves a publish that is still inside the window alone", async () => {
+    mockGet.mockResolvedValue(
+      makeCompletedPost({
+        output_format: "wordpress",
+        wp_publish_status: "publishing",
+        updated_at: minutesAgo(3),
+        execution_logs: [startEntry(minutesAgo(2))],
+      })
+    );
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Publishing...")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Publish stalled")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  /**
+   * The case the item is actually about: nobody reloads. A publish that dies
+   * publishes no further event, this page has no poll, and the render that
+   * would have to notice is the one that never happens again.
+   */
+  it("flips to stalled on a page nothing else touches", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockGet.mockResolvedValue(
+        makeCompletedPost({
+          output_format: "wordpress",
+          wp_publish_status: "publishing",
+          updated_at: minutesAgo(14),
+          execution_logs: [startEntry(minutesAgo(14))],
+        })
+      );
+      renderWithProviders(<PostDetailPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Publishing...")).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2 * 60_000);
+      });
+
+      expect(screen.getByText("Publish stalled")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

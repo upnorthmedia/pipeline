@@ -63,11 +63,19 @@ import {
 import { STAGE_LABELS, stageLabel } from "@/lib/stages";
 import { deriveRunState, resumeStage } from "@/lib/run-state";
 import { buildRunTrace, type LiveImage } from "@/lib/run-trace";
-import { lastPublishError } from "@/lib/publish-report";
+import { lastPublishError, publishStall } from "@/lib/publish-report";
 import { PUBLISH_TARGET_LABELS, publishTargetOf } from "@/lib/publishing";
 import { plainMessage } from "@/lib/plain-message";
 import { useSSE, type SSEEvent } from "@/hooks/use-sse";
 import { toast } from "sonner";
+
+/**
+ * How often the page re-derives the stall window while a publish is in flight.
+ * Well under `PUBLISH_STALL_AFTER_MS`, because the point of the tick is that
+ * the banner appears without a reload, and coarse enough that a tab left open
+ * on a publishing post is doing nothing measurable.
+ */
+const PUBLISH_STALL_TICK_MS = 30_000;
 
 const STAGE_CONTENT_FIELDS: Record<PipelineStage, keyof Post> = {
   research: "research_content",
@@ -112,6 +120,29 @@ export default function PostDetailPage() {
   // stage's progress while it is the stage in flight.
   const [liveImages, setLiveImages] = useState<LiveImage[]>([]);
   const lastSavedRef = useRef<string>("");
+
+  /**
+   * The clock behind the stall banner.
+   *
+   * A publish that dies with its worker publishes no further event, and this
+   * page has no poll, so the render that would have to notice the stall window
+   * closing is a render that never happens: the tab sits on "Publishing..."
+   * until the reader reloads by hand. This interval is the only thing that
+   * makes that render happen, and it runs only while a publish is in flight,
+   * so a post nobody is publishing schedules nothing.
+   */
+  const [now, setNow] = useState(() => Date.now());
+  const publishInFlight =
+    post?.wp_publish_status === "pending" ||
+    post?.wp_publish_status === "publishing" ||
+    post?.nextjs_publish_status === "pending" ||
+    post?.nextjs_publish_status === "publishing";
+  useEffect(() => {
+    if (!publishInFlight) return;
+    setNow(Date.now());
+    const tick = setInterval(() => setNow(Date.now()), PUBLISH_STALL_TICK_MS);
+    return () => clearInterval(tick);
+  }, [publishInFlight]);
 
   /**
    * A failed load used to raise a toast and push the browser back to `/`, so a
@@ -275,12 +306,21 @@ export default function PostDetailPage() {
       }
       if (event.event === "publish_start") {
         const target = (event as Record<string, unknown>).target;
+        // The frame is a worker saying it has the post in hand, which is the
+        // same thing the `publish_start` entry behind it says. Stamping the
+        // clock with it keeps the stall window measured from the pickup rather
+        // than from the queueing, on a page that will not refetch the row.
+        const pickedUpAt = new Date().toISOString();
         if (target === "nextjs") {
           toast.info("Publishing to Next.js...");
-          setPost((prev) => prev ? { ...prev, nextjs_publish_status: "publishing" } : prev);
+          setPost((prev) =>
+            prev ? { ...prev, nextjs_publish_status: "publishing", updated_at: pickedUpAt } : prev
+          );
         } else {
           toast.info("Publishing to WordPress...");
-          setPost((prev) => prev ? { ...prev, wp_publish_status: "publishing" } : prev);
+          setPost((prev) =>
+            prev ? { ...prev, wp_publish_status: "publishing", updated_at: pickedUpAt } : prev
+          );
         }
       }
       if (event.event === "publish_complete") {
@@ -451,9 +491,14 @@ export default function PostDetailPage() {
       toast.info(`Queued to publish to ${target}.`);
       setPost((prev) => {
         if (!prev) return prev;
+        // `updated_at` comes along because the handler stamped it, and because
+        // it is the clock the stall banner reads: leaving the old value here
+        // would put "Publish stalled" back on the row the instant the retry
+        // was pressed.
+        const requestedAt = new Date().toISOString();
         return prev.output_format === "nextjs"
-          ? { ...prev, nextjs_publish_status: "pending" }
-          : { ...prev, wp_publish_status: "pending" };
+          ? { ...prev, nextjs_publish_status: "pending", updated_at: requestedAt }
+          : { ...prev, wp_publish_status: "pending", updated_at: requestedAt };
       });
     } catch (e) {
       toast.error(apiErrorMessage(e, `Could not start publishing to ${target}.`));
@@ -543,6 +588,26 @@ export default function PostDetailPage() {
       ? (lastPublishError(post.execution_logs) ??
         "The run recorded no reason. The worker log has the detail.")
       : null;
+  /**
+   * A publish that stopped moving, which is a different thing from one that
+   * failed: no reason was recorded, because the process that would have
+   * recorded one is gone.
+   *
+   * Gated on the destination the post's `output_format` names, for the reason
+   * `publishTarget` is: a status column left over from a destination this post
+   * no longer publishes to is not something to raise an alarm about.
+   */
+  const publishStalled = publishTarget
+    ? publishStall({
+        status: publishTarget.status,
+        updatedAt: post.updated_at,
+        executionLogs: post.execution_logs,
+        now,
+      })
+    : null;
+  const wpStalled = publishTarget?.target === "wordpress" ? publishStalled : null;
+  const nextjsStalled = publishTarget?.target === "nextjs" ? publishStalled : null;
+
   // The stage the header's re-run will start from, derived the way the handler
   // derives it so the button cannot promise a stage the run does not begin at.
   const resumeFrom = resumeStage(post.stage_status);
@@ -591,12 +656,12 @@ export default function PostDetailPage() {
                   </Badge>
                 </a>
               )}
-              {post.wp_publish_status === "pending" && (
+              {post.wp_publish_status === "pending" && !wpStalled && (
                 <Badge variant="outline" className="text-amber-600 border-amber-600">
                   Queued to publish
                 </Badge>
               )}
-              {post.wp_publish_status === "publishing" && (
+              {post.wp_publish_status === "publishing" && !wpStalled && (
                 <Badge variant="outline">
                   <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                   Publishing...
@@ -615,12 +680,12 @@ export default function PostDetailPage() {
                   )}
                 </Badge>
               )}
-              {post.nextjs_publish_status === "pending" && (
+              {post.nextjs_publish_status === "pending" && !nextjsStalled && (
                 <Badge variant="outline" className="text-amber-600 border-amber-600">
                   Queued to publish
                 </Badge>
               )}
-              {post.nextjs_publish_status === "publishing" && (
+              {post.nextjs_publish_status === "publishing" && !nextjsStalled && (
                 <Badge variant="outline">
                   <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                   Publishing to Next.js...
@@ -628,6 +693,14 @@ export default function PostDetailPage() {
               )}
               {post.nextjs_publish_status === "failed" && (
                 <Badge variant="destructive">Publish failed</Badge>
+              )}
+              {/* One badge for both destinations: only the one the post's
+                  format names can be stalled, so only one of them renders. */}
+              {publishStalled && (
+                <Badge variant="outline" className="text-amber-600 border-amber-600">
+                  <AlertCircle className="h-3 w-3 mr-1" />
+                  Publish stalled
+                </Badge>
               )}
               {saving && (
                 <span className="text-xs text-muted-foreground animate-pulse">
@@ -732,6 +805,33 @@ export default function PostDetailPage() {
               Publishing to {publishTarget.label} failed
             </p>
             <p className="mt-0.5 text-sm text-muted-foreground">{publishFailure}</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={handlePublish}>
+            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+            Try publishing again
+          </Button>
+        </div>
+      )}
+
+      {/*
+        A publish that went quiet. It reads differently from the failure banner
+        above on purpose: a failure has a reason the step recorded, and this
+        has none, because whatever was going to record one is gone. What the
+        reader gets instead is which of the two ways it went quiet, and the
+        retry the header's Publish button does not offer a row whose status
+        column is stuck on `publishing`.
+      */}
+      {publishTarget && publishStalled && (
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 px-4 py-3"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">
+              Publishing to {publishTarget.label} stopped responding
+            </p>
+            <p className="mt-0.5 text-sm text-muted-foreground">{publishStalled.reason}</p>
           </div>
           <Button variant="outline" size="sm" onClick={handlePublish}>
             <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
