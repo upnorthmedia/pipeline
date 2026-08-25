@@ -11,6 +11,7 @@ vi.mock("@/lib/api", async () => {
     apiKeys: {
       get: vi.fn(),
       update: vi.fn(),
+      reveal: vi.fn(),
     },
     rules: {
       list: vi.fn(),
@@ -454,6 +455,117 @@ describe("SettingsPage async states", () => {
     });
     expect(screen.getByLabelText("blog-research.md")).toHaveAttribute("name", "rule-content");
   });
+  // The eye next to a key the operator has just pasted is asking "did that
+  // paste land intact", which the browser can answer on its own. Calling the
+  // reveal endpoint for it returned the *stored* key over a typed one and
+  // failed outright when the endpoint said no.
+  it("shows a key typed into the field without asking the server for it", async () => {
+    const user = userEvent.setup();
+    const reveal = vi.fn();
+    vi.mocked(apiKeys).reveal = reveal;
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Anthropic")).toBeInTheDocument();
+    });
+
+    const input = screen.getByLabelText("Anthropic");
+    await user.type(input, "sk-ant-typed-1234");
+    expect(input).toHaveAttribute("type", "password");
+
+    await user.click(
+      screen.getByRole("button", { name: "Toggle Anthropic key visibility" })
+    );
+
+    expect(reveal).not.toHaveBeenCalled();
+    expect(input).toHaveAttribute("type", "text");
+    expect(input).toHaveValue("sk-ant-typed-1234");
+  });
+
+  // Google's current keys start `AQ.`, not the `AIza` of the AI Studio format
+  // this page was written against. A prefix guess that goes stale must not be
+  // able to refuse a key the provider itself accepts.
+  it("saves a current-format Gemini key rather than calling it malformed", async () => {
+    const user = userEvent.setup();
+    mockApiKeysUpdate.mockResolvedValue({
+      anthropic: { provider: "anthropic", configured: true, source: "db" as const, hint: "...ab12", valid: null },
+      perplexity: { provider: "perplexity", configured: false, source: "none" as const, hint: "", valid: null },
+      gemini: { provider: "gemini", configured: true, source: "db" as const, hint: "...alue", valid: true },
+    });
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Gemini")).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByLabelText("Gemini"), "AQ.Ab8RN6JTestKeyValue");
+    await user.tab();
+
+    expect(screen.queryByText(/Expected prefix/)).not.toBeInTheDocument();
+    const save = screen.getByRole("button", { name: /Save & Validate/ });
+    expect(save).toBeEnabled();
+
+    await user.click(save);
+    await waitFor(() => {
+      expect(mockApiKeysUpdate).toHaveBeenCalledWith({
+        gemini: "AQ.Ab8RN6JTestKeyValue",
+      });
+    });
+  });
+
+  // The same thought one step further: an unrecognised prefix is a warning,
+  // not a verdict. Only the provider can say whether a key works, and the save
+  // is what asks it.
+  it("warns about an unrecognised prefix without refusing to save", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Anthropic")).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByLabelText("Anthropic"), "bad-key");
+    await user.tab();
+
+    await waitFor(() => {
+      expect(screen.getByText("Expected prefix: sk-ant-")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: /Save & Validate/ })).toBeEnabled();
+  });
+
+  // A reveal that fails says nothing about the key in the box next to it, so
+  // it has no business disabling the save that would store it.
+  it("still saves a pasted key after a reveal failed", async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiKeys).reveal = vi
+      .fn()
+      .mockRejectedValue(new Error('{"detail":"Forbidden"}'));
+    mockApiKeysUpdate.mockResolvedValue({
+      anthropic: { provider: "anthropic", configured: true, source: "db" as const, hint: "...ab12", valid: null },
+      perplexity: { provider: "perplexity", configured: true, source: "db" as const, hint: "...wxyz", valid: true },
+      gemini: { provider: "gemini", configured: true, source: "db" as const, hint: "...xyz9", valid: true },
+    });
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Anthropic")).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Toggle Anthropic key visibility" })
+    );
+    await waitFor(() => {
+      expect(screen.getByText("Forbidden")).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByLabelText("Perplexity"), "pplx-pasted-wxyz");
+    const save = screen.getByRole("button", { name: /Save & Validate/ });
+    expect(save).toBeEnabled();
+
+    await user.click(save);
+    await waitFor(() => {
+      expect(mockApiKeysUpdate).toHaveBeenCalledWith({
+        perplexity: "pplx-pasted-wxyz",
+      });
+    });
+  });
+
 });
 
 describe("settings loading.tsx", () => {

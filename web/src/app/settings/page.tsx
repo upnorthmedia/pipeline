@@ -48,10 +48,18 @@ const RULE_NAMES = [
   "blog-ready",
 ] as const;
 
+/**
+ * The prefixes each provider has been seen to issue, newest first. They drive
+ * a warning and nothing else: only the provider can say whether a key works,
+ * and `Save & Validate` asks it. Google's current keys start `AQ.` while the
+ * AI Studio ones this page was written against start `AIza`, and a single
+ * hardcoded guess going stale is what turned a working key into a field the
+ * page refused to save.
+ */
 const PROVIDERS = [
-  { key: "anthropic" as const, label: "Anthropic", prefix: "sk-ant-" },
-  { key: "perplexity" as const, label: "Perplexity", prefix: "pplx-" },
-  { key: "gemini" as const, label: "Gemini", prefix: "AIza" },
+  { key: "anthropic" as const, label: "Anthropic", prefixes: ["sk-ant-"] },
+  { key: "perplexity" as const, label: "Perplexity", prefixes: ["pplx-"] },
+  { key: "gemini" as const, label: "Gemini", prefixes: ["AQ.", "AIza"] },
 ] as const;
 
 type ProviderKey = (typeof PROVIDERS)[number]["key"];
@@ -80,6 +88,7 @@ export default function SettingsPage() {
     gemini: false,
   });
   const [keyErrors, setKeyErrors] = useState<Record<string, string>>({});
+  const [keyWarnings, setKeyWarnings] = useState<Record<string, string>>({});
   const [savingKeys, setSavingKeys] = useState(false);
   const [loadingKeys, setLoadingKeys] = useState(true);
   const [keysError, setKeysError] = useState("");
@@ -158,19 +167,17 @@ export default function SettingsPage() {
   useEffect(() => loadRule(activeRule), [activeRule, loadRule]);
 
   const validateFormat = (provider: ProviderKey, value: string) => {
-    if (!value) {
-      setKeyErrors((prev) => ({ ...prev, [provider]: "" }));
-      return;
-    }
     const config = PROVIDERS.find((p) => p.key === provider);
-    if (config && !value.startsWith(config.prefix)) {
-      setKeyErrors((prev) => ({
-        ...prev,
-        [provider]: `Expected prefix: ${config.prefix}`,
-      }));
-    } else {
-      setKeyErrors((prev) => ({ ...prev, [provider]: "" }));
-    }
+    const recognised =
+      !value ||
+      !config ||
+      config.prefixes.some((prefix) => value.startsWith(prefix));
+    setKeyWarnings((prev) => ({
+      ...prev,
+      [provider]: recognised
+        ? ""
+        : `Expected prefix: ${config.prefixes.join(" or ")}`,
+    }));
   };
 
   const handleToggleReveal = async (provider: ProviderKey) => {
@@ -178,6 +185,14 @@ export default function SettingsPage() {
       // Hide: clear revealed key
       setKeyVisible((prev) => ({ ...prev, [provider]: false }));
       setRevealedKeys((prev) => ({ ...prev, [provider]: "" }));
+      return;
+    }
+
+    // A key the operator has just pasted is already here. Asking the server to
+    // reveal one would answer with the *stored* key over the top of it, and
+    // fail outright wherever the reveal endpoint declines.
+    if (keyValues[provider]) {
+      setKeyVisible((prev) => ({ ...prev, [provider]: true }));
       return;
     }
 
@@ -212,6 +227,8 @@ export default function SettingsPage() {
       setKeyStatuses(result);
       // Clear typed values and any revealed keys
       setKeyValues({ anthropic: "", perplexity: "", gemini: "" });
+      // The warnings belonged to the text that is no longer in the fields.
+      setKeyWarnings({});
       setRevealedKeys({ anthropic: "", perplexity: "", gemini: "" });
       setKeyVisible({ anthropic: false, perplexity: false, gemini: false });
 
@@ -252,7 +269,6 @@ export default function SettingsPage() {
   };
 
   const hasKeyChanges = PROVIDERS.some((p) => keyValues[p.key].length > 0);
-  const hasFormatErrors = Object.values(keyErrors).some((e) => e);
   const configuredCount = PROVIDERS.filter(
     (p) => keyStatuses[p.key]?.configured
   ).length;
@@ -367,11 +383,9 @@ export default function SettingsPage() {
                         name={`key-${provider.key}`}
                         autoComplete="off"
                         type={
-                          keyVisible[provider.key] && !keyValues[provider.key]
-                            ? "text"
-                            : keyValues[provider.key]
-                              ? "password"
-                              : "text"
+                          !keyVisible[provider.key] && keyValues[provider.key]
+                            ? "password"
+                            : "text"
                         }
                         placeholder={
                           status?.configured
@@ -435,6 +449,11 @@ export default function SettingsPage() {
                         {keyErrors[provider.key]}
                       </p>
                     )}
+                    {keyWarnings[provider.key] && (
+                      <p className="text-xs text-amber-500">
+                        {keyWarnings[provider.key]}
+                      </p>
+                    )}
                   </div>
                 );
               })}
@@ -448,7 +467,7 @@ export default function SettingsPage() {
                 )}
                 <Button
                   onClick={handleSaveKeys}
-                  disabled={savingKeys || !hasKeyChanges || hasFormatErrors}
+                  disabled={savingKeys || !hasKeyChanges}
                 >
                   {savingKeys ? (
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
