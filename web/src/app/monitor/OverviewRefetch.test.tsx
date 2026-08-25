@@ -166,7 +166,7 @@ describe("OverviewTab feed refetching", () => {
     expect(mockStatus).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["stage_start", "stage_complete", "stage_error", "pipeline_complete"])(
+  it.each(["stage_start", "stage_complete", "stage_error", "pipeline_complete", "run_paused"])(
     "treats %s as a frame that changes the numbers",
     async (event) => {
       await mountLoaded();

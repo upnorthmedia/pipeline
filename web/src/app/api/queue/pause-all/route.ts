@@ -35,6 +35,7 @@ import type { PostStage, StageStatusMap } from "@/lib/api"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import { withServerError } from "@/lib/route-error"
 import { deriveRunState, PAUSABLE_RUN_STATES } from "@/lib/run-state"
+import { announceRunPaused } from "@/mastra/announce-pause"
 import { CURRENT_STAGE_PAUSED, STAGES } from "@/mastra/state"
 
 /** Python's `["pending", *STAGES]`. */
@@ -73,6 +74,11 @@ async function postHandler(request: Request): Promise<Response> {
           pausable.map((row) => row.id),
         ),
       )
+    // One frame per row the write actually moved, after the commit and for the
+    // rows that passed both guards only. A reader holding the queue-wide feed
+    // open filters it by post id, so a frame for a row this call left alone
+    // would make it refetch a post nothing had happened to.
+    await announceRunPaused(pausable.map((row) => row.id))
   }
 
   return Response.json({ status: CURRENT_STAGE_PAUSED, count: pausable.length }, { status: 200 })

@@ -34,6 +34,7 @@ import { eq, like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, getPool, posts, websiteProfiles } from "@/db"
+import { TOPIC_PIPELINE_EVENTS } from "@/mastra/pipeline-events"
 import { STAGE_CONTENT_MAP } from "@/mastra/state"
 import { ABSENT_POST_ID } from "@/test/absent-ids"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
@@ -144,6 +145,9 @@ const db = getDb()
 const observer = new RedisStreamsPubSub({ url: process.env.REDIS_URL! })
 const started: StartEvent[] = []
 
+/** Everything published onto the dashboard's own feed while a test runs. */
+const frames: { event: string; post_id: string }[] = []
+
 let user: TestSession
 let other: TestSession
 
@@ -240,11 +244,25 @@ async function waitForStart(
   }
 }
 
+/** Resolves once `event` for `postId` reaches the feed a browser subscribes to. */
+async function waitForFrame(postId: string, event: string, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const match = frames.find((frame) => frame.post_id === postId && frame.event === event)
+    if (match) return match
+    if (Date.now() > deadline) throw new Error(`no ${event} for ${postId} within ${timeoutMs}ms`)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+}
+
 beforeAll(async () => {
   // No `group`, so this subscription is its own fan-out consumer group and can
   // never take an event away from a worker.
   await observer.subscribe("workflows", (event: unknown) => {
     started.push(event as StartEvent)
+  })
+  await observer.subscribe(TOPIC_PIPELINE_EVENTS, (event: unknown) => {
+    frames.push((event as { data: { event: string; post_id: string } }).data)
   })
   await clearFixtures()
   await deleteTestSessions(PREFIX)
@@ -260,6 +278,7 @@ afterEach(async () => {
   njStart.mode = "skip"
   njStart.calls.length = 0
   started.length = 0
+  frames.length = 0
   await clearFixtures()
 })
 
@@ -918,6 +937,39 @@ describe("POST /api/posts/{post_id}/pause", () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ status: "paused", post_id: post.id })
     expect((await readPost(post.id)).currentStage).toBe("paused")
+  })
+
+  /**
+   * Ledger item P4.4a. Every other pipeline control announces its write with
+   * the run it starts, and this one starts nothing, so the row changed with
+   * nobody told: a second tab kept the post on screen as running until its
+   * reader reloaded by hand.
+   */
+  it("announces the pause on the feed a browser is holding open", async () => {
+    const post = await insertPost(user.userId, {
+      currentStage: "outline",
+      stageStatus: { research: "complete", outline: "running" },
+    })
+    const untouched = await insertPost(user.userId, { currentStage: "write" })
+
+    await pause(post.id, user.cookie)
+
+    expect(await waitForFrame(post.id, "run_paused")).toMatchObject({
+      event: "run_paused",
+      post_id: post.id,
+    })
+    expect(frames.filter((frame) => frame.post_id === untouched.id)).toEqual([])
+  })
+
+  it("announces nothing for a post the caller may not pause", async () => {
+    const post = await insertPost(other.userId, { currentStage: "write" })
+
+    expect((await pause(post.id, user.cookie)).status).toBe(404)
+
+    // No positive frame to wait for, so the wait is the negative: long enough
+    // that the owned pause above would have landed several times over.
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(frames.filter((frame) => frame.post_id === post.id)).toEqual([])
   })
 
   it("enqueues nothing, unlike every other pipeline-control endpoint", async () => {

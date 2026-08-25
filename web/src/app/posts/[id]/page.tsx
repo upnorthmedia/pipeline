@@ -288,10 +288,15 @@ export default function PostDetailPage() {
       // it is the one that was missing: a run that parks at a gate publishes
       // nothing else, and this page has no poll, so the approval below stayed
       // invisible until the reader reloaded by hand.
+      // `run_paused` is here for the same reason `stage_review` is: a pause
+      // stops the run without starting anything, so no stage frame follows it
+      // and this page has no poll. Every reader but the tab that pressed the
+      // button kept the run on screen as running until it reloaded.
       if (
         event.event === "stage_complete" ||
         event.event === "stage_error" ||
         event.event === "stage_review" ||
+        event.event === "run_paused" ||
         event.event === "pipeline_complete"
       ) {
         fetchPost();

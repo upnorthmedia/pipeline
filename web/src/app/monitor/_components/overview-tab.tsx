@@ -66,6 +66,9 @@ const AGGREGATE_EVENTS = new Set([
   "stage_complete",
   "stage_error",
   "pipeline_complete",
+  // A pause writes `current_stage` and starts nothing, so this frame is the
+  // only one that accompanies it. Both aggregates group over that column.
+  "run_paused",
 ]);
 
 /**

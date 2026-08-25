@@ -846,6 +846,51 @@ describe("PostDetailPage review gates", () => {
     );
   });
 
+  /**
+   * The frame the two pause endpoints publish. A pause is the one pipeline
+   * control that starts nothing, so before ledger item P4.4a it announced
+   * itself to nobody: the tab that pressed the button refetched by hand and
+   * every other reader kept the run on screen as running until it reloaded.
+   */
+  it("refetches when a run announces that it has been paused", async () => {
+    mockGet.mockResolvedValue(
+      makePost({
+        current_stage: "outline",
+        stage_status: { research: "complete", outline: "running" },
+      })
+    );
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => expect(screen.getByText("Running Outline")).toBeInTheDocument());
+    const before = mockGet.mock.calls.length;
+
+    mockGet.mockResolvedValue(
+      makePost({
+        current_stage: "paused",
+        stage_status: { research: "complete", outline: "running" },
+      })
+    );
+    await emitSSE({ event: "run_paused", post_id: "post-1" });
+
+    await waitFor(() => expect(mockGet.mock.calls.length).toBeGreaterThan(before));
+    await waitFor(() => expect(screen.getByText("Pausing")).toBeInTheDocument());
+  });
+
+  it("ignores a pause announced for a different post", async () => {
+    mockGet.mockResolvedValue(
+      makePost({
+        current_stage: "outline",
+        stage_status: { research: "complete", outline: "running" },
+      })
+    );
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => expect(screen.getByText("Running Outline")).toBeInTheDocument());
+    const before = mockGet.mock.calls.length;
+
+    await emitSSE({ event: "run_paused", post_id: "another-post" });
+
+    expect(mockGet.mock.calls.length).toBe(before);
+  });
+
   it("shows no approval on a post that is not parked", async () => {
     mockGet.mockResolvedValue(makeCompletedPost());
     renderWithProviders(<PostDetailPage />);

@@ -23,6 +23,7 @@ import { eq, like } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { closeDb, getDb, posts, websiteProfiles } from "@/db"
+import { TOPIC_PIPELINE_EVENTS } from "@/mastra/pipeline-events"
 import { STAGES } from "@/mastra/state"
 import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
 
@@ -59,6 +60,9 @@ type StartEvent = { type: string; data?: { workflowId?: string; prevResult?: { o
 const db = getDb()
 const observer = new RedisStreamsPubSub({ url: process.env.REDIS_URL! })
 const started: StartEvent[] = []
+
+/** Everything published onto the dashboard's own feed while a test runs. */
+const frames: { event: string; post_id: string }[] = []
 
 let user: TestSession
 let other: TestSession
@@ -135,11 +139,25 @@ async function waitForStart(postId: string, timeoutMs = 15_000): Promise<StartEv
   }
 }
 
+/** Resolves once `run_paused` for `postId` reaches the feed a browser subscribes to. */
+async function waitForPauseFrame(postId: string, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const match = frames.find((frame) => frame.post_id === postId && frame.event === "run_paused")
+    if (match) return match
+    if (Date.now() > deadline) throw new Error(`no run_paused for ${postId} within ${timeoutMs}ms`)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+}
+
 beforeAll(async () => {
   // No `group`, so this subscription is its own fan-out consumer group and can
   // never take an event away from a worker.
   await observer.subscribe("workflows", (event: unknown) => {
     started.push(event as StartEvent)
+  })
+  await observer.subscribe(TOPIC_PIPELINE_EVENTS, (event: unknown) => {
+    frames.push((event as { data: { event: string; post_id: string } }).data)
   })
   await clearFixtures()
   await deleteTestSessions(PREFIX)
@@ -153,6 +171,7 @@ afterEach(async () => {
   start.mode = "skip"
   start.calls.length = 0
   started.length = 0
+  frames.length = 0
   await clearPosts()
 })
 
@@ -242,6 +261,24 @@ describe("POST /api/queue/pause-all", () => {
     })
     expect(await body(await pause(user.cookie))).toEqual({ status: "paused", count: 0 })
     expect((await readPost(id)).currentStage).toBe("research")
+  })
+
+  /**
+   * Ledger item P4.4a. The write is the whole of what this endpoint does, so
+   * without a frame per paused row the monitor and every open post page kept
+   * reporting runs that had just been stopped.
+   */
+  it("announces one pause per row it actually paused", async () => {
+    const paused = await insertPost(profileId, { currentStage: "write" })
+    const parked = await insertPost(profileId, {
+      currentStage: "outline",
+      stageStatus: { research: "complete", outline: "review" },
+    })
+
+    expect(await body(await pause(user.cookie))).toEqual({ status: "paused", count: 1 })
+
+    await waitForPauseFrame(paused)
+    expect(frames.filter((frame) => frame.post_id === parked)).toEqual([])
   })
 
   it("still pauses a stage in flight beside a stage that failed earlier", async () => {

@@ -968,10 +968,29 @@ criterion 9's bar are named at the bottom with what is owed to `SUMMARY.md` inst
       tick while a publish is in flight is what makes the banner appear without a reload,
       which is the whole case: a dead publish publishes no event.
       `ui/p43c-*.png`. [evidence](evidence/p4.md#p43)
-- [ ] **P4.4** A run that stops for a pause publishes no event, so a second tab shows it
-      running until the reader reloads. A pause during `ready` also leaves all six stages
-      complete with `current_stage = "paused"` and no `completed_at`, which reads as
-      unfinished.
+- [x] **P4.4a** A pause reached no reader but the one that pressed it. Every other pipeline
+      control announces its write with the `stage_start` of the run it starts, and the pause
+      starts nothing by design (P2.115 made it a signal the next stage step reads), so
+      `current_stage = "paused"` was committed with nobody told: `handlePause()` refetches in
+      the tab that pressed the button, which is why this was invisible there, and a second
+      tab, `/monitor` between two of its ten-second polls, and the eleven rows a queue-strip
+      Pause All moves at once all kept reading as running. `pauseGate()`'s `log` frame is a
+      different fact at a later time (the worker stopping, not the row changing) and no
+      reader refetches on it. `announceRunPaused()` in `src/mastra/announce-pause.ts` now
+      publishes one `run_paused` per row the write actually moved, from `web`, after the
+      commit, carrying no stage because the pause overwrote it; the three readers that need
+      it gained the name. Proven on a real row by sending the pause from `curl` while
+      watching the page: before, the row said paused and the page said `Running Write` with a
+      Pause button; after, it read `Pausing` with no interaction in the tab, and the monitor
+      strip went `Running: 1 / Paused: 0` to `Running: 0 / Paused: 1` two seconds later with
+      the frame listed in its activity feed. `ui/p44a-*.png`.
+      [evidence](evidence/p4.md#p44a)
+- [ ] **P4.4b** A pause during `ready` leaves all six stages complete, `current_stage =
+      "paused"` and no `completed_at`, because `pipeline-complete` reads the pause and skips
+      the stamp, the auto-publish and the `pipeline_complete` frame (deliberate, P2.115). The
+      row then reads "Paused / The run stopped here. Start it again to carry on from this
+      stage", which is wrong twice: there is no stage left to carry on from, and what the
+      post actually lost is the completion stamp and its publish. Split from P4.4.
 - [ ] **P4.5** `stage_review` is a live frame only, never written to `execution_logs`, so a
       reader who opens a post after the gate was released sees no trace that the run ever
       waited, and neither does the run trace.

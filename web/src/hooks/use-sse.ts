@@ -42,6 +42,10 @@ const NAMED_EVENTS = [
   "stage_complete",
   "stage_error",
   "pipeline_complete",
+  // The two pause endpoints publish this one from the `web` process rather
+  // than from a step: a pause stops the run without starting anything, so it
+  // is the one row change no stage frame accompanies.
+  "run_paused",
   "publish_start",
   "publish_complete",
   "publish_error",

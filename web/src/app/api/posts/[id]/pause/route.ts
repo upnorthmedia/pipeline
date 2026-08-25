@@ -20,9 +20,12 @@
  * The stage the post was on is still overwritten rather than remembered, which
  * is why `POST /api/queue/resume-all` recovers it from `stage_status`.
  *
- * It is also the one pipeline-control endpoint that enqueues nothing.
+ * It is also the one pipeline-control endpoint that enqueues nothing, which is
+ * why it has to announce itself: every other one is announced by the
+ * `stage_start` of the run it starts. `announceRunPaused()` records the rest.
  */
 import { getDb, posts } from "@/db"
+import { announceRunPaused } from "@/mastra/announce-pause"
 import { CURRENT_STAGE_PAUSED } from "@/mastra/state"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import { withServerError } from "@/lib/route-error"
@@ -50,6 +53,11 @@ async function postHandler(
     .returning({ id: posts.id })
 
   if (updated.length === 0) return postNotFound()
+
+  // Row first, then the frame, the order every publisher in this app uses: a
+  // browser reacts to it by refetching the post and must not read a row that
+  // still says the run is moving.
+  await announceRunPaused([updated[0].id])
 
   return Response.json({ status: CURRENT_STAGE_PAUSED, post_id: updated[0].id }, { status: 200 })
 }

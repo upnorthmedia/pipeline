@@ -74,14 +74,20 @@
   offering to change them. A post parked at a gate can be approved, and a post that should
   never have had one has to be recreated. Found under P2.114.
 
-- [confirmed] 2026-08-24 A run that stops for a pause publishes no event, so a second tab
-  watching the same post shows it running until the reader reloads. Pausing itself is a real
-  control signal since polish ledger P2.115 (every stage step ends the run in front of itself,
-  and `currentStageUnlessPaused()` in `web/src/mastra/post-state.ts` stops the finishing stage
-  erasing the flag), and the tab that made the request refetches, but nothing goes onto the
-  bus: `stage_review` got a frame under P2.109b and a pause did not. Also unsaid on screen: a
-  pause during `ready` leaves all six stages complete with `current_stage = "paused"` and no
-  `completed_at`, which reads as unfinished. Found while closing P2.115.
+- [confirmed] 2026-08-24 A pause during `ready` leaves all six stages complete with
+  `current_stage = "paused"` and no `completed_at`, so the row reads as unfinished. The run
+  stopped in front of `pipeline-complete`, which is deliberate (P2.115: that step is where the
+  stamp, the auto-publish and the `pipeline_complete` frame live), but `deriveRunState()` then
+  says "Paused / The run stopped here. Start it again to carry on from this stage" over a post
+  with no stage left to carry on from, and does not say the post was never marked complete or
+  published. Polish ledger P4.4b. The other half of this entry, the missing event, was fixed
+  under P4.4a.
+
+- [confirmed] 2026-08-24 The posts list at `/` holds no event feed open, so a pause, a stall
+  or a stage that finished elsewhere is invisible on it until the reader navigates or reloads.
+  `run_paused` (P4.4a) and `publishStall()` (P4.3) are both derivations the list would use;
+  the list subscribes to nothing at all. Same reader gap polish ledger P4.9 names for a
+  stalled publish. Found while closing P4.4a.
 
 - [investigate] 2026-08-24 A retry of a WordPress publish that died mid-flight can create a
   second post on the site. `wp_post_id` is written only after `createPost` returns, so an
