@@ -7,9 +7,10 @@
  * writes and sign the cookie with the running instance's own secret, so
  * `auth.api.getSession()` validates it exactly as it would a browser's.
  *
- * Sign-up is deliberately not used to mint the session: the Stripe plugin's
- * `createCustomerOnSignUp` would make an outbound Stripe call on every test
- * user.
+ * Sign-up is deliberately not used to mint the session: it hashes a password
+ * per user, and where `STRIPE_SECRET_KEY` is set the Stripe plugin's
+ * `createCustomerOnSignUp` would make an outbound Stripe call for each one.
+ * (With no key that hook no longer runs at all; see `src/lib/auth.ts`.)
  *
  * Requires `docker compose up -d db` and `node --env-file=../.env
  * scripts/auth-migrate.mts --apply`.

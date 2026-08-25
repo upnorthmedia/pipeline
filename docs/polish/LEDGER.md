@@ -727,19 +727,29 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       `ensureMastraStorage()` moved to `src/lib/` and runs inside the pre-deploy hook, which is
       on both services precisely so no process opens a store against a database that has no
       `mastra_*` tables. [evidence](evidence/p2.md#p277b-ii)
-- [ ] **P2.100** `[investigate 2026-08-24]` `pnpm auth:migrate --apply` against a fresh
+- [x] **P2.100** `[investigate 2026-08-24]` `pnpm auth:migrate --apply` against a fresh
       database creates no `subscription` table, though `src/lib/auth.ts` mounts the
-      `@better-auth/stripe` plugin and `schema-parity.ts` names the table. Either the plugin
-      only creates it with real Stripe credentials, or a fresh database is missing a table the
-      billing path queries at runtime.
+      `@better-auth/stripe` plugin and `schema-parity.ts` names the table. Does not reproduce
+      as a defect and was deleted rather than fixed: the plugin puts `subscription` in its
+      schema only under `subscription: { enabled: true }`, which nothing here sets, and the
+      same flag gates the six endpoints that would read it, so there is no billing path to be
+      short a table. The plugin's one unconditional contribution, `auth_users.stripeCustomerId`,
+      is present. Both facts are now asserted on the scratch database in
+      `migration-scripts.test.ts`. [evidence](evidence/p2.md#p2100-and-p2102)
 - [ ] **P2.101** `[confirmed 2026-08-24]` Next 16 deprecates the `middleware` file convention
       and says so on every dev boot. `web/src/middleware.ts` is the only thing between an
       anonymous request and every page, so the rename to `proxy` has to be deliberate, with
       the e2e signed-out redirect test as the guard.
-- [ ] **P2.102** `[confirmed 2026-08-24]` Signing up logs a BetterAuth ERROR on every account
+- [x] **P2.102** `[confirmed 2026-08-24]` Signing up logs a BetterAuth ERROR on every account
       when `STRIPE_SECRET_KEY` is unset: the mock key in `src/lib/auth.ts` reaches Stripe's
       API rather than short-circuiting. The sign-up succeeds, so it is noise, but it is an
-      ERROR line on the happy path of the first thing a user ever does.
+      ERROR line on the happy path of the first thing a user ever does. Measured as six
+      blocked requests to api.stripe.com per sign-up (the SDK retries each of the plugin's two
+      calls) and 2.12s of wall clock in front of the response. Fixed with one flag:
+      `createCustomerOnSignUp` is now `Boolean(process.env.STRIPE_SECRET_KEY)`, so the hook
+      runs only where there is an account to write a customer into. The plugin stays mounted
+      and the schema is unchanged. `stripe-signup.test.ts` stubs `https.request`, so the guard
+      needs no network. [evidence](evidence/p2.md#p2100-and-p2102)
 - [ ] **P2.103** `[investigate 2026-08-24]` CI skips 10 tests where a local run skips 7. The
       three extra are the suites gated on a provider key, which CI has no value for, so the
       real Perplexity, Anthropic and Gemini call paths are the one part of the suite CI cannot
@@ -804,6 +814,12 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       clearing every gate for one post is silently written back to the profile's gates. A
       faithful port of Python's rule that the parity oracle asserts, so changing it is a
       deliberate deviation. Found under P3.1a.
+- [ ] **P2.116** `[investigate 2026-08-24]` `worker-health.test.ts` > "reports a worker that
+      is subscribed and waiting as alive" failed once in a full `pnpm test` run
+      (`expected false to be true` on `workerAlive`) and passed in the next full run with no
+      code between them. One observation, possibly load, but suite determinism is a Done
+      criterion. Found while closing P2.102.
+
 - [x] **P2.C1** Cleanup batch, one iteration for both: P2.79 (no `typecheck` script in
       `web/package.json`, so the objective's literal `pnpm -C web tsc --noEmit` exits 254) and
       P2.105 (five unreferenced starter assets). P2.53 and P2.66 were the other two members

@@ -174,6 +174,25 @@ describe("the documented fresh-database commands", () => {
     expect(stdout).toContain("schema is up to date")
   }, 120_000)
 
+  it("creates no subscription table, and the one Stripe column the app does get", async () => {
+    // P2.100 asked whether a fresh database is short a table the billing path
+    // queries at runtime. It is not. `@better-auth/stripe` puts `subscription`
+    // in its schema only under `subscription: { enabled: true }` (`getSchema`
+    // in `node_modules/@better-auth/stripe/dist/index.mjs`), and `src/lib/
+    // auth.ts` enables neither subscriptions nor any plan, so the plugin
+    // contributes exactly one thing to the schema: `auth_users.stripeCustomerId`.
+    // Its six subscription endpoints are gated on the same flag, so there is no
+    // code path that could read the table either. Asserted here rather than
+    // reasoned about, so that turning subscriptions on lands as a failure in
+    // the file that owns fresh-database shape.
+    expect(await tableNames(scratchPool)).not.toContain("subscription")
+    const { rows } = await scratchPool.query(
+      `select column_name from information_schema.columns
+        where table_name = 'auth_users' and column_name = 'stripeCustomerId'`,
+    )
+    expect(rows).toHaveLength(1)
+  }, 120_000)
+
   it("auth:migrate runs where there is no repo-root .env, which is every image", async () => {
     // The deployed image carries no `.env`: Railway and compose inject the
     // environment directly. A hard `--env-file` makes the script exit before it

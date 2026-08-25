@@ -32,8 +32,12 @@ export type SchemaShape = Record<string, Record<string, ColumnShape>>
 /**
  * Tables in the `public` schema that the pipeline schema does not own, so the
  * parity check must not report them as unexpected. BetterAuth creates `auth_*`
- * (see `src/lib/auth.ts`) plus `subscription` from its Stripe plugin, and Mastra's
- * Postgres storage adapter creates `mastra_*` for workflow run state.
+ * (see `src/lib/auth.ts`), and Mastra's Postgres storage adapter creates
+ * `mastra_*` for workflow run state. `subscription` is listed for the day the
+ * Stripe plugin's billing half is turned on: that plugin puts the table in its
+ * schema only under `subscription: { enabled: true }`, which nothing here sets,
+ * so a fresh database has no such table today (P2.100, pinned by
+ * `src/db/migration-scripts.test.ts`).
  */
 export function isPipelineTable(table: string): boolean {
   if (table.startsWith("auth_")) return false

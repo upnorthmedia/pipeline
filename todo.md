@@ -41,15 +41,6 @@
   column stays nullable for the rows that predate it. Needs a decision on the existing rows:
   leave them, or a one-off cleanup that names them in a migration.
 
-- [investigate] 2026-08-24 `pnpm auth:migrate --apply` against a fresh database reports
-  `tables to create: auth_users, auth_sessions, auth_accounts, auth_verifications` and no
-  `subscription`, but `web/src/lib/auth.ts:77` mounts the `@better-auth/stripe` plugin and both
-  `drizzle/README.md` and `src/db/schema-parity.ts` name `subscription` as a BetterAuth-owned
-  table. Either the plugin only creates it when configured with real Stripe credentials, or a
-  fresh database is missing a table the billing path will query at runtime. Reproduce by hitting
-  whatever reads a subscription on a database built by the documented procedure. Found at polish
-  ledger P0.6a. Ledger item P2.100.
-
 - [confirmed] 2026-08-24 Next 16 deprecates the `middleware` file convention and every dev
   server boot says so: `⚠ The "middleware" file convention is deprecated. Please use "proxy"
   instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy`. `web/src/middleware.ts`
@@ -58,15 +49,12 @@
   e2e suite's signed-out redirect test as the guard. Found at polish ledger P0.6b-i. Ledger
   item P2.101.
 
-- [confirmed] 2026-08-24 Signing up logs a Stripe failure on every account when
-  `STRIPE_SECRET_KEY` is unset: `WARN [Better Auth]: Stripe customers.search failed, falling back
-  to customers.list` then `ERROR [Better Auth]: Failed to create or link Stripe customer: Invalid
-  API Key provided: sk_test_********_key`. The sign-up still succeeds, so this is noise rather
-  than a broken path, but it is an ERROR line on the happy path of the first thing a user ever
-  does, and it means the mock key in `web/src/lib/auth.ts` is reaching Stripe's API rather than
-  short-circuiting. Either skip customer creation when the key is the mock, or make the failure a
-  debug line. Found at polish ledger P0.6b-i, in the CI dry run's e2e log. Ledger item
-  P2.102.
+- [investigate] 2026-08-24 `src/mastra/worker-health.test.ts` > "reports a worker that is
+  subscribed and waiting as alive" failed once in a full `pnpm test` run and passed in the
+  next full run with no code between them (`expected false to be true` on `workerAlive`). One
+  observation only, so it may be load rather than a defect, but the suite's determinism is a
+  Done criterion. Reproduce by running that file repeatedly under a loaded machine before
+  changing anything.
 
 - [investigate] 2026-08-24 CI skips 10 tests where a local run skips 7. The three extra are the
   suites gated on a provider key (`ANTHROPIC_API_KEY`, `PERPLEXITY_API_KEY`, `GEMINI_API_KEY`),

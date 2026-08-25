@@ -31,9 +31,11 @@ Three owners, applied in this order. Only the first is in this folder.
    an already-set `DATABASE_URL_SYNC` still wins, which is what the compose,
    Railway and pre-deploy paths rely on.
 2. **Auth tables** (`auth_users`, `auth_sessions`, `auth_accounts`,
-   `auth_verifications`, `subscription`): `pnpm auth:migrate`. BetterAuth owns
-   these, so they are deliberately absent from `schema.ts` and from the
-   baseline.
+   `auth_verifications`): `pnpm auth:migrate`. BetterAuth owns these, so they
+   are deliberately absent from `schema.ts` and from the baseline. The Stripe
+   plugin adds one column, `auth_users.stripeCustomerId`, and no table: its
+   `subscription` table appears only under `subscription: { enabled: true }`,
+   which `src/lib/auth.ts` does not set (P2.100).
 3. **Workflow run state** (`mastra_*`): created by the `@mastra/pg` storage
    adapter the first time the Mastra instance starts. No command to run, but
    note that this DDL is not safe to run concurrently: two stores initialising
