@@ -52,7 +52,7 @@ import { readyAgent } from "../agents/ready"
 import { researchAgent } from "../agents/research"
 import { writeAgent } from "../agents/write"
 import corpus from "../images/data/image-generation-parity.json"
-import { STAGES, STATUS_COMPLETE, STATUS_REVIEW } from "../state"
+import { MAX_ATTEMPTS, STAGES, STATUS_COMPLETE, STATUS_REVIEW } from "../state"
 import { gateModeFor, stageNeedsReview } from "../steps/stage-io"
 import { imagesWorkflow } from "./images"
 import { pipelineWorkflow } from "./pipeline"
@@ -95,6 +95,17 @@ const AGENT_TEXT = {
 const FIRST_STAGE_POST_ID = "00000000-0000-4000-8000-0000000004c1"
 const IMAGES_POST_ID = "00000000-0000-4000-8000-0000000004c2"
 const SELECTION_POST_ID = "00000000-0000-4000-8000-0000000004c3"
+/** Approved, and then its stage throws, so the engine retries it. */
+const THROWING_POST_ID = "00000000-0000-4000-8000-0000000004c4"
+
+/**
+ * The topic that makes the stubbed research agent throw.
+ *
+ * Keyed off the prompt because the agent mock is shared by every run in this
+ * file and `generate` is handed nothing else that identifies the post. The
+ * topic reaches the prompt through `buildStagePrompt`.
+ */
+const THROWING_TOPIC = "a stage that throws after its gate is released"
 
 const db = getDb()
 let mediaRootDir: string
@@ -142,12 +153,22 @@ let images: GatedRun
  */
 let imageCallsWhileSuspended: number
 let selection: { result: PipelineResult; called: string[] }
+/** The approved-then-throwing run: what it settled as, and the row it left. */
+let afterThrow: {
+  settled: NonNullable<Awaited<ReturnType<typeof pipelineWorkflow.getWorkflowRunById>>>
+  row: typeof posts.$inferSelect
+  researchCalls: number
+}
 
-function seedValues(postId: string, stageSettings: Record<string, string>) {
+function seedValues(
+  postId: string,
+  stageSettings: Record<string, string>,
+  topic = "composable pipelines",
+) {
   return {
     id: postId,
     slug: `review-gates-${postId.slice(-3)}`,
-    topic: "composable pipelines",
+    topic,
     currentStage: "pending",
     stageSettings,
     stageStatus: {},
@@ -210,8 +231,11 @@ beforeAll(async () => {
 
   callOrder = []
   for (const [stage, agent] of Object.entries(agents)) {
-    vi.spyOn(agent, "generate").mockImplementation((async () => {
+    vi.spyOn(agent, "generate").mockImplementation((async (prompt: unknown) => {
       callOrder.push(stage)
+      if (typeof prompt === "string" && prompt.includes(THROWING_TOPIC)) {
+        throw new Error("provider unavailable")
+      }
       return {
         text: AGENT_TEXT[stage as keyof typeof AGENT_TEXT],
         response: { modelId: `stub-${stage}` },
@@ -226,7 +250,7 @@ beforeAll(async () => {
     tokensOut: 11,
   })
 
-  for (const postId of [FIRST_STAGE_POST_ID, IMAGES_POST_ID, SELECTION_POST_ID]) {
+  for (const postId of [FIRST_STAGE_POST_ID, IMAGES_POST_ID, SELECTION_POST_ID, THROWING_POST_ID]) {
     await db.delete(posts).where(eq(posts.id, postId))
   }
   await db.insert(posts).values(seedValues(FIRST_STAGE_POST_ID, settings({ research: "review" })))
@@ -234,6 +258,9 @@ beforeAll(async () => {
   await db
     .insert(posts)
     .values(seedValues(SELECTION_POST_ID, settings(Object.fromEntries(STAGES.map((s) => [s, "review"])))))
+  await db
+    .insert(posts)
+    .values(seedValues(THROWING_POST_ID, settings({ research: "review" }), THROWING_TOPIC))
 
   await storage.init()
   await testMastra.startWorkers()
@@ -288,12 +315,26 @@ beforeAll(async () => {
     called: [],
   }
   selection.called = callOrder
+
+  // The retry path. `STAGE_RETRY_DELAY_MS` is 0 under vitest, so the three
+  // attempts run back to back.
+  callOrder = []
+  const throwingRun = await pipelineWorkflow.createRun()
+  await throwingRun.start({ inputData: { postId: THROWING_POST_ID } })
+  await suspendedRun(throwingRun.runId)
+  await throwingRun.resume({ step: "research", resumeData: { approved: true } })
+  afterThrow = {
+    settled: await settledRun(throwingRun.runId),
+    row: await readPost(THROWING_POST_ID),
+    researchCalls: 0,
+  }
+  afterThrow.researchCalls = callOrder.filter((stage) => stage === "research").length
 }, 180_000)
 
 afterAll(async () => {
   await testMastra.stopWorkers()
   await pubsub.close()
-  for (const postId of [FIRST_STAGE_POST_ID, IMAGES_POST_ID, SELECTION_POST_ID]) {
+  for (const postId of [FIRST_STAGE_POST_ID, IMAGES_POST_ID, SELECTION_POST_ID, THROWING_POST_ID]) {
     await db.delete(posts).where(eq(posts.id, postId))
   }
   await closeDb()
@@ -387,6 +428,33 @@ describe("a full run gated at its first stage", () => {
     expect(row.researchContent).toBe(AGENT_TEXT.research)
     expect(row.readyContent).toBe(AGENT_TEXT.ready)
     expect(row.stageStatus).toEqual(Object.fromEntries(STAGES.map((s) => [s, STATUS_COMPLETE])))
+  })
+})
+
+/**
+ * Ledger item P2.109b, and the half of it that no route can fix.
+ *
+ * The engine does not carry `resumeData` into its retry branch, so an approved
+ * stage that then throws re-enters `execute` with `resumeData` undefined. The
+ * gate would fire again on the same settings that paused it in the first place
+ * and park the run at the gate the reviewer had just released, which reads on
+ * screen as an approval that undid itself. Seen in a browser on a real run
+ * before the fix, with the row going `review` -> `running` -> `review` while
+ * the provider call failed in between.
+ */
+describe("an approved stage that then throws", () => {
+  it("fails the run rather than parking it at the gate again", () => {
+    expect(afterThrow.settled.status).toBe("failed")
+  })
+
+  it("leaves the row on the failure rather than back on review", () => {
+    expect(afterThrow.row.stageStatus?.research).not.toBe(STATUS_REVIEW)
+  })
+
+  it("spends its whole retry budget on the stage, which is what proves it ran", () => {
+    // Three attempts, not one: a re-suspend would have stopped after the
+    // first, because a suspended step is not a failed one.
+    expect(afterThrow.researchCalls).toBe(MAX_ATTEMPTS)
   })
 })
 

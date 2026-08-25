@@ -534,6 +534,33 @@ describe("a stage parked at a review gate", () => {
     expect(eventsFor(GATE_POST_ID, "stage_complete")).toEqual([])
     expect(eventsFor(GATE_POST_ID, "pipeline_complete")).toEqual([])
   })
+
+  /**
+   * Ledger item P2.109b. A suspend published nothing at all, and the dashboard
+   * has no poll: it refetches on `stage_complete`, `stage_error` and
+   * `pipeline_complete`, so a parked run stayed invisible on screen until the
+   * reader reloaded the page by hand. Measured in a browser before this frame
+   * existed.
+   */
+  it("announces that it is waiting, naming the stage and the mode", () => {
+    const events = eventsFor(GATE_POST_ID, "stage_review")
+    expect(events).toHaveLength(1)
+    expect(events[0].data).toMatchObject({
+      event: "stage_review",
+      post_id: GATE_POST_ID,
+      stage: "research",
+      mode: "review",
+      message: "Stage research paused for review",
+    })
+  })
+
+  it("publishes the frame after the row it tells the reader to refetch", () => {
+    // The same ordering `announceStageStart` keeps: a browser reacts to the
+    // frame by refetching the post and must not read a row that still calls
+    // the stage pending. Asserted through the row as it stood when the frame
+    // was delivered, which is what `statusOnDelivery` records.
+    expect(statusOnDelivery[`${GATE_POST_ID}/stage_review/research`]).toBe("review")
+  })
 })
 
 describe("a run that names one stage", () => {

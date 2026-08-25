@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { screen, act, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/render";
 import { RunTrace } from "../run-trace";
 
@@ -183,6 +184,62 @@ describe("RunTrace", () => {
    * said nothing about the step most likely to fail on something outside this
    * app.
    */
+  /**
+   * A gate is the only status on this table that is waiting on the reader
+   * rather than on a machine, so it is the only one that carries a control.
+   * Ledger item P2.109b.
+   */
+  describe("review gate", () => {
+    it("offers to release the stage the run is parked at", async () => {
+      const user = userEvent.setup();
+      const onApprove = vi.fn();
+      renderWithProviders(
+        <RunTrace
+          executionLogs={[complete("research")]}
+          stageStatus={{ research: "complete", outline: "review" }}
+          onApprove={onApprove}
+        />
+      );
+
+      const table = within(screen.getByRole("table"));
+      expect(table.getByText("Nothing runs until you release this stage.")).toBeInTheDocument();
+      await user.click(table.getByRole("button", { name: "Approve Outline" }));
+
+      expect(onApprove).toHaveBeenCalledWith("outline");
+    });
+
+    it("shows no control on a trace nothing can act on", () => {
+      renderWithProviders(
+        <RunTrace
+          executionLogs={[complete("research")]}
+          stageStatus={{ research: "complete", outline: "review" }}
+        />
+      );
+
+      expect(screen.queryByRole("button", { name: /^Approve/ })).not.toBeInTheDocument();
+      // The status itself is still reported, which is what makes the absence
+      // of the button about the handler and not about the row.
+      expect(within(screen.getByRole("table")).getAllByText("Awaiting review").length).toBe(1);
+    });
+
+    it("puts the control on the parked stage and nowhere else", () => {
+      const onApprove = vi.fn();
+      renderWithProviders(
+        <RunTrace
+          executionLogs={[complete("research")]}
+          stageStatus={{ research: "complete", outline: "review", write: "pending" }}
+          onApprove={onApprove}
+        />
+      );
+
+      const buttons = screen
+        .getAllByRole("button")
+        .map((b) => b.textContent)
+        .filter((text) => text?.startsWith("Approve"));
+      expect(buttons).toEqual(["Approve Outline"]);
+    });
+  });
+
   describe("publish leg", () => {
     const wpStart = {
       ts: "2026-08-23T11:00:00.000Z",

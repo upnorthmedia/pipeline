@@ -595,6 +595,18 @@ export const posts = {
       method: "POST",
     }),
 
+  /**
+   * Release the run this post is parked on. 202, because what was accepted is
+   * the resume: the stage it releases then runs in the worker for minutes. A
+   * post with nothing waiting answers 409, which is what a second click looks
+   * like.
+   */
+  approve: (id: string) =>
+    request<{ status: string; stage: PipelineStage; mode: StageMode; post_id: string }>(
+      `/api/posts/${id}/approve`,
+      { method: "POST" }
+    ),
+
   // Publish
   publish: (id: string) =>
     request<{ status: string }>(`/api/posts/${id}/publish`, { method: "POST" }),

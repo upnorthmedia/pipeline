@@ -136,7 +136,14 @@ export const readyStep = createStep({
 
       // The gate sits immediately after the skip check and before anything the
       // stage spends, which is where Python put it: a paused stage bills nothing.
-      const gate = await reviewGate("ready", inputData, state.stageSettings, resumeData)
+      const gate = await reviewGate(
+        mastra,
+        "ready",
+        inputData,
+        state.stageSettings,
+        resumeData,
+        retryCount,
+      )
       if (gate) return suspend(gate)
       await announceStageStart(mastra, "ready", inputData)
       const rules = loadRules("ready")

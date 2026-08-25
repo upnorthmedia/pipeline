@@ -38,6 +38,7 @@ type SSECallback = (event: SSEEvent) => void;
  */
 const NAMED_EVENTS = [
   "stage_start",
+  "stage_review",
   "stage_complete",
   "stage_error",
   "pipeline_complete",

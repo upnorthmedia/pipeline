@@ -403,3 +403,38 @@ export async function clearFailureMarkers(postIds: string[]): Promise<void> {
     .set({ stageLogs: dropErrorLog, updatedAt: new Date() })
     .where(inArray(posts.id, postIds))
 }
+
+/**
+ * Move a row off its review gate, but only if it is still parked on one.
+ *
+ * `markStageForReview` is what put it there, and the worker's
+ * `announceStageStart` is what would normally take it back off: a released run
+ * re-enters the step, the gate short-circuits on `resumeData`, and the row is
+ * written `running`. That write happens in the worker, milliseconds to seconds
+ * after the resume is accepted, and the dashboard polls in between. So the
+ * process that accepted the approval makes the same write itself rather than
+ * leaving the reviewer looking at a stage that still says it is waiting for
+ * them.
+ *
+ * The `stage_status[stage] = 'review'` predicate is the whole point of the
+ * statement: by the time this runs the worker may already have written
+ * `running`, or (for a stage that is nothing but a skip) `complete`, and an
+ * unconditional write would put a finished stage back to `running`. Postgres
+ * evaluates the predicate under the row lock, so the two writers cannot
+ * interleave. Returns whether it moved the row.
+ */
+export async function releaseStageFromReview(postId: string, stage: Stage): Promise<boolean> {
+  const moved = await getDb()
+    .update(posts)
+    .set({
+      stageStatus: mergeStageStatus({ [stage]: STATUS_RUNNING }),
+      currentStage: stage,
+      updatedAt: new Date(),
+    })
+    .where(
+      sql`${posts.id} = ${postId} and ${posts.stageStatus} ->> ${stage} = ${STATUS_REVIEW}`,
+    )
+    .returning({ id: posts.id })
+
+  return moved.length > 0
+}

@@ -6,6 +6,8 @@ import Link from "next/link";
 import {
   AlertCircle,
   ArrowLeft,
+  CheckCircle2,
+  PauseCircle,
   Play,
   RefreshCw,
   RotateCcw,
@@ -251,7 +253,16 @@ export default function PostDetailPage() {
         });
       }
 
-      if (event.event === "stage_complete" || event.event === "stage_error" || event.event === "pipeline_complete") {
+      // `stage_review` is here for the same reason the other three are, and
+      // it is the one that was missing: a run that parks at a gate publishes
+      // nothing else, and this page has no poll, so the approval below stayed
+      // invisible until the reader reloaded by hand.
+      if (
+        event.event === "stage_complete" ||
+        event.event === "stage_error" ||
+        event.event === "stage_review" ||
+        event.event === "pipeline_complete"
+      ) {
         fetchPost();
       }
       // No toast here. `GlobalNotifications` is mounted from the root layout,
@@ -376,6 +387,28 @@ export default function PostDetailPage() {
   };
 
   const handleRetryImages = () => handleRetryStage("images");
+
+  /**
+   * Release the run parked at a review gate. This is the only action on the
+   * page that continues the run that is already waiting: `/run` and `/rerun`
+   * both start a *new* one and leave the parked run suspended forever, which
+   * is what ledger item P2.109 records.
+   *
+   * A 409 is not a failure the user caused. It is what a second click looks
+   * like, and what an approval made in another tab looks like, so it refetches
+   * rather than shouting.
+   */
+  const handleApprove = async (stage: PipelineStage) => {
+    const name = STAGE_LABELS[stage];
+    try {
+      const released = await posts.approve(postId);
+      toast.success(`${STAGE_LABELS[released.stage]} approved`);
+    } catch (e) {
+      toast.error(apiErrorMessage(e, `The ${name} stage could not be approved.`));
+    } finally {
+      fetchPost();
+    }
+  };
 
   /**
    * `POST /restart` clears all six content columns plus `final_html_content`
@@ -699,6 +732,37 @@ export default function PostDetailPage() {
       )}
 
       {/*
+        The one thing on this page that is waiting on the reader rather than on
+        a machine. It sits above the failure banners because a parked run is
+        not broken, it is asking a question, and nothing else moves until it is
+        answered. `runState.reviewStages` is the same derivation the badge in
+        the header uses, so the two cannot disagree about whether a gate is
+        open.
+      */}
+      {runState.reviewStages.map((stage) => (
+        <div
+          key={stage}
+          className="flex items-start gap-3 rounded-md border border-sky-500/40 bg-sky-500/5 px-4 py-3"
+        >
+          <PauseCircle className="mt-0.5 h-4 w-4 shrink-0 text-sky-500" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">
+              {STAGE_LABELS[stage]} is waiting for your approval
+            </p>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              The run stopped in front of this stage and will not go on until
+              you release it. Everything it has written so far is in the tabs
+              below.
+            </p>
+          </div>
+          <Button size="sm" onClick={() => handleApprove(stage)}>
+            <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
+            Approve and continue
+          </Button>
+        </div>
+      ))}
+
+      {/*
         A stage can fail without stopping the run: the `images` stage writes
         `images: failed` and returns rather than raising, and the chain carries
         on to `ready` and stamps the post complete. Without this the only trace
@@ -746,6 +810,7 @@ export default function PostDetailPage() {
             ? { target: publishTarget.target, status: publishTarget.status ?? "pending" }
             : null
         }
+        onApprove={handleApprove}
       />
 
       {/* Stage Content Tabs */}

@@ -874,10 +874,11 @@ describe("ProfileDetailPage", () => {
       );
     });
 
-    it("offers no way to add a gate the dashboard cannot release", async () => {
-      // Nothing in the app resumes a suspended run, so a gate switched on here
-      // would park a post with no approve action anywhere to continue it. The
-      // picker lets a stored gate be cleared and not set.
+    it("offers both waiting modes now that the post page can release them", async () => {
+      // The picker offered `auto` alone for as long as nothing in the app
+      // could resume a suspended run: a gate switched on here parked a post
+      // with no approve action anywhere to continue it. P2.109b is that
+      // action, so all three modes are settings again.
       const user = userEvent.setup();
       mockGet.mockResolvedValue(
         makeProfile({
@@ -901,6 +902,8 @@ describe("ProfileDetailPage", () => {
       await waitFor(() =>
         expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
           "Run automatically",
+          "Wait for review",
+          "Wait for approval",
         ])
       );
     });

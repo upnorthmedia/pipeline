@@ -32,6 +32,7 @@ import {
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -126,10 +127,22 @@ function StatusCell({ status }: { status: TraceStatus }) {
   );
 }
 
-function StageRow({ row, now }: { row: StageTrace; now: number }) {
+function StageRow({
+  row,
+  now,
+  onApprove,
+}: {
+  row: StageTrace;
+  now: number;
+  onApprove?: () => void;
+}) {
   const running = row.status === "running";
   const elapsed = running ? elapsedSeconds(row.startedAt, now) : null;
-  const hasDetail = row.retries.length > 0 || row.error !== null || row.images !== null;
+  // A gate is the one status on this table that is waiting on the reader
+  // rather than on a machine, so it is the one that gets a control.
+  const waiting = row.status === "review" && onApprove !== undefined;
+  const hasDetail =
+    row.retries.length > 0 || row.error !== null || row.images !== null || waiting;
 
   return (
     <>
@@ -194,6 +207,17 @@ function StageRow({ row, now }: { row: StageTrace; now: number }) {
                   <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
                   <span className="break-all">{row.error}</span>
                 </p>
+              )}
+              {waiting && (
+                <div className="flex items-center gap-2 pt-1">
+                  <span className="text-xs text-muted-foreground">
+                    Nothing runs until you release this stage.
+                  </span>
+                  <Button size="sm" variant="outline" className="h-7" onClick={onApprove}>
+                    <CheckCircle2 className="mr-1.5 h-3 w-3" />
+                    Approve {STAGE_LABELS[row.stage]}
+                  </Button>
+                </div>
               )}
             </div>
           </TableCell>
@@ -264,6 +288,7 @@ export function RunTrace({
   liveStart,
   liveImages,
   publish,
+  onApprove,
 }: {
   executionLogs: readonly unknown[];
   stageStatus: StageStatusMap;
@@ -281,6 +306,12 @@ export function RunTrace({
    * decision: the format is on the row it already holds.
    */
   publish?: { target: PublishTarget; status: string } | null;
+  /**
+   * Release the gate a stage is parked at. Omitted where nothing can act on
+   * it, which is what keeps the button out of a read-only trace: a stage row
+   * with no handler shows the status and no control.
+   */
+  onApprove?: (stage: PipelineStage) => void;
 }) {
   const trace = buildRunTrace({
     entries: executionLogs,
@@ -357,7 +388,12 @@ export function RunTrace({
             </TableHeader>
             <TableBody>
               {trace.stages.map((row) => (
-                <StageRow key={row.stage} row={row} now={now} />
+                <StageRow
+                  key={row.stage}
+                  row={row}
+                  now={now}
+                  onApprove={onApprove ? () => onApprove(row.stage) : undefined}
+                />
               ))}
               {trace.publish !== null && <PublishRow row={trace.publish} now={now} />}
             </TableBody>

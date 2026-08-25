@@ -129,6 +129,26 @@ describe("GlobalNotifications", () => {
       expect(toast.error).toHaveBeenCalledWith("Images failed", expect.anything());
     });
 
+    /**
+     * Ledger item P2.109b. A run that parks at a gate is waiting on the
+     * reader, and until that item it announced nothing at all: no frame, no
+     * toast, and no refetch on the post page either.
+     */
+    it("says which stage is waiting when a run parks at a gate", async () => {
+      await renderSignedIn();
+
+      await emit("stage_review", {
+        post_id: "abcdef1234",
+        stage: "outline",
+        mode: "review",
+      });
+
+      expect(toast.info).toHaveBeenCalledWith(
+        "Outline is waiting for your approval",
+        expect.anything(),
+      );
+    });
+
     it("says nothing about an unknown stage when the frame carries none", async () => {
       await renderSignedIn();
 

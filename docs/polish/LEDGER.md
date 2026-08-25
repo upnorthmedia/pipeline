@@ -805,7 +805,7 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
       the one view built for watching a run. Closed at P3.2b-ii, which also found that neither
       step wrote a `publish_start` entry and that Next.js wrote none on success.
       [evidence](evidence/p3.md#p32b-ii)
-- [ ] **P2.109** `[confirmed 2026-08-24]` A run parked at a review gate can never be resumed:
+- [x] **P2.109** `[confirmed 2026-08-24]` A run parked at a review gate can never be resumed:
       nothing in the app calls `run.resume()`. The only way forward the UI offers starts a
       *new* run, so the suspended run stays in `mastra_workflow_snapshot` forever while a
       second run redoes the chain. A gate approval route has to poll `getWorkflowRunById`
@@ -827,11 +827,18 @@ deploy), P2.71 (Perplexity's deprecated Sonar Chat Completions endpoint).
         suspended snapshot was removed after it resumed a two-day-old orphan; runs suspended
         before this commit are therefore not releasable by post id, stated as a gap.
         [evidence](evidence/p2.md#p2109a)
-  - [ ] **P2.109b** The route and the UI that call it: an approval endpoint scoped to the
-        caller, the post row moved off `review` so the dashboard does not read stale, an
-        approve action wherever a gate is shown, and the profile picker's `review` and
-        `approve_only` modes offered again now that something can release them (the comment
-        in `src/app/profiles/[id]/page.tsx` disabling them cites exactly this).
+  - [x] **P2.109b** The route and the UI that call it. `POST /api/posts/{id}/approve` scopes
+        to the caller before it resumes anything, then moves the row off `review` under a
+        `stage_status ->> stage = 'review'` predicate so a slow approval cannot undo the
+        worker. Three surfaces show the gate and two of them release it: the banner and the
+        run-trace control on `/posts/[id]`, and a toast with a View action from anywhere.
+        The profile picker offers both waiting modes again. Two defects found on the way and
+        fixed here: **a parked run published nothing**, so with no poll on the route a gate
+        was invisible until a manual reload (now a `stage_review` frame), and the deleted
+        **P2.40** reproduced in a browser, the engine dropping `resumeData` on its retry
+        branch so an approved stage that threw re-parked itself at the gate (now short-
+        circuited on `retryCount`). Verified on a real suspended run in a browser, not on
+        seeded rows. [evidence](evidence/p2.md#p2109b)
 - [x] **P2.110** `[confirmed 2026-08-24]` Five of the seven workflow registration keys in
       `web/src/mastra/index.ts` differ from the workflow's own `id`, and a resume resolves by
       id, so those five would answer `MASTRA_GET_WORKFLOW_BY_ID_NOT_FOUND` the moment a step

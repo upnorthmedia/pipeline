@@ -216,7 +216,14 @@ export const imagesManifestStep = createStep({
 
       // The gate sits immediately after the skip check and before anything the
       // stage spends, which is where Python put it: a paused stage bills nothing.
-      const gate = await reviewGate("images", inputData, state.stageSettings, resumeData)
+      const gate = await reviewGate(
+        mastra,
+        "images",
+        inputData,
+        state.stageSettings,
+        resumeData,
+        retryCount,
+      )
       if (gate) return suspend(gate)
       await announceStageStart(mastra, "images", inputData)
       const rules = loadRules("images")

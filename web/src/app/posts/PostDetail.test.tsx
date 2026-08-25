@@ -31,6 +31,7 @@ vi.mock("@/lib/api", async () => {
       update: vi.fn(),
       run: vi.fn(),
       runAll: vi.fn(),
+      approve: vi.fn(),
       pause: vi.fn(),
       rerun: vi.fn(),
       restart: vi.fn(),
@@ -101,6 +102,7 @@ const mockGet = vi.mocked(posts.get);
 const mockAnalytics = vi.mocked(posts.analytics);
 const mockRun = vi.mocked(posts.run);
 const mockRerun = vi.mocked(posts.rerun);
+const mockApprove = vi.mocked(posts.approve);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -708,6 +710,135 @@ describe("PostDetailPage stage failures", () => {
  * reached this page. Nothing refetches the row until the stage ends, so
  * without the live frames the count only appears once it is too late to watch.
  */
+/**
+ * Ledger item P2.109b. A run parked at a gate is the one state on this page
+ * that is waiting on the reader, and until this item there was nowhere in the
+ * app to release it: the two buttons the header offered both started a *new*
+ * run and left the parked one suspended forever.
+ */
+describe("PostDetailPage review gates", () => {
+  const gatedPost = () =>
+    makePost({
+      current_stage: "outline",
+      stage_status: { research: "complete", outline: "review" },
+    });
+
+  beforeEach(() => {
+    mockGet.mockResolvedValue(gatedPost());
+    mockApprove.mockResolvedValue({
+      status: "approved",
+      stage: "outline",
+      mode: "review",
+      post_id: "post-1",
+    });
+  });
+
+  it("names the stage that is waiting and what it is waiting for", async () => {
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Outline is waiting for your approval")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(
+        "The run stopped in front of this stage and will not go on until you release it. Everything it has written so far is in the tabs below."
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("releases the run rather than starting a new one", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Approve and continue" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Approve and continue" }));
+
+    expect(mockApprove).toHaveBeenCalledWith("post-1");
+    // The distinction the item is about: neither of the header's two forward
+    // actions was used, because both create a second run.
+    expect(mockRun).not.toHaveBeenCalled();
+    expect(mockRerun).not.toHaveBeenCalled();
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Outline approved"));
+  });
+
+  it("refetches the post so the badge stops saying it is waiting", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Approve and continue" })).toBeInTheDocument();
+    });
+    const before = mockGet.mock.calls.length;
+
+    await user.click(screen.getByRole("button", { name: "Approve and continue" }));
+
+    await waitFor(() => expect(mockGet.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  /**
+   * A 409 is what a second click looks like, and what an approval made in
+   * another tab looks like. The message is the server's, not a stack trace,
+   * and the refetch still runs so the page catches up with whatever released
+   * the gate.
+   */
+  it("reports a refused approval in the server's words and still refetches", async () => {
+    const user = userEvent.setup();
+    // `request()` throws with the response body as its message, which is what
+    // `apiErrorMessage` reads the server's `detail` back out of.
+    mockApprove.mockRejectedValue(
+      new Error(JSON.stringify({ detail: "This post is not waiting for approval." }))
+    );
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Approve and continue" })).toBeInTheDocument();
+    });
+    const before = mockGet.mock.calls.length;
+
+    await user.click(screen.getByRole("button", { name: "Approve and continue" }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("This post is not waiting for approval.")
+    );
+    await waitFor(() => expect(mockGet.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  /**
+   * The frame the gate publishes. Nothing else tells this page a run has
+   * parked: it refetches on `stage_complete`, `stage_error` and
+   * `pipeline_complete` and has no poll, so before P2.109b a gate appeared
+   * only when the reader reloaded by hand.
+   */
+  it("refetches when a run announces that it has parked", async () => {
+    mockGet.mockResolvedValue(
+      makePost({ current_stage: "outline", stage_status: { research: "complete" } })
+    );
+    renderWithProviders(<PostDetailPage />);
+    await waitFor(() => expect(mockGet).toHaveBeenCalled());
+    const before = mockGet.mock.calls.length;
+
+    mockGet.mockResolvedValue(gatedPost());
+    await emitSSE({ event: "stage_review", post_id: "post-1", stage: "outline" });
+
+    await waitFor(() => expect(mockGet.mock.calls.length).toBeGreaterThan(before));
+    await waitFor(() =>
+      expect(screen.getByText("Outline is waiting for your approval")).toBeInTheDocument()
+    );
+  });
+
+  it("shows no approval on a post that is not parked", async () => {
+    mockGet.mockResolvedValue(makeCompletedPost());
+    renderWithProviders(<PostDetailPage />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Complete").length).toBeGreaterThan(0);
+    });
+    expect(
+      screen.queryByRole("button", { name: "Approve and continue" })
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe("PostDetailPage live image progress", () => {
   const runningImages = () =>
     makePost({

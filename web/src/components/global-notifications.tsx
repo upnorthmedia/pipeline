@@ -60,6 +60,16 @@ export const GlobalNotifications = () => {
           });
           break;
 
+        // A parked run is the one event that is waiting on the reader. The
+        // action carries them to the page that can release it, which is what
+        // makes the toast worth raising away from that page.
+        case "stage_review":
+          toast.info(`${stage} is waiting for your approval`, {
+            description: describePost(event),
+            action,
+          });
+          break;
+
         case "stage_error":
           toast.error(`${stage} failed`, {
             description: describeFailure(event),

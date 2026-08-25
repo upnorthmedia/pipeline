@@ -56,20 +56,13 @@
   reports it instead of leaking it (`WordPressClient`'s constructor refuses one), so this is
   a data-hygiene item rather than a live leak.
 
-- [confirmed] 2026-08-24 A run parked at a review gate can never be resumed: nothing in the app
-  calls `run.resume()`. `stage-io.ts` suspends the run and writes `stage_status[stage] =
-  "review"`, and the only way forward the UI offers is `POST /api/posts/{id}/run` or
-  `/run-all`, which start a *new* run. So the suspended run stays suspended in
-  `mastra_workflow_snapshot` forever while a second run redoes the chain from the stage the
-  first one had already reached, and the trace view shows a run stuck at "Awaiting review"
-  beside the one that actually finished. The port's own comment on `reviewGate` says the point
-  of suspending rather than returning is that "approving it continues into the remaining stages
-  instead of starting a second run"; nothing exercises that outside `review-gates.test.ts`. A
-  gate approval route has to poll `getWorkflowRunById` rather than await the resume, for the
-  reason `evented-resume.test.ts` pins. Found at polish ledger P2.16. Ledger item P2.109.
-  Half done at P2.109a: `src/mastra/gate-approval.ts` finds the run a post is parked on and
-  releases it, with seven tests on real gated runs. Still true that nothing *calls* it, so the
-  entry stands until P2.109b lands the route and the approve action.
+- [confirmed] 2026-08-24 `stage_review` is a live frame only, never written to
+  `execution_logs`. `reviewGate()` publishes it so the dashboard learns a run has parked
+  without a reload (ledger P2.109b), but a reader who opens the post after the gate was
+  released sees no trace that the run ever waited, and neither does the run trace, which is
+  built from `execution_logs`. While the run is parked the only record is
+  `stage_status[stage] = "review"` on the row. Every other announcement (`stage_start`,
+  `stage_complete`, `stage_error`) writes an entry beside its frame. Found under P2.109b.
 
 - [confirmed] 2026-08-24 `@mastra/core@1.61.0` signals a failed `EventedExecutionEngine.execute()`
   twice. Its `catch` calls `rejectResult(err)` and then `throw err`, and the `await

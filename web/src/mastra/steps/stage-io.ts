@@ -190,22 +190,47 @@ export function stageNeedsReview(
  * `resumeData` short-circuits it. The step re-runs from the top when a run is
  * resumed, so without that check an approved gate would immediately re-suspend
  * itself on the same settings that paused it in the first place.
+ *
+ * `retryCount` short-circuits it for the same reason one attempt later, and it
+ * is the half `resumeData` cannot cover: the engine does not carry the resume
+ * payload into its retry branch, so an approved stage that then *throws*
+ * re-enters `execute` with `resumeData` undefined and parks the run at the gate
+ * the reviewer just released. Observed in a browser on a real run under ledger
+ * item P2.109b, with the row going `review` -> `running` -> `review` while the
+ * provider call failed in between. A retry is not a fresh execution: reaching
+ * it at all means this run already passed this gate, since the only way out of
+ * the gate is through it.
  */
 export async function reviewGate(
+  mastra: { pubsub: PubSub },
   stage: Stage,
   input: StageStepInput,
   stageSettings: Record<string, string>,
   resumeData?: GateResume,
+  retryCount?: number,
 ): Promise<GateSuspendPayload | null> {
   if (resumeData?.approved) return null
+  if ((retryCount ?? 0) > 0) return null
   if (!stageNeedsReview(stage, input, stageSettings)) return null
 
+  const mode = gateModeFor(stage, stageSettings) as ReviewMode
+  const message = `Stage ${stage} paused for review`
   await markStageForReview(input.postId, stage)
-  return {
+  // Row first, then the event, for the same reason `announceStageStart` does
+  // it in that order: a browser reacts to the frame by refetching the post and
+  // must not read a row that still calls the stage pending.
+  //
+  // Without this frame nothing on screen learns the run has parked. The
+  // dashboard has no poll: it refetches on `stage_complete`, `stage_error` and
+  // `pipeline_complete`, and a suspend is none of the three, so a gate stayed
+  // invisible until the reader reloaded the page by hand. Measured in a
+  // browser under ledger item P2.109b.
+  await publishPipelineEvent(mastra.pubsub, input.postId, "stage_review", {
     stage,
-    mode: gateModeFor(stage, stageSettings) as ReviewMode,
-    message: `Stage ${stage} paused for review`,
-  }
+    mode,
+    message,
+  })
+  return { stage, mode, message }
 }
 
 /**

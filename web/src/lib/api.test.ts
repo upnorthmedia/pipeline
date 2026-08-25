@@ -173,6 +173,18 @@ describe("api client", () => {
       expect(fetchCalls[0].url).toBe(`${API_BASE}/api/posts/post-1/pause`);
     });
 
+    it("approves the gate a post is parked at", async () => {
+      mockResponse.body = {
+        status: "approved",
+        stage: "outline",
+        mode: "review",
+        post_id: "post-1",
+      };
+      await posts.approve("post-1");
+      expect(fetchCalls[0].url).toBe(`${API_BASE}/api/posts/post-1/approve`);
+      expect(fetchCalls[0].init?.method).toBe("POST");
+    });
+
     it("reruns from current stage", async () => {
       mockResponse.body = { status: "queued", mode: "rerun", rerun_from: "research" };
       await posts.rerun("post-1");

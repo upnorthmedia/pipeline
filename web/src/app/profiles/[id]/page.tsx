@@ -69,16 +69,6 @@ import { toast } from "sonner";
 import { ProfileDetailSkeleton } from "./profile-detail-skeleton";
 
 /**
- * What this picker offers, plus whatever the profile is already set to.
- *
- * Only `auto` is offered. `stage_settings` also holds `review` and
- * `approve_only`, and the pipeline parks a run in front of the stage for
- * either, but nothing in the dashboard resumes a suspended run: a gate
- * switched on here would leave the post waiting with no approve action
- * anywhere to release it. So a stored gate is shown and can be cleared, and a
- * new one cannot be added until there is something to release it with.
- */
-/**
  * The four things a profile owns, one tab each, in the order of the ownership
  * table in `docs/polish/evidence/p3.md`: what the site is, where its finished
  * posts go, what a new post for it starts from, and its link inventory.
@@ -113,7 +103,20 @@ function tabFromUrl(): TabValue {
 /** Ties the action bar to the form it submits without nesting it inside. */
 const PROFILE_FORM_ID = "profile-form";
 
-const OFFERED_STAGE_MODES: StageMode[] = ["auto"];
+/**
+ * What this picker offers, plus whatever the profile is already set to.
+ *
+ * All three modes are offered. Only `auto` was, for as long as nothing in the
+ * dashboard could resume a suspended run: a gate switched on here parked the
+ * post with no approve action anywhere to release it. `POST /api/posts/{id}/approve`
+ * and the approval on the post page are that action, so the two waiting modes
+ * are real settings again (ledger item P2.109b).
+ *
+ * The pipeline treats `review` and `approve_only` identically; both names are
+ * kept because the column carries both and a profile written by the Python app
+ * may hold either.
+ */
+const OFFERED_STAGE_MODES: StageMode[] = ["auto", "review", "approve_only"];
 
 function stageModeOptions(current: StageMode | undefined): StageMode[] {
   // `default_stage_settings` is a bare JSON object on the wire, so a row that
