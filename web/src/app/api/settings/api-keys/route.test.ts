@@ -133,6 +133,93 @@ describe("GET /api/settings/api-keys/{provider}/reveal", () => {
     expect(await response.json()).toEqual({ detail: "Not authenticated" })
   })
 
+  /**
+   * Regression. `next dev` and `next start` both fill in `x-forwarded-*` from
+   * the socket before a route handler ever sees the request
+   * (`base-server.js`: `req.headers['x-forwarded-for'] ??= socket.remoteAddress`),
+   * so the gate's original "no forwarding header at all" rule was never
+   * satisfiable and every reveal 403'd, including on the developer's own
+   * machine. These are the exact headers Next delivers for
+   * `curl http://localhost:3000/...`.
+   */
+  it("allows the loopback request Next actually delivers", async () => {
+    const response = await GET_REVEAL(
+      apiRequest(revealUrl("anthropic"), {
+        cookie: user.cookie,
+        headers: {
+          host: "localhost:3000",
+          "x-forwarded-for": "::1",
+          "x-forwarded-host": "localhost:3000",
+          "x-forwarded-port": "3000",
+          "x-forwarded-proto": "http",
+        },
+      }),
+      segment("anthropic"),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      provider: "anthropic",
+      key: STORED.anthropic,
+    })
+  })
+
+  it("allows the IPv4 and IPv4-mapped peers a local connection can present", async () => {
+    for (const peer of ["127.0.0.1", "::ffff:127.0.0.1"]) {
+      const response = await GET_REVEAL(
+        apiRequest(revealUrl("anthropic"), {
+          cookie: user.cookie,
+          headers: {
+            host: "127.0.0.1:3000",
+            "x-forwarded-for": peer,
+            "x-forwarded-host": "127.0.0.1:3000",
+          },
+        }),
+        segment("anthropic"),
+      )
+
+      expect(response.status, peer).toBe(200)
+    }
+  })
+
+  /**
+   * The header is client-supplied, and Next keeps a client's value rather than
+   * overwriting it. A proxy appends the peer it saw, so the rightmost entry is
+   * the one written by the hop closest to this process and the only one worth
+   * reading. A forged loopback entry ahead of it must not open the gate.
+   */
+  it("403s a forged loopback entry ahead of the real peer", async () => {
+    const response = await GET_REVEAL(
+      apiRequest(revealUrl("anthropic"), {
+        cookie: user.cookie,
+        headers: {
+          host: "localhost:3000",
+          "x-forwarded-for": "127.0.0.1, 203.0.113.7",
+        },
+      }),
+      segment("anthropic"),
+    )
+
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ detail: "Forbidden" })
+  })
+
+  it("403s the deployed shape: a public forwarded host over a loopback peer", async () => {
+    const response = await GET_REVEAL(
+      apiRequest(revealUrl("anthropic"), {
+        cookie: user.cookie,
+        headers: {
+          host: "localhost:3000",
+          "x-forwarded-for": "127.0.0.1",
+          "x-forwarded-host": "app.example.com",
+        },
+      }),
+      segment("anthropic"),
+    )
+
+    expect(response.status).toBe(403)
+  })
+
   it("403s a request that carries a proxy forwarding header", async () => {
     for (const header of ["forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip"]) {
       const response = await GET_REVEAL(
