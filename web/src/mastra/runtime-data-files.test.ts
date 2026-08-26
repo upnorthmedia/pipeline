@@ -143,3 +143,29 @@ describe("the compose worker service", () => {
     })
   }
 })
+
+/**
+ * The local worker runs the same bundle as the deployed worker, so changing
+ * where it is launched does not make its runtime data appear inside
+ * `.mastra/worker`. The package script is the local runtime boundary: it must
+ * load the repo environment and pass absolute paths for every directory the
+ * bundle reads after the Mastra CLI changes its working directory.
+ */
+describe("the local worker command", () => {
+  const packageJson = JSON.parse(
+    fs.readFileSync(path.join(REPO_ROOT, "web", "package.json"), "utf8"),
+  ) as { scripts?: Record<string, string> }
+  const command = packageJson.scripts?.worker ?? ""
+
+  it("loads the repo environment", () => {
+    expect(command).toContain("--env ../.env")
+  })
+
+  it.each([
+    ["RULES_DIR", '"$PWD/../rules"'],
+    ["TEXTSTAT_DATA_DIR", '"$PWD/src/mastra/textstat/data"'],
+    ["MEDIA_DIR", '"$PWD/../media"'],
+  ])("sets %s to an absolute local path", (variable, directory) => {
+    expect(command).toContain(`${variable}=${directory}`)
+  })
+})
