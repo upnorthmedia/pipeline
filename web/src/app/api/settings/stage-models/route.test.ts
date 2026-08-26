@@ -91,10 +91,12 @@ describe("GET /api/settings/stage-models", () => {
     expect(await response.json()).toEqual({ detail: "Not authenticated" })
   })
 
-  it("returns every stage in pipeline order with no rows stored", async () => {
+  it("returns only model-backed stages in pipeline order", async () => {
     const body = await (await GET(apiRequest(URL, { cookie: user.cookie }))).json()
 
-    expect(body.stages.map((row: { stage: string }) => row.stage)).toEqual([...STAGES])
+    expect(body.stages.map((row: { stage: string }) => row.stage)).toEqual(
+      STAGES.filter((stage) => stage !== "ready"),
+    )
     expect(body.overrides).toEqual({})
   })
 

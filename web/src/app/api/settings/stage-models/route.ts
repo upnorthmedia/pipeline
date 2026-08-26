@@ -28,6 +28,7 @@ import { getDb, settings } from "@/db"
 import { getRequestUser, unauthorized } from "@/lib/request-auth"
 import {
   resolveStageModels,
+  MODEL_STAGES,
   parseStageModelSettings,
   STAGE_EFFORT_ALLOWLIST,
   STAGE_MODEL_ALLOWLIST,
@@ -35,7 +36,6 @@ import {
   type StageModelSettings,
 } from "@/mastra/stage-models"
 import { withServerError } from "@/lib/route-error"
-import { STAGES } from "@/mastra/state"
 
 /** One row of the settings page's stage table. */
 interface StageModelResponse {
@@ -77,7 +77,7 @@ async function getHandler(request: Request): Promise<Response> {
     ownOverrides(user.id),
   ])
 
-  const stages: StageModelResponse[] = STAGES.map((stage) => ({
+  const stages: StageModelResponse[] = MODEL_STAGES.map((stage) => ({
     stage,
     provider: effective[stage].provider,
     model: effective[stage].model,

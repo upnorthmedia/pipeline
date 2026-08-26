@@ -34,11 +34,12 @@ import { RedisStreamsPubSub } from "@mastra/redis-streams"
 import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 
+import { VALID_RESEARCH_PACKET } from "../../test/pipeline-fixtures"
+
 import { closeDb, getDb, getPool, posts } from "../../db"
 import { editAgent } from "../agents/edit"
 import { imagesAgent } from "../agents/images"
 import { outlineAgent } from "../agents/outline"
-import { readyAgent } from "../agents/ready"
 import { researchAgent } from "../agents/research"
 import { writeAgent } from "../agents/write"
 import corpus from "../images/data/image-generation-parity.json"
@@ -74,15 +75,22 @@ const PNG = Buffer.from(corpus.png_base64, "base64")
 
 const MANIFEST = {
   version: "1.0",
-  images: [{ id: "inline", filename: "inline.png", prompt: "an inline diagram" }],
+  images: [
+    {
+      id: "inline",
+      filename: "inline.png",
+      prompt: "an inline diagram",
+      placement: { location: "after_heading", after_section: "Comparison" },
+    },
+  ],
 }
 
 /** Stage -> the text its stubbed agent returns, so each column is identifiable. */
 const AGENT_TEXT = {
-  research: "## Keyword analysis\n\n## Pain point\n\n## Competitor\n\n## Search intent",
+  research: VALID_RESEARCH_PACKET,
   outline: "# Outline, rerun\n\n1. Opening\n2. Close",
   write: "# Draft\n\nThe draft body.",
-  edit: "# Edited\n\nThe edited body.",
+  edit: "# Edited\n\n## Comparison\n\nThe edited body.",
   images: JSON.stringify(MANIFEST),
   ready: "---\ntitle: Ready\n---\n\nThe publishable article.",
 } as const
@@ -92,7 +100,7 @@ const SEEDED = {
   research: "seeded research",
   outline: "seeded outline",
   write: "seeded draft",
-  edit: "seeded final markdown",
+  edit: "# Seeded final markdown\n\n## Comparison\n\nSeeded body.",
   ready: "seeded ready",
 } as const
 
@@ -115,7 +123,6 @@ const agents = {
   write: writeAgent,
   edit: editAgent,
   images: imagesAgent,
-  ready: readyAgent,
 } as const
 const testMastra = new Mastra({
   storage,
@@ -237,7 +244,7 @@ describe("a full run over a partly complete post", () => {
   })
 
   it("calls a provider only for the stages that were not already complete", () => {
-    expect(resume.called).toEqual(["images", "ready"])
+    expect(resume.called).toEqual(["images"])
   })
 
   it("leaves the completed stages' columns exactly as it found them", async () => {
@@ -254,7 +261,8 @@ describe("a full run over a partly complete post", () => {
 
     expect(generateImageMock).toHaveBeenCalledTimes(MANIFEST.images.length)
     expect((row.imageManifest as Record<string, unknown>).total_generated).toBe(1)
-    expect(row.readyContent).toBe(AGENT_TEXT.ready)
+    expect(row.readyContent).toContain("Seeded body.")
+    expect(row.readyContent).toContain("inline.webp")
     expect(row.stageStatus).toEqual(Object.fromEntries(STAGES.map((s) => [s, STATUS_COMPLETE])))
   })
 

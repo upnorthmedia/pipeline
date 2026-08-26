@@ -199,16 +199,18 @@ afterAll(async () => {
   await closeDb()
 })
 
-describe("outline step prompt parity", () => {
+describe("outline step prompt contract", () => {
   for (const [index, slug] of FIXTURE_SLUGS.entries()) {
-    it(`sends the prompt the Python stage sent for ${slug}`, async () => {
+    it(`sends the research packet with stage-scoped configuration for ${slug}`, async () => {
       const fixture = fixtures[index]
       vi.setSystemTime(new Date(fixture.captured_at))
 
       const { prompts } = await runStep(fixtureIds[index], replayOf(fixture))
 
       expect(prompts).toHaveLength(1)
-      expect(prompts[0]).toBe(fixture.rendered_prompts[0])
+      expect(prompts[0]).toContain(fixture.state_input.research)
+      expect(prompts[0]).toContain(`- **TONE**: ${String(fixture.post_spec.tone)}`)
+      expect(prompts[0]).not.toContain(`- **OUTPUT_FORMAT**: ${String(fixture.post_spec.output_format)}`)
     })
   }
 
@@ -257,6 +259,37 @@ describe("outline step persistence and output", () => {
         mastra: harness.mastra,
       } as unknown as ExecuteParams),
     ).rejects.toThrow("not found")
+    expect(harness.prompts).toEqual([])
+  })
+
+  it("refuses to outline an explicitly blocked research packet", async () => {
+    await db
+      .update(posts)
+      .set({
+        researchContent: [
+          "## Research summary",
+          "The core chronology is not supported.",
+          "## Claim ledger",
+          "No publishable chronology was verified.",
+          "## Topic coverage",
+          "Background only.",
+          "## Risks and open questions",
+          "Primary sources are missing.",
+          "## Recommended article direction",
+          "Do not draft until the chronology is sourced.",
+          "## Coverage verdict",
+          "STATUS: blocked",
+        ].join("\n\n"),
+      })
+      .where(eq(posts.id, fixtureIds[0]))
+
+    const harness = replayMastra(replayOf(fixtures[0]))
+    await expect(
+      outlineStep.execute({
+        inputData: { postId: fixtureIds[0] },
+        mastra: harness.mastra,
+      } as unknown as ExecuteParams),
+    ).rejects.toThrow("research coverage is blocked")
     expect(harness.prompts).toEqual([])
   })
 })

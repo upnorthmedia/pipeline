@@ -33,11 +33,12 @@ import { RedisStreamsPubSub } from "@mastra/redis-streams"
 import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 
+import { VALID_RESEARCH_PACKET } from "../test/pipeline-fixtures"
+
 import { closeDb, getDb, getPool, posts } from "../db"
 import { editAgent } from "./agents/edit"
 import { imagesAgent } from "./agents/images"
 import { outlineAgent } from "./agents/outline"
-import { readyAgent } from "./agents/ready"
 import { researchAgent } from "./agents/research"
 import { writeAgent } from "./agents/write"
 import { approveSuspendedGate, findSuspendedGate } from "./gate-approval"
@@ -65,14 +66,21 @@ const PNG = Buffer.from(corpus.png_base64, "base64")
 
 const MANIFEST = {
   version: "1.0",
-  images: [{ id: "inline", filename: "inline.png", prompt: "an inline diagram" }],
+  images: [
+    {
+      id: "inline",
+      filename: "inline.png",
+      prompt: "an inline diagram",
+      placement: { location: "after_heading", after_section: "Comparison" },
+    },
+  ],
 }
 
 const AGENT_TEXT = {
-  research: "## Keyword analysis\n\n## Pain point\n\n## Competitor\n\n## Search intent",
+  research: VALID_RESEARCH_PACKET,
   outline: "# Outline\n\n1. Opening\n2. Close",
   write: "# Draft\n\nThe draft body.",
-  edit: "# Edited\n\nThe edited body.",
+  edit: "# Edited\n\n## Comparison\n\nThe edited body.",
   images: JSON.stringify(MANIFEST),
   ready: "---\ntitle: Ready\n---\n\nThe publishable article.",
 } as const
@@ -100,7 +108,6 @@ const agents = {
   write: writeAgent,
   edit: editAgent,
   images: imagesAgent,
-  ready: readyAgent,
 } as const
 const testMastra = new Mastra({
   storage,

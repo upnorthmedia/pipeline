@@ -27,6 +27,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 
 import { closeDb, getDb, posts } from "../../db"
 import { ABSENT_POST_ID } from "../../test/absent-ids"
+import { loadPipelineState } from "../post-state"
+import { buildStagePrompt, loadRules } from "../prompts"
 import {
   imageManifestSchema,
   imagesManifestOutputSchema,
@@ -243,16 +245,18 @@ afterAll(async () => {
   await closeDb()
 })
 
-describe("images manifest step prompt parity", () => {
+describe("images manifest step prompt contract", () => {
   for (const [index, slug] of FIXTURE_SLUGS.entries()) {
-    it(`sends the prompt the Python stage sent for ${slug}`, async () => {
+    it(`sends the current stage-scoped prompt for ${slug}`, async () => {
       const fixture = fixtures[index]
       vi.setSystemTime(new Date(fixture.captured_at))
 
       const { prompts } = await runStep(fixtureIds[index], replayOf(fixture))
+      const state = await loadPipelineState(fixtureIds[index])
 
       expect(prompts).toHaveLength(1)
-      expect(prompts[0]).toBe(fixture.rendered_prompts[0])
+      expect(prompts[0]).toBe(buildStagePrompt("images", loadRules("images"), state))
+      expect(prompts[0]).not.toContain("OUTPUT_FORMAT")
     })
   }
 

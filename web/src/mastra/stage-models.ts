@@ -37,12 +37,18 @@ import { getDb, posts, settings, websiteProfiles } from "../db"
 import type { Provider } from "./api-keys"
 import { STAGE_PROVIDER_MAP, STAGES, type Stage } from "./state"
 
+export type ModelStage = Exclude<Stage, "ready">
+export const MODEL_STAGES = STAGES.filter((stage): stage is ModelStage => stage !== "ready")
+
 /** The `settings.key` per-stage model configuration is stored under. */
 export const STAGE_MODELS_SETTING_KEY = "stage_models"
 
 /** One entry per stage, in `STAGES` order, without an `as` on every map. */
-function byStage<T>(value: (stage: Stage) => T): Record<Stage, T> {
-  return Object.fromEntries(STAGES.map((stage) => [stage, value(stage)])) as Record<Stage, T>
+function byModelStage<T>(value: (stage: ModelStage) => T): Record<ModelStage, T> {
+  return Object.fromEntries(MODEL_STAGES.map((stage) => [stage, value(stage)])) as Record<
+    ModelStage,
+    T
+  >
 }
 
 /**
@@ -65,7 +71,7 @@ const CREDENTIAL_PROVIDER: Record<string, Provider> = {
  * configurable and keeps the shared Claude defaults, which is recorded in the
  * ledger rather than hidden here.
  */
-export const STAGE_MODEL_PROVIDER: Record<Stage, Provider> = byStage(
+export const STAGE_MODEL_PROVIDER: Record<ModelStage, Provider> = byModelStage(
   (stage) => CREDENTIAL_PROVIDER[STAGE_PROVIDER_MAP[stage]],
 )
 
@@ -82,7 +88,7 @@ export type ClaudeEffort = (typeof CLAUDE_EFFORTS)[number]
  * Model ids accepted per stage. Every entry returned HTTP 200 from a real
  * minimal call in item 6.1, sending the request shape its stage sends.
  */
-export const STAGE_MODEL_ALLOWLIST: Record<Stage, readonly string[]> = {
+export const STAGE_MODEL_ALLOWLIST: Record<ModelStage, readonly string[]> = {
   // The only Perplexity search model the Agent API accepts, which is the only
   // Perplexity surface still answering after 2026-09-27. `GET /v1/models`
   // lists no other, and `perplexity/sonar-pro` is refused outright, so this
@@ -94,7 +100,6 @@ export const STAGE_MODEL_ALLOWLIST: Record<Stage, readonly string[]> = {
   write: ["claude-opus-5", "claude-fable-5", "claude-opus-4-6"],
   edit: ["claude-opus-5", "claude-fable-5", "claude-opus-4-6"],
   images: ["gemini-3-pro-image", "gemini-3.1-flash-image-preview"],
-  ready: ["claude-opus-5", "claude-fable-5", "claude-opus-4-6"],
 }
 
 /**
@@ -103,7 +108,7 @@ export const STAGE_MODEL_ALLOWLIST: Record<Stage, readonly string[]> = {
  * carries it, so an `effort` sent to `research` or `images` is a client bug
  * and is rejected rather than stored and ignored.
  */
-export const STAGE_EFFORT_ALLOWLIST: Record<Stage, readonly string[]> = byStage((stage) =>
+export const STAGE_EFFORT_ALLOWLIST: Record<ModelStage, readonly string[]> = byModelStage((stage) =>
   STAGE_MODEL_PROVIDER[stage] === "anthropic" ? CLAUDE_EFFORTS : [],
 )
 
@@ -124,13 +129,12 @@ export interface StageModelConfig {
  * low-level client keeps working without a database, and `IMAGES_MODEL_ID`,
  * the manifest call this setting deliberately does not configure.
  */
-export const STAGE_MODEL_DEFAULTS: Record<Stage, StageModelConfig> = {
+export const STAGE_MODEL_DEFAULTS: Record<ModelStage, StageModelConfig> = {
   research: { model: "perplexity/sonar", effort: null },
   outline: { model: "claude-opus-5", effort: "high" },
   write: { model: "claude-opus-5", effort: "high" },
   edit: { model: "claude-opus-5", effort: "high" },
   images: { model: "gemini-3-pro-image", effort: null },
-  ready: { model: "claude-opus-5", effort: "high" },
 }
 
 /** One stage's stored overrides. An absent field means "use the fallback". */
@@ -140,13 +144,13 @@ export interface StageModelOverride {
 }
 
 /** The whole `stage_models` row value: overrides for zero or more stages. */
-export type StageModelSettings = Partial<Record<Stage, StageModelOverride>>
+export type StageModelSettings = Partial<Record<ModelStage, StageModelOverride>>
 
 /** Where a resolved field came from, for the settings page's override badge. */
 export type StageModelSource = "default" | "global" | "user"
 
 export interface ResolvedStageModel extends StageModelConfig {
-  stage: Stage
+  stage: ModelStage
   provider: Provider
   modelSource: StageModelSource
   effortSource: StageModelSource
@@ -169,10 +173,10 @@ export function parseStageModelSettings(
 
   const parsed: StageModelSettings = {}
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-    if (!(STAGES as readonly string[]).includes(key)) {
-      return { ok: false, detail: `Unknown stage '${key}'. Stages are ${STAGES.join(", ")}` }
+    if (!(MODEL_STAGES as readonly string[]).includes(key)) {
+      return { ok: false, detail: `Unknown stage '${key}'. Stages are ${MODEL_STAGES.join(", ")}` }
     }
-    const stage = key as Stage
+    const stage = key as ModelStage
 
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
       return { ok: false, detail: `Stage '${stage}' must be an object with 'model' and 'effort'` }
@@ -247,7 +251,7 @@ function storedSettings(value: unknown): StageModelSettings {
  */
 export async function resolveStageModels(
   userId: string | null,
-): Promise<Record<Stage, ResolvedStageModel>> {
+): Promise<Record<ModelStage, ResolvedStageModel>> {
   const rows = await getDb()
     .select({ userId: settings.userId, value: settings.value })
     .from(settings)
@@ -264,8 +268,8 @@ export async function resolveStageModels(
   const userSettings =
     userId === null ? {} : storedSettings(rows.find((row) => row.userId === userId)?.value)
 
-  const resolved = {} as Record<Stage, ResolvedStageModel>
-  for (const stage of STAGES) {
+  const resolved = {} as Record<ModelStage, ResolvedStageModel>
+  for (const stage of MODEL_STAGES) {
     const layers: Array<[StageModelSource, StageModelOverride]> = [
       ["global", globalSettings[stage] ?? {}],
       ["user", userSettings[stage] ?? {}],
@@ -302,7 +306,7 @@ export async function resolveStageModels(
 
 /** One stage's effective configuration, for the agent that runs it. */
 export async function resolveStageModel(
-  stage: Stage,
+  stage: ModelStage,
   userId: string | null,
 ): Promise<StageModelConfig> {
   const { model, effort } = (await resolveStageModels(userId))[stage]
@@ -357,7 +361,7 @@ export async function settingsUserIdForPost(postId: string): Promise<string | nu
 
 /** One stage's effective configuration for the user who owns a post. */
 export async function resolveStageModelForPost(
-  stage: Stage,
+  stage: ModelStage,
   postId: string,
 ): Promise<StageModelConfig> {
   return resolveStageModel(stage, await settingsUserIdForPost(postId))

@@ -44,11 +44,12 @@ import { RedisStreamsPubSub } from "@mastra/redis-streams"
 import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 
+import { VALID_RESEARCH_PACKET } from "../../test/pipeline-fixtures"
+
 import { closeDb, getDb, getPool, posts } from "../../db"
 import { editAgent } from "../agents/edit"
 import { imagesAgent } from "../agents/images"
 import { outlineAgent } from "../agents/outline"
-import { readyAgent } from "../agents/ready"
 import { researchAgent } from "../agents/research"
 import { writeAgent } from "../agents/write"
 import corpus from "../images/data/image-generation-parity.json"
@@ -80,14 +81,21 @@ const PNG = Buffer.from(corpus.png_base64, "base64")
 
 const MANIFEST = {
   version: "1.0",
-  images: [{ id: "inline", filename: "inline.png", prompt: "an inline diagram" }],
+  images: [
+    {
+      id: "inline",
+      filename: "inline.png",
+      prompt: "an inline diagram",
+      placement: { location: "after_heading", after_section: "Comparison" },
+    },
+  ],
 }
 
 const AGENT_TEXT = {
-  research: "## Keyword analysis\n\n## Pain point\n\n## Competitor\n\n## Search intent",
+  research: VALID_RESEARCH_PACKET,
   outline: "# Outline\n\n1. Opening\n2. Close",
   write: "# Draft\n\nThe draft body.",
-  edit: "# Edited\n\nThe edited body.",
+  edit: "# Edited\n\n## Comparison\n\nThe edited body.",
   images: JSON.stringify(MANIFEST),
   ready: "---\ntitle: Ready\n---\n\nThe publishable article.",
 } as const
@@ -123,7 +131,6 @@ const agents = {
   write: writeAgent,
   edit: editAgent,
   images: imagesAgent,
-  ready: readyAgent,
 } as const
 const testMastra = new Mastra({
   storage,
@@ -421,12 +428,11 @@ describe("a full run gated at its first stage", () => {
       "write",
       "edit",
       "images",
-      "ready",
     ])
 
     const row = await readPost(FIRST_STAGE_POST_ID)
     expect(row.researchContent).toBe(AGENT_TEXT.research)
-    expect(row.readyContent).toBe(AGENT_TEXT.ready)
+    expect(row.readyContent).toContain("The edited body.")
     expect(row.stageStatus).toEqual(Object.fromEntries(STAGES.map((s) => [s, STATUS_COMPLETE])))
   })
 })
@@ -486,12 +492,13 @@ describe("a full run gated inside the nested images workflow", () => {
 
   it("generates the images and finishes the chain once approved", async () => {
     expect(images.resumed.status).toBe("success")
-    expect(images.calledAfterApproval).toEqual(["images", "ready"])
+    expect(images.calledAfterApproval).toEqual(["images"])
     expect(generateImageMock).toHaveBeenCalledTimes(MANIFEST.images.length)
 
     const row = await readPost(IMAGES_POST_ID)
     expect((row.imageManifest as Record<string, unknown>).total_generated).toBe(1)
-    expect(row.readyContent).toBe(AGENT_TEXT.ready)
+    expect(row.readyContent).toContain("The edited body.")
+    expect(row.readyContent).toContain("inline.webp")
     expect(row.stageStatus).toEqual(Object.fromEntries(STAGES.map((s) => [s, STATUS_COMPLETE])))
   })
 })

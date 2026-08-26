@@ -28,6 +28,7 @@ import { CLAUDE_DEFAULT_EFFORT } from "./agents/claude"
 import { GEMINI_IMAGE_MODEL_ID } from "./images/gemini"
 import {
   CLAUDE_EFFORTS,
+  MODEL_STAGES,
   resolveStageModelForPost,
   settingsUserIdForPost,
   stageRequestContext,
@@ -42,7 +43,6 @@ import {
   STAGE_MODELS_SETTING_KEY,
   type StageModelSettings,
 } from "./stage-models"
-import { STAGES } from "./state"
 
 const PREFIX = "stage-models-test-"
 
@@ -113,13 +113,13 @@ describe("the allowlist and the defaults", () => {
   })
 
   it("default effort is the one every Claude stage sends today", () => {
-    for (const stage of ["outline", "write", "edit", "ready"] as const) {
+    for (const stage of ["outline", "write", "edit"] as const) {
       expect(STAGE_MODEL_DEFAULTS[stage].effort).toBe(CLAUDE_DEFAULT_EFFORT)
     }
   })
 
   it("every default is itself an allowed value", () => {
-    for (const stage of STAGES) {
+    for (const stage of MODEL_STAGES) {
       expect(STAGE_MODEL_ALLOWLIST[stage]).toContain(STAGE_MODEL_DEFAULTS[stage].model)
       const effort = STAGE_MODEL_DEFAULTS[stage].effort
       if (effort === null) expect(STAGE_EFFORT_ALLOWLIST[stage]).toEqual([])
@@ -134,9 +134,8 @@ describe("the allowlist and the defaults", () => {
       write: "anthropic",
       edit: "anthropic",
       images: "gemini",
-      ready: "anthropic",
     })
-    for (const stage of STAGES) {
+    for (const stage of MODEL_STAGES) {
       expect(STAGE_EFFORT_ALLOWLIST[stage]).toEqual(
         STAGE_MODEL_PROVIDER[stage] === "anthropic" ? CLAUDE_EFFORTS : [],
       )
@@ -155,7 +154,6 @@ describe("the allowlist and the defaults", () => {
       write: ["claude-opus-5", "claude-fable-5", "claude-opus-4-6"],
       edit: ["claude-opus-5", "claude-fable-5", "claude-opus-4-6"],
       images: ["gemini-3-pro-image", "gemini-3.1-flash-image-preview"],
-      ready: ["claude-opus-5", "claude-fable-5", "claude-opus-4-6"],
     })
   })
 })
@@ -198,7 +196,7 @@ describe("parseStageModelSettings", () => {
     expect(result).toEqual({
       ok: false,
       detail:
-        "Unknown stage 'publish'. Stages are research, outline, write, edit, images, ready",
+        "Unknown stage 'publish'. Stages are research, outline, write, edit, images",
     })
   })
 
@@ -239,9 +237,9 @@ describe("parseStageModelSettings", () => {
   })
 
   it("rejects an effort outside Anthropic's enum", () => {
-    const result = parseStageModelSettings({ ready: { effort: "extreme" } })
+    const result = parseStageModelSettings({ edit: { effort: "extreme" } })
     expect(result.ok === false && result.detail).toBe(
-      "Invalid effort 'extreme' for stage 'ready'. " +
+      "Invalid effort 'extreme' for stage 'edit'. " +
         "Verified values are low, medium, high, xhigh, max",
     )
   })
@@ -256,7 +254,7 @@ describe("resolveStageModels", () => {
   it("falls back to the verified defaults when nothing is stored", async () => {
     const resolved = await resolveStageModels(user.userId)
 
-    for (const stage of STAGES) {
+    for (const stage of MODEL_STAGES) {
       expect(resolved[stage]).toEqual({
         stage,
         provider: STAGE_MODEL_PROVIDER[stage],
@@ -306,13 +304,13 @@ describe("resolveStageModels", () => {
   })
 
   it("does not leak one user's row into another user's resolution", async () => {
-    await setUser(user.userId, { ready: { model: "claude-fable-5" } })
+    await setUser(user.userId, { edit: { model: "claude-fable-5" } })
 
     expect(await resolveStageModels(other.userId)).toMatchObject({
-      ready: { model: "claude-opus-5", modelSource: "default" },
+      edit: { model: "claude-opus-5", modelSource: "default" },
     })
     expect(await resolveStageModels(user.userId)).toMatchObject({
-      ready: { model: "claude-fable-5", modelSource: "user" },
+      edit: { model: "claude-fable-5", modelSource: "user" },
     })
   })
 

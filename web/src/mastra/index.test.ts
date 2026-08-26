@@ -12,6 +12,8 @@
  *
  * Requires `docker compose up -d db redis`.
  */
+import { existsSync } from "node:fs"
+
 import { Mastra } from "@mastra/core"
 import { PinoLogger } from "@mastra/loggers"
 import { PostgresStore } from "@mastra/pg"
@@ -96,6 +98,7 @@ describe("mastra instance", () => {
     for (const file of files) {
       // The probe suites register their own workflows on their own instances.
       if (file.endsWith(".test.ts") || file.endsWith(".test.tsx")) continue
+      if (!existsSync(file)) continue
       const source = await readFile(file, "utf8")
       for (const match of source.matchAll(/getWorkflow\("([^"]+)"\)/g)) {
         if (!keys.has(match[1])) unregistered.push(`${file}: ${match[1]}`)

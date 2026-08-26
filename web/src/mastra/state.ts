@@ -30,7 +30,7 @@ export const STAGE_PROVIDER_MAP: Record<Stage, string> = {
   write: "claude",
   edit: "claude",
   images: "gemini",
-  ready: "claude",
+  ready: "deterministic",
 }
 
 /** Stage -> rule file under `rules/`. */

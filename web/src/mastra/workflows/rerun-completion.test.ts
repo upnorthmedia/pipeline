@@ -45,11 +45,12 @@ import { RedisStreamsPubSub } from "@mastra/redis-streams"
 import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 
+import { VALID_RESEARCH_PACKET } from "../../test/pipeline-fixtures"
+
 import { closeDb, getDb, getPool, posts } from "../../db"
 import { editAgent } from "../agents/edit"
 import { imagesAgent } from "../agents/images"
 import { outlineAgent } from "../agents/outline"
-import { readyAgent } from "../agents/ready"
 import { researchAgent } from "../agents/research"
 import { writeAgent } from "../agents/write"
 import { STAGES, STATUS_COMPLETE } from "../state"
@@ -65,7 +66,7 @@ vi.mock("../api-keys", () => ({
 
 /** Stage -> the text its stubbed agent returns. */
 const AGENT_TEXT = {
-  research: "## Keyword analysis\n\n## Pain point\n\n## Competitor\n\n## Search intent",
+  research: VALID_RESEARCH_PACKET,
   outline: "# Outline\n\n1. Opening\n2. Close",
   write: "# Draft\n\nThe draft body.",
   edit: "# Edited\n\nThe edited body.",
@@ -99,7 +100,6 @@ const agents = {
   write: writeAgent,
   edit: editAgent,
   images: imagesAgent,
-  ready: readyAgent,
 } as const
 const testMastra = new Mastra({
   storage,

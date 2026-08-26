@@ -36,11 +36,12 @@ import { RedisStreamsPubSub } from "@mastra/redis-streams"
 import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { VALID_RESEARCH_PACKET } from "../test/pipeline-fixtures"
+
 import { closeDb, getDb, getPool, posts } from "../db"
 import { editAgent } from "./agents/edit"
 import { imagesAgent } from "./agents/images"
 import { outlineAgent } from "./agents/outline"
-import { readyAgent } from "./agents/ready"
 import { researchAgent } from "./agents/research"
 import { writeAgent } from "./agents/write"
 import corpus from "./images/data/image-generation-parity.json"
@@ -68,14 +69,21 @@ const PNG = Buffer.from(corpus.png_base64, "base64")
 
 const MANIFEST = {
   version: "1.0",
-  images: [{ id: "inline", filename: "inline.png", prompt: "an inline diagram" }],
+  images: [
+    {
+      id: "inline",
+      filename: "inline.png",
+      prompt: "an inline diagram",
+      placement: { location: "after_heading", after_section: "Comparison" },
+    },
+  ],
 }
 
 const AGENT_TEXT = {
-  research: "## Keyword analysis\n\n## Pain point\n\n## Competitor\n\n## Search intent",
+  research: VALID_RESEARCH_PACKET,
   outline: "# Outline\n\n1. Opening\n2. Close",
   write: "# Draft\n\nThe draft body.",
-  edit: "# Edited\n\nThe edited body.",
+  edit: "# Edited\n\n## Comparison\n\nThe edited body.",
   images: JSON.stringify(MANIFEST),
   ready: "---\ntitle: Ready\n---\n\nThe publishable article.",
 } as const
@@ -101,7 +109,6 @@ const agents = {
   write: writeAgent,
   edit: editAgent,
   images: imagesAgent,
-  ready: readyAgent,
 } as const
 const testMastra = new Mastra({
   storage,
@@ -251,7 +258,7 @@ describe("a run paused while it is executing", () => {
     expect(after.research - before.research).toBe(1)
     // Nothing after it runs. This is the whole item: before the fix every one
     // of these differences is 1, and `gemini` is 1 as well.
-    for (const stage of ["outline", "write", "edit", "images", "ready"]) {
+    for (const stage of ["outline", "write", "edit", "images"]) {
       expect(after[stage] - before[stage]).toBe(0)
     }
     expect(after.gemini - before.gemini).toBe(0)
@@ -277,7 +284,6 @@ describe("a run paused while it is executing", () => {
     // that bills two providers, so it gets its own case.
     expect(after.images - before.images).toBe(0)
     expect(after.gemini - before.gemini).toBe(0)
-    expect(after.ready - before.ready).toBe(0)
     expect(row.imageManifest).toBeNull()
     expect(row.readyContent).toBeNull()
     expect(row.currentStage).toBe(CURRENT_STAGE_PAUSED)
@@ -318,6 +324,6 @@ describe("a run started again after a pause", () => {
     // `research` committed before the pause, so the resumed run skips it: a
     // resumed run must not re-bill what the paused one already paid for.
     expect(after.research - before.research).toBe(0)
-    expect(after.ready - before.ready).toBe(1)
+    expect(row.readyContent).not.toBeNull()
   }, 300_000)
 })

@@ -1,20 +1,15 @@
-/**
- * Stage prompt assembly, ported from `load_rules()` / `build_stage_prompt()` in
- * `api/src/pipeline/helpers.py`.
- *
- * This is the one piece of the port that must be byte-identical to the Python
- * original: the rendered prompt is the product's prompt IP, and every stage's
- * parity test compares what this produces against the prompt the Python stage
- * actually sent to the provider (`docs/mastra-port/golden/`). Behaviour changes
- * here are prompt changes, not refactors.
- *
- * `rules/*.md` are inputs, never rewritten by this port.
- */
+/** Stage-scoped prompt assembly for the five model-backed pipeline stages. */
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 
 import { STAGE_OUTPUT_KEY, STAGE_RULES_MAP, STAGES } from "./state"
 import type { PipelineContext, Stage } from "./state"
+
+type PromptContext = PipelineContext & {
+  imageStyle?: string
+  imageBrandColors?: string[]
+  imageExclude?: string[]
+}
 
 /**
  * Where `rules/*.md` live: the repo root by default, overridden by `RULES_DIR`
@@ -57,14 +52,7 @@ export function loadRules(stage: Stage): string {
 /**
  * Python's `json.dumps(..., indent=2)` escapes every non-ASCII character to a
  * `\uXXXX` sequence (`ensure_ascii` defaults to true) while `JSON.stringify`
- * emits it literally. The only prompt that serializes JSON is `ready`, which
- * embeds the image manifest, and manifest prose routinely carries typographic
- * punctuation. Without this the two stacks' prompts differ on exactly the posts
- * that matter.
- *
- * Exported because `ready` does not go through `buildStagePrompt`: it has its
- * own builder in `steps/ready.ts` and serializes a *filtered* manifest, so it
- * needs the same escaping without the surrounding section.
+ * emits it literally.
  *
  * Iterating the string by UTF-16 code unit escapes astral characters as the
  * surrogate pair Python also emits.
@@ -83,36 +71,64 @@ export function pythonJsonDumps(value: unknown): string {
   )
 }
 
-/** `- **LABEL**: value` lines, in the order the Python field list declares. */
-const CONFIG_FIELDS: [string, keyof PipelineContext][] = [
+/** Identity fields shared by every model-backed stage. */
+const COMMON_CONFIG_FIELDS: [string, keyof PromptContext][] = [
   ["BLOG_POST_TOPIC", "topic"],
   ["TARGET_AUDIENCE", "targetAudience"],
   ["NICHE", "niche"],
   ["INTENT", "intent"],
   ["ARTICLE_TYPE", "articleType"],
-  ["ADDITIONAL_INFO", "additionalInfo"],
+  ["WEBSITE_URL", "websiteUrl"],
+]
+
+const WRITING_CONFIG_FIELDS: [string, keyof PromptContext][] = [
   ["WORD_COUNT", "wordCount"],
   ["TONE", "tone"],
-  ["OUTPUT_FORMAT", "outputFormat"],
-  ["WEBSITE_URL", "websiteUrl"],
   ["BRAND_VOICE", "brandVoice"],
   ["AVOID", "avoid"],
   ["REQUIRED_MENTIONS", "requiredMentions"],
 ]
 
-function buildConfigContext(context: PipelineContext, today: string): string {
+function stageConfigFields(stage: Stage): [string, keyof PromptContext][] {
+  if (stage === "research") {
+    return [...COMMON_CONFIG_FIELDS, ["ADDITIONAL_INFO", "additionalInfo"]]
+  }
+  if (stage === "outline") {
+    return [
+      ...COMMON_CONFIG_FIELDS,
+      ["ADDITIONAL_INFO", "additionalInfo"],
+      ...WRITING_CONFIG_FIELDS,
+    ]
+  }
+  if (stage === "write" || stage === "edit") {
+    return [...COMMON_CONFIG_FIELDS, ...WRITING_CONFIG_FIELDS]
+  }
+  if (stage === "images") {
+    return [
+      ...COMMON_CONFIG_FIELDS,
+      ["IMAGE_STYLE", "imageStyle"],
+      ["IMAGE_BRAND_COLORS", "imageBrandColors"],
+      ["IMAGE_EXCLUDE", "imageExclude"],
+    ]
+  }
+  return COMMON_CONFIG_FIELDS
+}
+
+function renderConfigValue(value: unknown): string {
+  return Array.isArray(value) ? value.join(", ") : String(value)
+}
+
+function buildConfigContext(stage: Stage, context: PromptContext, today: string): string {
   const lines = ["## Post Configuration\n"]
-  for (const [label, key] of CONFIG_FIELDS) {
+  for (const [label, key] of stageConfigFields(stage)) {
     const value = context[key]
-    // Python skips falsy values, so an empty string and a zero word count are
-    // both omitted rather than rendered.
-    if (!value) continue
-    lines.push(`- **${label}**: ${String(value)}`)
+    if (!value || (Array.isArray(value) && value.length === 0)) continue
+    lines.push(`- **${label}**: ${renderConfigValue(value)}`)
   }
   if (context.relatedKeywords.length > 0) {
     lines.push(`- **RELATED_KEYWORDS**: ${context.relatedKeywords.join(", ")}`)
   }
-  if (context.competitorUrls.length > 0) {
+  if ((stage === "research" || stage === "outline") && context.competitorUrls.length > 0) {
     lines.push(`- **COMPETITOR_URLS**: ${context.competitorUrls.join(", ")}`)
   }
   lines.push(`- **TODAY_DATE**: ${today}`)
@@ -120,16 +136,25 @@ function buildConfigContext(context: PipelineContext, today: string): string {
 }
 
 /** The previous stage's output, which is this stage's chain input. */
-function previousOutput(stage: Stage, context: PipelineContext): string {
+function previousOutput(stage: Stage, context: PromptContext): string {
   const index = STAGES.indexOf(stage)
   if (index === 0) return ""
   const value = context[STAGE_OUTPUT_KEY[STAGES[index - 1]]]
-  // The manifest is the only object-valued output. Note that an empty manifest
-  // serializes to "{}", which is truthy, so `ready` still gets a (useless)
-  // previous-output section when `images` produced nothing. Python does the
-  // same and the golden fixtures were captured with that behaviour.
+  // The manifest is the only object-valued stage output.
   if (typeof value === "object" && value !== null) return pythonJsonDumps(value)
   return typeof value === "string" ? value : ""
+}
+
+/** Return one named Markdown section, stopping before the next heading. */
+export function markdownSection(content: string, sectionName: string): string {
+  const escaped = sectionName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const heading = new RegExp(`^#{1,6}\\s+${escaped}[ \\t]*$`, "im")
+  const match = heading.exec(content)
+  if (!match) return ""
+  const tail = content.slice(match.index + match[0].length)
+  const nextHeading = /^#{1,6}\s+.+$/m.exec(tail)
+  const end = nextHeading ? match.index + match[0].length + nextHeading.index : content.length
+  return content.slice(match.index, end).trim()
 }
 
 function buildLinksContext(context: PipelineContext): string {
@@ -163,23 +188,28 @@ function buildLinksContext(context: PipelineContext): string {
  * a markdown rule.
  *
  * `today` is injectable because the config block stamps TODAY_DATE from the
- * clock; parity tests pin it to the date the golden fixture was captured.
+ * clock and tests must be deterministic.
  */
 export function buildStagePrompt(
   stage: Stage,
   rules: string,
-  context: PipelineContext,
+  context: PromptContext,
   today: string = new Date().toISOString().slice(0, 10),
 ): string {
   const sections: string[] = []
 
   if (rules) sections.push(rules)
 
-  const config = buildConfigContext(context, today)
+  const config = buildConfigContext(stage, context, today)
   if (config) sections.push(config)
 
   const previous = previousOutput(stage, context)
   if (previous) sections.push(`## Previous Stage Output\n\n${previous}`)
+
+  if (stage === "edit" || stage === "images") {
+    const claimLedger = markdownSection(context.research, "Claim ledger")
+    if (claimLedger) sections.push(claimLedger)
+  }
 
   if (stage === "edit" && context.internalLinks.length > 0) {
     sections.push(buildLinksContext(context))

@@ -1,19 +1,5 @@
 // @vitest-environment node
-/**
- * Phase 3 item 3.1a: the TypeScript prompt assembly renders the same prompt the
- * Python pipeline sent to the provider.
- *
- * The oracle is `docs/mastra-port/golden/`, captured in Phase 0 from live runs
- * of the Python stack. Each fixture holds the exact `PipelineState` a stage was
- * given and the exact prompt string that state produced, so the comparison is
- * against a real rendered prompt rather than against a reimplementation of the
- * renderer.
- *
- * The gate the objective sets is whitespace-normalized equality. These tests
- * assert byte equality as well, because the two renderers currently agree
- * exactly and a whitespace-only divergence would still be a defect worth
- * seeing.
- */
+/** Prompt assembly and stage-context regressions. */
 import fs from "node:fs"
 import path from "node:path"
 
@@ -21,69 +7,9 @@ import { describe, expect, it } from "vitest"
 
 import { buildStagePrompt, loadRules, rulesDir } from "./prompts"
 import { pipelineContextSchema, STAGE_RULES_MAP, STAGES } from "./state"
-import type { PipelineContext, Stage } from "./state"
+import type { PipelineContext } from "./state"
 
 const GOLDEN_DIR = path.resolve(process.cwd(), "..", "docs", "mastra-port", "golden")
-
-type GoldenFixture = {
-  captured_at: string
-  post_slug: string
-  stage: Stage
-  state_input: Record<string, unknown>
-  rendered_prompts: string[]
-}
-
-function readFixture(slug: string, stage: Stage): GoldenFixture {
-  const file = path.join(GOLDEN_DIR, slug, `${stage}.json`)
-  return JSON.parse(fs.readFileSync(file, "utf8")) as GoldenFixture
-}
-
-const GOLDEN_SLUGS = fs
-  .readdirSync(GOLDEN_DIR, { withFileTypes: true })
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => entry.name)
-  .sort()
-
-/**
- * Map a captured Python `PipelineState` onto the TypeScript context. Doubles as
- * the written-down snake_case to camelCase mapping the steps will use when they
- * read a `posts` row through drizzle.
- */
-function contextFromState(state: Record<string, unknown>): PipelineContext {
-  return pipelineContextSchema.parse({
-    topic: state.topic,
-    targetAudience: state.target_audience,
-    niche: state.niche,
-    intent: state.intent,
-    articleType: state.article_type,
-    additionalInfo: state.additional_info,
-    wordCount: state.word_count,
-    tone: state.tone,
-    outputFormat: state.output_format,
-    websiteUrl: state.website_url,
-    brandVoice: state.brand_voice,
-    avoid: state.avoid,
-    requiredMentions: state.required_mentions,
-    relatedKeywords: state.related_keywords,
-    competitorUrls: state.competitor_urls,
-    internalLinks: state.internal_links,
-    research: state.research,
-    outline: state.outline,
-    draft: state.draft,
-    finalMd: state.final_md,
-    imageManifest: state.image_manifest,
-    ready: state.ready,
-  })
-}
-
-/** The UTC date the fixture was captured, which is the TODAY_DATE it stamped. */
-function capturedDate(fixture: GoldenFixture): string {
-  return fixture.captured_at.slice(0, 10)
-}
-
-function normalizeWhitespace(value: string): string {
-  return value.replace(/\s+/g, " ").trim()
-}
 
 /** A context with every field at the value `state_from_post()` coalesces to. */
 function emptyContext(): PipelineContext {
@@ -112,102 +38,6 @@ function emptyContext(): PipelineContext {
     ready: "",
   })
 }
-
-describe("golden fixture prompt parity", () => {
-  it("captured two posts covering both article types and output formats", () => {
-    expect(GOLDEN_SLUGS).toHaveLength(2)
-    const specs = GOLDEN_SLUGS.map((slug) => {
-      const state = readFixture(slug, "research").state_input
-      return `${state.article_type}/${state.output_format}`
-    })
-    expect(new Set(specs).size).toBe(2)
-  })
-
-  /**
-   * Four of the six stages send exactly `build_stage_prompt()`'s output.
-   * `images` sends it as the first of several prompts (the rest are per-image
-   * and belong to item 3.5).
-   */
-  const EXACT_STAGES: Stage[] = ["research", "outline", "write", "images"]
-
-  for (const slug of GOLDEN_SLUGS) {
-    for (const stage of EXACT_STAGES) {
-      it(`renders ${slug}/${stage} exactly as the Python stage did`, () => {
-        const fixture = readFixture(slug, stage)
-        expect(fixture.stage).toBe(stage)
-
-        const rendered = buildStagePrompt(
-          stage,
-          loadRules(stage),
-          contextFromState(fixture.state_input),
-          capturedDate(fixture),
-        )
-
-        const expected = fixture.rendered_prompts[0]
-        expect(normalizeWhitespace(rendered)).toBe(normalizeWhitespace(expected))
-        expect(rendered).toBe(expected)
-      })
-    }
-
-    /**
-     * `edit_node` appends its own content-analytics block:
-     *   `build_stage_prompt(...) + "\n\n---\n\n" + _build_analytics_section(...)`.
-     * The shared assembly is therefore an exact prefix, and item 3.4 ports the
-     * analytics tail.
-     */
-    it(`renders ${slug}/edit up to the analytics block the edit stage appends`, () => {
-      const fixture = readFixture(slug, "edit")
-      const rendered = buildStagePrompt(
-        "edit",
-        loadRules("edit"),
-        contextFromState(fixture.state_input),
-        capturedDate(fixture),
-      )
-      const expected = fixture.rendered_prompts[0]
-
-      expect(expected.startsWith(rendered)).toBe(true)
-      expect(expected.slice(rendered.length)).toMatch(
-        /^\n\n---\n\n## Current Content Analytics\n/,
-      )
-    })
-
-    /**
-     * `ready_node` does not call `build_stage_prompt()` at all; `_build_ready_prompt`
-     * emits a two-field configuration block (SLUG, OUTPUT_FORMAT, TODAY_DATE) and
-     * fences the manifest as JSON. Pinned here so item 3.6 ports that builder
-     * instead of reaching for this one.
-     */
-    it(`does not use the shared assembly for ${slug}/ready`, () => {
-      const fixture = readFixture(slug, "ready")
-      const expected = fixture.rendered_prompts[0]
-
-      expect(expected).toContain(`## Post Configuration\n\n- **SLUG**: ${slug}\n`)
-      expect(expected).toContain("## Image Manifest (generated images only)")
-      expect(expected).not.toContain("- **BLOG_POST_TOPIC**:")
-
-      const rendered = buildStagePrompt(
-        "ready",
-        loadRules("ready"),
-        contextFromState(fixture.state_input),
-        capturedDate(fixture),
-      )
-      expect(rendered).not.toBe(expected)
-    })
-  }
-
-  it("stamps TODAY_DATE from the clock the run happens on", () => {
-    const fixture = readFixture(GOLDEN_SLUGS[0], "research")
-    const context = contextFromState(fixture.state_input)
-    expect(buildStagePrompt("research", "", context, "2020-01-02")).toContain(
-      "- **TODAY_DATE**: 2020-01-02",
-    )
-    // The fixtures pin the other direction: the captured date is what makes the
-    // parity assertions above exact.
-    expect(fixture.rendered_prompts[0]).toContain(
-      `- **TODAY_DATE**: ${capturedDate(fixture)}`,
-    )
-  })
-})
 
 describe("loadRules", () => {
   it("reads every stage's rule file from the repo's rules directory", () => {
@@ -320,5 +150,89 @@ describe("buildStagePrompt edge cases", () => {
       const prompt = buildStagePrompt(stage, "", context, "2026-08-21")
       expect(prompt.includes("## Available Internal Links")).toBe(stage === "edit")
     }
+  })
+})
+
+describe("stage-specific prompt context", () => {
+  function configuredContext(): PipelineContext & {
+    imageStyle: string
+    imageBrandColors: string[]
+    imageExclude: string[]
+  } {
+    return Object.assign(emptyContext(), {
+      topic: "The History of 80 Percent Pistol Frames",
+      targetAudience: "Experienced builders",
+      niche: "Firearm component history",
+      intent: "informational",
+      articleType: "historical guide",
+      additionalInfo: "Research source packet only",
+      wordCount: 1800,
+      tone: "Direct and technically precise",
+      websiteUrl: "https://g80.com",
+      brandVoice: "Practical subject matter expert",
+      avoid: "Unsupported legal conclusions",
+      requiredMentions: "G80 steel FCU",
+      relatedKeywords: ["80 percent frame"],
+      competitorUrls: ["https://competitor.example/article"],
+      research: [
+        "## Research summary",
+        "Summary that later stages do not need.",
+        "## Claim ledger",
+        "- Claim: Polymer80 introduced a pistol frame.",
+        "  Source: https://example.com/source",
+        "## Topic coverage",
+        "Coverage notes that later stages do not need.",
+      ].join("\n"),
+      outline: "## Origins\n- Establish the chronology.",
+      draft: "---\ntitle: History\n---\n\n# History\n\nDraft body.",
+      imageStyle: "Documentary product photography",
+      imageBrandColors: ["#111111", "#D4A017"],
+      imageExclude: ["exploded firearm diagrams"],
+    })
+  }
+
+  it("keeps voice controls out of research", () => {
+    const prompt = buildStagePrompt("research", "Research rules", configuredContext(), "2026-08-26")
+
+    expect(prompt).toContain("Research source packet only")
+    expect(prompt).toContain("https://competitor.example/article")
+    expect(prompt).not.toContain("Direct and technically precise")
+    expect(prompt).not.toContain("Practical subject matter expert")
+    expect(prompt).not.toContain("Unsupported legal conclusions")
+    expect(prompt).not.toContain("G80 steel FCU")
+  })
+
+  it("gives write the outline and voice controls without research-only context", () => {
+    const prompt = buildStagePrompt("write", "Write rules", configuredContext(), "2026-08-26")
+
+    expect(prompt).toContain("## Origins")
+    expect(prompt).toContain("Direct and technically precise")
+    expect(prompt).toContain("Practical subject matter expert")
+    expect(prompt).toContain("Unsupported legal conclusions")
+    expect(prompt).toContain("G80 steel FCU")
+    expect(prompt).not.toContain("Research source packet only")
+    expect(prompt).not.toContain("https://competitor.example/article")
+    expect(prompt).not.toContain("Documentary product photography")
+  })
+
+  it("gives edit only the claim ledger from research", () => {
+    const prompt = buildStagePrompt("edit", "Edit rules", configuredContext(), "2026-08-26")
+
+    expect(prompt).toContain("## Claim ledger")
+    expect(prompt).toContain("https://example.com/source")
+    expect(prompt).not.toContain("Summary that later stages do not need")
+    expect(prompt).not.toContain("Coverage notes that later stages do not need")
+  })
+
+  it("gives images visual controls and the claim ledger without prose controls", () => {
+    const prompt = buildStagePrompt("images", "Image rules", configuredContext(), "2026-08-26")
+
+    expect(prompt).toContain("Documentary product photography")
+    expect(prompt).toContain("#111111, #D4A017")
+    expect(prompt).toContain("exploded firearm diagrams")
+    expect(prompt).toContain("## Claim ledger")
+    expect(prompt).not.toContain("Direct and technically precise")
+    expect(prompt).not.toContain("Practical subject matter expert")
+    expect(prompt).not.toContain("Research source packet only")
   })
 })

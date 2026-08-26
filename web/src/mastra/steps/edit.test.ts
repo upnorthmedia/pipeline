@@ -259,16 +259,23 @@ async function progressLines(postId: string) {
     .map((entry) => [entry.level, entry.message])
 }
 
-describe("edit step prompt parity", () => {
+describe("edit step prompt contract", () => {
   for (const [index, slug] of FIXTURE_SLUGS.entries()) {
-    it(`sends the prompt the Python stage sent for ${slug}`, async () => {
+    it(`sends the current stage-scoped prompt for ${slug}`, async () => {
       const fixture = fixtures[index]
       vi.setSystemTime(new Date(fixture.captured_at))
 
       const { prompts } = await runStep(fixtureIds[index], replayOf(fixture))
+      const state = await loadPipelineState(fixtureIds[index])
+      const analytics = buildAnalyticsSection(state)
 
       expect(prompts).toHaveLength(1)
-      expect(prompts[0]).toBe(fixture.rendered_prompts[0])
+      expect(prompts[0]).toBe(
+        buildStagePrompt("edit", loadRules("edit"), state) +
+          "\n\n---\n\n" +
+          analytics,
+      )
+      expect(prompts[0]).not.toContain("OUTPUT_FORMAT")
     })
   }
 
@@ -324,7 +331,9 @@ describe("edit step analytics section", () => {
     expect(at).toBeGreaterThan(0)
     // Asserted separately from the whole-prompt comparison so a mismatch points
     // at the computed kilobyte rather than at 34 KB of rules and columns.
-    expect(prompts[0].slice(at)).toBe(fixture.rendered_prompts[0].slice(at))
+    const currentAt = prompts[0].indexOf(marker)
+    expect(currentAt).toBeGreaterThan(0)
+    expect(prompts[0].slice(currentAt)).toBe(fixture.rendered_prompts[0].slice(at))
   })
 })
 

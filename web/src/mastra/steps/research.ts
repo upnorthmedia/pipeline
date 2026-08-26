@@ -73,8 +73,27 @@ const REFUSAL_RE = new RegExp(REFUSAL_PATTERNS.join("|"), "i")
 export const DEGRADED_RESEARCH_MESSAGE =
   "WARNING: Research quality may be degraded \u2014 Perplexity returned unexpected responses."
 
-/** Sections a valid research document is expected to cover. */
-export const EXPECTED_SECTIONS = ["keyword", "pain point", "competitor", "search intent"]
+/** Sections required by the research handoff contract. */
+export const EXPECTED_SECTIONS = [
+  "research summary",
+  "claim ledger",
+  "topic coverage",
+  "risks and open questions",
+  "recommended article direction",
+  "coverage verdict",
+]
+
+export type ResearchCoverageStatus = "ready" | "blocked" | "unknown"
+
+export function researchCoverageStatus(content: string): ResearchCoverageStatus {
+  const heading = /^#{1,6}\s+coverage verdict[ \t]*$/im.exec(content)
+  if (!heading) return "unknown"
+  const tail = content.slice(heading.index + heading[0].length)
+  const nextHeading = /^#{1,6}\s+.+$/m.exec(tail)
+  const section = nextHeading ? tail.slice(0, nextHeading.index) : tail
+  const status = /^\s*(?:\*\*)?STATUS(?:\*\*)?\s*:\s*(ready|blocked)\s*$/im.exec(section)
+  return status ? (status[1].toLowerCase() as ResearchCoverageStatus) : "unknown"
+}
 
 /**
  * True when the response looks like research rather than a meta-response:
@@ -82,9 +101,13 @@ export const EXPECTED_SECTIONS = ["keyword", "pain point", "competitor", "search
  */
 export function isValidResearch(content: string): boolean {
   if (REFUSAL_RE.test(content)) return false
-  const lower = content.toLowerCase()
-  const matches = EXPECTED_SECTIONS.filter((section) => lower.includes(section)).length
-  return matches >= 2
+  const headings = Array.from(content.matchAll(/^#{1,6}\s+(.+?)[ \t]*$/gm)).map((match) =>
+    match[1].trim().toLowerCase(),
+  )
+  return (
+    EXPECTED_SECTIONS.every((section) => headings.includes(section)) &&
+    researchCoverageStatus(content) !== "unknown"
+  )
 }
 
 /** Python's `_reinforced_prompt`: the retry preamble, byte-identical. */

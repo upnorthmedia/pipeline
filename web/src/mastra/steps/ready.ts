@@ -1,26 +1,9 @@
-/**
- * The `ready` stage as a Mastra step, ported from `ready_node` in
- * `api/src/pipeline/stages/ready.py`.
- *
- * The last stage, and the only one whose prompt is not built by the shared
- * `build_stage_prompt`. `ready_node` has a private `_build_ready_prompt` that
- * drops the thirteen-field configuration block and the previous-stage section
- * in favour of three lines of post configuration, the edited markdown, and the
- * image manifest filtered down to the images that actually got generated. That
- * divergence is the substance of this port, so the builder is exported and
- * tested on its own.
- *
- * Everything else is the plain stage contract: one Claude call, no validator,
- * no retry, and the answer committed to `posts.ready_content` before returning.
- */
+/** Deterministic assembly of edited Markdown and generated image placements. */
 import { createStep } from "@mastra/core/workflows/evented"
 
 import { loadPipelineState, saveStageOutput } from "../post-state"
-import type { PipelineState } from "../post-state"
-import { loadRules, pythonJsonDumps } from "../prompts"
+import { validatePublishContent } from "../publish-safety"
 import { STATUS_COMPLETE } from "../state"
-import { pythonTruthy } from "./images-manifest"
-import type { JsonValue } from "./images-manifest"
 import {
   announceStageComplete,
   announceStageStart,
@@ -34,91 +17,104 @@ import {
   reviewGate,
   shouldRunStage,
   skippedStageOutput,
-  stageAgentOptions,
   stageStepInputSchema,
   stageStepOutputSchema,
 } from "./stage-io"
 
-/** The separator `_build_ready_prompt` joins its sections with. */
-const SECTION_SEPARATOR = "\n\n---\n\n"
+type ManifestEntry = Record<string, unknown>
 
-/**
- * `[img for img in images if img.get("generated", False)]`.
- *
- * The manifest is a JSONB document written from whatever Claude answered with,
- * so `generated` is only a boolean by convention. Python tests its truthiness,
- * which is why this does too rather than comparing to `true`: a manifest
- * carrying `"generated": "yes"` reaches the model in Python and must here.
- *
- * A non-object entry raises `AttributeError` out of the Python stage, so it
- * throws here as well instead of being silently dropped.
- */
-export function generatedImages(images: unknown[]): unknown[] {
-  return images.filter((image, index) => {
+const FRONTMATTER_RE = /^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)/
+const NOTES_COMMENT_RE = /(?:\n---\s*)?\n?<!--(?:(?!-->)[\s\S])*(?:PUBLISHING|WRITING) NOTES(?:(?!-->)[\s\S])*-->\s*/gi
+
+function manifestImages(manifest: Record<string, unknown>): ManifestEntry[] {
+  const images = manifest.images
+  if (images === undefined) return []
+  if (!Array.isArray(images)) throw new TypeError("image manifest 'images' is not an array")
+  return images.map((image, index) => {
     if (typeof image !== "object" || image === null || Array.isArray(image)) {
       throw new TypeError(`image manifest entry ${index} is not an object`)
     }
-    return pythonTruthy((image as Record<string, JsonValue>).generated)
+    return image as ManifestEntry
   })
 }
 
-/**
- * `_build_ready_prompt`: rules, three lines of post configuration, the edited
- * markdown, and the generated-images-only manifest, joined by a markdown rule.
- *
- * `today` is injectable for the same reason `buildStagePrompt`'s is: the
- * configuration block stamps TODAY_DATE from the clock, and the parity tests
- * pin it to the date the golden fixture was captured.
- */
-export function buildReadyPrompt(
-  rules: string,
-  state: PipelineState,
-  today: string = new Date().toISOString().slice(0, 10),
-): string {
-  const sections: string[] = []
-
-  if (rules) sections.push(rules)
-
-  sections.push(
-    `## Post Configuration\n\n- **SLUG**: ${state.slug}\n` +
-      `- **OUTPUT_FORMAT**: ${state.outputFormat}\n` +
-      `- **TODAY_DATE**: ${today}`,
+function isFeatured(image: ManifestEntry): boolean {
+  const placement = image.placement
+  return Boolean(
+    image.type === "featured" ||
+      placement === "featured" ||
+      (typeof placement === "object" &&
+        placement !== null &&
+        !Array.isArray(placement) &&
+        (placement as ManifestEntry).location === "featured_image"),
   )
+}
 
-  // The edit stage's committed output. Suppressed entirely when empty, so a
-  // `ready` run on a post that never made it through `edit` sends the rules and
-  // the configuration rather than an empty section.
-  if (state.finalMd) {
-    sections.push(`## Final Markdown Content (from edit stage)\n\n${state.finalMd}`)
+function applyFeaturedFrontmatter(
+  content: string,
+  manifest: Record<string, unknown>,
+): string {
+  const featured = manifestImages(manifest).find((image) => image.generated && isFeatured(image))
+  if (!featured) return content
+
+  const match = FRONTMATTER_RE.exec(content)
+  const metaLines = match?.[1] ? match[1].split("\n") : []
+  const body = match ? content.slice(match[0].length) : content
+  const updates: [string, string][] = [
+    ["featuredImage", String(featured.url ?? "")],
+    ["featuredImageAlt", String(featured.alt_text ?? "")],
+  ]
+
+  for (const [key, value] of updates) {
+    const replacement = `${key}: ${JSON.stringify(value)}`
+    const index = metaLines.findIndex((line) => line.startsWith(`${key}:`))
+    if (index === -1) metaLines.push(replacement)
+    else metaLines[index] = replacement
   }
 
-  const manifest = state.imageManifest
-  // `if manifest:` in Python, where an empty dict is falsy. `{}` is truthy in
-  // JavaScript, so the emptiness has to be tested explicitly or a post with no
-  // images would get a section Python omits.
-  if (Object.keys(manifest).length > 0) {
-    // `manifest.get("images", [])`: absent is `[]`, and an explicit `null` is
-    // not, which is why this tests key presence rather than using `??`. A
-    // present non-array raises out of the Python comprehension, so it throws
-    // here too.
-    const images = "images" in manifest ? manifest.images : []
-    if (!Array.isArray(images)) {
-      throw new TypeError(
-        `image manifest 'images' is ${images === null ? "null" : typeof images}, not an array`,
-      )
-    }
-    // `{**manifest, "images": generated_images}` replaces the value in place, so
-    // `images` keeps its original position in the document rather than moving to
-    // the end. `json.dumps` preserves insertion order and the prompt is compared
-    // byte for byte, so the spread order matters.
-    const filtered = { ...manifest, images: generatedImages(images) }
-    sections.push(
-      "## Image Manifest (generated images only)\n\n" +
-        `\`\`\`json\n${pythonJsonDumps(filtered)}\n\`\`\``,
-    )
+  return `---\n${metaLines.join("\n")}\n---\n\n${body.trimStart()}`
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function insertImage(content: string, image: ManifestEntry): string {
+  const url = String(image.url ?? "")
+  if (!url || content.includes(url)) return content
+
+  const placement = image.placement
+  const section =
+    typeof placement === "object" && placement !== null && !Array.isArray(placement)
+      ? String((placement as ManifestEntry).after_section ?? "")
+      : ""
+  const id = String(image.id ?? url)
+  if (!section) throw new Error(`image ${id} has no target section`)
+
+  const heading = new RegExp(`^(#{2,6})\\s+${escapeRegExp(section)}[ \\t]*$`, "m")
+  const match = heading.exec(content)
+  if (!match) throw new Error(`image ${id} target heading not found: ${section}`)
+
+  const imageMarkdown = `![${String(image.alt_text ?? "")}](${url})`
+  const end = match.index + match[0].length
+  return `${content.slice(0, end)}\n\n${imageMarkdown}\n\n${content.slice(end).trimStart()}`
+}
+
+export function assembleReadyContent(
+  finalMd: string,
+  manifest: Record<string, unknown>,
+): string {
+  let content = finalMd.replace(NOTES_COMMENT_RE, "\n").trim()
+  content = applyFeaturedFrontmatter(content, manifest)
+
+  for (const image of manifestImages(manifest)) {
+    if (!image.generated || isFeatured(image)) continue
+    content = insertImage(content, image)
   }
 
-  return sections.join(SECTION_SEPARATOR)
+  content = `${content.trim()}\n`
+  validatePublishContent(content)
+  return content
 }
 
 export const readyStep = createStep({
@@ -131,17 +127,12 @@ export const readyStep = createStep({
     try {
       const { postId } = inputData
       const state = await loadPipelineState(postId)
-      // Before the skip check, because a paused run stops here whatever this
-      // stage would have done: `pauseGate()` ends the run rather than the
-      // stage, so nothing after it runs either.
       const paused = await pauseGate(mastra, "ready", inputData, state)
       if (paused) return bail(paused)
       if (!shouldRunStage("ready", inputData, state.stageStatus)) {
         return skippedStageOutput(inputData, "ready")
       }
 
-      // The gate sits immediately after the skip check and before anything the
-      // stage spends, which is where Python put it: a paused stage bills nothing.
       const gate = await reviewGate(
         mastra,
         "ready",
@@ -151,30 +142,20 @@ export const readyStep = createStep({
         retryCount,
       )
       if (gate) return suspend(gate)
+
       await announceStageStart(mastra, "ready", inputData)
-      const rules = loadRules("ready")
-      // Python's three progress lines, in the three positions
-      // `ready_node` wrote them: after the rules are read, before the
-      // provider is called, and once it has answered.
-      await publishStageLog(mastra, postId, "ready", "Rules loaded, building prompt...")
-      const prompt = buildReadyPrompt(rules, state)
-
-      await publishStageLog(mastra, postId, "ready", "Calling Claude for final assembly...")
+      await publishStageLog(mastra, postId, "ready", "Assembling final Markdown...")
       const startedAt = Date.now()
-      const agentOptions = await stageAgentOptions(postId)
-      const result = await mastra.getAgent("ready").generate(prompt, agentOptions)
-      const durationMs = Date.now() - startedAt
-
-      const tokensOut = result.usage?.outputTokens ?? 0
-      const durationS = durationMs / 1000
+      const content = assembleReadyContent(state.finalMd, state.imageManifest)
+      const durationS = (Date.now() - startedAt) / 1000
       await publishStageLog(
         mastra,
         postId,
         "ready",
-        `Assembly done (${tokensOut} tokens, ${formatSeconds(durationS)}s)`,
+        `Assembly done (${formatSeconds(durationS)}s)`,
       )
 
-      await saveStageOutput(postId, "ready", result.text, { ready: STATUS_COMPLETE })
+      await saveStageOutput(postId, "ready", content, { ready: STATUS_COMPLETE })
       await markRerunComplete(inputData)
 
       const output = {
@@ -182,20 +163,14 @@ export const readyStep = createStep({
         stages: inputData.stages,
         stage: "ready" as const,
         skipped: false,
-        // The provider's own reported model id, not the one requested, so a
-        // silent server-side alias shows up in the run trace.
-        model: result.response?.modelId ?? "",
-        tokensIn: result.usage?.inputTokens ?? 0,
-        tokensOut,
+        model: "deterministic",
+        tokensIn: 0,
+        tokensOut: 0,
         durationS,
       }
       await announceStageComplete(mastra, output)
       return output
     } catch (error) {
-      // Python's `warning` / `retry` entry, from the `except` block that
-      // wrapped the whole stage loop. Only this side of the throw can see the
-      // attempt number, so the record is written here and the error is rethrown
-      // unchanged for the engine to retry or fail on.
       await recordStageRetry("ready", inputData.postId, retryCount, error, abortSignal)
       throw error
     }

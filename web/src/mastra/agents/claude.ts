@@ -99,7 +99,7 @@ export const CLAUDE_ROUTER_PREFIX = "anthropic/"
  * mistake was made once during item 6.2b and this type is what makes it a
  * compile error rather than a 404 from the router.
  */
-export type ClaudeStage = "outline" | "write" | "edit" | "ready"
+export type ClaudeStage = "outline" | "write" | "edit"
 
 /**
  * The `model` a Claude-backed stage agent runs, resolved per call from the

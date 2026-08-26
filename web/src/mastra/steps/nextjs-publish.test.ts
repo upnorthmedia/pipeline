@@ -61,6 +61,7 @@ const POST_BAD_SECRET = "00000000-0000-4000-8000-0000000000d5"
 const POST_REJECTED = "00000000-0000-4000-8000-0000000000d6"
 const POST_UNREACHABLE = "00000000-0000-4000-8000-0000000000d7"
 const POST_BAD_MANIFEST = "00000000-0000-4000-8000-0000000000d8"
+const POST_UNSAFE = "00000000-0000-4000-8000-0000000000d9"
 const POST_ABSENT = "00000000-0000-4000-8000-0000000000df"
 
 const ALL_POSTS = [
@@ -72,6 +73,7 @@ const ALL_POSTS = [
   POST_REJECTED,
   POST_UNREACHABLE,
   POST_BAD_MANIFEST,
+  POST_UNSAFE,
   POST_ABSENT,
 ]
 
@@ -283,13 +285,17 @@ beforeAll(async () => {
     [POST_REJECTED, PROFILE_ID],
     [POST_UNREACHABLE, DEAD_PROFILE_ID],
     [POST_BAD_MANIFEST, PROFILE_ID],
+    [POST_UNSAFE, PROFILE_ID],
   ] as const) {
     await db.insert(posts).values({
       id: postId,
       profileId,
       slug: `nextjs-publish-${postId.slice(-2)}`,
       topic: "Topic from the row",
-      readyContent: markdown(postId),
+      readyContent:
+        postId === POST_UNSAFE
+          ? "---\ntitle: Unsafe\n---\n\nBody.\n\n<!-- PUBLISHING NOTES: leaked -->"
+          : markdown(postId),
       // Always present, so `ready_content or final_md_content` is a real choice.
       finalMdContent: "SHOULD-NOT-BE-PUBLISHED",
       imageManifest:
@@ -462,6 +468,15 @@ describe("a profile with a frontmatter mapping", () => {
 })
 
 describe("the guards", () => {
+  it("rejects workflow artifacts before sending a webhook", async () => {
+    reset()
+    const output = await publishPost(POST_UNSAFE)
+    expect(output.status).toBe("failed")
+    expect(output.error).toBe("unsafe publish content: publishing notes")
+    expect(recorded).toEqual([])
+    expect((await readPost(POST_UNSAFE)).nextjsPublishStatus).toBe("failed")
+  })
+
   it("returns missing and touches nothing when the post is gone", async () => {
     reset()
     const output = await publishPost(POST_ABSENT)

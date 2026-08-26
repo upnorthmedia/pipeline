@@ -34,6 +34,7 @@ import {
   MAX_RESEARCH_ATTEMPTS,
   isValidResearch,
   reinforcedPrompt,
+  researchCoverageStatus,
   researchStep,
 } from "./research"
 
@@ -89,8 +90,23 @@ const fixtureIds = fixtures.map(
 /** One replayed provider response, shaped like the agent's `generate` result. */
 function replayOf(fixture: Fixture) {
   const call = fixture.provider_calls[0]
+  const capturedResearch = call.response.body.choices[0].message.content
   return {
-    text: call.response.body.choices[0].message.content,
+    text: [
+      "## Research summary",
+      capturedResearch,
+      "## Claim ledger",
+      "- Claim: Archived fixture content is available for the port test.",
+      "  Source: https://example.com/source",
+      "## Topic coverage",
+      "The archived fixture covers the requested topic.",
+      "## Risks and open questions",
+      "The archived source packet predates the coverage contract.",
+      "## Recommended article direction",
+      "Use the fixture only to exercise stage persistence and accounting.",
+      "## Coverage verdict",
+      "STATUS: ready",
+    ].join("\n\n"),
     response: { modelId: call.request.model },
     usage: {
       inputTokens: call.response.body.usage.prompt_tokens,
@@ -233,16 +249,18 @@ afterAll(async () => {
   await closeDb()
 })
 
-describe("research step prompt parity", () => {
+describe("research step prompt contract", () => {
   for (const [index, slug] of FIXTURE_SLUGS.entries()) {
-    it(`sends the prompt the Python stage sent for ${slug}`, async () => {
+    it(`sends stage-scoped configuration for ${slug}`, async () => {
       const fixture = fixtures[index]
       vi.setSystemTime(new Date(fixture.captured_at))
 
       const { prompts } = await runStep(fixtureIds[index], [replayOf(fixture)])
 
       expect(prompts).toHaveLength(1)
-      expect(prompts[0]).toBe(fixture.rendered_prompts[0])
+      expect(prompts[0]).toContain(String(fixture.post_spec.additional_info))
+      expect(prompts[0]).not.toContain(`- **TONE**: ${String(fixture.post_spec.tone)}`)
+      expect(prompts[0]).not.toContain(`- **BRAND_VOICE**: ${String(fixture.post_spec.brand_voice)}`)
     })
   }
 })
@@ -263,7 +281,7 @@ describe("research step persistence and output", () => {
     })
 
     const [row] = await db.select().from(posts).where(eq(posts.id, fixtureIds[0]))
-    expect(row.researchContent).toBe(fixture.stage_output.research)
+    expect(row.researchContent).toBe(replayOf(fixture).text)
     expect(row.currentStage).toBe(fixture.stage_output.current_stage)
     expect(row.stageStatus).toEqual(fixture.stage_output.stage_status)
     // Later stages' columns stay untouched, which is what makes a resume safe.
@@ -307,7 +325,7 @@ describe("research step meta-response retry loop", () => {
     // Pinned against the literal from `_reinforced_prompt`, not against
     // `reinforcedPrompt()`, so editing the preamble fails here instead of
     // moving both sides of the comparison together.
-    expect(prompts[1]).toBe(PYTHON_RETRY_PREAMBLE + fixture.rendered_prompts[0])
+    expect(prompts[1]).toBe(PYTHON_RETRY_PREAMBLE + prompts[0])
     expect(reinforcedPrompt("x")).toBe(`${PYTHON_RETRY_PREAMBLE}x`)
     expect(output.tokensIn).toBe(REFUSAL.usage.inputTokens + good.usage.inputTokens)
     expect(output.tokensOut).toBe(REFUSAL.usage.outputTokens + good.usage.outputTokens)
@@ -332,10 +350,39 @@ describe("research step meta-response retry loop", () => {
 })
 
 describe("isValidResearch", () => {
-  it("accepts the golden fixtures' research documents", () => {
-    for (const fixture of fixtures) {
-      expect(isValidResearch(fixture.stage_output.research)).toBe(true)
-    }
+  const readyPacket = [
+    "## Research summary",
+    "The available sources establish a usable chronology.",
+    "## Claim ledger",
+    "- Claim: The product launched in 2017.",
+    "  Source: https://example.com/source",
+    "## Topic coverage",
+    "Origins, major product changes, and current context are covered.",
+    "## Risks and open questions",
+    "One exact launch month remains unverified.",
+    "## Recommended article direction",
+    "Use a sourced chronology and qualify the unresolved month.",
+    "## Coverage verdict",
+    "STATUS: ready",
+  ].join("\n\n")
+
+  const blockedPacket = readyPacket
+    .replace("The available sources establish a usable chronology.", "The core chronology is not supported.")
+    .replace("STATUS: ready", "STATUS: blocked")
+
+  it("accepts a complete packet with a ready coverage verdict", () => {
+    expect(researchCoverageStatus(readyPacket)).toBe("ready")
+    expect(isValidResearch(readyPacket)).toBe(true)
+  })
+
+  it("preserves a complete blocked packet instead of retrying it as a refusal", () => {
+    expect(researchCoverageStatus(blockedPacket)).toBe("blocked")
+    expect(isValidResearch(blockedPacket)).toBe(true)
+  })
+
+  it("rejects a packet that omits the coverage verdict", () => {
+    expect(researchCoverageStatus(readyPacket.replace("## Coverage verdict\n\nSTATUS: ready", ""))).toBe("unknown")
+    expect(isValidResearch(readyPacket.replace("## Coverage verdict\n\nSTATUS: ready", ""))).toBe(false)
   })
 
   it("rejects every refusal phrasing Python listed", () => {
@@ -353,14 +400,13 @@ describe("isValidResearch", () => {
     for (const refusal of refusals) {
       // Each carries enough expected sections to pass the section check, so the
       // rejection can only be coming from the refusal pattern.
-      const padded = `${refusal}\n\nkeyword, pain point, competitor, search intent`
+      const padded = `${readyPacket}\n\n${refusal}`
       expect(isValidResearch(padded)).toBe(false)
     }
   })
 
-  it("rejects a clean response that covers fewer than two expected sections", () => {
-    expect(isValidResearch("# Notes\n\nSome keyword ideas.")).toBe(false)
-    expect(isValidResearch("# Notes\n\nkeyword ideas and pain point analysis.")).toBe(true)
+  it("rejects legacy keyword notes that do not satisfy the research contract", () => {
+    expect(isValidResearch("# Notes\n\nkeyword ideas and pain point analysis.")).toBe(false)
   })
 })
 

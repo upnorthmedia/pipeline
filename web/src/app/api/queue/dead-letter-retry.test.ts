@@ -30,7 +30,6 @@ import { closeDb, getDb, getPool, posts, websiteProfiles } from "@/db"
 import { editAgent } from "@/mastra/agents/edit"
 import { imagesAgent } from "@/mastra/agents/images"
 import { outlineAgent } from "@/mastra/agents/outline"
-import { readyAgent } from "@/mastra/agents/ready"
 import { researchAgent } from "@/mastra/agents/research"
 import { writeAgent } from "@/mastra/agents/write"
 import { createWorkerEvents } from "@/mastra/failure-recorder"
@@ -116,7 +115,6 @@ const testMastra = new Mastra({
     write: writeAgent,
     edit: editAgent,
     images: imagesAgent,
-    ready: readyAgent,
   },
 })
 

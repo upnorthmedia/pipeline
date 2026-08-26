@@ -50,14 +50,11 @@ import geminiCorpus from "../images/data/gemini-parity.json"
 import corpus from "../images/data/image-generation-parity.json"
 import { GEMINI_API_BASE, GEMINI_IMAGE_MODEL_ID } from "../images/gemini"
 import { CONTENT_MAX_WIDTH, FEATURED_MAX_WIDTH } from "../images/generate-one"
-import { loadPipelineState } from "../post-state"
 import { STAGE_MODELS_SETTING_KEY } from "../stage-models"
-import { loadRules } from "../prompts"
 import { imagesAssembleStep } from "./images-assemble"
 import { imagesGenerateStep } from "./images-generate"
 import type { GeneratedImageOutput } from "./images-generate"
 import type { ImagesManifestOutput } from "./images-manifest"
-import { buildReadyPrompt } from "./ready"
 
 /**
  * The key the step is expected to hand the client. A literal, so the assertion
@@ -441,7 +438,6 @@ describe("the generated images reach the stored manifest and the ready prompt", 
   }
 
   let stored: Record<string, unknown>
-  let prompt: string
 
   beforeAll(async () => {
     await imagesAssembleStep.execute({
@@ -454,9 +450,6 @@ describe("the generated images reach the stored manifest and the ready prompt", 
 
     const rows = await db.select().from(posts).where(eq(posts.id, POST_ID))
     stored = rows[0].imageManifest as Record<string, unknown>
-
-    const state = await loadPipelineState(POST_ID)
-    prompt = buildReadyPrompt(loadRules("ready"), state, "2026-08-22")
   }, 30_000)
 
   it("stores every entry with the totals the fan-out produced", () => {
@@ -472,14 +465,19 @@ describe("the generated images reach the stored manifest and the ready prompt", 
     }
   })
 
-  it("embeds the generated urls in the ready prompt and drops the failed entry", () => {
-    // Asserted first so the two negative expectations below cannot pass on a
-    // prompt that simply has no manifest section.
-    expect(prompt).toContain("## Image Manifest (generated images only)")
-    expect(prompt).toContain(String(content.spec.url))
-    expect(prompt).toContain(String(featured.spec.url))
-    expect(prompt).not.toContain(promptlessSpec.id)
-    expect(prompt).not.toContain("no prompt")
+  it("marks generated and failed entries for deterministic ready assembly", () => {
+    const images = stored.images as Record<string, unknown>[]
+    expect(images.find((image) => image.id === content.spec.id)).toMatchObject({
+      generated: true,
+      url: content.spec.url,
+    })
+    expect(images.find((image) => image.id === featured.spec.id)).toMatchObject({
+      generated: true,
+      url: featured.spec.url,
+    })
+    expect(images.find((image) => image.id === promptlessSpec.id)).toMatchObject({
+      generated: false,
+    })
   })
 })
 

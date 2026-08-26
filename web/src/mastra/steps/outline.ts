@@ -13,6 +13,7 @@ import { createStep } from "@mastra/core/workflows/evented"
 import { loadPipelineState, saveStageOutput } from "../post-state"
 import { buildStagePrompt, loadRules } from "../prompts"
 import { STATUS_COMPLETE } from "../state"
+import { researchCoverageStatus } from "./research"
 import {
   announceStageComplete,
   announceStageStart,
@@ -48,6 +49,9 @@ export const outlineStep = createStep({
       if (paused) return bail(paused)
       if (!shouldRunStage("outline", inputData, state.stageStatus)) {
         return skippedStageOutput(inputData, "outline")
+      }
+      if (researchCoverageStatus(state.research) === "blocked") {
+        throw new Error("research coverage is blocked; resolve the research gaps before outlining")
       }
 
       // The gate sits immediately after the skip check and before anything the

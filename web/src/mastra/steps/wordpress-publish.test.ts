@@ -597,15 +597,7 @@ describe("a post with nothing configured", () => {
   })
 })
 
-/**
- * Ledger item P1.3c. `rules/blog-ready.md` asks the ready stage for Gutenberg
- * HTML when the output format is `wordpress`, and an LLM writing prose reaches
- * for `<br />` and `<sup>` unasked. Every one of those that mistune's *block*
- * layer declines becomes an `inline_html` token, which `_GutenbergRenderer` has
- * no method for, so the publish died inside `markdownToWpHtml` and the run
- * reported `no renderer for "inline_html"`.
- */
-describe("an article carrying the HTML the ready stage is told to write", () => {
+describe("an article carrying leaked Gutenberg source blocks", () => {
   let output: WordPressPublishOutput
 
   beforeAll(async () => {
@@ -615,24 +607,18 @@ describe("an article carrying the HTML the ready stage is told to write", () => 
     output = await publishPost(POST_INLINE_HTML)
   }, 60_000)
 
-  it("publishes rather than failing in the converter", () => {
-    expect(output.status).toBe("published")
-    expect(output.error).toBeNull()
+  it("fails before sending any request to WordPress", () => {
+    expect(output.status).toBe("failed")
+    expect(output.error).toBe("unsafe publish content: Gutenberg source block")
+    expect(recorded).toEqual([])
   })
 
-  it("sends the inline tags through to WordPress verbatim", () => {
-    const { content } = articleBody<{ content: string }>()
-    expect(content).toContain(
-      "<p>Bees navigate by polarised light.<br />Even under cloud.</p>",
+  it("records the artifact class on the post", async () => {
+    expect((await readPost(POST_INLINE_HTML)).wpPublishStatus).toBe("failed")
+    const entries = await publishLogEntries(POST_INLINE_HTML)
+    expect(entries.at(-1)?.message).toBe(
+      "WordPress publish failed: unsafe publish content: Gutenberg source block",
     )
-    expect(content).toContain('<p>See <a href="/guide">the field guide</a> for the dance vocabulary.</p>')
-    expect(content).toContain("<p>Ultraviolet<sup>1</sup> light is the cue.</p>")
-  })
-
-  it("still rewrites the media URL inside the figure block", () => {
-    const { content } = articleBody<{ content: string }>()
-    expect(content).toContain(`${base}/wp-content/uploads/`)
-    expect(content).not.toContain(`/media/${POST_INLINE_HTML}/`)
   })
 })
 

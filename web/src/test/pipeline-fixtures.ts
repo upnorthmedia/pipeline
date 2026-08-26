@@ -1,0 +1,15 @@
+export const VALID_RESEARCH_PACKET = [
+  "## Research summary",
+  "The available evidence supports a useful article.",
+  "## Claim ledger",
+  "- Claim: The fixture has one usable claim.",
+  "  Source: https://example.com/source",
+  "## Topic coverage",
+  "The central reader question is covered.",
+  "## Risks and open questions",
+  "No material gaps remain in this fixture.",
+  "## Recommended article direction",
+  "Use the verified claim in a concise explanation.",
+  "## Coverage verdict",
+  "STATUS: ready",
+].join("\n\n")

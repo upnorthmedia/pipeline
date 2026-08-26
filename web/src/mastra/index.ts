@@ -24,7 +24,6 @@ import { getPool } from "../db"
 import { editAgent } from "./agents/edit"
 import { imagesAgent } from "./agents/images"
 import { outlineAgent } from "./agents/outline"
-import { readyAgent } from "./agents/ready"
 import { researchAgent } from "./agents/research"
 import { writeAgent } from "./agents/write"
 import { DrainingPubSub } from "./draining-pubsub"
@@ -202,6 +201,5 @@ export const mastra = new Mastra({
     write: writeAgent,
     edit: editAgent,
     images: imagesAgent,
-    ready: readyAgent,
   },
 })

@@ -14,8 +14,7 @@ import { describe, expect, it } from "vitest"
 
 import { stageCostUsd } from "./execution-log"
 import { MODEL_COSTS, type ModelCost } from "./model-costs"
-import { STAGE_MODEL_ALLOWLIST, STAGE_MODEL_PROVIDER } from "./stage-models"
-import { STAGES } from "./state"
+import { MODEL_STAGES, STAGE_MODEL_ALLOWLIST, STAGE_MODEL_PROVIDER } from "./stage-models"
 
 /**
  * Anthropic's per-million-token rates for every Claude model a stage can be
@@ -36,7 +35,7 @@ const ANTHROPIC_PUBLISHED_RATES: Record<string, ModelCost> = {
 }
 
 function selectableAnthropicModels(): string[] {
-  const models = STAGES.filter((stage) => STAGE_MODEL_PROVIDER[stage] === "anthropic").flatMap(
+  const models = MODEL_STAGES.filter((stage) => STAGE_MODEL_PROVIDER[stage] === "anthropic").flatMap(
     (stage) => STAGE_MODEL_ALLOWLIST[stage],
   )
   return [...new Set(models)].sort()
@@ -44,7 +43,7 @@ function selectableAnthropicModels(): string[] {
 
 describe("MODEL_COSTS", () => {
   it("prices every model any stage can be configured to run", () => {
-    const unpriced = STAGES.flatMap((stage) =>
+    const unpriced = MODEL_STAGES.flatMap((stage) =>
       STAGE_MODEL_ALLOWLIST[stage]
         .filter((model) => !(model in MODEL_COSTS))
         .map((model) => `${stage}: ${model}`),

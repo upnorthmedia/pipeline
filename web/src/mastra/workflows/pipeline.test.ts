@@ -32,11 +32,12 @@ import { RedisStreamsPubSub } from "@mastra/redis-streams"
 import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 
+import { VALID_RESEARCH_PACKET } from "../../test/pipeline-fixtures"
+
 import { closeDb, getDb, getPool, posts } from "../../db"
 import { editAgent } from "../agents/edit"
 import { imagesAgent } from "../agents/images"
 import { outlineAgent } from "../agents/outline"
-import { readyAgent } from "../agents/ready"
 import { researchAgent } from "../agents/research"
 import { writeAgent } from "../agents/write"
 import corpus from "../images/data/image-generation-parity.json"
@@ -67,21 +68,19 @@ const generateImageMock = vi.mocked(generateImage)
 const PNG = Buffer.from(corpus.png_base64, "base64")
 
 /** Text that passes `research`'s meta-response validator on the first attempt. */
-const RESEARCH = [
-  "## Keyword analysis",
-  "primary keyword: composable pipelines",
-  "## Pain point",
-  "runs die halfway and nobody knows which stage was last.",
-  "## Competitor coverage",
-  "## Search intent: informational",
-].join("\n\n")
+const RESEARCH = VALID_RESEARCH_PACKET
 
 const MANIFEST = {
   version: "1.0",
   style_brief: { palette: "cool" },
   images: [
     { id: "hero", filename: "hero.png", prompt: "a hero image", type: "featured" },
-    { id: "inline", filename: "inline.png", prompt: "an inline diagram" },
+    {
+      id: "inline",
+      filename: "inline.png",
+      prompt: "an inline diagram",
+      placement: { location: "after_heading", after_section: "Comparison" },
+    },
   ],
 }
 
@@ -90,7 +89,7 @@ const AGENT_TEXT = {
   research: RESEARCH,
   outline: "# Outline\n\n1. Opening\n2. Body\n3. Close",
   write: "# Draft\n\nThe draft body.",
-  edit: "# Edited\n\nThe edited body.",
+  edit: "# Edited\n\n## Comparison\n\nThe edited body.",
   images: JSON.stringify(MANIFEST),
   ready: "---\ntitle: Ready\n---\n\nThe publishable article.",
 } as const
@@ -125,7 +124,6 @@ const testMastra = new Mastra({
     write: writeAgent,
     edit: editAgent,
     images: imagesAgent,
-    ready: readyAgent,
   },
 })
 
@@ -151,7 +149,6 @@ beforeAll(async () => {
     write: writeAgent,
     edit: editAgent,
     images: imagesAgent,
-    ready: readyAgent,
   } as const
   for (const [stage, agent] of Object.entries(agents)) {
     vi.spyOn(agent, "generate").mockImplementation((async (prompt: string) => {
@@ -221,8 +218,8 @@ describe("the pipeline workflow", () => {
     expect(result.status).toBe("success")
   })
 
-  it("runs the six stages in the order the Python runner ran them", () => {
-    expect(callOrder).toEqual([...STAGES])
+  it("calls the five model-backed stages in pipeline order", () => {
+    expect(callOrder).toEqual(STAGES.filter((stage) => stage !== "ready"))
   })
 
   it("commits every stage's column", async () => {
@@ -232,7 +229,9 @@ describe("the pipeline workflow", () => {
     expect(row.outlineContent).toBe(AGENT_TEXT.outline)
     expect(row.draftContent).toBe(AGENT_TEXT.write)
     expect(row.finalMdContent).toBe(AGENT_TEXT.edit)
-    expect(row.readyContent).toBe(AGENT_TEXT.ready)
+    expect(row.readyContent).toContain("# Edited")
+    expect(row.readyContent).toContain("The edited body.")
+    expect(row.readyContent).toContain("inline.webp")
     expect((row.imageManifest as Record<string, unknown>).total_generated).toBe(2)
   })
 
@@ -259,18 +258,13 @@ describe("the pipeline workflow", () => {
     expect(prompts.write).toContain(AGENT_TEXT.outline)
     expect(prompts.edit).toContain(AGENT_TEXT.write)
     expect(prompts.images).toContain(AGENT_TEXT.edit)
-    expect(prompts.ready).toContain(AGENT_TEXT.edit)
-    // The manifest `images` committed, not the one Claude wrote: the URL only
-    // exists after the fan-out optimized the bytes to webp. `inline` rather
-    // than `hero`, because the featured entry is renamed to a timestamp.
-    expect(prompts.ready).toContain("inline.webp")
+    // Ready reads the edited content and committed manifest directly from the
+    // row, so there is no sixth provider prompt to assert here.
   })
 
   it("chains the nested images workflow like any other step", () => {
     expect(generateImageMock).toHaveBeenCalledTimes(MANIFEST.images.length)
-    // `ready` ran after it, which is only possible if the nested workflow's
-    // output satisfied `ready`'s input schema.
-    expect(callOrder.indexOf("ready")).toBeGreaterThan(callOrder.indexOf("images"))
+    expect(callOrder.at(-1)).toBe("images")
   })
 
   it("reports the stage's quality warnings on the post's own log, not to the logger", async () => {
@@ -293,9 +287,9 @@ describe("the pipeline workflow", () => {
 
     expect(output?.postId).toBe(POST_ID)
     expect(output?.stage).toBe("ready")
-    expect(output?.model).toBe("stub-ready")
-    expect(output?.tokensIn).toBe(100)
-    expect(output?.tokensOut).toBe(20)
+    expect(output?.model).toBe("deterministic")
+    expect(output?.tokensIn).toBe(0)
+    expect(output?.tokensOut).toBe(0)
   })
 
   it("exposes every stage's meta on the finished run", () => {

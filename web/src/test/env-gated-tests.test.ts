@@ -44,9 +44,12 @@ const SELF = "src/test/env-gated-tests.test.ts"
  * an unconfigured Stripe. CI satisfies every `unset` gate and no `set` gate.
  */
 const GATES: { file: string; env: string[]; runs: "set" | "unset" | "uid" }[] = [
-  // Two metadata-only calls to the real Gemini endpoint: the one gated pair
-  // that costs nothing to run, which is why the developer key runs them.
-  { file: "src/mastra/api-key-validator.test.ts", env: ["GEMINI_API_KEY"], runs: "set" },
+  // Credential validation calls each provider's real endpoint.
+  {
+    file: "src/mastra/api-key-validator.test.ts",
+    env: ["ANTHROPIC_API_KEY", "PERPLEXITY_API_KEY", "GEMINI_API_KEY"],
+    runs: "set",
+  },
   // A model-id lookup on the key, plus the generation probe behind a second
   // gate because it bills about $0.134 an image.
   { file: "src/mastra/images/gemini.test.ts", env: ["GEMINI_API_KEY", "GEMINI_IMAGE_QUOTA"], runs: "set" },
@@ -56,7 +59,6 @@ const GATES: { file: string; env: string[]; runs: "set" | "unset" | "uid" }[] = 
   { file: "src/mastra/agents/write.test.ts", env: ["ANTHROPIC_API_KEY"], runs: "set" },
   { file: "src/mastra/agents/edit.test.ts", env: ["ANTHROPIC_API_KEY"], runs: "set" },
   { file: "src/mastra/agents/images.test.ts", env: ["ANTHROPIC_API_KEY"], runs: "set" },
-  { file: "src/mastra/agents/ready.test.ts", env: ["ANTHROPIC_API_KEY"], runs: "set" },
   { file: "src/lib/stripe-signup.test.ts", env: ["STRIPE_SECRET_KEY"], runs: "unset" },
   // Not an environment gate: the permission cases it skips cannot fail for
   // root, which can read a directory it has just chmod-ed to 000.

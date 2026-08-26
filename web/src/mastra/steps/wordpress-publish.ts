@@ -68,6 +68,10 @@ import { decrypt } from "../../lib/crypto"
 import { appendExecutionLog } from "../execution-log"
 import { postMediaDir } from "../images/media-dir"
 import { publishPipelineEvent } from "../pipeline-events"
+import {
+  validateImageManifestForPublish,
+  validatePublishContent,
+} from "../publish-safety"
 import { WordPressClient } from "../wordpress"
 import { pythonGet, rewriteImageUrls, sweepMediaDirectory } from "../wordpress/media-upload"
 import { extractFrontmatter, indexManifestImages } from "../wordpress/publish-metadata"
@@ -224,6 +228,15 @@ export const wordpressPublishStep = createStep({
         return fail(pubsub, logger, postId, "Failed to decrypt WP app password")
       }
 
+      const content = post.readyContent || post.finalMdContent || ""
+      try {
+        validatePublishContent(content)
+        validateImageManifestForPublish(post.imageManifest)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return fail(pubsub, logger, postId, message)
+      }
+
       await db.update(posts).set({ wpPublishStatus: "publishing" }).where(eq(posts.id, postId))
       // The row, then the trail, then the bus, which is `_fail`'s order and for
       // the same reason. The trail entry is a divergence from
@@ -249,7 +262,6 @@ export const wordpressPublishStep = createStep({
           },
         )
 
-        const content = post.readyContent || post.finalMdContent || ""
         // `body` is discarded: see the header.
         const { meta } = extractFrontmatter(content)
         const title = meta.has("title") ? meta.get("title")! : post.topic

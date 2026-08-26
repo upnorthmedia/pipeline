@@ -35,13 +35,14 @@ import { RedisStreamsPubSub } from "@mastra/redis-streams"
 import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 
+import { VALID_RESEARCH_PACKET } from "../test/pipeline-fixtures"
+
 import { closeDb, getDb, getPool, posts } from "../db"
 import { inDeliveryOrder } from "../test/in-delivery-order"
 import { pythonRound } from "./analytics/python-round"
 import { editAgent } from "./agents/edit"
 import { imagesAgent } from "./agents/images"
 import { outlineAgent } from "./agents/outline"
-import { readyAgent } from "./agents/ready"
 import { researchAgent } from "./agents/research"
 import { writeAgent } from "./agents/write"
 import { MODEL_COSTS } from "./model-costs"
@@ -59,14 +60,7 @@ vi.mock("./api-keys", () => ({
 }))
 
 /** Text that passes `research`'s meta-response validator on the first attempt. */
-const RESEARCH = [
-  "## Keyword analysis",
-  "primary keyword: realtime pipeline events",
-  "## Pain point",
-  "the dashboard cannot tell a running stage from a finished one.",
-  "## Competitor coverage",
-  "## Search intent: informational",
-].join("\n\n")
+const RESEARCH = VALID_RESEARCH_PACKET
 
 /**
  * A manifest with no images, so the `images` stage reaches its own
@@ -102,7 +96,7 @@ const STUB_MODEL: Record<Stage, string> = {
   write: "claude-fable-5",
   edit: "claude-opus-4-6",
   images: "gemini-3-pro-image",
-  ready: "claude-opus-5",
+  ready: "deterministic",
 }
 
 /** The post that runs all six stages. */
@@ -143,7 +137,6 @@ const testMastra = new Mastra({
     write: writeAgent,
     edit: editAgent,
     images: imagesAgent,
-    ready: readyAgent,
   },
 })
 
@@ -243,7 +236,6 @@ beforeAll(async () => {
     write: writeAgent,
     edit: editAgent,
     images: imagesAgent,
-    ready: readyAgent,
   } as const
   for (const [stage, agent] of Object.entries(agents)) {
     vi.spyOn(agent, "generate").mockImplementation((async () => ({
@@ -350,7 +342,7 @@ const LOG_LINES_PER_STAGE: Partial<Record<(typeof STAGES)[number], number>> = {
   write: 3,
   edit: 5,
   images: 4,
-  ready: 3,
+  ready: 2,
 }
 
 describe("a run that executes every stage", () => {
@@ -471,7 +463,7 @@ describe("a run that executes every stage", () => {
       // would not be counted here in any case: neither uses the `log` event
       // name, which is what `perStage` filters on.
       images: 4,
-      ready: 3,
+      ready: 2,
     })
   })
 
@@ -709,22 +701,28 @@ describe("what a run writes to execution_logs", () => {
     for (const entry of entries.filter((item) => item.event === "stage_complete")) {
       const model = STUB_MODEL[entry.stage as Stage]
       const rate = MODEL_COSTS[model]
+      const deterministic = entry.stage === "ready"
+      const tokensIn = deterministic ? 0 : 100
+      const tokensOut = deterministic ? 0 : 20
       expect(entry).toMatchObject({
         level: "info",
         message: `Stage ${entry.stage} complete`,
         data: {
           model,
           // The stub reports 100 in and 20 out for every agent call.
-          tokens_in: 100,
-          tokens_out: 20,
+          tokens_in: tokensIn,
+          tokens_out: tokensOut,
           duration_s: expect.any(Number),
           // Item P2.38: the reported model's own rate, not the one pair of Opus
           // rates Python applied to every stage. Every entry read 0.003 before
           // the fix; `research` is 0.0006 here and `images` is 0.0026.
-          cost_usd: pythonRound(
-            (100 / 1_000_000) * rate.input + (20 / 1_000_000) * rate.output,
-            6,
-          ),
+          cost_usd: deterministic
+            ? 0
+            : pythonRound(
+                (tokensIn / 1_000_000) * rate.input +
+                  (tokensOut / 1_000_000) * rate.output,
+                6,
+              ),
         },
       })
     }
@@ -827,9 +825,8 @@ describe("what a run writes to execution_logs", () => {
       "Generating 0 images via Gemini...",
     ])
     expect(messagesFor("ready")).toEqual([
-      "Rules loaded, building prompt...",
-      "Calling Claude for final assembly...",
-      expect.stringMatching(/^Assembly done \(20 tokens, \d+\.\ds\)$/),
+      "Assembling final Markdown...",
+      expect.stringMatching(/^Assembly done \(\d+\.\ds\)$/),
     ])
   })
 

@@ -66,6 +66,10 @@ import { signPayload } from "../../lib/hmac-signing"
 import { mediaRoot } from "../images/media-dir"
 import { buildNextjsPayload, isoformatUtc } from "../nextjs/payload"
 import { publishPipelineEvent } from "../pipeline-events"
+import {
+  validateImageManifestForPublish,
+  validatePublishContent,
+} from "../publish-safety"
 import { pauseBeforeHookRetry } from "./stage-io"
 
 import type { PubSub } from "@mastra/core/events"
@@ -203,6 +207,14 @@ export const nextjsPublishStep = createStep({
         secret = decrypt(profile.nextjsWebhookSecret)
       } catch {
         return fail(pubsub, logger, postId, "Failed to decrypt webhook secret")
+      }
+
+      try {
+        validatePublishContent(post.readyContent || post.finalMdContent || "")
+        validateImageManifestForPublish(post.imageManifest)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return fail(pubsub, logger, postId, message)
       }
 
       await db.update(posts).set({ nextjsPublishStatus: "publishing" }).where(eq(posts.id, postId))

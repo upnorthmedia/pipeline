@@ -30,6 +30,8 @@ import { RedisStreamsPubSub } from "@mastra/redis-streams"
 import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { VALID_RESEARCH_PACKET } from "../test/pipeline-fixtures"
+
 import { closeDb, getDb, getPool, posts } from "../db"
 import type { EngineStepErrors } from "../test/engine-step-errors"
 import { captureEngineStepErrors } from "../test/engine-step-errors"
@@ -37,7 +39,6 @@ import { inDeliveryOrder } from "../test/in-delivery-order"
 import { editAgent } from "./agents/edit"
 import { imagesAgent } from "./agents/images"
 import { outlineAgent } from "./agents/outline"
-import { readyAgent } from "./agents/ready"
 import { researchAgent } from "./agents/research"
 import { writeAgent } from "./agents/write"
 import { createWorkerEvents, recordRunFailure } from "./failure-recorder"
@@ -55,14 +56,7 @@ vi.mock("./api-keys", () => ({
 }))
 
 /** Text that passes `research`'s meta-response validator on the first attempt. */
-const RESEARCH = [
-  "## Keyword analysis",
-  "primary keyword: failure recording",
-  "## Pain point",
-  "a dead run leaves the row parked on the stage it was executing.",
-  "## Competitor coverage",
-  "## Search intent: informational",
-].join("\n\n")
+const RESEARCH = VALID_RESEARCH_PACKET
 
 /** What the `write` agent throws, and so what `_error.message` must carry. */
 const BOOM = "provider exploded mid-draft"
@@ -110,7 +104,6 @@ const testMastra = new Mastra({
     write: writeAgent,
     edit: editAgent,
     images: imagesAgent,
-    ready: readyAgent,
   },
   // The production map, not a restatement of it: what `startWorkers()` below
   // subscribes is exactly what the `worker` service subscribes.
