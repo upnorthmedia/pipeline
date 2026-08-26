@@ -23,6 +23,7 @@ import {
   Activity,
   AlertCircle,
   CheckCircle2,
+  ChevronDown,
   Circle,
   Images,
   Loader2,
@@ -30,7 +31,7 @@ import {
   RotateCw,
 } from "lucide-react";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -323,6 +324,7 @@ export function RunTrace({
   liveImages,
   publish,
   onApprove,
+  defaultOpen = true,
 }: {
   executionLogs: readonly unknown[];
   stageStatus: StageStatusMap;
@@ -347,6 +349,8 @@ export function RunTrace({
    * with no handler shows the status and no control.
    */
   onApprove?: (stage: PipelineStage) => void;
+  /** Whether the detailed table should be expanded on first render. */
+  defaultOpen?: boolean;
 }) {
   const trace = buildRunTrace({
     entries: executionLogs,
@@ -369,6 +373,7 @@ export function RunTrace({
   // rejects; the cost is that a run starting on a page that has been open a
   // while shows `0.0s` for its first second before the first tick corrects it.
   const [now, setNow] = useState(() => Date.now());
+  const [open, setOpen] = useState(defaultOpen);
   useEffect(() => {
     if (!running) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -382,33 +387,41 @@ export function RunTrace({
     (trace.publish !== null && trace.publish.status !== "pending");
 
   return (
-    <Card className="gap-0 py-0">
-      <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 py-3">
-        <div className="flex items-center gap-2">
-          <Activity className="h-4 w-4 text-muted-foreground" />
-          <CardTitle className="text-base">Run Trace</CardTitle>
-          {running && (
-            <span className="relative flex h-2 w-2" aria-label="Run in progress">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
-            </span>
-          )}
-        </div>
-        {started && (
-          <div className="flex items-center gap-2" role="group" aria-label="Run totals">
-            <Badge variant="secondary" className="font-mono text-[10px]">
-              {formatTokens(trace.totals.tokensIn + trace.totals.tokensOut)} tokens
-            </Badge>
-            <Badge variant="secondary" className="font-mono text-[10px]">
-              {formatCost(trace.totals.costUsd)}
-            </Badge>
-            <Badge variant="secondary" className="font-mono text-[10px]">
-              {formatDuration(trace.totals.durationS)}
-            </Badge>
+    <details
+      data-testid="run-trace-details"
+      className="group rounded-xl border border-border/70 bg-card"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="list-none cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        <CardHeader className="flex min-h-12 flex-row items-center justify-between gap-4 space-y-0 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Activity className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">Run Trace</CardTitle>
+            {running && (
+              <span className="relative flex h-2 w-2" aria-label="Run in progress">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+              </span>
+            )}
           </div>
-        )}
-      </CardHeader>
-      <CardContent className="pt-0 pb-3">
+          {started && (
+            <div className="ml-auto flex items-center gap-2" role="group" aria-label="Run totals">
+              <Badge variant="secondary" className="hidden font-mono text-[10px] sm:inline-flex">
+                {formatTokens(trace.totals.tokensIn + trace.totals.tokensOut)} tokens
+              </Badge>
+              <Badge variant="secondary" className="font-mono text-[10px]">
+                {formatCost(trace.totals.costUsd)}
+              </Badge>
+              <Badge variant="secondary" className="hidden font-mono text-[10px] md:inline-flex">
+                {formatDuration(trace.totals.durationS)}
+              </Badge>
+            </div>
+          )}
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+        </CardHeader>
+      </summary>
+      <CardContent className="border-t border-border/60 px-4 pt-3 pb-3">
         {!started ? (
           <p className="rounded border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
             No run yet. Start the pipeline to see per-step status, timing, tokens and cost.
@@ -445,6 +458,6 @@ export function RunTrace({
           </p>
         )}
       </CardContent>
-    </Card>
+    </details>
   );
 }

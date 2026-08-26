@@ -281,6 +281,33 @@ describe("PostDetailPage", () => {
     });
   });
 
+  it("keeps secondary run information collapsed while failure recovery stays visible", async () => {
+    const post = makePost({
+      current_stage: "failed",
+      stage_status: { research: "failed" },
+      execution_logs: [
+        {
+          ts: "2026-08-25T19:12:53.000Z",
+          stage: "research",
+          level: "error",
+          event: "stage_error",
+          message: "Pipeline failed after 3 attempts",
+          data: { error: "Rule file not found" },
+        },
+      ],
+    });
+    mockGet.mockResolvedValue(post);
+    mockAnalytics.mockResolvedValue(makeAnalytics({ word_count: 0 }));
+    renderWithProviders(<PostDetailPage />);
+
+    expect(await screen.findByText("Research failed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Re-run Research" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /resume from/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId("run-trace-details")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("review-gates-details")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("analytics-details")).not.toHaveAttribute("open");
+  });
+
   it("renders SEO checklist items", async () => {
     const post = makeCompletedPost();
     const analytics = makeAnalytics();
@@ -1019,6 +1046,7 @@ describe("PostDetailPage live image progress", () => {
 
   it("puts each per-image line in the debug log with what it said", async () => {
     mockGet.mockResolvedValue(runningImages());
+    const user = userEvent.setup();
     renderWithProviders(<PostDetailPage />);
     await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
 
@@ -1030,6 +1058,7 @@ describe("PostDetailPage live image progress", () => {
       data: { index: 2, error: "429 RESOURCE_EXHAUSTED" },
     });
 
+    await user.click(screen.getByRole("button", { name: /debug logs/i }));
     expect(screen.getByText("Image 2 failed: 429 RESOURCE_EXHAUSTED")).toBeInTheDocument();
   });
 

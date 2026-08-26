@@ -112,6 +112,10 @@ test.describe("Post Editor", () => {
 
     await page.goto(`/posts/${post.id}`)
 
+    const analyticsDetails = page.locator("[data-testid='analytics-details']")
+    await expect(analyticsDetails).not.toHaveAttribute("open", "")
+    await analyticsDetails.locator("summary").click()
+
     const bar = page.locator("[data-testid='analytics-bar']")
     await expect(bar).toBeVisible()
 

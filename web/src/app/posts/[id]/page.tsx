@@ -6,7 +6,9 @@ import Link from "next/link";
 import {
   AlertCircle,
   ArrowLeft,
+  BarChart3,
   CheckCircle2,
+  ChevronDown,
   PauseCircle,
   Play,
   RefreshCw,
@@ -729,21 +731,21 @@ export default function PostDetailPage() {
     }) && STAGES.every((s) => !post[STAGE_CONTENT_FIELDS[s]]);
 
   return (
-    <div className="p-6 space-y-6 max-w-6xl mx-auto">
+    <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
+      <div className="flex flex-col items-start justify-between gap-4 sm:flex-row">
+        <div className="flex min-w-0 items-start gap-3">
           <Link href="/">
             <Button variant="ghost" size="icon" className="mt-1">
               <ArrowLeft className="h-4 w-4" />
             </Button>
           </Link>
-          <div>
+          <div className="min-w-0">
             <h1 className="text-xl font-semibold tracking-tight">
               {post.topic}
             </h1>
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-xs font-mono text-muted-foreground">
+              <span className="truncate text-xs font-mono text-muted-foreground">
                 {post.slug}
               </span>
               <RunStateBadge
@@ -815,7 +817,7 @@ export default function PostDetailPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
           {/* Not offered once the run is already stopping: a stage is still
               marked running while the pause takes effect, so `isRunning` alone
               put a `Pause` button next to a badge reading `Pausing`. */}
@@ -835,7 +837,7 @@ export default function PostDetailPage() {
               {/* A run paused after its last stage has no stage to resume
                   from, and the action it does need is in the banner below,
                   next to the sentence saying what the pause cost the post. */}
-              {!pausedBeforeFinish && (
+              {!pausedBeforeFinish && runState.failedStages.length === 0 && (
                 <Button variant="outline" size="sm" onClick={handleRerun}>
                   <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
                   Resume from {STAGE_LABELS[resumeFrom]}
@@ -1030,50 +1032,14 @@ export default function PostDetailPage() {
       ))}
 
       {/* Pipeline Progress */}
-      <Card className="gap-0 py-0">
-        <CardContent className="py-4">
-          <div className="flex items-center justify-center">
-            <PipelineProgress
-              stageStatus={stageStatus}
-              currentStage={post.current_stage}
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Run Trace */}
-      <RunTrace
-        executionLogs={post.execution_logs}
-        stageStatus={stageStatus}
-        liveStart={liveStart}
-        liveImages={liveImages}
-        publish={
-          publishTarget
-            ? {
-                target: publishTarget.target,
-                status: publishTarget.status ?? "pending",
-                stall: publishStalled,
-              }
-            : null
-        }
-        onApprove={handleApprove}
-      />
-
-      {/*
-        Under the trace, because the trace is where a reader finds out the run
-        stopped and this is the control that decides where it stops next. It is
-        the same card as the one on `/posts/new`, editing the same column, so a
-        gate set at creation and a gate set afterwards are one thing in two
-        places rather than two settings.
-      */}
-      <PipelineGatesCard
-        profile={null}
-        title="Review gates"
-        subject="This post"
-        value={post.stage_settings}
-        parkedStages={runState.reviewStages}
-        onChange={handleGatesChange}
-      />
+      <div className="border-y border-border/70 py-4">
+        <div className="flex items-center justify-center">
+          <PipelineProgress
+            stageStatus={stageStatus}
+            currentStage={post.current_stage}
+          />
+        </div>
+      </div>
 
       {/* Stage Content Tabs */}
       {neverRan ? (
@@ -1215,52 +1181,95 @@ export default function PostDetailPage() {
         </Tabs>
       )}
 
-      {/* Debug Logs */}
-      <DebugLogPanel logs={debugLogs} isRunning={isRunning} />
+      <div className="space-y-2">
+        <RunTrace
+          executionLogs={post.execution_logs}
+          stageStatus={stageStatus}
+          liveStart={liveStart}
+          liveImages={liveImages}
+          publish={
+            publishTarget
+              ? {
+                  target: publishTarget.target,
+                  status: publishTarget.status ?? "pending",
+                  stall: publishStalled,
+                }
+              : null
+          }
+          onApprove={handleApprove}
+          defaultOpen={false}
+        />
 
-      {/* Analytics. The endpoint answers zeroes for a post with no content, so
-          nothing here is conditional on the pipeline having run: a card with no
-          numbers in it is the honest empty state, and a failure is the server's
-          own message rather than the silence it used to be. */}
-      {analytics ? (
-        <Card className="gap-0 py-0">
-          <CardHeader className="py-3">
-            <CardTitle className="text-base">Analytics</CardTitle>
-          </CardHeader>
-          <Separator />
-          <CardContent className="space-y-4 py-4">
-            <AnalyticsBar
-              analytics={analytics}
-              targetWordCount={post.word_count}
+        <details data-testid="review-gates-details" className="group">
+          <summary className="flex min-h-12 cursor-pointer list-none items-center gap-3 rounded-xl border border-border/70 bg-card px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+            <PauseCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="text-sm font-medium">Review gates</span>
+            <span className="ml-auto hidden text-sm text-muted-foreground sm:inline">
+              Change where this post pauses
+            </span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="mt-2">
+            <PipelineGatesCard
+              profile={null}
+              title="Stage behavior"
+              subject="This post"
+              value={post.stage_settings}
+              parkedStages={runState.reviewStages}
+              onChange={handleGatesChange}
             />
-            <SeoChecklist checklist={analytics.seo_checklist} />
-            <KeywordDensity density={analytics.keyword_density} />
-          </CardContent>
-        </Card>
-      ) : (
-        analyticsError && (
-          <Card className="gap-0 py-0">
-            <CardHeader className="py-3">
-              <CardTitle className="text-base">Analytics</CardTitle>
-            </CardHeader>
-            <Separator />
-            <CardContent className="py-6 text-center">
-              <AlertCircle className="mx-auto h-5 w-5 text-destructive" />
-              <p className="mt-2 text-sm font-medium">Analytics unavailable</p>
-              <p className="mt-1 text-sm text-muted-foreground">{analyticsError}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-3"
-                onClick={fetchAnalytics}
-              >
-                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                Retry
-              </Button>
+          </div>
+        </details>
+
+        <DebugLogPanel logs={debugLogs} isRunning={isRunning} />
+
+        {(analytics || analyticsError) && (
+          <details
+            data-testid="analytics-details"
+            className="group rounded-xl border border-border/70 bg-card"
+          >
+            <summary className="flex min-h-12 cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+              <BarChart3 className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="text-sm font-medium">Analytics</span>
+              <span className="ml-auto text-sm text-muted-foreground">
+                {analytics
+                  ? analytics.word_count > 0
+                    ? `${analytics.word_count.toLocaleString()} words`
+                    : "No content yet"
+                  : "Unavailable"}
+              </span>
+              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+            </summary>
+            <CardContent className="border-t border-border/60 px-4 py-4">
+              {analytics ? (
+                <div className="space-y-4">
+                  <AnalyticsBar
+                    analytics={analytics}
+                    targetWordCount={post.word_count}
+                  />
+                  <SeoChecklist checklist={analytics.seo_checklist} />
+                  <KeywordDensity density={analytics.keyword_density} />
+                </div>
+              ) : (
+                <div className="py-2 text-center">
+                  <AlertCircle className="mx-auto h-5 w-5 text-destructive" />
+                  <p className="mt-2 text-sm font-medium">Analytics unavailable</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{analyticsError}</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={fetchAnalytics}
+                  >
+                    <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                    Retry
+                  </Button>
+                </div>
+              )}
             </CardContent>
-          </Card>
-        )
-      )}
+          </details>
+        )}
+      </div>
 
       {/*
         The one destructive run control. Everything it clears is regenerable,
