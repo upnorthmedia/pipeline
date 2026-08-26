@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest"
 
-import { assembleReadyContent } from "./ready"
+import { applyImageReviewDecision, assembleReadyContent } from "./ready"
 
 const FINAL_MD = [
   "---",
@@ -48,6 +48,27 @@ const MANIFEST = {
 }
 
 describe("deterministic ready assembly", () => {
+  it("marks every generated image as requiring review", () => {
+    const manifest = applyImageReviewDecision(MANIFEST, false)
+    const images = manifest.images as Record<string, unknown>[]
+
+    expect(images).toHaveLength(2)
+    for (const image of images) {
+      expect(image).toMatchObject({
+        generated: true,
+        human_review_required: true,
+        human_review_approved: false,
+      })
+    }
+  })
+
+  it("records approval when a reviewer releases ready", () => {
+    const manifest = applyImageReviewDecision(MANIFEST, true)
+    const images = manifest.images as Record<string, unknown>[]
+
+    expect(images.every((image) => image.human_review_approved === true)).toBe(true)
+  })
+
   it("removes notes, updates featured metadata, and inserts each generated image once", () => {
     const result = assembleReadyContent(FINAL_MD, MANIFEST)
 

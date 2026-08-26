@@ -178,7 +178,8 @@ export async function recordRunFailure(event: Event, pubsub: PubSub): Promise<vo
   // the stage the run died in, so the stage that goes on the announcement and
   // the stage that goes on the row are the same derivation, not two.
   const stage = failedStageOf(event.data)
-  await markPipelineFailed(postId, message, attempts, stage)
+  const recorded = await markPipelineFailed(postId, message, attempts, stage)
+  if (!recorded) return
 
   if (!firstReportOf(event.runId)) return
 

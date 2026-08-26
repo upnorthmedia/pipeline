@@ -11,7 +11,7 @@
  * Kept out of `state.ts` so that module stays free of database imports: the
  * prompt assembly and the stage vocabulary are pure, this file is not.
  */
-import { eq, getTableColumns, inArray, sql } from "drizzle-orm"
+import { and, eq, getTableColumns, inArray, sql } from "drizzle-orm"
 
 import { getDb, internalLinks, posts } from "../db"
 import {
@@ -346,16 +346,20 @@ export async function markPipelineComplete(postId: string): Promise<void> {
  * written over the map so the stages that did finish keep their record, and it
  * is skipped when the engine's terminal event names no step, which is the case
  * `resolveStageStatus()` in `src/lib/run-state.ts` covers for every reader.
+ *
+ * A named stage already recorded as complete belongs to a newer successful
+ * run. In that case the conditional update applies to no row and returns
+ * false, so a delayed terminal event cannot roll the post back to failed.
  */
 export async function markPipelineFailed(
   postId: string,
   message: string,
   attempts: number,
   stage: Stage | "" = "",
-): Promise<void> {
+): Promise<boolean> {
   const now = new Date()
   const error = { message, attempts, failed_at: now.toISOString() }
-  await getDb()
+  const rows = await getDb()
     .update(posts)
     .set({
       currentStage: CURRENT_STAGE_FAILED,
@@ -363,7 +367,16 @@ export async function markPipelineFailed(
       ...(stage ? { stageStatus: mergeStageStatus({ [stage]: STATUS_FAILED }) } : {}),
       updatedAt: now,
     })
-    .where(eq(posts.id, postId))
+    .where(
+      stage
+        ? and(
+            eq(posts.id, postId),
+            sql`coalesce(${posts.stageStatus} ->> ${stage}, '') <> ${STATUS_COMPLETE}`,
+          )
+        : eq(posts.id, postId),
+    )
+    .returning({ id: posts.id })
+  return rows.length > 0
 }
 
 /**

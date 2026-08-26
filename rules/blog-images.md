@@ -13,7 +13,7 @@ Use only these prompt inputs. Do not read or create local files and do not ask f
 
 ## Visual selection
 
-Use one featured image and no more than four body images. Every body image must explain information that prose alone does not communicate as quickly.
+Use one featured image and no more than three body images. Every body image must explain information that prose alone does not communicate as quickly.
 
 Choose visual type by purpose:
 
@@ -24,9 +24,13 @@ Choose visual type by purpose:
 
 Short labels and dates are allowed when they are essential to the information and can pass legibility review. Specify the exact label text in the prompt. Never request fabricated product markings, measurements, claims, logos, or geometry.
 
+Prefer text-free visuals when labels are not essential. The generated image may contain only the exact visible text specified in the prompt. Explicitly forbid headings such as "element one," enumeration labels, captions, legends, and decorative symbols that were not requested.
+
+Every label must have one unambiguous visual target. Place a label beside or directly beneath its own object. Do not put labels for vertically stacked objects together in one shared caption area.
+
 Use `image_style`, `image_brand_colors`, and `image_exclude` exactly as supplied. Supporting neutral colors are allowed only when they do not replace the brand palette.
 
-Technical product images require approved reference images or human technical review before publication. When exact geometry cannot be supported, request a clearly abstract conceptual diagram.
+Technical product images require approved reference images or human technical review before publication. When exact geometry cannot be supported, use simple geometric blocks, interface arrows, and boundaries instead of firearm-shaped silhouettes.
 
 For timelines, every event and date shown must be supported by a cited claim ID. Do not add an approximate date range or an undated event merely to fill the layout.
 

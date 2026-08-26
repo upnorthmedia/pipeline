@@ -72,7 +72,9 @@ Write exactly one status line:
 - `STATUS: ready` when usable claims support the article's central thesis and every material section in the recommended sequence.
 - `STATUS: blocked` when a central claim, required mention, promised chronology, or material section lacks sufficient evidence.
 
-After the status, give a short reason. Do not mark the packet ready merely because some usable claims exist. A blocked packet is a valid research result and must preserve the evidence gaps for review.
+Judge coverage against the requested scope and required mentions, not against optional sections you introduced. Remove an unsupported nonessential section from the recommended sequence instead of using it as a reason to block. A concise direction to check applicable law does not require a jurisdiction-by-jurisdiction legal survey. Do not turn a historical or technical article into a broader legal guide unless the post configuration requests one.
+
+After the status, give a short reason. Do not mark the packet ready merely because some usable claims exist. A blocked packet is a valid research result and must preserve the central evidence gaps for review.
 
 ## Output boundaries
 

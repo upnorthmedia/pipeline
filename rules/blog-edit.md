@@ -27,6 +27,10 @@ Edit in this order:
 
 If an unsupported claim cannot be repaired from supplied evidence, remove it or qualify it accurately. Never invent a citation.
 
+Preserve the official capitalization of case names, product names, and agencies. Treat a company's legal, compliance, superiority, and performance claims as attributed marketing unless the claim ledger independently supports them. Do not turn a narrow holding into an absolute statement about every jurisdiction or product.
+
+Do not infer causation, intent, market response, or product evolution from chronology alone. If the evidence establishes only that one event followed another, state the sequence without claiming that the first caused the second. Keep legal terminology internally consistent: if the article correctly establishes that "80 percent" was never a federal legal threshold, do not later say a rule replaced, retired, or moved away from that threshold. Describe what the rule actually defined instead.
+
 ## Structure
 
 - Use one H1 only through the frontmatter title. The body starts with introductory paragraphs.
@@ -41,6 +45,10 @@ If an unsupported claim cannot be repaired from supplied evidence, remove it or 
 
 Match the supplied brand voice. Prefer complete sentences, varied cadence, and direct explanations. Remove generic bucket brigades, fake dialogue, roadmap prose, slogan stacks, repeated fragments, generic AI filler, and unsupported superlatives.
 
+Do not shift unfinished research work to the reader with phrases such as "verify this yourself." State the supported fact with its qualification, or omit it. Omit current price, stock, lead-time, and shipping snapshots unless the requested article depends on them.
+
+Avoid absolute jurisdictional caveats such as "a national holding tells you nothing." When supported, say that state and local law may impose additional or different requirements. Do not imply that a federal holding has no relevance outside the precise issue decided.
+
 Readability metrics are diagnostics, not targets to game. Prefer plain language when it preserves technical and legal precision. Do not fragment sentences or replace correct domain terms solely to change a score.
 
 ## Links
@@ -51,6 +59,7 @@ Readability metrics are diagnostics, not targets to game. Prefer plain language 
 - Use descriptive anchor text.
 - Do not force a link count.
 - Do not use a competitor page as factual authority.
+- Prefer the strongest source available for a claim: primary, then reputable secondary. Do not link an anecdotal source, a thin trade post, or an unaffiliated promotional blog merely to attach a citation. Remove a nonessential claim when that is its only support.
 - The primary CTA near the end must be a working descriptive link.
 - One optional related-reading link may follow the primary CTA.
 

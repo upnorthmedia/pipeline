@@ -1,6 +1,8 @@
 /** Deterministic assembly of edited Markdown and generated image placements. */
 import { createStep } from "@mastra/core/workflows/evented"
+import { eq } from "drizzle-orm"
 
+import { getDb, posts } from "../../db"
 import { loadPipelineState, saveStageOutput } from "../post-state"
 import { validatePublishContent } from "../publish-safety"
 import { STATUS_COMPLETE } from "../state"
@@ -36,6 +38,24 @@ function manifestImages(manifest: Record<string, unknown>): ManifestEntry[] {
     }
     return image as ManifestEntry
   })
+}
+
+export function applyImageReviewDecision(
+  manifest: Record<string, unknown>,
+  approved: boolean,
+): Record<string, unknown> {
+  return {
+    ...manifest,
+    images: manifestImages(manifest).map((image) =>
+      image.generated
+        ? {
+            ...image,
+            human_review_required: true,
+            human_review_approved: approved,
+          }
+        : image,
+    ),
+  }
 }
 
 function isFeatured(image: ManifestEntry): boolean {
@@ -146,7 +166,15 @@ export const readyStep = createStep({
       await announceStageStart(mastra, "ready", inputData)
       await publishStageLog(mastra, postId, "ready", "Assembling final Markdown...")
       const startedAt = Date.now()
-      const content = assembleReadyContent(state.finalMd, state.imageManifest)
+      const reviewedManifest = applyImageReviewDecision(
+        state.imageManifest,
+        resumeData?.approved === true,
+      )
+      await getDb()
+        .update(posts)
+        .set({ imageManifest: reviewedManifest, updatedAt: new Date() })
+        .where(eq(posts.id, postId))
+      const content = assembleReadyContent(state.finalMd, reviewedManifest)
       const durationS = (Date.now() - startedAt) / 1000
       await publishStageLog(
         mastra,

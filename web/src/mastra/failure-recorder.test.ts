@@ -67,6 +67,7 @@ const UNIT_POST_ID = "00000000-0000-4000-8000-0000000005e8"
 /** Rows of their own for the two `stage_status` cases, which start mid-run. */
 const STAGE_STAMP_POST_ID = "00000000-0000-4000-8000-0000000005e9"
 const NO_STAMP_POST_ID = "00000000-0000-4000-8000-0000000005ea"
+const STALE_FAILURE_POST_ID = "00000000-0000-4000-8000-0000000005eb"
 
 /** A `stage_logs` entry written before the failure, to prove the merge keeps it. */
 const EXISTING_LOG = { model: "stub-research", tokens_in: 100, tokens_out: 20 }
@@ -221,6 +222,7 @@ const RUN_LOG_STAGE = "33333333-3333-4333-8333-333333333335"
 const RUN_LOG_REPEAT = "33333333-3333-4333-8333-333333333336"
 const RUN_STAGE_STAMP = "33333333-3333-4333-8333-333333333337"
 const RUN_NO_STAMP = "33333333-3333-4333-8333-333333333338"
+const RUN_STALE_FAILURE = "33333333-3333-4333-8333-333333333339"
 
 /** A `workflow.fail` event shaped exactly as the engine publishes one. */
 function failEvent(overrides: {
@@ -322,6 +324,7 @@ afterAll(async () => {
   await db.delete(posts).where(eq(posts.id, UNIT_POST_ID))
   await db.delete(posts).where(eq(posts.id, STAGE_STAMP_POST_ID))
   await db.delete(posts).where(eq(posts.id, NO_STAMP_POST_ID))
+  await db.delete(posts).where(eq(posts.id, STALE_FAILURE_POST_ID))
   await closeDb()
   vi.restoreAllMocks()
 })
@@ -615,6 +618,38 @@ describe("recordRunFailure", () => {
       research: "complete",
       edit: "failed",
     })
+  })
+
+  it("ignores a delayed failure after a newer run completed that stage", async () => {
+    await insertPost(
+      STALE_FAILURE_POST_ID,
+      { outline: EXISTING_LOG },
+      { research: "complete", outline: "complete", edit: "running" },
+    )
+    await db
+      .update(posts)
+      .set({ currentStage: "edit" })
+      .where(eq(posts.id, STALE_FAILURE_POST_ID))
+
+    await recordRunFailure(
+      failEvent({
+        runId: RUN_STALE_FAILURE,
+        input: { postId: STALE_FAILURE_POST_ID },
+        steps: { outline: { status: "failed" } },
+      }),
+      recorder,
+    )
+
+    const row = await readPost(STALE_FAILURE_POST_ID)
+    expect(row.currentStage).toBe("edit")
+    expect(row.stageStatus).toEqual({
+      research: "complete",
+      outline: "complete",
+      edit: "running",
+    })
+    expect((row.stageLogs as StageLogs)._error).toBeUndefined()
+    expect(executionLogsOf(row).filter((entry) => entry.event === "stage_error")).toEqual([])
+    expect(announced).toEqual([])
   })
 
   it("leaves stage_status alone when no step result names a stage", async () => {
