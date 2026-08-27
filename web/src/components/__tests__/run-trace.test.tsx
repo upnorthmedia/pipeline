@@ -127,6 +127,45 @@ describe("RunTrace", () => {
     expect(screen.getByText("Attempt 1 of 3 failed: 429 rate limited")).toBeInTheDocument();
   });
 
+  it("does not reuse a React key when retry attempt numbers repeat", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      renderWithProviders(
+        <RunTrace
+          executionLogs={[
+            { ts: "2026-08-23T10:00:00.000Z", stage: "write", event: "stage_start" },
+            {
+              ts: "2026-08-23T10:00:30.000Z",
+              stage: "write",
+              level: "warning",
+              event: "retry",
+              message: "First retry record",
+              data: { attempt: 1, max_attempts: 3, error: "first failure" },
+            },
+            {
+              ts: "2026-08-23T10:00:31.000Z",
+              stage: "write",
+              level: "warning",
+              event: "retry",
+              message: "Second retry record",
+              data: { attempt: 1, max_attempts: 3, error: "second failure" },
+            },
+            complete("write"),
+          ]}
+          stageStatus={{ write: "complete" }}
+        />
+      );
+
+      const duplicateKeyWarnings = consoleError.mock.calls
+        .flat()
+        .filter((value) => String(value).includes("same key"));
+      expect(duplicateKeyWarnings).toEqual([]);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("shows a failed stage with its error text", () => {
     renderWithProviders(
       <RunTrace

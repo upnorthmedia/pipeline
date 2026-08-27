@@ -208,7 +208,7 @@ function StageRow({
               )}
               {row.retries.map((retry) => (
                 <p
-                  key={retry.attempt}
+                  key={retry.id}
                   className="flex items-start gap-1.5 text-xs text-yellow-600 dark:text-yellow-500"
                 >
                   <RotateCw className="mt-0.5 h-3 w-3 shrink-0" />

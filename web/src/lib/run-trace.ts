@@ -99,6 +99,7 @@ export interface TraceReview {
 
 /** One `retry` entry: an attempt that threw while the engine still had attempts left. */
 export interface TraceRetry {
+  id: string
   attempt: number
   maxAttempts: number | null
   error: string | null
@@ -359,7 +360,7 @@ export function buildRunTrace(input: {
   let keylessImages = 0
   let imagesStartedAt: string | null = null
 
-  for (const raw of input.entries) {
+  for (const [entryIndex, raw] of input.entries.entries()) {
     const entry = entryOf(raw)
     if (!entry) continue
     const event = typeof entry.event === "string" ? entry.event : ""
@@ -367,6 +368,21 @@ export function buildRunTrace(input: {
     const data = dataOf(entry)
 
     if (!isStage(entry.stage)) {
+      // A full pipeline start is a run boundary. A stage can fail before it
+      // announces `stage_start` (for example, outline rejecting blocked
+      // research), so waiting for that stage-level entry preserves retries
+      // from every failed full run and makes attempt numbers repeat. Named
+      // stage reruns do not write `pipeline_start`; their existing
+      // `stage_start` boundary below remains unchanged.
+      if (event === "pipeline_start") {
+        for (const stage of STAGES) rows.set(stage, emptyStage(stage))
+        lastEventFor.clear()
+        runError = null
+        imageOutcomes.clear()
+        keylessImages = 0
+        imagesStartedAt = null
+        continue
+      }
       // A failure the engine could not pin on a step. Its text is still the
       // only account of why the run stopped.
       if (event === "stage_error") runError = textOf(data.error) ?? textOf(entry.message)
@@ -443,6 +459,7 @@ export function buildRunTrace(input: {
         break
       case "retry":
         row.retries.push({
+          id: `${entry.stage}:${ts ?? "unknown"}:${entryIndex}`,
           attempt: numberOf(data.attempt) ?? row.retries.length + 1,
           maxAttempts: numberOf(data.max_attempts),
           error: textOf(data.error),

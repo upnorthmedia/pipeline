@@ -164,7 +164,14 @@ describe("buildRunTrace", () => {
       { write: "complete" },
     )
     const write = result.stages[2]
-    expect(write.retries).toEqual([{ attempt: 1, maxAttempts: 3, error: "429 rate limited" }])
+    expect(write.retries).toEqual([
+      {
+        id: "write:2026-08-23T10:00:30.000Z:1",
+        attempt: 1,
+        maxAttempts: 3,
+        error: "429 rate limited",
+      },
+    ])
     expect(write.startedAt).toBe("2026-08-23T10:00:31.000Z")
     expect(write.status).toBe("complete")
   })
@@ -195,6 +202,44 @@ describe("buildRunTrace", () => {
     expect(write.model).toBeNull()
     expect(write.durationS).toBeNull()
     expect(write.startedAt).toBe("2026-08-25T09:00:00.000Z")
+  })
+
+  it("drops retries from earlier full runs when a stage failed before it could start", () => {
+    const pipelineStart = (ts: string) => ({
+      ts,
+      stage: "",
+      level: "info",
+      event: "pipeline_start",
+      message: "Full pipeline run initiated",
+    })
+    const retry = (attempt: number, ts: string) => ({
+      ts,
+      stage: "outline",
+      level: "warning",
+      event: "retry",
+      message: `Pipeline attempt ${attempt} failed, retrying...`,
+      data: { attempt, max_attempts: 3, error: "research coverage is blocked" },
+    })
+
+    const result = trace(
+      [
+        pipelineStart("2026-08-23T10:00:00.000Z"),
+        retry(1, "2026-08-23T10:00:01.000Z"),
+        retry(2, "2026-08-23T10:00:02.000Z"),
+        pipelineStart("2026-08-23T11:00:00.000Z"),
+        retry(1, "2026-08-23T11:00:01.000Z"),
+        retry(2, "2026-08-23T11:00:02.000Z"),
+        pipelineStart("2026-08-23T12:00:00.000Z"),
+        retry(1, "2026-08-23T12:00:01.000Z"),
+        retry(2, "2026-08-23T12:00:02.000Z"),
+        pipelineStart("2026-08-23T13:00:00.000Z"),
+        start("outline", "2026-08-23T13:00:01.000Z"),
+        complete("outline", {}, "2026-08-23T13:01:00.000Z"),
+      ],
+      { outline: "complete" },
+    )
+
+    expect(result.stages[1].retries).toEqual([])
   })
 
   it("drops a completed stage's numbers once a rerun resets it to pending", () => {
