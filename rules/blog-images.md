@@ -13,7 +13,7 @@ Use only these prompt inputs. Do not read or create local files and do not ask f
 
 ## Visual selection
 
-Use one featured image and no more than three body images. Every body image must explain information that prose alone does not communicate as quickly.
+Use at most one featured image and no more than three body images. Every image must explain information that prose alone does not communicate as quickly. Omit the featured image when no accurate, meaningful concept or approved product reference is available.
 
 Choose visual type by purpose:
 
@@ -21,6 +21,8 @@ Choose visual type by purpose:
 - Use diagrams or infographics for timelines, comparisons, architectures, processes, and kit boundaries.
 - Use editorial illustration only when a literal product depiction would be misleading or unnecessary.
 - Omit a visual when it would be decorative filler.
+
+Do not make generic blocks, boxes, or silhouettes stand in for a physical product. If product appearance or architecture is central and no approved reference image is supplied, omit that product visual. A diagram must encode concrete sourced data or a relationship that remains clear without the article beside it. Do not generate two visuals for the same concept.
 
 Short labels and dates are allowed when they are essential to the information and can pass legibility review. Specify the exact label text in the prompt. Never request fabricated product markings, measurements, claims, logos, or geometry.
 

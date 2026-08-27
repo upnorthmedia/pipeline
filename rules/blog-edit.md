@@ -31,6 +31,8 @@ Preserve the official capitalization of case names, product names, and agencies.
 
 Do not infer causation, intent, market response, or product evolution from chronology alone. If the evidence establishes only that one event followed another, state the sequence without claiming that the first caused the second. Keep legal terminology internally consistent: if the article correctly establishes that "80 percent" was never a federal legal threshold, do not later say a rule replaced, retired, or moved away from that threshold. Describe what the rule actually defined instead.
 
+Do not turn a comparison between an older product pattern and one current product into a claim that the whole category or market moved in that direction. Name the products or architectures the evidence actually covers.
+
 ## Structure
 
 - Use one H1 only through the frontmatter title. The body starts with introductory paragraphs.
@@ -45,7 +47,7 @@ Do not infer causation, intent, market response, or product evolution from chron
 
 Match the supplied brand voice. Prefer complete sentences, varied cadence, and direct explanations. Remove generic bucket brigades, fake dialogue, roadmap prose, slogan stacks, repeated fragments, generic AI filler, and unsupported superlatives.
 
-Do not shift unfinished research work to the reader with phrases such as "verify this yourself." State the supported fact with its qualification, or omit it. Omit current price, stock, lead-time, and shipping snapshots unless the requested article depends on them.
+Do not shift unfinished research work to the reader with phrases such as "verify this yourself." State the supported fact with its qualification, or omit it. Omit current price, stock, lead-time, shipping snapshots, and shipping-restrictions links unless the requested article specifically depends on them.
 
 Avoid absolute jurisdictional caveats such as "a national holding tells you nothing." When supported, say that state and local law may impose additional or different requirements. Do not imply that a federal holding has no relevance outside the precise issue decided.
 
