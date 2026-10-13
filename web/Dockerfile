@@ -32,7 +32,7 @@ RUN pnpm install --frozen-lockfile
 RUN cp -RL node_modules/drizzle-orm /app/vendor-drizzle-orm
 
 # Copy config files needed for dev server
-COPY web/next.config.ts web/tsconfig.json web/postcss.config.mjs web/eslint.config.mjs web/components.json ./
+COPY web/next.config.ts web/repo-env.ts web/tsconfig.json web/postcss.config.mjs web/eslint.config.mjs web/components.json ./
 
 # Stage 2: Build
 FROM node:22-alpine AS builder
