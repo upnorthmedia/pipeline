@@ -1,0 +1,152 @@
+[
+  {
+    "name": "empty",
+    "input": "",
+    "output": ""
+  },
+  {
+    "name": "no frontmatter, leading h1",
+    "input": "# Hello\n\nBody text.\n",
+    "output": "# Hello\n\nBody text.\n"
+  },
+  {
+    "name": "frontmatter without a title key",
+    "input": "---\ndescription: d\n---\n# Hello\n\nBody.\n",
+    "output": "---\ndescription: d\n---\n# Hello\n\nBody.\n"
+  },
+  {
+    "name": "title matches h1",
+    "input": "---\ntitle: Hello\ndescription: d\n---\n# Hello\n\nBody.\n",
+    "output": "---\ntitle: Hello\ndescription: d\n---\n\nBody.\n"
+  },
+  {
+    "name": "title does not match h1",
+    "input": "---\ntitle: Hello\ndescription: d\n---\n# Goodbye\n\nBody.\n",
+    "output": "---\ntitle: Hello\ndescription: d\n---\n# Goodbye\n\nBody.\n"
+  },
+  {
+    "name": "match differs only by case",
+    "input": "---\ntitle: hello world\ndescription: d\n---\n# Hello World\n\nBody.\n",
+    "output": "---\ntitle: hello world\ndescription: d\n---\n\nBody.\n"
+  },
+  {
+    "name": "double-quoted title, bare h1",
+    "input": "---\ntitle: \"Hello\"\ndescription: d\n---\n# Hello\n\nBody.\n",
+    "output": "---\ntitle: \"Hello\"\ndescription: d\n---\n\nBody.\n"
+  },
+  {
+    "name": "single-quoted title, bare h1",
+    "input": "---\ntitle: 'Hello'\ndescription: d\n---\n# Hello\n\nBody.\n",
+    "output": "---\ntitle: 'Hello'\ndescription: d\n---\n\nBody.\n"
+  },
+  {
+    "name": "bare title, quoted h1",
+    "input": "---\ntitle: Hello\ndescription: d\n---\n# \"Hello\"\n\nBody.\n",
+    "output": "---\ntitle: Hello\ndescription: d\n---\n\nBody.\n"
+  },
+  {
+    "name": "h1 preceded by blank lines",
+    "input": "---\ntitle: Hello\ndescription: d\n---\n\n\n# Hello\n\nBody.\n",
+    "output": "---\ntitle: Hello\ndescription: d\n---\n\nBody.\n"
+  },
+  {
+    "name": "h1 indented by spaces",
+    "input": "---\ntitle: Hello\ndescription: d\n---\n   # Hello\n\nBody.\n",
+    "output": "---\ntitle: Hello\ndescription: d\n---\n\nBody.\n"
+  },
+  {
+    "name": "several blank lines after the h1",
+    "input": "---\ntitle: Hello\ndescription: d\n---\n# Hello\n\n\n\nBody.\n",
+    "output": "---\ntitle: Hello\ndescription: d\n---\n\nBody.\n"
+  },
+  {
+    "name": "no blank line after the h1",
+    "input": "---\ntitle: Hello\ndescription: d\n---\n# Hello\nBody.\n",
+    "output": "---\ntitle: Hello\ndescription: d\n---\n\nBody.\n"
+  },
+  {
+    "name": "h1 is the whole body, no trailing newline",
+    "input": "---\ntitle: Hello\ndescription: d\n---\n# Hello",
+    "output": "---\ntitle: Hello\ndescription: d\n---\n# Hello"
+  },
+  {
+    "name": "h2 rather than h1",
+    "input": "---\ntitle: Hello\ndescription: d\n---\n## Hello\n\nBody.\n",
+    "output": "---\ntitle: Hello\ndescription: d\n---\n## Hello\n\nBody.\n"
+  },
+  {
+    "name": "hash with no space",
+    "input": "---\ntitle: Hello\ndescription: d\n---\n#Hello\n\nBody.\n",
+    "output": "---\ntitle: Hello\ndescription: d\n---\n#Hello\n\nBody.\n"
+  },
+  {
+    "name": "trailing spaces after the h1 text",
+    "input": "---\ntitle: Hello\ndescription: d\n---\n# Hello   \n\nBody.\n",
+    "output": "---\ntitle: Hello\ndescription: d\n---\n\nBody.\n"
+  },
+  {
+    "name": "trailing spaces after the title",
+    "input": "---\ntitle: Hello   \ndescription: d\n---\n# Hello\n\nBody.\n",
+    "output": "---\ntitle: Hello   \ndescription: d\n---\n\nBody.\n"
+  },
+  {
+    "name": "two title keys, first wins",
+    "input": "---\ntitle: Hello\ntitle: Other\ndescription: d\n---\n# Other\n\nBody.\n",
+    "output": "---\ntitle: Hello\ntitle: Other\ndescription: d\n---\n# Other\n\nBody.\n"
+  },
+  {
+    "name": "title key not at line start",
+    "input": "---\n  title: Hello\ndescription: d\n---\n# Hello\n\nBody.\n",
+    "output": "---\n  title: Hello\ndescription: d\n---\n# Hello\n\nBody.\n"
+  },
+  {
+    "name": "body contains a later thematic break",
+    "input": "---\ntitle: Hello\ndescription: d\n---\n# Hello\n\nA.\n\n---\n\nB.\n",
+    "output": "---\ntitle: Hello\ndescription: d\n---\n\nA.\n\n---\n\nB.\n"
+  },
+  {
+    "name": "frontmatter fence with trailing spaces",
+    "input": "---   \ntitle: Hello\n---   \n# Hello\n\nBody.\n",
+    "output": "---\ntitle: Hello\n---\n\nBody.\n"
+  },
+  {
+    "name": "crlf line endings",
+    "input": "---\r\ntitle: Hello\r\n---\r\n# Hello\r\n\r\nBody.\r\n",
+    "output": "---\ntitle: Hello\r\n---\n\nBody.\r\n"
+  },
+  {
+    "name": "title contains a colon",
+    "input": "---\ntitle: \"Hello: A Guide\"\ndescription: d\n---\n# Hello: A Guide\n\nBody.\n",
+    "output": "---\ntitle: \"Hello: A Guide\"\ndescription: d\n---\n\nBody.\n"
+  },
+  {
+    "name": "h1 text differs by trailing punctuation",
+    "input": "---\ntitle: Hello\ndescription: d\n---\n# Hello.\n\nBody.\n",
+    "output": "---\ntitle: Hello\ndescription: d\n---\n# Hello.\n\nBody.\n"
+  },
+  {
+    "name": "body is empty",
+    "input": "---\ntitle: Hello\ndescription: d\n---\n",
+    "output": "---\ntitle: Hello\ndescription: d\n---\n"
+  },
+  {
+    "name": "lone carriage return inside the title and the h1",
+    "input": "---\ntitle: Hello\rWorld\ndescription: d\n---\n# Hello\rWorld\n\nBody.\n",
+    "output": "---\ntitle: Hello\rWorld\ndescription: d\n---\n\nBody.\n"
+  },
+  {
+    "name": "title key preceded by a lone carriage return",
+    "input": "---\nx\rtitle: Hello\n---\n# Hello\n\nBody.\n",
+    "output": "---\nx\rtitle: Hello\n---\n# Hello\n\nBody.\n"
+  },
+  {
+    "name": "line separator inside the title and the h1",
+    "input": "---\ntitle: Hello World\ndescription: d\n---\n# Hello World\n\nBody.\n",
+    "output": "---\ntitle: Hello World\ndescription: d\n---\n\nBody.\n"
+  },
+  {
+    "name": "media urls survive the strip",
+    "input": "---\ntitle: Hello\ndescription: d\n---\n# Hello\n\n![a](/media/POST/a.webp)\n",
+    "output": "---\ntitle: Hello\ndescription: d\n---\n\n![a](/media/POST/a.webp)\n"
+  }
+]

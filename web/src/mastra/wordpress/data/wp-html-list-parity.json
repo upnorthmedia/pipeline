@@ -1,0 +1,573 @@
+{
+  "generated_by": "api/scripts/export_wp_html_list_parity.py",
+  "source": "api/src/services/wp_html.py::markdown_to_wp_html",
+  "mistune_version": "3.2.0",
+  "scope": "lists: the per-item break scanner, the continuation width, the tight/loose rule, the nesting depth and the list/thematic_break and list/setext precedence cases",
+  "cases": [
+    {
+      "name": "dash bullet list",
+      "markdown": "- one\n- two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "star bullet list",
+      "markdown": "* one\n* two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "plus bullet list",
+      "markdown": "+ one\n+ two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "single item list",
+      "markdown": "- only\n",
+      "html": "<!-- wp:list -->\n<ul><li>only</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "ordered list with dots",
+      "markdown": "1. one\n2. two\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>one</li>\n<li>two</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "ordered list with parens",
+      "markdown": "1) one\n2) two\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>one</li>\n<li>two</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "ordered list numbered out of sequence",
+      "markdown": "1. one\n1. two\n1. three\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>one</li>\n<li>two</li>\n<li>three</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "ordered list starting at three",
+      "markdown": "3. three\n4. four\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>three</li>\n<li>four</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "ordered list starting at zero",
+      "markdown": "0. zero\n1. one\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>zero</li>\n<li>one</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "ordered list with a nine digit start",
+      "markdown": "999999999. big\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>big</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "marker change starts a second list",
+      "markdown": "- one\n+ two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:list -->\n<ul><li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "ordered marker change starts a second list",
+      "markdown": "1. one\n1) two\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>one</li>\n</ol>\n<!-- /wp:list -->\n\n<!-- wp:list {\"ordered\":true} -->\n<ol><li>two</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "bullet then ordered",
+      "markdown": "- one\n1. two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:list {\"ordered\":true} -->\n<ol><li>two</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item with no text",
+      "markdown": "-\n",
+      "html": "<!-- wp:list -->\n<ul><li></li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item with only spaces after the marker",
+      "markdown": "-   \n",
+      "html": "<!-- wp:list -->\n<ul><li></li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "empty item between two full ones",
+      "markdown": "- one\n-\n- three\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n<li></li>\n<li>three</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item with a tab after the marker",
+      "markdown": "-\titem\n",
+      "html": "<!-- wp:list -->\n<ul><li>item</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item with two spaces after the marker",
+      "markdown": "-  item\n",
+      "html": "<!-- wp:list -->\n<ul><li>item</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item with four spaces after the marker",
+      "markdown": "-    item\n",
+      "html": "<!-- wp:list -->\n<ul><li>item</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item with five spaces after the marker",
+      "markdown": "-     item\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:code -->\n<pre class=\"wp-block-code\"><code>item</code></pre>\n<!-- /wp:code -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item with six spaces after the marker",
+      "markdown": "-      item\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:code -->\n<pre class=\"wp-block-code\"><code> item</code></pre>\n<!-- /wp:code -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item text holding an ampersand",
+      "markdown": "- Tom & Jerry\n",
+      "html": "<!-- wp:list -->\n<ul><li>Tom & Jerry</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item text holding a hash",
+      "markdown": "- item # here\n",
+      "html": "<!-- wp:list -->\n<ul><li>item # here</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "list indented one space",
+      "markdown": " - one\n - two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "list indented three spaces",
+      "markdown": "   - one\n   - two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:list -->\n<ul><li>two</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "list indented four spaces",
+      "markdown": "    - one\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "list indented four spaces after a paragraph",
+      "markdown": "Para.\n\n    - one\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>- one</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "items at different indents",
+      "markdown": "- one\n  - two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:list -->\n<ul><li>two</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "second item outdented",
+      "markdown": "  - one\n- two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item with a lazy continuation line",
+      "markdown": "- one\ntwo\n",
+      "html": "<!-- wp:list -->\n<ul><li>one\ntwo</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item with an indented continuation line",
+      "markdown": "- one\n  two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one\ntwo</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item with an over indented continuation line",
+      "markdown": "- one\n      two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one\ntwo</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "two items each with a continuation",
+      "markdown": "- one\n  more\n- two\n  more\n",
+      "html": "<!-- wp:list -->\n<ul><li>one\nmore</li>\n<li>two\nmore</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "continuation line with a hard break",
+      "markdown": "- one  \n  two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<br />\ntwo</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "ordered item with a continuation line",
+      "markdown": "1. one\n   two\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>one\ntwo</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "loose list from a blank line between items",
+      "markdown": "- one\n\n- two\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n</li>\n<li><!-- wp:paragraph -->\n<p>two</p>\n<!-- /wp:paragraph -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "loose list from two paragraphs in one item",
+      "markdown": "- one\n\n  two\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>two</p>\n<!-- /wp:paragraph -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "tight list then a paragraph",
+      "markdown": "- one\n- two\n\nAfter.\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:paragraph -->\n<p>After.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "blank line inside an item then another item",
+      "markdown": "- one\n\n  more\n- two\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>more</p>\n<!-- /wp:paragraph -->\n\n</li>\n<li><!-- wp:paragraph -->\n<p>two</p>\n<!-- /wp:paragraph -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "trailing blank line after a tight list",
+      "markdown": "- one\n- two\n\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item beginning with a blank line",
+      "markdown": "-\n  one\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item beginning with two blank lines",
+      "markdown": "-\n\n  one\n",
+      "html": "<!-- wp:list -->\n<ul><li></li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "bullet list nested in a bullet list",
+      "markdown": "- one\n  - nested\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:list -->\n<ul><li>nested</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "ordered list nested in a bullet list",
+      "markdown": "- one\n  1. nested\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:list {\"ordered\":true} -->\n<ol><li>nested</li>\n</ol>\n<!-- /wp:list -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "bullet list nested in an ordered list",
+      "markdown": "1. one\n   - nested\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>one<!-- wp:list -->\n<ul><li>nested</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "three levels of nesting",
+      "markdown": "- a\n  - b\n    - c\n",
+      "html": "<!-- wp:list -->\n<ul><li>a<!-- wp:list -->\n<ul><li>b<!-- wp:list -->\n<ul><li>c</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "nested list then a sibling item",
+      "markdown": "- one\n  - nested\n- two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:list -->\n<ul><li>nested</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "seven levels of nesting",
+      "markdown": "- a\n  - b\n    - c\n      - d\n        - e\n          - f\n            - g\n",
+      "html": "<!-- wp:list -->\n<ul><li>a<!-- wp:list -->\n<ul><li>b<!-- wp:list -->\n<ul><li>c<!-- wp:list -->\n<ul><li>d<!-- wp:list -->\n<ul><li>e<!-- wp:list -->\n<ul><li>f\n- g</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "loose outer list with a tight inner one",
+      "markdown": "- one\n  - nested\n\n- two\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:list -->\n<ul><li>nested</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n<li><!-- wp:paragraph -->\n<p>two</p>\n<!-- /wp:paragraph -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "heading inside an item",
+      "markdown": "- one\n  ## Title\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "thematic break inside an item",
+      "markdown": "- one\n  ***\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "fenced code inside an item",
+      "markdown": "- one\n  ```\n  code\n  ```\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>code\n</code></pre>\n<!-- /wp:code -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "indented code inside an item",
+      "markdown": "- one\n\n      code\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>code</code></pre>\n<!-- /wp:code -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "block quote inside an item",
+      "markdown": "- one\n  > quoted\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item whose text is indented code",
+      "markdown": "-     code\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:code -->\n<pre class=\"wp-block-code\"><code>code</code></pre>\n<!-- /wp:code -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "setext underline inside an item",
+      "markdown": "- one\n  ===\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:heading {\"level\":1} -->\n<h1>one</h1>\n<!-- /wp:heading -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "thematic break after a list",
+      "markdown": "- one\n***\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n"
+    },
+    {
+      "name": "dash thematic break after a list",
+      "markdown": "- one\n---\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n"
+    },
+    {
+      "name": "fenced code after a list",
+      "markdown": "- one\n```\ncode\n```\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>code\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "heading after a list",
+      "markdown": "- one\n## Title\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "quote after a list",
+      "markdown": "- one\n> quoted\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "blank line then heading after a list",
+      "markdown": "- one\n\n## Title\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "three spaced dashes are a thematic break",
+      "markdown": "- - -\n",
+      "html": "<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n"
+    },
+    {
+      "name": "three spaced stars are a thematic break",
+      "markdown": "* * *\n",
+      "html": "<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n"
+    },
+    {
+      "name": "dash dash is a setext underline",
+      "markdown": "Para.\n--\n",
+      "html": "<!-- wp:heading -->\n<h2>Para.</h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "dash under a paragraph with text after it",
+      "markdown": "Para.\n- item\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:list -->\n<ul><li>item</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "ordered one interrupts a paragraph",
+      "markdown": "Para.\n1. item\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:list {\"ordered\":true} -->\n<ol><li>item</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "ordered three does not interrupt a paragraph",
+      "markdown": "Para.\n3. item\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.\n3. item</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "empty item does not interrupt a paragraph",
+      "markdown": "Para.\n-\n",
+      "html": "<!-- wp:heading -->\n<h2>Para.</h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "list directly after a quote",
+      "markdown": "> quoted\n- item\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:list -->\n<ul><li>item</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "list inside a quote",
+      "markdown": "> - one\n> - two\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:list -->\n<ul><li>one</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "list inside a quote with a lazy item",
+      "markdown": "> - one\n- two\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:list -->\n<ul><li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "paragraph, list, paragraph",
+      "markdown": "Before.\n\n- one\n- two\n\nAfter.\n",
+      "html": "<!-- wp:paragraph -->\n<p>Before.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:list -->\n<ul><li>one</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:paragraph -->\n<p>After.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "two lists separated by a paragraph",
+      "markdown": "- one\n\nMid.\n\n- two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:paragraph -->\n<p>Mid.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:list -->\n<ul><li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "list at the end with no trailing newline",
+      "markdown": "- one\n- two",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "list with trailing spaces on the marker line",
+      "markdown": "- one   \n- two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "list after a heading",
+      "markdown": "## Title\n\n- one\n- two\n",
+      "html": "<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n<!-- wp:list -->\n<ul><li>one</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "list holding a line that looks like frontmatter",
+      "markdown": "- ---\n",
+      "html": "<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n"
+    },
+    {
+      "name": "second item indented one space",
+      "markdown": "- one\n - two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "heading indented one space under an item",
+      "markdown": "- one\n # Title\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:heading {\"level\":1} -->\n<h1>Title</h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "heading indented two spaces under an item",
+      "markdown": "- one\n  # Title\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:heading {\"level\":1} -->\n<h1>Title</h1>\n<!-- /wp:heading -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "heading indented three spaces under an item",
+      "markdown": "- one\n   # Title\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:heading {\"level\":1} -->\n<h1>Title</h1>\n<!-- /wp:heading -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "quote indented one space under an item",
+      "markdown": "- one\n > quoted\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "thematic break indented one space under an item",
+      "markdown": "- one\n ***\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n"
+    },
+    {
+      "name": "two digit ordered markers",
+      "markdown": "10. ten\n11. eleven\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>ten</li>\n<li>eleven</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "three digit ordered marker with a nested list",
+      "markdown": "100) hundred\n     - nested\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>hundred<!-- wp:list -->\n<ul><li>nested</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "nested list indented four spaces",
+      "markdown": "- one\n    - nested\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:list -->\n<ul><li>nested</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "ordered item indented two spaces",
+      "markdown": "1. one\n  2. two\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>one</li>\n<li>two</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item with a tab continuation line",
+      "markdown": "- one\n\ttwo\n",
+      "html": "<!-- wp:list -->\n<ul><li>one\ntwo</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "tab after the marker and a tab continuation",
+      "markdown": "-\tone\n\ttwo\n",
+      "html": "<!-- wp:list -->\n<ul><li>one\ntwo</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "ordered item with a tab after the marker",
+      "markdown": "1.\tone\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>one</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "two blank lines between items",
+      "markdown": "- a\n\n\n- b\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:paragraph -->\n<p>a</p>\n<!-- /wp:paragraph -->\n\n</li>\n<li><!-- wp:paragraph -->\n<p>b</p>\n<!-- /wp:paragraph -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "blank line holding spaces inside an item",
+      "markdown": "- one\n  \n  two\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>two</p>\n<!-- /wp:paragraph -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "three loose items",
+      "markdown": "* one\n\n* two\n\n* three\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n</li>\n<li><!-- wp:paragraph -->\n<p>two</p>\n<!-- /wp:paragraph -->\n\n</li>\n<li><!-- wp:paragraph -->\n<p>three</p>\n<!-- /wp:paragraph -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "blank line before the last ordered item",
+      "markdown": "1. one\n2. two\n\n3. three\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li><!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n</li>\n<li><!-- wp:paragraph -->\n<p>two</p>\n<!-- /wp:paragraph -->\n\n</li>\n<li><!-- wp:paragraph -->\n<p>three</p>\n<!-- /wp:paragraph -->\n\n</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "nested list with two items then a sibling",
+      "markdown": "- one\n  - a\n  - b\n- two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:list -->\n<ul><li>a</li>\n<li>b</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item whose text is a thematic break",
+      "markdown": "- ***\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item whose text is a heading",
+      "markdown": "- # Title\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:heading {\"level\":1} -->\n<h1>Title</h1>\n<!-- /wp:heading -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item whose text is a quote",
+      "markdown": "- > quoted\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "item whose text is a fence",
+      "markdown": "- ```\n  code\n  ```\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:code -->\n<pre class=\"wp-block-code\"><code>code\n</code></pre>\n<!-- /wp:code -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "setext underline under an indented item body",
+      "markdown": "- one\n  ---\n",
+      "html": "<!-- wp:list -->\n<ul><li><!-- wp:heading -->\n<h2>one</h2>\n<!-- /wp:heading -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "thematic break between two items",
+      "markdown": "- one\n---\n- two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n<!-- wp:list -->\n<ul><li>two</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "quote spanning two lines inside an item",
+      "markdown": "- one\n  > quoted\n  > more\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted\nmore</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "list then blank then quote inside a quote",
+      "markdown": "> - one\n> - two\n>\n> after\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:list -->\n<ul><li>one</li>\n<li>two</li>\n</ul>\n<!-- /wp:list -->\n\n<!-- wp:paragraph -->\n<p>after</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "heading indented two, marker plus three",
+      "markdown": "-   one\n  # Title\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:heading {\"level\":1} -->\n<h1>Title</h1>\n<!-- /wp:heading -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "heading indented three, marker plus three",
+      "markdown": "-   one\n   # Title\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:heading {\"level\":1} -->\n<h1>Title</h1>\n<!-- /wp:heading -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "break indented two, marker plus three",
+      "markdown": "-   one\n  ***\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "quote indented two, marker plus three",
+      "markdown": "-   one\n  > quoted\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "fence indented two, marker plus three",
+      "markdown": "-   one\n  ```\n  code\n  ```\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>code\n</code></pre>\n<!-- /wp:code -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "sibling indented two, marker plus three",
+      "markdown": "-   one\n  - two\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:list -->\n<ul><li>two</li>\n</ul>\n<!-- /wp:list -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "heading indented two, marker plus two",
+      "markdown": "-  one\n  # Title\n",
+      "html": "<!-- wp:list -->\n<ul><li>one<!-- wp:heading {\"level\":1} -->\n<h1>Title</h1>\n<!-- /wp:heading -->\n\n</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "heading indented three, ordered marker plus three",
+      "markdown": "1.   one\n   # Title\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>one<!-- wp:heading {\"level\":1} -->\n<h1>Title</h1>\n<!-- /wp:heading -->\n\n</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "break indented three, ordered marker plus three",
+      "markdown": "1.   one\n   ***\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>one<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    }
+  ]
+}

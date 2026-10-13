@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import BatchCreatePage from "./page";
 import { renderWithProviders } from "@/test/render";
-import { makeProfile } from "@/test/fixtures";
+import { makeProfileListItem } from "@/test/fixtures";
 
 const mockPush = vi.fn();
 
@@ -48,10 +48,28 @@ const _toast = await import("sonner");
 const mockProfilesList = vi.mocked(profiles.list);
 const mockBatchCreate = vi.mocked(posts.batchCreate);
 
+/**
+ * A batch cannot be submitted without a profile since P2.97, so the cases that
+ * reach `batchCreate` render against an account with exactly one, which the
+ * picker selects for the page.
+ */
+async function renderWithOneProfile() {
+  mockProfilesList.mockResolvedValue([makeProfileListItem({ id: "prof-1", name: "Test Site" })]);
+  renderWithProviders(<BatchCreatePage />);
+  await waitFor(() =>
+    expect(screen.getByRole("combobox", { name: "Website profile" })).toHaveTextContent(
+      "Test Site"
+    )
+  );
+}
+
 describe("BatchCreatePage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockProfilesList.mockResolvedValue([makeProfile()]);
+    // Pending by default: most cases here render and assert without awaiting
+    // the profile list, and a list that resolves afterwards settles state
+    // outside act(...). Cases that need the list say so.
+    mockProfilesList.mockReturnValue(new Promise(() => {}));
     mockBatchCreate.mockResolvedValue([{ id: "new-1" }] as unknown as Awaited<ReturnType<typeof posts.batchCreate>>);
   });
 
@@ -66,9 +84,59 @@ describe("BatchCreatePage", () => {
     expect(screen.getByText("Manual Entry")).toBeInTheDocument();
   });
 
-  it("renders profile selector", async () => {
+  it("names what the batch's gates will do", async () => {
+    mockProfilesList.mockResolvedValue([makeProfileListItem({ name: "Test Site" })]);
     renderWithProviders(<BatchCreatePage />);
-    expect(await screen.findByText("No profile")).toBeInTheDocument();
+    // No profile picked yet: the six stages still have an effective mode.
+    expect(await screen.findByTestId("gate-research")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-ready")).toBeInTheDocument();
+    expect(screen.getByTestId("gate-summary")).toHaveTextContent(
+      /^Every post in this batch will /
+    );
+  });
+
+  it("says the gates apply to the batch, not to one run", async () => {
+    mockProfilesList.mockResolvedValue([makeProfileListItem({ name: "Test Site" })]);
+    renderWithProviders(<BatchCreatePage />);
+    expect(
+      await screen.findByText(
+        "Where every post in this batch will pause and wait for you"
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("links the batch gates at the profile that owns them once one is picked", async () => {
+    const user = userEvent.setup();
+    mockProfilesList.mockResolvedValue([makeProfileListItem({ id: "prof-1", name: "Test Site" })]);
+    renderWithProviders(<BatchCreatePage />);
+    await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+    await user.click(await screen.findByRole("option", { name: "Test Site" }));
+    const link = await screen.findByRole("link", {
+      name: /Edit gates in the Test Site profile/,
+    });
+    expect(link).toHaveAttribute("href", "/profiles/prof-1?tab=defaults");
+  });
+
+  it("renders profile selector", async () => {
+    mockProfilesList.mockResolvedValue([makeProfileListItem({ name: "Test Site" }), makeProfileListItem()]);
+    renderWithProviders(<BatchCreatePage />);
+    expect(
+      await screen.findByRole("combobox", { name: "Website profile" })
+    ).toHaveTextContent("Select a profile");
+  });
+
+  it("cannot submit until a profile is picked", async () => {
+    const user = userEvent.setup();
+    mockProfilesList.mockResolvedValue([makeProfileListItem({ name: "A" }), makeProfileListItem({ name: "B" })]);
+    renderWithProviders(<BatchCreatePage />);
+    await user.click(screen.getByText("Manual Entry"));
+    await user.type(screen.getByPlaceholderText("Topic"), "Test Blog Post");
+
+    // Every item needs a profile since P2.97, so the button says so rather
+    // than sending a batch the endpoint answers with a 422.
+    expect(await screen.findByText("Pick a website profile to create these posts.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Create 1 Post$/i })).toBeDisabled();
+    expect(mockBatchCreate).not.toHaveBeenCalled();
   });
 
   it("loads profiles on mount", async () => {
@@ -122,7 +190,7 @@ describe("BatchCreatePage", () => {
 
   it("submit creates posts and redirects", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<BatchCreatePage />);
+    await renderWithOneProfile();
 
     await user.click(screen.getByText("Manual Entry"));
 
@@ -145,5 +213,68 @@ describe("BatchCreatePage", () => {
 
     const cancelLink = screen.getByRole("link", { name: /Cancel/i });
     expect(cancelLink).toHaveAttribute("href", "/");
+  });
+
+  // A rejected batch leaves up to twenty rows of typed-in work on screen, so
+  // the reason has to outlive a toast.
+  it("shows the server's own reason inline when the batch is rejected", async () => {
+    mockBatchCreate.mockRejectedValue(
+      new Error(JSON.stringify({ detail: "Slug already in use: test-blog-post" }))
+    );
+    const user = userEvent.setup();
+    await renderWithOneProfile();
+
+    await user.click(screen.getByText("Manual Entry"));
+    await user.type(screen.getByPlaceholderText("Topic"), "Test Blog Post");
+    await user.click(screen.getByRole("button", { name: /Create 1 Post$/i }));
+
+    expect(
+      await screen.findByText("Slug already in use: test-blog-post")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Could not create the posts")).toBeInTheDocument();
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it("falls back to its own wording when the failure carries no message", async () => {
+    mockBatchCreate.mockRejectedValue(new Error("Server error"));
+    const user = userEvent.setup();
+    await renderWithOneProfile();
+
+    await user.click(screen.getByText("Manual Entry"));
+    await user.type(screen.getByPlaceholderText("Topic"), "Test Blog Post");
+    await user.click(screen.getByRole("button", { name: /Create 1 Post$/i }));
+
+    expect(await screen.findByText("Failed to create posts")).toBeInTheDocument();
+  });
+
+  it("applies the chosen profile's defaults to every row", async () => {
+    const profile = makeProfileListItem({
+      id: "prof-batch",
+      name: "Batch Site",
+      niche: "Optics",
+      tone: "Expert",
+      word_count: 3000,
+    });
+    mockProfilesList.mockResolvedValue([profile]);
+    const user = userEvent.setup();
+    renderWithProviders(<BatchCreatePage />);
+
+    await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+    await user.click(await screen.findByRole("option", { name: "Batch Site" }));
+
+    await user.click(screen.getByText("Manual Entry"));
+    await user.type(screen.getByPlaceholderText("Topic"), "Test Blog Post");
+    await user.click(screen.getByRole("button", { name: /Create 1 Post$/i }));
+
+    await waitFor(() =>
+      expect(mockBatchCreate).toHaveBeenCalledWith([
+        expect.objectContaining({
+          profile_id: "prof-batch",
+          niche: "Optics",
+          tone: "Expert",
+          word_count: 3000,
+        }),
+      ])
+    );
   });
 });

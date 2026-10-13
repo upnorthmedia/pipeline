@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
+  AlertCircle,
   ArrowLeft,
   Upload,
   Plus,
@@ -37,6 +38,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
+import { ProfileSelectCard } from "@/components/profile-select-card";
+import { PipelineGatesCard } from "@/components/pipeline-gates-card";
 import {
   Tabs,
   TabsContent,
@@ -44,8 +47,8 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import {
+  apiErrorMessage,
   posts,
-  profiles,
   type Profile,
   type PostCreate,
 } from "@/lib/api";
@@ -103,9 +106,9 @@ function emptyRow(): BatchRow {
 export default function BatchCreatePage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [profileList, setProfileList] = useState<Profile[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<Profile | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // CSV mode
   const [csvRows, setCsvRows] = useState<BatchRow[]>([]);
@@ -116,19 +119,6 @@ export default function BatchCreatePage() {
 
   // Active tab
   const [activeTab, setActiveTab] = useState("csv");
-
-  useEffect(() => {
-    profiles.list().then(setProfileList).catch(() => {});
-  }, []);
-
-  const handleProfileChange = (profileId: string) => {
-    if (profileId === "none") {
-      setSelectedProfile(null);
-    } else {
-      const profile = profileList.find((p) => p.id === profileId) || null;
-      setSelectedProfile(profile);
-    }
-  };
 
   // CSV handling
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -203,6 +193,12 @@ export default function BatchCreatePage() {
       toast.error("No posts to create");
       return;
     }
+    // Every item needs a profile: a post reaches its owner only through one,
+    // so the endpoint refuses a batch that names none (ledger item P2.97).
+    if (!selectedProfile) {
+      toast.error("Pick a website profile first");
+      return;
+    }
 
     const seen = new Set<string>();
     for (const row of activeRows) {
@@ -219,11 +215,12 @@ export default function BatchCreatePage() {
     }
 
     setSubmitting(true);
+    setSubmitError(null);
     try {
       const items: PostCreate[] = activeRows.map((row) => ({
         slug: row.slug || slugify(row.topic),
         topic: row.topic.trim(),
-        profile_id: selectedProfile?.id || undefined,
+        profile_id: selectedProfile.id,
         intent: row.intent || undefined,
         niche: row.niche || selectedProfile?.niche || undefined,
         target_audience: selectedProfile?.target_audience || undefined,
@@ -241,8 +238,11 @@ export default function BatchCreatePage() {
       const created = await posts.batchCreate(items);
       toast.success(`Created ${created.length} posts`);
       router.push("/");
-    } catch {
-      toast.error("Failed to create posts");
+    } catch (e) {
+      // Inline rather than a toast: a rejected batch leaves the operator on a
+      // page holding up to 20 rows of typed-in work, and the reason for the
+      // rejection has to survive next to the button that failed.
+      setSubmitError(apiErrorMessage(e, "Failed to create posts"));
     } finally {
       setSubmitting(false);
     }
@@ -265,33 +265,11 @@ export default function BatchCreatePage() {
         </div>
       </div>
 
-      {/* Profile selector */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Website Profile</CardTitle>
-          <CardDescription>
-            Apply profile defaults to all batch items
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Select
-            value={selectedProfile?.id || "none"}
-            onValueChange={handleProfileChange}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="No profile (manual config)" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">No profile</SelectItem>
-              {profileList.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </CardContent>
-      </Card>
+      <ProfileSelectCard
+        description="Apply profile defaults to all batch items"
+        selected={selectedProfile}
+        onSelect={setSelectedProfile}
+      />
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -319,6 +297,8 @@ export default function BatchCreatePage() {
               <div className="flex items-center gap-3">
                 <Input
                   ref={fileInputRef}
+                  name="csv"
+                  aria-label="CSV file"
                   type="file"
                   accept=".csv"
                   onChange={handleFileChange}
@@ -395,6 +375,8 @@ export default function BatchCreatePage() {
                   </span>
                   <div className="flex-1 min-w-0">
                     <Input
+                      name={`topic-${i}`}
+                      aria-label={`Topic for row ${i + 1}`}
                       placeholder="Topic"
                       value={row.topic}
                       onChange={(e) => updateManualRow(i, "topic", e.target.value)}
@@ -402,6 +384,8 @@ export default function BatchCreatePage() {
                   </div>
                   <div className="w-[160px] shrink-0">
                     <Input
+                      name={`slug-${i}`}
+                      aria-label={`Slug for row ${i + 1}`}
                       placeholder="slug"
                       value={row.slug}
                       onChange={(e) => updateManualRow(i, "slug", e.target.value)}
@@ -410,6 +394,7 @@ export default function BatchCreatePage() {
                   </div>
                   <div className="w-[140px] shrink-0">
                     <Select
+                      name={`intent-${i}`}
                       value={row.intent || "none"}
                       onValueChange={(v) =>
                         updateManualRow(i, "intent", v === "none" ? "" : v)
@@ -430,6 +415,7 @@ export default function BatchCreatePage() {
                   </div>
                   <div className="w-[130px] shrink-0">
                     <Select
+                      name={`article-type-${i}`}
                       value={row.article_type || "none"}
                       onValueChange={(v) =>
                         updateManualRow(i, "article_type", v === "none" ? "" : v)
@@ -473,10 +459,34 @@ export default function BatchCreatePage() {
         </TabsContent>
       </Tabs>
 
+      {/* Last, for the reason it is last on `/posts/new`: everything above is
+          an input to the six stages, this is what those stages will do with it.
+          The batch copies the profile's gates onto every row it creates, so
+          the card that names them belongs on this page too. */}
+      <PipelineGatesCard
+        profile={selectedProfile}
+        subject="Every post in this batch"
+      />
+
       <Separator />
 
+      {submitError && (
+        <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+          <div>
+            <p className="text-sm font-medium">Could not create the posts</p>
+            <p className="mt-1 text-sm text-muted-foreground">{submitError}</p>
+          </div>
+        </div>
+      )}
+
       {/* Submit */}
-      <div className="flex justify-end gap-3">
+      <div className="flex items-center justify-end gap-3">
+        {!selectedProfile && (
+          <p className="mr-auto text-sm text-muted-foreground">
+            Pick a website profile to create these posts.
+          </p>
+        )}
         <Link href="/">
           <Button variant="outline" type="button">
             Cancel
@@ -484,7 +494,7 @@ export default function BatchCreatePage() {
         </Link>
         <Button
           onClick={handleSubmit}
-          disabled={submitting || activeRows.length === 0}
+          disabled={submitting || activeRows.length === 0 || !selectedProfile}
         >
           {submitting ? (
             <>

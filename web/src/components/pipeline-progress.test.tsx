@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { PipelineProgress } from "./pipeline-progress";
 import { renderWithProviders } from "@/test/render";
 import type { StageStatusMap } from "@/lib/api";
@@ -112,6 +113,21 @@ describe("PipelineProgress", () => {
       expect(redRing).toBeInTheDocument();
     });
 
+    it("stops spinning a stage the run died in, and names it failed", () => {
+      // Polish ledger P5.1. `markPipelineFailed()` stamps the stage it can
+      // name, but rows written before it did, and failures whose step the
+      // engine could not identify, still record the stage as running under
+      // `current_stage = "failed"`. Painting an amber spinner on a dead run is
+      // the same lie the run trace's elapsed clock was telling.
+      const stageStatus: StageStatusMap = { research: "complete", write: "running" };
+      const { container } = renderWithProviders(
+        <PipelineProgress stageStatus={stageStatus} currentStage="failed" />
+      );
+      expect(container.querySelector(".ring-amber-500\\/30")).not.toBeInTheDocument();
+      expect(container.querySelector(".ring-red-500\\/30")).toBeInTheDocument();
+      expect(screen.getByLabelText("Write: Failed")).toBeInTheDocument();
+    });
+
     it("highlights active stage with ring-offset", () => {
       const stageStatus: StageStatusMap = { research: "running" };
       const { container } = renderWithProviders(
@@ -133,6 +149,48 @@ describe("PipelineProgress", () => {
         ".h-px.w-8.bg-emerald-500\\/50"
       );
       expect(emeraldConnector).toBeInTheDocument();
+    });
+
+    it("tells a stage awaiting review apart from one that has not started", () => {
+      // The defect: `STATUS_STYLES` had no `review` entry, so a stage parked
+      // in front of a reviewer fell through to the `pending` style and painted
+      // the same grey circle as a stage nothing had reached yet.
+      const parked = renderWithProviders(
+        <PipelineProgress stageStatus={{ research: "review" }} currentStage="research" />
+      );
+      const skyRing = parked.container.querySelector(".ring-sky-500\\/30");
+      expect(skyRing).toBeInTheDocument();
+
+      const untouched = renderWithProviders(
+        <PipelineProgress stageStatus={{}} currentStage="research" />
+      );
+      expect(untouched.container.querySelector(".ring-sky-500\\/30")).toBeNull();
+    });
+
+    it("names a status in the user's terms rather than by its stored value", () => {
+      renderWithProviders(
+        <PipelineProgress stageStatus={{ research: "review" }} currentStage="research" />
+      );
+      expect(screen.getByLabelText("Research: Awaiting review")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Research: review")).toBeNull();
+    });
+
+    // The aria-label above went through `stageStatusLabel`; the tooltip body a
+    // sighted mouse user actually reads printed the stored value with a
+    // `capitalize` class over it, so a parked stage read "Review" there and
+    // "Awaiting review" one line up in the same component.
+    it("names the status in the tooltip body too", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(
+        <PipelineProgress stageStatus={{ research: "review" }} currentStage="research" />
+      );
+
+      await user.hover(screen.getByLabelText("Research: Awaiting review"));
+
+      // Radix renders the content twice: once on screen and once in the
+      // visually-hidden live region it announces through.
+      expect(await screen.findAllByText("Awaiting review")).not.toHaveLength(0);
+      expect(screen.queryAllByText("review")).toHaveLength(0);
     });
 
     it("applies spin animation to running icon", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   Search,
   ChevronLeft,
@@ -9,6 +9,8 @@ import {
   FileText,
   ChevronDown,
   ChevronUp,
+  AlertCircle,
+  Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +26,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   analytics,
+  apiErrorMessage,
   profiles as profilesApi,
   STAGES,
   type PaginatedLogs,
@@ -31,8 +34,13 @@ import {
   type Profile,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import {
+  useDebouncedValue,
+  SEARCH_DEBOUNCE_MS,
+} from "@/hooks/use-debounced-value";
+import { useLatestRequest } from "@/hooks/use-latest-request";
 import Link from "next/link";
+import { TabError, TabEmpty } from "./tab-states";
 
 const LEVEL_COLORS: Record<string, string> = {
   info: "bg-blue-500/10 text-blue-500",
@@ -63,6 +71,8 @@ export function LogsTab() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [profileList, setProfileList] = useState<Profile[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [profilesError, setProfilesError] = useState<string | null>(null);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
 
   // Filters
@@ -70,43 +80,79 @@ export function LogsTab() {
   const [stage, setStage] = useState<string>("");
   const [profileId, setProfileId] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  // What the typist sees is `searchQuery`; what the server is asked for is
+  // this, so a typed word is one query rather than one per keystroke.
+  const search = useDebouncedValue(searchQuery, SEARCH_DEBOUNCE_MS);
+  const beginFetch = useLatestRequest();
+  // Whether there are rows on screen worth keeping. A filter change replaces
+  // them in place; only a load with nothing to show falls back to skeletons.
+  const loadedRef = useRef(false);
   const [timePreset, setTimePreset] = useState<number>(24 * 7);
   const [page, setPage] = useState(1);
+  // The search box is the one filter that changes without a click, so it is
+  // the one that cannot reset the page in a handler. Adjusted during the
+  // render that first sees the new query rather than in an effect: an effect
+  // would let the fetch for the old page go out first and answer with an empty
+  // table on its way to being replaced.
+  const askedFor = useRef(search);
+  if (askedFor.current !== search) {
+    askedFor.current = search;
+    setPage(1);
+  }
 
   const fetchLogs = useCallback(async () => {
+    // Two filter changes can be in flight together, and the older one
+    // answering last would write its rows over the newer ones.
+    const isCurrent = beginFetch();
+    if (loadedRef.current) setRefreshing(true);
+    else setLoading(true);
     try {
       const since = new Date(Date.now() - timePreset * 60 * 60 * 1000).toISOString();
       const result = await analytics.logs({
         level: level || undefined,
         stage: stage || undefined,
         profile_id: profileId || undefined,
-        q: searchQuery || undefined,
+        q: search || undefined,
         since,
         page,
         per_page: 50,
       });
+      if (!isCurrent()) return;
       setData(result);
-    } catch {
-      toast.error("Failed to load logs");
+      loadedRef.current = true;
+      setError(null);
+    } catch (err) {
+      if (!isCurrent()) return;
+      setData(null);
+      loadedRef.current = false;
+      setError(apiErrorMessage(err, "Could not load logs."));
     } finally {
-      setLoading(false);
+      if (isCurrent()) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [level, stage, profileId, searchQuery, timePreset, page]);
+  }, [level, stage, profileId, search, timePreset, page, beginFetch]);
 
   useEffect(() => {
-    profilesApi.list().then(setProfileList).catch(() => {});
+    // A failed profile list is not a failed page, but hiding the filter with no
+    // explanation reads as an account with no profiles, so it says so instead.
+    profilesApi
+      .list()
+      .then((list) => {
+        setProfileList(list);
+        setProfilesError(null);
+      })
+      .catch((err) => {
+        setProfilesError(apiErrorMessage(err, "Could not load profiles."));
+      });
   }, []);
 
   useEffect(() => {
-    setLoading(true);
     fetchLogs();
   }, [fetchLogs]);
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await fetchLogs();
-    setRefreshing(false);
-  };
+  const handleRefresh = () => fetchLogs();
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -123,6 +169,8 @@ export function LogsTab() {
   };
 
   const hasActiveFilters = level || stage || profileId || searchQuery;
+  const presetLabel =
+    TIME_PRESETS.find((p) => p.hours === timePreset)?.label ?? `${timePreset}h`;
 
   return (
     <div className="space-y-4">
@@ -149,8 +197,8 @@ export function LogsTab() {
             </div>
 
             {/* Level Filter */}
-            <Select value={level} onValueChange={(v) => { setLevel(v === "all" ? "" : v); setPage(1); }}>
-              <SelectTrigger className="w-[100px] h-8 text-xs">
+            <Select name="level" value={level} onValueChange={(v) => { setLevel(v === "all" ? "" : v); setPage(1); }}>
+              <SelectTrigger id="logs-level-filter" aria-label="Filter by level" className="w-[100px] h-8 text-xs">
                 <SelectValue placeholder="Level" />
               </SelectTrigger>
               <SelectContent>
@@ -162,8 +210,8 @@ export function LogsTab() {
             </Select>
 
             {/* Stage Filter */}
-            <Select value={stage} onValueChange={(v) => { setStage(v === "all" ? "" : v); setPage(1); }}>
-              <SelectTrigger className="w-[110px] h-8 text-xs">
+            <Select name="stage" value={stage} onValueChange={(v) => { setStage(v === "all" ? "" : v); setPage(1); }}>
+              <SelectTrigger id="logs-stage-filter" aria-label="Filter by stage" className="w-[110px] h-8 text-xs">
                 <SelectValue placeholder="Stage" />
               </SelectTrigger>
               <SelectContent>
@@ -177,9 +225,18 @@ export function LogsTab() {
             </Select>
 
             {/* Profile Filter */}
+            {profilesError && (
+              <span
+                className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                title={profilesError}
+              >
+                <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+                Profile filter unavailable
+              </span>
+            )}
             {profileList.length > 0 && (
-              <Select value={profileId} onValueChange={(v) => { setProfileId(v === "all" ? "" : v); setPage(1); }}>
-                <SelectTrigger className="w-[140px] h-8 text-xs">
+              <Select name="profile" value={profileId} onValueChange={(v) => { setProfileId(v === "all" ? "" : v); setPage(1); }}>
+                <SelectTrigger id="logs-profile-filter" aria-label="Filter by profile" className="w-[140px] h-8 text-xs">
                   <SelectValue placeholder="Profile" />
                 </SelectTrigger>
                 <SelectContent>
@@ -198,6 +255,9 @@ export function LogsTab() {
               <div className="relative flex-1">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
+                  id="logs-search"
+                  name="q"
+                  aria-label="Search log messages"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search messages..."
@@ -219,6 +279,7 @@ export function LogsTab() {
                 className="h-8 w-8"
                 onClick={handleRefresh}
                 disabled={refreshing}
+                aria-label="Refresh logs"
               >
                 <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
               </Button>
@@ -228,6 +289,39 @@ export function LogsTab() {
       </Card>
 
       {/* Results */}
+      {error ? (
+        <TabError
+          title="Could not load logs"
+          message={error}
+          retryLabel="Retry logs"
+          onRetry={handleRefresh}
+        />
+      ) : !loading && (!data || data.items.length === 0) ? (
+        hasActiveFilters ? (
+          <TabEmpty
+            icon={FileText}
+            title="No logs match your filters"
+            description={`Nothing in the last ${presetLabel} matches. Widen the time range or clear the filters.`}
+          >
+            <Button variant="outline" size="sm" onClick={resetFilters}>
+              Clear filters
+            </Button>
+          </TabEmpty>
+        ) : (
+          <TabEmpty
+            icon={FileText}
+            title="No logs recorded yet"
+            description={`Nothing was logged in the last ${presetLabel}. Every stage writes here as it runs, so a wider range or a run fills it.`}
+          >
+            <Button asChild variant="outline" size="sm">
+              <Link href="/posts/new">
+                <Plus className="h-3.5 w-3.5 mr-1.5" />
+                New post
+              </Link>
+            </Button>
+          </TabEmpty>
+        )
+      ) : (
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
@@ -244,6 +338,7 @@ export function LogsTab() {
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
+                    aria-label="Previous page"
                     disabled={page <= 1}
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                   >
@@ -253,6 +348,7 @@ export function LogsTab() {
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
+                    aria-label="Next page"
                     disabled={page >= (data?.pages ?? 1)}
                     onClick={() => setPage((p) => p + 1)}
                   >
@@ -270,17 +366,9 @@ export function LogsTab() {
                 <Skeleton key={i} className="h-10 w-full" />
               ))}
             </div>
-          ) : !data || data.items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <FileText className="h-8 w-8 text-muted-foreground/40 mb-2" />
-              <p className="text-sm text-muted-foreground">No logs match your filters</p>
-              <p className="text-xs text-muted-foreground/60 mt-0.5">
-                Try adjusting the time range or clearing filters
-              </p>
-            </div>
           ) : (
             <div className="space-y-1">
-              {data.items.map((entry, i) => (
+              {data?.items.map((entry, i) => (
                 <LogRow
                   key={`${entry.post_id}-${entry.timestamp}-${i}`}
                   entry={entry}
@@ -292,6 +380,7 @@ export function LogsTab() {
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }

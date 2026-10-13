@@ -54,16 +54,23 @@ function createMockEventSource() {
   return MockEventSource;
 }
 
-function emitMessage(source: MockES, data: unknown) {
+function emitMessage(source: MockES, data: unknown, lastEventId = "") {
   const event = new MessageEvent("message", {
     data: typeof data === "string" ? data : JSON.stringify(data),
+    lastEventId,
   });
   source.onmessage?.(event);
 }
 
-function emitNamedEvent(source: MockES, type: string, data: unknown) {
+function emitNamedEvent(
+  source: MockES,
+  type: string,
+  data: unknown,
+  lastEventId = ""
+) {
   const event = new MessageEvent(type, {
     data: typeof data === "string" ? data : JSON.stringify(data),
+    lastEventId,
   });
   const listeners = source.listeners.get(type) || [];
   for (const listener of listeners) {
@@ -90,13 +97,13 @@ describe("useSSE", () => {
   it("connects to global SSE endpoint when no postId", async () => {
     renderHook(() => useSSE());
     await waitFor(() => expect(instances).toHaveLength(1));
-    expect(instances[0].url).toBe("http://localhost:8055/api/events");
+    expect(instances[0].url).toBe("/api/events");
   });
 
   it("connects to post-specific SSE endpoint", async () => {
     renderHook(() => useSSE("post-123"));
     await waitFor(() => expect(instances).toHaveLength(1));
-    expect(instances[0].url).toBe("http://localhost:8055/api/events/post-123");
+    expect(instances[0].url).toBe("/api/events/post-123");
   });
 
   it("sets connected to true on open", async () => {
@@ -145,6 +152,34 @@ describe("useSSE", () => {
       })
     );
   });
+
+  /**
+   * Item P3.2c. The `images` fan-out publishes these two names rather than
+   * `log`, so before this they were the one kind of progress `EventSource`
+   * dropped on the floor: an unlistened named event never reaches `onmessage`.
+   */
+  it.each(["image_generated", "image_failed"])(
+    "receives the fan-out's %s frames, which are named events too",
+    async (name) => {
+      const callback = vi.fn();
+      renderHook(() => useSSE("p1", callback));
+      await waitFor(() => expect(instances).toHaveLength(1));
+      await waitFor(() => expect(instances[0].readyState).toBe(1));
+
+      act(() => {
+        emitNamedEvent(instances[0], name, {
+          post_id: "p1",
+          stage: "images",
+          message: `Image 2 ${name === "image_generated" ? "generated" : "failed"}`,
+          data: { index: 2 },
+        });
+      });
+
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({ event: name, post_id: "p1", stage: "images" })
+      );
+    }
+  );
 
   it("calls onEvent callback for message events", async () => {
     const callback = vi.fn();
@@ -220,5 +255,155 @@ describe("useSSE", () => {
 
     // Should not crash, lastEvent stays null
     expect(result.current.lastEvent).toBeNull();
+  });
+});
+
+/**
+ * Ledger 5.5e-iii: the anchor has to survive the reconnect `useSSE()` performs
+ * itself.
+ *
+ * `EventSource` sends `Last-Event-ID` only when it reconnects the object it
+ * already owns. `useSSE()` never lets that happen: `onerror` closes the source
+ * and a timer constructs a brand new one, whose own id buffer starts empty. So
+ * the hook has to carry the id across the gap, and the only place a new
+ * `EventSource` can carry anything is its URL.
+ */
+describe("useSSE replay anchor", () => {
+  const ANCHOR_A = "1755859200000-11111111-2222-3333-4444-555555555555";
+  const ANCHOR_B = "1755859200500-66666666-7777-8888-9999-aaaaaaaaaaaa";
+  const ANCHOR_C = "1755859201000-bbbbbbbb-cccc-dddd-eeee-ffffffffffff";
+  const GLOBAL_URL = "/api/events";
+
+  /**
+   * Lets the mock's open-on-next-microtask fire inside `act()`, so the
+   * `setConnected(true)` it triggers does not warn.
+   */
+  async function settle() {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+  }
+
+  /** Errors the live source, then lets the 3000ms reconnect timer fire. */
+  async function reconnect() {
+    act(() => {
+      triggerError(instances[instances.length - 1]);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3100);
+    });
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("opens the first connection with no anchor, because it has missed nothing", async () => {
+    renderHook(() => useSSE());
+    await settle();
+
+    expect(instances[0].url).toBe(GLOBAL_URL);
+  });
+
+  it("puts the last delivered event's id on the URL of the next EventSource", async () => {
+    renderHook(() => useSSE());
+    await settle();
+
+    act(() => {
+      emitMessage(instances[0], { event: "log", post_id: "p1" }, ANCHOR_A);
+    });
+    await reconnect();
+
+    expect(instances[1].url).toBe(
+      `${GLOBAL_URL}?last_event_id=${encodeURIComponent(ANCHOR_A)}`
+    );
+  });
+
+  it("takes the anchor from a named event too, not only from an unnamed one", async () => {
+    renderHook(() => useSSE("post-123"));
+    await settle();
+
+    act(() => {
+      emitNamedEvent(
+        instances[0],
+        "stage_complete",
+        { post_id: "post-123", stage: "outline" },
+        ANCHOR_B
+      );
+    });
+    await reconnect();
+
+    expect(instances[1].url).toBe(
+      `/api/events/post-123?last_event_id=${encodeURIComponent(ANCHOR_B)}`
+    );
+  });
+
+  it("advances the anchor rather than accumulating parameters across two reconnects", async () => {
+    renderHook(() => useSSE());
+    await settle();
+
+    act(() => {
+      emitMessage(instances[0], { event: "log" }, ANCHOR_A);
+    });
+    await reconnect();
+    act(() => {
+      emitMessage(instances[1], { event: "log" }, ANCHOR_C);
+    });
+    await reconnect();
+
+    expect(instances[2].url).toBe(
+      `${GLOBAL_URL}?last_event_id=${encodeURIComponent(ANCHOR_C)}`
+    );
+  });
+
+  it("keeps the previous anchor when a frame arrives without an id", async () => {
+    renderHook(() => useSSE());
+    await settle();
+
+    act(() => {
+      emitMessage(instances[0], { event: "log" }, ANCHOR_A);
+      emitMessage(instances[0], { event: "log" }, "");
+    });
+    await reconnect();
+
+    expect(instances[1].url).toBe(
+      `${GLOBAL_URL}?last_event_id=${encodeURIComponent(ANCHOR_A)}`
+    );
+  });
+
+  it("advances the anchor on a frame whose data does not parse, as the browser's own buffer does", async () => {
+    renderHook(() => useSSE());
+    await settle();
+
+    act(() => {
+      emitMessage(instances[0], { event: "log" }, ANCHOR_A);
+      emitMessage(instances[0], "not-valid-json{{{", ANCHOR_C);
+    });
+    await reconnect();
+
+    expect(instances[1].url).toBe(
+      `${GLOBAL_URL}?last_event_id=${encodeURIComponent(ANCHOR_C)}`
+    );
+  });
+
+  it("does not carry an anchor across a postId change, which is a different feed", async () => {
+    const { rerender } = renderHook(({ id }) => useSSE(id), {
+      initialProps: { id: "post-1" as string | undefined },
+    });
+    await settle();
+
+    act(() => {
+      emitMessage(instances[0], { event: "log", post_id: "post-1" }, ANCHOR_A);
+    });
+    rerender({ id: "post-2" });
+    await settle();
+
+    expect(instances[instances.length - 1].url).toBe(
+      "/api/events/post-2"
+    );
   });
 });

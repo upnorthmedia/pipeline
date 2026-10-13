@@ -1,0 +1,1766 @@
+{
+  "walkBlockSource": "if media_dir.is_dir():\n    for img_file in sorted(media_dir.iterdir()):\n        if not img_file.is_file():\n            continue\n        names.append(img_file.name)\n",
+  "fsdecode": [
+    {
+      "name": "empty",
+      "bytes": [],
+      "codepoints": []
+    },
+    {
+      "name": "ascii",
+      "bytes": [
+        102,
+        101,
+        97,
+        116,
+        117,
+        114,
+        101,
+        100,
+        45,
+        48,
+        56,
+        50,
+        51,
+        50,
+        54,
+        45,
+        97,
+        49,
+        98,
+        50,
+        46,
+        119,
+        101,
+        98,
+        112
+      ],
+      "codepoints": [
+        102,
+        101,
+        97,
+        116,
+        117,
+        114,
+        101,
+        100,
+        45,
+        48,
+        56,
+        50,
+        51,
+        50,
+        54,
+        45,
+        97,
+        49,
+        98,
+        50,
+        46,
+        119,
+        101,
+        98,
+        112
+      ]
+    },
+    {
+      "name": "two byte sequence",
+      "bytes": [
+        99,
+        97,
+        102,
+        195,
+        169,
+        46,
+        119,
+        101,
+        98,
+        112
+      ],
+      "codepoints": [
+        99,
+        97,
+        102,
+        233,
+        46,
+        119,
+        101,
+        98,
+        112
+      ]
+    },
+    {
+      "name": "three byte sequence",
+      "bytes": [
+        226,
+        130,
+        172,
+        46,
+        119,
+        101,
+        98,
+        112
+      ],
+      "codepoints": [
+        8364,
+        46,
+        119,
+        101,
+        98,
+        112
+      ]
+    },
+    {
+      "name": "four byte sequence",
+      "bytes": [
+        240,
+        159,
+        152,
+        128,
+        46,
+        119,
+        101,
+        98,
+        112
+      ],
+      "codepoints": [
+        128512,
+        46,
+        119,
+        101,
+        98,
+        112
+      ]
+    },
+    {
+      "name": "replacement character",
+      "bytes": [
+        239,
+        191,
+        189,
+        46,
+        119,
+        101,
+        98,
+        112
+      ],
+      "codepoints": [
+        65533,
+        46,
+        119,
+        101,
+        98,
+        112
+      ]
+    },
+    {
+      "name": "lone 0xff",
+      "bytes": [
+        255
+      ],
+      "codepoints": [
+        56575
+      ]
+    },
+    {
+      "name": "lone 0x80",
+      "bytes": [
+        128
+      ],
+      "codepoints": [
+        56448
+      ]
+    },
+    {
+      "name": "two undecodable bytes",
+      "bytes": [
+        255,
+        254
+      ],
+      "codepoints": [
+        56575,
+        56574
+      ]
+    },
+    {
+      "name": "undecodable byte between ascii",
+      "bytes": [
+        97,
+        255,
+        98
+      ],
+      "codepoints": [
+        97,
+        56575,
+        98
+      ]
+    },
+    {
+      "name": "truncated two byte sequence",
+      "bytes": [
+        195
+      ],
+      "codepoints": [
+        56515
+      ]
+    },
+    {
+      "name": "truncated three byte sequence",
+      "bytes": [
+        226,
+        130
+      ],
+      "codepoints": [
+        56546,
+        56450
+      ]
+    },
+    {
+      "name": "truncated four byte sequence",
+      "bytes": [
+        240,
+        159,
+        152
+      ],
+      "codepoints": [
+        56560,
+        56479,
+        56472
+      ]
+    },
+    {
+      "name": "continuation byte without a start",
+      "bytes": [
+        128,
+        129,
+        130
+      ],
+      "codepoints": [
+        56448,
+        56449,
+        56450
+      ]
+    },
+    {
+      "name": "start byte followed by ascii",
+      "bytes": [
+        195,
+        97
+      ],
+      "codepoints": [
+        56515,
+        97
+      ]
+    },
+    {
+      "name": "overlong two byte nul",
+      "bytes": [
+        192,
+        128
+      ],
+      "codepoints": [
+        56512,
+        56448
+      ]
+    },
+    {
+      "name": "overlong three byte solidus",
+      "bytes": [
+        224,
+        128,
+        175
+      ],
+      "codepoints": [
+        56544,
+        56448,
+        56495
+      ]
+    },
+    {
+      "name": "overlong four byte euro",
+      "bytes": [
+        240,
+        130,
+        130,
+        172
+      ],
+      "codepoints": [
+        56560,
+        56450,
+        56450,
+        56492
+      ]
+    },
+    {
+      "name": "encoded high surrogate",
+      "bytes": [
+        237,
+        160,
+        128
+      ],
+      "codepoints": [
+        56557,
+        56480,
+        56448
+      ]
+    },
+    {
+      "name": "encoded low surrogate",
+      "bytes": [
+        237,
+        176,
+        128
+      ],
+      "codepoints": [
+        56557,
+        56496,
+        56448
+      ]
+    },
+    {
+      "name": "encoded surrogate pair",
+      "bytes": [
+        237,
+        160,
+        189,
+        237,
+        184,
+        128
+      ],
+      "codepoints": [
+        56557,
+        56480,
+        56509,
+        56557,
+        56504,
+        56448
+      ]
+    },
+    {
+      "name": "above U+10FFFF",
+      "bytes": [
+        244,
+        144,
+        128,
+        128
+      ],
+      "codepoints": [
+        56564,
+        56464,
+        56448,
+        56448
+      ]
+    },
+    {
+      "name": "0xf5 start byte",
+      "bytes": [
+        245,
+        128,
+        128,
+        128
+      ],
+      "codepoints": [
+        56565,
+        56448,
+        56448,
+        56448
+      ]
+    },
+    {
+      "name": "0xfe and 0xff",
+      "bytes": [
+        254,
+        255
+      ],
+      "codepoints": [
+        56574,
+        56575
+      ]
+    },
+    {
+      "name": "smallest two byte sequence",
+      "bytes": [
+        194,
+        128
+      ],
+      "codepoints": [
+        128
+      ]
+    },
+    {
+      "name": "largest two byte sequence",
+      "bytes": [
+        223,
+        191
+      ],
+      "codepoints": [
+        2047
+      ]
+    },
+    {
+      "name": "smallest three byte sequence",
+      "bytes": [
+        224,
+        160,
+        128
+      ],
+      "codepoints": [
+        2048
+      ]
+    },
+    {
+      "name": "largest three byte sequence",
+      "bytes": [
+        239,
+        191,
+        191
+      ],
+      "codepoints": [
+        65535
+      ]
+    },
+    {
+      "name": "smallest four byte sequence",
+      "bytes": [
+        240,
+        144,
+        128,
+        128
+      ],
+      "codepoints": [
+        65536
+      ]
+    },
+    {
+      "name": "largest four byte sequence",
+      "bytes": [
+        244,
+        143,
+        191,
+        191
+      ],
+      "codepoints": [
+        1114111
+      ]
+    },
+    {
+      "name": "valid sequence after an invalid one",
+      "bytes": [
+        255,
+        226,
+        130,
+        172
+      ],
+      "codepoints": [
+        56575,
+        8364
+      ]
+    },
+    {
+      "name": "invalid sequence after a valid one",
+      "bytes": [
+        226,
+        130,
+        172,
+        255
+      ],
+      "codepoints": [
+        8364,
+        56575
+      ]
+    },
+    {
+      "name": "nul byte",
+      "bytes": [
+        97,
+        0,
+        98
+      ],
+      "codepoints": [
+        97,
+        0,
+        98
+      ]
+    },
+    {
+      "name": "newline and tab",
+      "bytes": [
+        97,
+        9,
+        98,
+        10,
+        99
+      ],
+      "codepoints": [
+        97,
+        9,
+        98,
+        10,
+        99
+      ]
+    }
+  ],
+  "sorts": [
+    {
+      "name": "empty",
+      "names": [],
+      "sorted": []
+    },
+    {
+      "name": "one name",
+      "names": [
+        [
+          97,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ],
+      "sorted": [
+        [
+          97,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ]
+    },
+    {
+      "name": "already sorted ascii",
+      "names": [
+        [
+          97,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          98,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          99,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ],
+      "sorted": [
+        [
+          97,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          98,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          99,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ]
+    },
+    {
+      "name": "reversed ascii",
+      "names": [
+        [
+          99,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          98,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          97,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ],
+      "sorted": [
+        [
+          97,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          98,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          99,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ]
+    },
+    {
+      "name": "case",
+      "names": [
+        [
+          97,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          66,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          65,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          98,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ],
+      "sorted": [
+        [
+          65,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          66,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          97,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          98,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ]
+    },
+    {
+      "name": "punctuation",
+      "names": [
+        [
+          45,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          95,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          126,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          48,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          65,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ],
+      "sorted": [
+        [
+          45,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          48,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          65,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          95,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          126,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ]
+    },
+    {
+      "name": "digits",
+      "names": [
+        [
+          49,
+          48,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          57,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          50,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          49,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          49,
+          48,
+          48,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ],
+      "sorted": [
+        [
+          49,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          49,
+          48,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          49,
+          48,
+          48,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          50,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          57,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ]
+    },
+    {
+      "name": "prefix of another name",
+      "names": [
+        [
+          97,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          97
+        ],
+        [
+          97,
+          46,
+          119,
+          101,
+          98
+        ],
+        [
+          97,
+          46,
+          119,
+          101,
+          98,
+          112,
+          120
+        ]
+      ],
+      "sorted": [
+        [
+          97
+        ],
+        [
+          97,
+          46,
+          119,
+          101,
+          98
+        ],
+        [
+          97,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          97,
+          46,
+          119,
+          101,
+          98,
+          112,
+          120
+        ]
+      ]
+    },
+    {
+      "name": "space and tab",
+      "names": [
+        [
+          97,
+          32,
+          98,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          97,
+          9,
+          98,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          97,
+          98,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ],
+      "sorted": [
+        [
+          97,
+          9,
+          98,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          97,
+          32,
+          98,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          97,
+          98,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ]
+    },
+    {
+      "name": "astral against the BMP",
+      "names": [
+        [
+          128512
+        ],
+        [
+          65533
+        ],
+        [
+          57344
+        ],
+        [
+          65536
+        ]
+      ],
+      "sorted": [
+        [
+          57344
+        ],
+        [
+          65533
+        ],
+        [
+          65536
+        ],
+        [
+          128512
+        ]
+      ]
+    },
+    {
+      "name": "astral against a lone surrogate",
+      "names": [
+        [
+          128512
+        ],
+        [
+          56575
+        ],
+        [
+          65533
+        ]
+      ],
+      "sorted": [
+        [
+          56575
+        ],
+        [
+          65533
+        ],
+        [
+          128512
+        ]
+      ]
+    },
+    {
+      "name": "lone surrogates in escape order",
+      "names": [
+        [
+          56575
+        ],
+        [
+          56448
+        ],
+        [
+          56574
+        ]
+      ],
+      "sorted": [
+        [
+          56448
+        ],
+        [
+          56574
+        ],
+        [
+          56575
+        ]
+      ]
+    },
+    {
+      "name": "undecodable byte against a valid sequence",
+      "names": [
+        [
+          56575
+        ],
+        [
+          65533
+        ],
+        [
+          233
+        ]
+      ],
+      "sorted": [
+        [
+          233
+        ],
+        [
+          56575
+        ],
+        [
+          65533
+        ]
+      ]
+    },
+    {
+      "name": "combining marks",
+      "names": [
+        [
+          233,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          101,
+          769,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          102,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ],
+      "sorted": [
+        [
+          101,
+          769,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          102,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          233,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ]
+    },
+    {
+      "name": "the filenames the images stage writes",
+      "names": [
+        [
+          105,
+          110,
+          108,
+          105,
+          110,
+          101,
+          45,
+          48,
+          56,
+          50,
+          51,
+          50,
+          54,
+          45,
+          99,
+          51,
+          100,
+          52,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          102,
+          101,
+          97,
+          116,
+          117,
+          114,
+          101,
+          100,
+          45,
+          48,
+          56,
+          50,
+          51,
+          50,
+          54,
+          45,
+          97,
+          49,
+          98,
+          50,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          109,
+          97,
+          110,
+          105,
+          102,
+          101,
+          115,
+          116,
+          46,
+          106,
+          115,
+          111,
+          110
+        ],
+        [
+          105,
+          110,
+          108,
+          105,
+          110,
+          101,
+          45,
+          48,
+          56,
+          50,
+          51,
+          50,
+          54,
+          45,
+          101,
+          53,
+          102,
+          54,
+          46,
+          119,
+          101,
+          98,
+          112
+        ]
+      ],
+      "sorted": [
+        [
+          102,
+          101,
+          97,
+          116,
+          117,
+          114,
+          101,
+          100,
+          45,
+          48,
+          56,
+          50,
+          51,
+          50,
+          54,
+          45,
+          97,
+          49,
+          98,
+          50,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          105,
+          110,
+          108,
+          105,
+          110,
+          101,
+          45,
+          48,
+          56,
+          50,
+          51,
+          50,
+          54,
+          45,
+          99,
+          51,
+          100,
+          52,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          105,
+          110,
+          108,
+          105,
+          110,
+          101,
+          45,
+          48,
+          56,
+          50,
+          51,
+          50,
+          54,
+          45,
+          101,
+          53,
+          102,
+          54,
+          46,
+          119,
+          101,
+          98,
+          112
+        ],
+        [
+          109,
+          97,
+          110,
+          105,
+          102,
+          101,
+          115,
+          116,
+          46,
+          106,
+          115,
+          111,
+          110
+        ]
+      ]
+    }
+  ],
+  "walks": [
+    {
+      "name": "the directory does not exist",
+      "entries": [],
+      "walk": "missing",
+      "expected": []
+    },
+    {
+      "name": "the media directory is empty",
+      "entries": [],
+      "walk": ".",
+      "expected": []
+    },
+    {
+      "name": "the media directory is a regular file",
+      "entries": [
+        {
+          "path": "notadir",
+          "kind": "file"
+        }
+      ],
+      "walk": "notadir",
+      "expected": []
+    },
+    {
+      "name": "the media directory is a symlink to a directory",
+      "entries": [
+        {
+          "path": "real",
+          "kind": "dir"
+        },
+        {
+          "path": "real/a.webp",
+          "kind": "file"
+        },
+        {
+          "path": "link",
+          "kind": "symlink",
+          "target": "real"
+        }
+      ],
+      "walk": "link",
+      "expected": [
+        "a.webp"
+      ]
+    },
+    {
+      "name": "the media directory is a broken symlink",
+      "entries": [
+        {
+          "path": "link",
+          "kind": "symlink",
+          "target": "nowhere"
+        }
+      ],
+      "walk": "link",
+      "expected": []
+    },
+    {
+      "name": "the media directory is a symlink to itself",
+      "entries": [
+        {
+          "path": "loop",
+          "kind": "symlink",
+          "target": "loop"
+        }
+      ],
+      "walk": "loop",
+      "expected": []
+    },
+    {
+      "name": "the media directory is under a regular file",
+      "entries": [
+        {
+          "path": "notadir",
+          "kind": "file"
+        }
+      ],
+      "walk": "notadir/post",
+      "expected": []
+    },
+    {
+      "name": "the media directory is under a missing directory",
+      "entries": [],
+      "walk": "missing/post",
+      "expected": []
+    },
+    {
+      "name": "a subdirectory is skipped",
+      "entries": [
+        {
+          "path": "a.webp",
+          "kind": "file"
+        },
+        {
+          "path": "sub",
+          "kind": "dir"
+        },
+        {
+          "path": "sub/nested.webp",
+          "kind": "file"
+        },
+        {
+          "path": "z.webp",
+          "kind": "file"
+        }
+      ],
+      "walk": ".",
+      "expected": [
+        "a.webp",
+        "z.webp"
+      ]
+    },
+    {
+      "name": "a symlink to a file is followed and kept",
+      "entries": [
+        {
+          "path": "real.webp",
+          "kind": "file"
+        },
+        {
+          "path": "sym.webp",
+          "kind": "symlink",
+          "target": "real.webp"
+        }
+      ],
+      "walk": ".",
+      "expected": [
+        "real.webp",
+        "sym.webp"
+      ]
+    },
+    {
+      "name": "a symlink to a directory is followed and skipped",
+      "entries": [
+        {
+          "path": "keep.webp",
+          "kind": "file"
+        },
+        {
+          "path": "sub",
+          "kind": "dir"
+        },
+        {
+          "path": "sym",
+          "kind": "symlink",
+          "target": "sub"
+        }
+      ],
+      "walk": ".",
+      "expected": [
+        "keep.webp"
+      ]
+    },
+    {
+      "name": "a broken symlink is skipped",
+      "entries": [
+        {
+          "path": "keep.webp",
+          "kind": "file"
+        },
+        {
+          "path": "dead.webp",
+          "kind": "symlink",
+          "target": "gone.webp"
+        }
+      ],
+      "walk": ".",
+      "expected": [
+        "keep.webp"
+      ]
+    },
+    {
+      "name": "a symlink loop is skipped",
+      "entries": [
+        {
+          "path": "keep.webp",
+          "kind": "file"
+        },
+        {
+          "path": "loop.webp",
+          "kind": "symlink",
+          "target": "loop.webp"
+        }
+      ],
+      "walk": ".",
+      "expected": [
+        "keep.webp"
+      ]
+    },
+    {
+      "name": "a fifo is skipped",
+      "entries": [
+        {
+          "path": "keep.webp",
+          "kind": "file"
+        },
+        {
+          "path": "pipe.webp",
+          "kind": "fifo"
+        }
+      ],
+      "walk": ".",
+      "expected": [
+        "keep.webp"
+      ]
+    },
+    {
+      "name": "an empty file is kept",
+      "entries": [
+        {
+          "path": "empty.webp",
+          "kind": "file"
+        }
+      ],
+      "walk": ".",
+      "expected": [
+        "empty.webp"
+      ]
+    },
+    {
+      "name": "a dotfile is kept",
+      "entries": [
+        {
+          "path": ".hidden.webp",
+          "kind": "file"
+        },
+        {
+          "path": "b.webp",
+          "kind": "file"
+        }
+      ],
+      "walk": ".",
+      "expected": [
+        ".hidden.webp",
+        "b.webp"
+      ]
+    },
+    {
+      "name": "uppercase sorts before lowercase",
+      "entries": [
+        {
+          "path": "b.webp",
+          "kind": "file"
+        },
+        {
+          "path": "Z.webp",
+          "kind": "file"
+        },
+        {
+          "path": "_.webp",
+          "kind": "file"
+        },
+        {
+          "path": "-.webp",
+          "kind": "file"
+        }
+      ],
+      "walk": ".",
+      "expected": [
+        "-.webp",
+        "Z.webp",
+        "_.webp",
+        "b.webp"
+      ]
+    },
+    {
+      "name": "digits sort lexicographically, not numerically",
+      "entries": [
+        {
+          "path": "2.webp",
+          "kind": "file"
+        },
+        {
+          "path": "10.webp",
+          "kind": "file"
+        },
+        {
+          "path": "9.webp",
+          "kind": "file"
+        }
+      ],
+      "walk": ".",
+      "expected": [
+        "10.webp",
+        "2.webp",
+        "9.webp"
+      ]
+    },
+    {
+      "name": "an astral filename sorts by code point",
+      "entries": [
+        {
+          "path": "😀.webp",
+          "kind": "file"
+        },
+        {
+          "path": "�.webp",
+          "kind": "file"
+        },
+        {
+          "path": ".webp",
+          "kind": "file"
+        }
+      ],
+      "walk": ".",
+      "expected": [
+        ".webp",
+        "�.webp",
+        "😀.webp"
+      ]
+    },
+    {
+      "name": "the filenames the images stage actually writes",
+      "entries": [
+        {
+          "path": "featured-082326-a1b2.webp",
+          "kind": "file"
+        },
+        {
+          "path": "inline-082326-c3d4.webp",
+          "kind": "file"
+        },
+        {
+          "path": "inline-082326-e5f6.webp",
+          "kind": "file"
+        },
+        {
+          "path": "manifest.json",
+          "kind": "file"
+        }
+      ],
+      "walk": ".",
+      "expected": [
+        "featured-082326-a1b2.webp",
+        "inline-082326-c3d4.webp",
+        "inline-082326-e5f6.webp",
+        "manifest.json"
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "name": "a name longer than NAME_MAX raises rather than reporting absence",
+      "entries": [],
+      "walk": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+      "error": "OSError",
+      "expected": null
+    },
+    {
+      "name": "an embedded NUL is not an error, it is an absent directory",
+      "entries": [],
+      "walk": "a\u0000b",
+      "error": null,
+      "expected": []
+    },
+    {
+      "name": "a directory whose entries cannot be stat-ed raises",
+      "entries": [
+        {
+          "path": "post",
+          "kind": "dir"
+        },
+        {
+          "path": "post/a.webp",
+          "kind": "file"
+        },
+        {
+          "path": "post",
+          "kind": "chmod",
+          "mode": 292
+        }
+      ],
+      "walk": "post",
+      "error": "OSError",
+      "expected": null
+    }
+  ]
+}

@@ -1,0 +1,1411 @@
+{
+  "source": "def apply_frontmatter_mapping(\n    jena_frontmatter: dict[str, Any],\n    mapping: dict[str, Any],\n) -> dict[str, Any]:\n    \"\"\"Apply a frontmatter mapping to transform Jena AI output to the target schema.\"\"\"\n    result: dict[str, Any] = {}\n\n    for jena_field, target in mapping.items():\n        if isinstance(target, str):\n            if jena_field in jena_frontmatter:\n                result[target] = jena_frontmatter[jena_field]\n        elif isinstance(target, dict):\n            key = target.get(\"key\", jena_field)\n            transform = target.get(\"transform\")\n            default = target.get(\"default\")\n\n            value = jena_frontmatter.get(jena_field)\n\n            if value is None and default is not None:\n                result[key] = default\n                continue\n\n            if value is None:\n                continue\n\n            if transform == \"array\" and not isinstance(value, list):\n                value = [value]\n\n            result[key] = value\n\n    return result\n",
+  "cases": [
+    {
+      "name": "str target, field present",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          "title"
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "title"
+          },
+          "My Post"
+        ]
+      ]
+    },
+    {
+      "name": "str target, field absent",
+      "frontmatter": [],
+      "mapping": [
+        [
+          "title",
+          "title"
+        ]
+      ],
+      "result": []
+    },
+    {
+      "name": "str target, field present holding null",
+      "frontmatter": [
+        [
+          "title",
+          null
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          "title"
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "title"
+          },
+          null
+        ]
+      ]
+    },
+    {
+      "name": "str target, field holding an empty string",
+      "frontmatter": [
+        [
+          "title",
+          ""
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          "t"
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "t"
+          },
+          ""
+        ]
+      ]
+    },
+    {
+      "name": "str target, field holding false",
+      "frontmatter": [
+        [
+          "draft",
+          false
+        ]
+      ],
+      "mapping": [
+        [
+          "draft",
+          "draft"
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "draft"
+          },
+          false
+        ]
+      ]
+    },
+    {
+      "name": "str target, field holding zero",
+      "frontmatter": [
+        [
+          "weight",
+          0
+        ]
+      ],
+      "mapping": [
+        [
+          "weight",
+          "weight"
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "weight"
+          },
+          0
+        ]
+      ]
+    },
+    {
+      "name": "str target, field holding a list",
+      "frontmatter": [
+        [
+          "tags",
+          [
+            "a",
+            "b"
+          ]
+        ]
+      ],
+      "mapping": [
+        [
+          "tags",
+          "tags"
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "tags"
+          },
+          [
+            "a",
+            "b"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "str target, field holding an object",
+      "frontmatter": [
+        [
+          "author",
+          {
+            "name": "Cody"
+          }
+        ]
+      ],
+      "mapping": [
+        [
+          "author",
+          "author"
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "author"
+          },
+          {
+            "name": "Cody"
+          }
+        ]
+      ]
+    },
+    {
+      "name": "str target renames the field",
+      "frontmatter": [
+        [
+          "description",
+          "d"
+        ]
+      ],
+      "mapping": [
+        [
+          "description",
+          "excerpt"
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "excerpt"
+          },
+          "d"
+        ]
+      ]
+    },
+    {
+      "name": "empty string target",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          ""
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": ""
+          },
+          "My Post"
+        ]
+      ]
+    },
+    {
+      "name": "two fields collapse onto one target, the last wins",
+      "frontmatter": [
+        [
+          "title",
+          "first"
+        ],
+        [
+          "heading",
+          "second"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          "t"
+        ],
+        [
+          "heading",
+          "t"
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "t"
+          },
+          "second"
+        ]
+      ]
+    },
+    {
+      "name": "two fields collapse onto one target, the last is absent",
+      "frontmatter": [
+        [
+          "title",
+          "first"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          "t"
+        ],
+        [
+          "heading",
+          "t"
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "t"
+          },
+          "first"
+        ]
+      ]
+    },
+    {
+      "name": "mapping order is the result order",
+      "frontmatter": [
+        [
+          "b",
+          2
+        ],
+        [
+          "a",
+          1
+        ]
+      ],
+      "mapping": [
+        [
+          "b",
+          "b"
+        ],
+        [
+          "a",
+          "a"
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "b"
+          },
+          2
+        ],
+        [
+          {
+            "type": "str",
+            "value": "a"
+          },
+          1
+        ]
+      ]
+    },
+    {
+      "name": "__proto__ is an ordinary source field",
+      "frontmatter": [
+        [
+          "__proto__",
+          "polluted"
+        ]
+      ],
+      "mapping": [
+        [
+          "__proto__",
+          "safe"
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "safe"
+          },
+          "polluted"
+        ]
+      ]
+    },
+    {
+      "name": "__proto__ is an ordinary target key",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          "__proto__"
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "__proto__"
+          },
+          "My Post"
+        ]
+      ]
+    },
+    {
+      "name": "a target that is a string of digits",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ],
+        [
+          "description",
+          "d"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          "10"
+        ],
+        [
+          "description",
+          "2"
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "10"
+          },
+          "My Post"
+        ],
+        [
+          {
+            "type": "str",
+            "value": "2"
+          },
+          "d"
+        ]
+      ]
+    },
+    {
+      "name": "dict target with an explicit key",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          {
+            "key": "heading"
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "heading"
+          },
+          "My Post"
+        ]
+      ]
+    },
+    {
+      "name": "dict target with no key falls back to the source field",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          {
+            "transform": null
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "title"
+          },
+          "My Post"
+        ]
+      ]
+    },
+    {
+      "name": "dict target whose key is stored as null",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          {
+            "key": null
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "None",
+            "value": null
+          },
+          "My Post"
+        ]
+      ]
+    },
+    {
+      "name": "dict target whose key is a number",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          {
+            "key": 5
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "int",
+            "value": 5
+          },
+          "My Post"
+        ]
+      ]
+    },
+    {
+      "name": "dict target whose key is true, beside one whose key is 1",
+      "frontmatter": [
+        [
+          "a",
+          "first"
+        ],
+        [
+          "b",
+          "second"
+        ]
+      ],
+      "mapping": [
+        [
+          "a",
+          {
+            "key": 1
+          }
+        ],
+        [
+          "b",
+          {
+            "key": true
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "int",
+            "value": 1
+          },
+          "second"
+        ]
+      ]
+    },
+    {
+      "name": "dict target whose key is a list",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          {
+            "key": [
+              "a"
+            ]
+          }
+        ]
+      ],
+      "result": null,
+      "error": {
+        "type": "TypeError",
+        "message": "unhashable type: 'list'"
+      }
+    },
+    {
+      "name": "dict target whose key is an object",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          {
+            "key": {
+              "name": "heading"
+            }
+          }
+        ]
+      ],
+      "result": null,
+      "error": {
+        "type": "TypeError",
+        "message": "unhashable type: 'dict'"
+      }
+    },
+    {
+      "name": "dict target, source field absent, no default",
+      "frontmatter": [],
+      "mapping": [
+        [
+          "author",
+          {
+            "key": "author"
+          }
+        ]
+      ],
+      "result": []
+    },
+    {
+      "name": "dict target, source field present holding null, no default",
+      "frontmatter": [
+        [
+          "author",
+          null
+        ]
+      ],
+      "mapping": [
+        [
+          "author",
+          {
+            "key": "author"
+          }
+        ]
+      ],
+      "result": []
+    },
+    {
+      "name": "dict target, source field absent, default present",
+      "frontmatter": [],
+      "mapping": [
+        [
+          "author",
+          {
+            "key": "author",
+            "default": "Cody"
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "author"
+          },
+          "Cody"
+        ]
+      ]
+    },
+    {
+      "name": "dict target, source field present holding null, default present",
+      "frontmatter": [
+        [
+          "author",
+          null
+        ]
+      ],
+      "mapping": [
+        [
+          "author",
+          {
+            "key": "author",
+            "default": "Cody"
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "author"
+          },
+          "Cody"
+        ]
+      ]
+    },
+    {
+      "name": "dict target, source field present, default ignored",
+      "frontmatter": [
+        [
+          "author",
+          "Real"
+        ]
+      ],
+      "mapping": [
+        [
+          "author",
+          {
+            "key": "author",
+            "default": "Cody"
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "author"
+          },
+          "Real"
+        ]
+      ]
+    },
+    {
+      "name": "dict target, default stored as null",
+      "frontmatter": [],
+      "mapping": [
+        [
+          "author",
+          {
+            "key": "author",
+            "default": null
+          }
+        ]
+      ],
+      "result": []
+    },
+    {
+      "name": "dict target, default is false",
+      "frontmatter": [],
+      "mapping": [
+        [
+          "draft",
+          {
+            "key": "draft",
+            "default": false
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "draft"
+          },
+          false
+        ]
+      ]
+    },
+    {
+      "name": "dict target, default is zero",
+      "frontmatter": [],
+      "mapping": [
+        [
+          "weight",
+          {
+            "key": "w",
+            "default": 0
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "w"
+          },
+          0
+        ]
+      ]
+    },
+    {
+      "name": "dict target, default is an empty string",
+      "frontmatter": [],
+      "mapping": [
+        [
+          "author",
+          {
+            "key": "author",
+            "default": ""
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "author"
+          },
+          ""
+        ]
+      ]
+    },
+    {
+      "name": "dict target, default is an empty list",
+      "frontmatter": [],
+      "mapping": [
+        [
+          "tags",
+          {
+            "key": "tags",
+            "default": []
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "tags"
+          },
+          []
+        ]
+      ]
+    },
+    {
+      "name": "dict target, source field holds false so the default is not reached",
+      "frontmatter": [
+        [
+          "draft",
+          false
+        ]
+      ],
+      "mapping": [
+        [
+          "draft",
+          {
+            "key": "draft",
+            "default": true
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "draft"
+          },
+          false
+        ]
+      ]
+    },
+    {
+      "name": "dict target, source field holds an empty string",
+      "frontmatter": [
+        [
+          "author",
+          ""
+        ]
+      ],
+      "mapping": [
+        [
+          "author",
+          {
+            "key": "author",
+            "default": "Cody"
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "author"
+          },
+          ""
+        ]
+      ]
+    },
+    {
+      "name": "array transform wraps a scalar",
+      "frontmatter": [
+        [
+          "category",
+          "Tech"
+        ]
+      ],
+      "mapping": [
+        [
+          "category",
+          {
+            "key": "categories",
+            "transform": "array"
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "categories"
+          },
+          [
+            "Tech"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "array transform leaves a list alone",
+      "frontmatter": [
+        [
+          "category",
+          [
+            "Tech",
+            "AI"
+          ]
+        ]
+      ],
+      "mapping": [
+        [
+          "category",
+          {
+            "key": "categories",
+            "transform": "array"
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "categories"
+          },
+          [
+            "Tech",
+            "AI"
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "array transform wraps an empty string",
+      "frontmatter": [
+        [
+          "category",
+          ""
+        ]
+      ],
+      "mapping": [
+        [
+          "category",
+          {
+            "key": "categories",
+            "transform": "array"
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "categories"
+          },
+          [
+            ""
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "array transform wraps an object",
+      "frontmatter": [
+        [
+          "category",
+          {
+            "name": "Tech"
+          }
+        ]
+      ],
+      "mapping": [
+        [
+          "category",
+          {
+            "key": "categories",
+            "transform": "array"
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "categories"
+          },
+          [
+            {
+              "name": "Tech"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "array transform leaves an empty list alone",
+      "frontmatter": [
+        [
+          "category",
+          []
+        ]
+      ],
+      "mapping": [
+        [
+          "category",
+          {
+            "key": "categories",
+            "transform": "array"
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "categories"
+          },
+          []
+        ]
+      ]
+    },
+    {
+      "name": "array transform does not reach a default",
+      "frontmatter": [],
+      "mapping": [
+        [
+          "category",
+          {
+            "key": "c",
+            "transform": "array",
+            "default": "Tech"
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "c"
+          },
+          "Tech"
+        ]
+      ]
+    },
+    {
+      "name": "array transform is case sensitive",
+      "frontmatter": [
+        [
+          "category",
+          "Tech"
+        ]
+      ],
+      "mapping": [
+        [
+          "category",
+          {
+            "key": "c",
+            "transform": "Array"
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "c"
+          },
+          "Tech"
+        ]
+      ]
+    },
+    {
+      "name": "an unrecognised transform is a passthrough",
+      "frontmatter": [
+        [
+          "image",
+          "https://cdn.example.com/hero.webp"
+        ]
+      ],
+      "mapping": [
+        [
+          "image",
+          {
+            "key": "image",
+            "transform": "jena-cdn-url"
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "image"
+          },
+          "https://cdn.example.com/hero.webp"
+        ]
+      ]
+    },
+    {
+      "name": "a transform stored as null is a passthrough",
+      "frontmatter": [
+        [
+          "category",
+          "Tech"
+        ]
+      ],
+      "mapping": [
+        [
+          "category",
+          {
+            "key": "c",
+            "transform": null
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "c"
+          },
+          "Tech"
+        ]
+      ]
+    },
+    {
+      "name": "a transform stored as a list is a passthrough",
+      "frontmatter": [
+        [
+          "category",
+          "Tech"
+        ]
+      ],
+      "mapping": [
+        [
+          "category",
+          {
+            "key": "c",
+            "transform": [
+              "array"
+            ]
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "c"
+          },
+          "Tech"
+        ]
+      ]
+    },
+    {
+      "name": "unrecognised target fields are ignored",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          {
+            "key": "t",
+            "when": "always",
+            "": "x"
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "t"
+          },
+          "My Post"
+        ]
+      ]
+    },
+    {
+      "name": "target is null",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          null
+        ]
+      ],
+      "result": []
+    },
+    {
+      "name": "target is a list",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          [
+            "title"
+          ]
+        ]
+      ],
+      "result": []
+    },
+    {
+      "name": "target is a number",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          7
+        ]
+      ],
+      "result": []
+    },
+    {
+      "name": "target is true",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          true
+        ]
+      ],
+      "result": []
+    },
+    {
+      "name": "a skipped target does not stop the fields after it",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ],
+        [
+          "description",
+          "d"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          null
+        ],
+        [
+          "description",
+          "description"
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "description"
+          },
+          "d"
+        ]
+      ]
+    },
+    {
+      "name": "empty mapping",
+      "frontmatter": [
+        [
+          "title",
+          "My Post"
+        ]
+      ],
+      "mapping": [],
+      "result": []
+    },
+    {
+      "name": "empty frontmatter",
+      "frontmatter": [],
+      "mapping": [
+        [
+          "title",
+          "title"
+        ],
+        [
+          "description",
+          "description"
+        ]
+      ],
+      "result": []
+    },
+    {
+      "name": "both empty",
+      "frontmatter": [],
+      "mapping": [],
+      "result": []
+    },
+    {
+      "name": "a realistic astro mapping",
+      "frontmatter": [
+        [
+          "title",
+          "Ship Restrict"
+        ],
+        [
+          "description",
+          "A description"
+        ],
+        [
+          "category",
+          "Tech"
+        ],
+        [
+          "date",
+          "2026-08-23"
+        ]
+      ],
+      "mapping": [
+        [
+          "title",
+          "title"
+        ],
+        [
+          "description",
+          "excerpt"
+        ],
+        [
+          "category",
+          {
+            "key": "tags",
+            "transform": "array"
+          }
+        ],
+        [
+          "author",
+          {
+            "key": "author",
+            "default": "Jena AI"
+          }
+        ],
+        [
+          "date",
+          {
+            "key": "pubDate"
+          }
+        ]
+      ],
+      "result": [
+        [
+          {
+            "type": "str",
+            "value": "title"
+          },
+          "Ship Restrict"
+        ],
+        [
+          {
+            "type": "str",
+            "value": "excerpt"
+          },
+          "A description"
+        ],
+        [
+          {
+            "type": "str",
+            "value": "tags"
+          },
+          [
+            "Tech"
+          ]
+        ],
+        [
+          {
+            "type": "str",
+            "value": "author"
+          },
+          "Jena AI"
+        ],
+        [
+          {
+            "type": "str",
+            "value": "pubDate"
+          },
+          "2026-08-23"
+        ]
+      ]
+    }
+  ]
+}

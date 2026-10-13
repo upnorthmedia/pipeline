@@ -1,0 +1,483 @@
+{
+  "generated_by": "api/scripts/export_wp_html_inline_escape_codespan_parity.py",
+  "source": "api/src/services/wp_html.py::markdown_to_wp_html",
+  "mistune_version": "3.2.0",
+  "scope": "the inline escape and codespan rules, the inline scan loop and the codespan renderer method",
+  "cases": [
+    {
+      "name": "escaped asterisks around a word",
+      "markdown": "\\*not emphasis\\*\n",
+      "html": "<!-- wp:paragraph -->\n<p>*not emphasis*</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped double asterisks",
+      "markdown": "\\*\\*not strong\\*\\*\n",
+      "html": "<!-- wp:paragraph -->\n<p>**not strong**</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped underscores",
+      "markdown": "\\_not emphasis\\_\n",
+      "html": "<!-- wp:paragraph -->\n<p>_not emphasis_</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped brackets",
+      "markdown": "\\[not a link\\]\n",
+      "html": "<!-- wp:paragraph -->\n<p>[not a link]</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped bang and brackets",
+      "markdown": "\\!\\[not an image\\]\n",
+      "html": "<!-- wp:paragraph -->\n<p>![not an image]</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped backtick",
+      "markdown": "\\`not code\\`\n",
+      "html": "<!-- wp:paragraph -->\n<p>`not code`</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped backslash",
+      "markdown": "a \\\\ b\n",
+      "html": "<!-- wp:paragraph -->\n<p>a \\ b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped backslash then an asterisk",
+      "markdown": "a \\\\\\*b\n",
+      "html": "<!-- wp:paragraph -->\n<p>a \\*b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped hash",
+      "markdown": "\\# not a heading\n",
+      "html": "<!-- wp:paragraph -->\n<p># not a heading</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped angle brackets",
+      "markdown": "\\<not html\\>\n",
+      "html": "<!-- wp:paragraph -->\n<p><not html></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped ampersand",
+      "markdown": "Tom \\& Jerry\n",
+      "html": "<!-- wp:paragraph -->\n<p>Tom & Jerry</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped pipe",
+      "markdown": "a \\| b\n",
+      "html": "<!-- wp:paragraph -->\n<p>a | b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped tilde",
+      "markdown": "a \\~ b\n",
+      "html": "<!-- wp:paragraph -->\n<p>a ~ b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped dollar",
+      "markdown": "\\$5\n",
+      "html": "<!-- wp:paragraph -->\n<p>$5</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped parentheses",
+      "markdown": "\\(a\\)\n",
+      "html": "<!-- wp:paragraph -->\n<p>(a)</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped braces",
+      "markdown": "\\{a\\}\n",
+      "html": "<!-- wp:paragraph -->\n<p>{a}</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped quotes",
+      "markdown": "\\\"a\\' b\n",
+      "html": "<!-- wp:paragraph -->\n<p>\"a' b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped colon and semicolon",
+      "markdown": "a\\:b\\;c\n",
+      "html": "<!-- wp:paragraph -->\n<p>a:b;c</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped comma and period",
+      "markdown": "a\\,b\\.c\n",
+      "html": "<!-- wp:paragraph -->\n<p>a,b.c</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped plus equals",
+      "markdown": "a\\+b\\=c\n",
+      "html": "<!-- wp:paragraph -->\n<p>a+b=c</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped at and caret",
+      "markdown": "a\\@b\\^c\n",
+      "html": "<!-- wp:paragraph -->\n<p>a@b^c</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped question and slash",
+      "markdown": "a\\?b\\/c\n",
+      "html": "<!-- wp:paragraph -->\n<p>a?b/c</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "run of three escapes",
+      "markdown": "\\*\\_\\` end\n",
+      "html": "<!-- wp:paragraph -->\n<p>*_` end</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "run of escapes at the start of a paragraph",
+      "markdown": "\\*\\*a\n",
+      "html": "<!-- wp:paragraph -->\n<p>**a</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escape at the very end of a paragraph",
+      "markdown": "end \\*\n",
+      "html": "<!-- wp:paragraph -->\n<p>end *</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "backslash before a letter is not an escape",
+      "markdown": "a \\x b\n",
+      "html": "<!-- wp:paragraph -->\n<p>a \\x b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "backslash before a digit is not an escape",
+      "markdown": "a \\1 b\n",
+      "html": "<!-- wp:paragraph -->\n<p>a \\1 b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "backslash before a space is not an escape",
+      "markdown": "a \\ b\n",
+      "html": "<!-- wp:paragraph -->\n<p>a \\ b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "lone trailing backslash on the only line",
+      "markdown": "a b \\\n",
+      "html": "<!-- wp:paragraph -->\n<p>a b \\</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "backslash at end of line is a hard break",
+      "markdown": "a\\\nb\n",
+      "html": "<!-- wp:paragraph -->\n<p>a<br />\nb</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escaped backslash at end of line is a soft break",
+      "markdown": "a\\\\\nb\n",
+      "html": "<!-- wp:paragraph -->\n<p>a\\\nb</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "two trailing spaces are a hard break",
+      "markdown": "a  \nb\n",
+      "html": "<!-- wp:paragraph -->\n<p>a<br />\nb</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escape inside a heading",
+      "markdown": "# A \\* B\n",
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>A * B</h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "escape inside a list item",
+      "markdown": "- a \\* b\n",
+      "html": "<!-- wp:list -->\n<ul><li>a * b</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "escape inside a block quote",
+      "markdown": "> a \\* b\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>a * b</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "escape inside a setext heading",
+      "markdown": "A \\* B\n===\n",
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>A * B</h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "escape does not survive into a fenced code block",
+      "markdown": "```\na \\* b\n```\n",
+      "html": "<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>a \\* b\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "escape does not survive into an indented code block",
+      "markdown": "Para.\n\n    a \\* b\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>a \\* b</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "simple codespan",
+      "markdown": "`code`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>code</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan with surrounding text",
+      "markdown": "a `code` b\n",
+      "html": "<!-- wp:paragraph -->\n<p>a <code>code</code> b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan at the start of a paragraph",
+      "markdown": "`code` after\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>code</code> after</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan at the end of a paragraph",
+      "markdown": "before `code`\n",
+      "html": "<!-- wp:paragraph -->\n<p>before <code>code</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "two codespans on one line",
+      "markdown": "`a` and `b`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a</code> and <code>b</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "double backtick codespan",
+      "markdown": "``code``\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>code</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "triple backtick codespan",
+      "markdown": "```code```\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>code</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "double backticks holding a single backtick",
+      "markdown": "`` a ` b ``\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a ` b</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "single backtick cannot close a double backtick run",
+      "markdown": "``a`b``\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a`b</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "triple backticks do not close a double backtick run",
+      "markdown": "``a```\n",
+      "html": "<!-- wp:paragraph -->\n<p>``a```</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "unclosed codespan is literal text",
+      "markdown": "`code\n",
+      "html": "<!-- wp:paragraph -->\n<p>`code</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "unclosed double backtick run is literal text",
+      "markdown": "``code\n",
+      "html": "<!-- wp:paragraph -->\n<p>``code</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "empty double backtick run is literal text",
+      "markdown": "``\n",
+      "html": "<!-- wp:paragraph -->\n<p>``</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "one space is taken off each end",
+      "markdown": "` a `\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "only a leading space is kept",
+      "markdown": "` a`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code> a</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "only a trailing space is kept",
+      "markdown": "`a `\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a </code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "two spaces each side lose only one",
+      "markdown": "`  a  `\n",
+      "html": "<!-- wp:paragraph -->\n<p><code> a </code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "all whitespace code keeps its spaces",
+      "markdown": "`  `\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>  </code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "single space code keeps its space",
+      "markdown": "` `\n",
+      "html": "<!-- wp:paragraph -->\n<p><code> </code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan spanning two lines folds the newline",
+      "markdown": "`a\nb`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a b</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan spanning two lines with indentation",
+      "markdown": "`a\n  b`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a   b</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan holding a tab",
+      "markdown": "`a\tb`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a\tb</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan holding an asterisk",
+      "markdown": "`a*b`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a*b</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan holding an underscore",
+      "markdown": "`a_b`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a_b</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan holding a bracket",
+      "markdown": "`[a]`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>[a]</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan holding a bang bracket",
+      "markdown": "`![a]`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>![a]</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan holding an angle bracket tag",
+      "markdown": "`<div>`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code><div></code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan holding an autolink",
+      "markdown": "`<https://example.com>`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code><https://example.com></code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan holding an email",
+      "markdown": "`<a@example.com>`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code><a@example.com></code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan holding an ampersand is not escaped",
+      "markdown": "`a & b`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a & b</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan holding an html entity is not decoded",
+      "markdown": "`a &amp; b`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a &amp; b</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan holding a backslash escape stays literal",
+      "markdown": "`a \\* b`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a \\* b</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan holding a double quote",
+      "markdown": "`a \"b\" c`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a \"b\" c</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan holding a unicode character",
+      "markdown": "`caf\u00e9`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>caf\u00e9</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan inside a heading",
+      "markdown": "# A `b` C\n",
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>A <code>b</code> C</h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "codespan inside a list item",
+      "markdown": "- a `b` c\n",
+      "html": "<!-- wp:list -->\n<ul><li>a <code>b</code> c</li>\n</ul>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "codespan inside an ordered list item",
+      "markdown": "1. a `b` c\n",
+      "html": "<!-- wp:list {\"ordered\":true} -->\n<ol><li>a <code>b</code> c</li>\n</ol>\n<!-- /wp:list -->\n\n"
+    },
+    {
+      "name": "codespan inside a block quote",
+      "markdown": "> a `b` c\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>a <code>b</code> c</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "codespan inside a setext heading",
+      "markdown": "A `b` C\n===\n",
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>A <code>b</code> C</h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "codespan does not survive into a fenced code block",
+      "markdown": "```\na `b` c\n```\n",
+      "html": "<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>a `b` c\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "codespan starting before an escape wins",
+      "markdown": "`a\\*b`\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a\\*b</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escape starting before a codespan wins",
+      "markdown": "\\`a`\n",
+      "html": "<!-- wp:paragraph -->\n<p>`a`</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escape and codespan side by side",
+      "markdown": "\\* `a`\n",
+      "html": "<!-- wp:paragraph -->\n<p>* <code>a</code></p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan then an escape",
+      "markdown": "`a` \\*\n",
+      "html": "<!-- wp:paragraph -->\n<p><code>a</code> *</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "backtick fence with a backtick in its info string",
+      "markdown": "```ru`by\ncode\n```\n",
+      "html": "<!-- wp:paragraph -->\n<p>```ru`by\ncode</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:code -->\n<pre class=\"wp-block-code\"><code></code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "backtick fence with a backtick info string and no body",
+      "markdown": "```a`b\n",
+      "html": "<!-- wp:paragraph -->\n<p>```a`b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "tilde fence with a backtick in its info string",
+      "markdown": "~~~ru`by\ncode\n~~~\n",
+      "html": "<!-- wp:code {\"language\":\"ru`by\"} -->\n<pre class=\"wp-block-code\"><code>code\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "codespan with crlf line endings",
+      "markdown": "a `b` c\r\n",
+      "html": "<!-- wp:paragraph -->\n<p>a <code>b</code> c</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escape with crlf line endings",
+      "markdown": "a \\* b\r\n",
+      "html": "<!-- wp:paragraph -->\n<p>a * b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "escape after frontmatter is stripped",
+      "markdown": "---\ntitle: x\n---\na \\* b\n",
+      "html": "<!-- wp:paragraph -->\n<p>a * b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "codespan after frontmatter is stripped",
+      "markdown": "---\ntitle: x\n---\na `b` c\n",
+      "html": "<!-- wp:paragraph -->\n<p>a <code>b</code> c</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "no trailing newline",
+      "markdown": "a `b` c",
+      "html": "<!-- wp:paragraph -->\n<p>a <code>b</code> c</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "paragraph ending in a non breaking space",
+      "markdown": "a `b`\u00a0\n\nsecond\n",
+      "html": "<!-- wp:paragraph -->\n<p>a <code>b</code>\u00a0</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>second</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "paragraph ending in an em space",
+      "markdown": "a `b`\u2003\n\nsecond\n",
+      "html": "<!-- wp:paragraph -->\n<p>a <code>b</code>\u2003</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>second</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "paragraph starting with an em space",
+      "markdown": "first\n\n\u2003a \\* b\n",
+      "html": "<!-- wp:paragraph -->\n<p>first</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>\u2003a * b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "paragraph ending in a vertical tab",
+      "markdown": "a \\* b\u000b\n\nsecond\n",
+      "html": "<!-- wp:paragraph -->\n<p>a * b\u000b</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>second</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "paragraph ending in a zero width no break space",
+      "markdown": "a `b`\ufeff\n",
+      "html": "<!-- wp:paragraph -->\n<p>a <code>b</code>\ufeff</p>\n<!-- /wp:paragraph -->\n\n"
+    }
+  ]
+}

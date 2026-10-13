@@ -1,0 +1,277 @@
+/**
+ * The `research` stage as a Mastra step, ported from `research_node` in
+ * `api/src/pipeline/stages/research.py`.
+ *
+ * The step owns everything around the provider call: reading the run's state
+ * from the posts table, assembling the prompt from `rules/blog-research.md`,
+ * the meta-response retry loop, and committing the output to
+ * `posts.research_content` before it returns. The agent (`agents/research.ts`)
+ * owns only the model, the system message and the credential.
+ *
+ * The retry loop is the reason this stage is not a bare `createStep(agent)`.
+ * Perplexity is a search assistant by default and answers a research brief with
+ * a description of itself often enough that Python grew a validator and two
+ * reinforced retries around it; dropping that would quietly regress research
+ * quality on exactly the runs that already fail.
+ */
+import { createStep } from "@mastra/core/workflows/evented"
+
+import { agentReportedCostUsd } from "../perplexity/agent-api"
+import { loadPipelineState, saveStageOutput } from "../post-state"
+import { buildStagePrompt, loadRules } from "../prompts"
+import { STATUS_COMPLETE } from "../state"
+import {
+  announceStageComplete,
+  announceStageStart,
+  formatSeconds,
+  gateResumeSchema,
+  gateSuspendSchema,
+  markRerunComplete,
+  pauseGate,
+  publishStageLog,
+  recordStageRetry,
+  reviewGate,
+  shouldRunStage,
+  skippedStageOutput,
+  stageAgentOptions,
+  stageStepInputSchema,
+  stageStepOutputSchema,
+} from "./stage-io"
+
+/** Python's `MAX_RESEARCH_ATTEMPTS`. */
+export const MAX_RESEARCH_ATTEMPTS = 3
+
+/**
+ * Phrases that mark a meta-response rather than research, from Python's
+ * `_REFUSAL_PATTERNS`. Kept as the same alternation under the same
+ * case-insensitive flag so both stacks reject the same responses; the patterns
+ * use no Python-only regex syntax, so they port across verbatim.
+ */
+export const REFUSAL_PATTERNS = [
+  String.raw`I'm\s+\*?\*?Perplexity\*?\*?`,
+  String.raw`I(?:'m| am) a search assistant`,
+  String.raw`I need to clarify my role`,
+  String.raw`I(?:'m| am) not a blog research agent`,
+  String.raw`I can(?:not|'t) (?:create|execute|generate|access)`,
+  String.raw`What I \*?can\*? do instead`,
+  String.raw`To move forward`,
+  String.raw`Please provide (?:either|new search results)`,
+  String.raw`Which would be most helpful\?`,
+]
+
+const REFUSAL_RE = new RegExp(REFUSAL_PATTERNS.join("|"), "i")
+
+/**
+ * The line Python wrote when every attempt came back a meta-response, from the
+ * `else` clause of the retry loop.
+ *
+ * The em dash is an escape rather than the character because this port's
+ * writing rule forbids the character in source. The string it builds is
+ * byte-identical to Python's, which is the part that matters: the message goes
+ * straight onto the wire and into `debug-log-panel.tsx`.
+ */
+export const DEGRADED_RESEARCH_MESSAGE =
+  "WARNING: Research quality may be degraded \u2014 Perplexity returned unexpected responses."
+
+/** Sections required by the research handoff contract. */
+export const EXPECTED_SECTIONS = [
+  "research summary",
+  "claim ledger",
+  "topic coverage",
+  "risks and open questions",
+  "recommended article direction",
+  "coverage verdict",
+]
+
+export type ResearchCoverageStatus = "ready" | "blocked" | "unknown"
+
+export function researchCoverageStatus(content: string): ResearchCoverageStatus {
+  const heading = /^#{1,6}\s+coverage verdict[ \t]*$/im.exec(content)
+  if (!heading) return "unknown"
+  const tail = content.slice(heading.index + heading[0].length)
+  const nextHeading = /^#{1,6}\s+.+$/m.exec(tail)
+  const section = nextHeading ? tail.slice(0, nextHeading.index) : tail
+  const status = /^\s*(?:\*\*)?STATUS(?:\*\*)?\s*:\s*(ready|blocked)\s*$/im.exec(section)
+  return status ? (status[1].toLowerCase() as ResearchCoverageStatus) : "unknown"
+}
+
+/**
+ * True when the response looks like research rather than a meta-response:
+ * no refusal phrasing, and at least two of the expected sections mentioned.
+ */
+export function isValidResearch(content: string): boolean {
+  if (REFUSAL_RE.test(content)) return false
+  const headings = Array.from(content.matchAll(/^#{1,6}\s+(.+?)[ \t]*$/gm)).map((match) =>
+    match[1].trim().toLowerCase(),
+  )
+  return (
+    EXPECTED_SECTIONS.every((section) => headings.includes(section)) &&
+    researchCoverageStatus(content) !== "unknown"
+  )
+}
+
+/** Python's `_reinforced_prompt`: the retry preamble, byte-identical. */
+export function reinforcedPrompt(prompt: string): string {
+  return (
+    "IMPORTANT: You must respond with ONLY the research document content. " +
+    "Do NOT describe yourself, your limitations, or ask questions. " +
+    "Do NOT say you are Perplexity or a search assistant. " +
+    "Simply produce the research document as specified.\n\n" + prompt
+  )
+}
+
+export const researchStep = createStep({
+  id: "research",
+  inputSchema: stageStepInputSchema,
+  outputSchema: stageStepOutputSchema,
+  resumeSchema: gateResumeSchema,
+  suspendSchema: gateSuspendSchema,
+  execute: async ({ inputData, mastra, resumeData, suspend, bail, retryCount, abortSignal }) => {
+    try {
+      const { postId } = inputData
+      const state = await loadPipelineState(postId)
+      // Before the skip check, because a paused run stops here whatever this
+      // stage would have done: `pauseGate()` ends the run rather than the
+      // stage, so nothing after it runs either.
+      const paused = await pauseGate(mastra, "research", inputData, state)
+      if (paused) return bail(paused)
+      if (!shouldRunStage("research", inputData, state.stageStatus)) {
+        return skippedStageOutput(inputData, "research")
+      }
+
+      // The gate sits immediately after the skip check and before anything the
+      // stage spends, which is where Python put it: a paused stage bills nothing.
+      const gate = await reviewGate(
+        mastra,
+        "research",
+        inputData,
+        state.stageSettings,
+        resumeData,
+        retryCount,
+      )
+      if (gate) return suspend(gate)
+      await announceStageStart(mastra, "research", inputData)
+      const rules = loadRules("research")
+      // Python's five progress lines, in the five positions `research_node`
+      // wrote them: after the rules are read, before each provider call, after
+      // each response that fails the validator, once the loop gives up, and
+      // once the stage has an answer to report.
+      await publishStageLog(mastra, postId, "research", "Rules loaded, building prompt...")
+      const prompt = buildStagePrompt("research", rules, state)
+      const agent = mastra.getAgent("research")
+      const agentOptions = await stageAgentOptions(postId)
+
+      let text = ""
+      let model = ""
+      let tokensIn = 0
+      let tokensOut = 0
+      let durationMs = 0
+      // Undefined until a response carries a price, so a provider that reports
+      // none leaves the stage on the per-token estimate rather than on a
+      // confident $0.00. Summed once it does, for the same reason the tokens
+      // are: a retried stage paid for every attempt.
+      let reportedCostUsd: number | undefined
+
+      for (let attempt = 1; attempt <= MAX_RESEARCH_ATTEMPTS; attempt += 1) {
+        // Python's ternary: the bare form on the first call, the counted form
+        // on every retry. Python interpolated the model id here, which went
+        // stale the moment the stage changed models (P2.71b), and named an id
+        // no screen offers to change. The other four stages write "Calling
+        // Claude for <what it is doing>...", so this now reads the same way;
+        // the model that actually ran is on the stage's own log entry.
+        await publishStageLog(
+          mastra,
+          postId,
+          "research",
+          attempt > 1
+            ? `Calling Perplexity for research (attempt ${attempt}/${MAX_RESEARCH_ATTEMPTS})...`
+            : "Calling Perplexity for research...",
+        )
+
+        const startedAt = Date.now()
+        const result = await agent.generate(
+          attempt === 1 ? prompt : reinforcedPrompt(prompt),
+          agentOptions,
+        )
+        durationMs += Date.now() - startedAt
+
+        text = result.text
+        model = result.response?.modelId ?? model
+        // Python sums usage across every attempt, so a run that retried is billed
+        // and reported for all of its calls rather than only the surviving one.
+        tokensIn += result.usage?.inputTokens ?? 0
+        tokensOut += result.usage?.outputTokens ?? 0
+        // The Agent API bills web_search per invocation on top of the tokens,
+        // so its own total is the only number that is the bill (P2.71b-ii).
+        const attemptCost = agentReportedCostUsd(result.providerMetadata)
+        if (attemptCost !== undefined) reportedCostUsd = (reportedCostUsd ?? 0) + attemptCost
+
+        if (isValidResearch(text)) break
+
+        mastra.getLogger()?.warn("research attempt returned a meta-response, retrying", {
+          postId,
+          attempt,
+          maxAttempts: MAX_RESEARCH_ATTEMPTS,
+        })
+        // Python wrote this from inside the loop body, so the final attempt
+        // gets one too and it still reads "retrying..." when nothing follows.
+        // Reproduced rather than corrected: the line is what a reader of the
+        // run log has always seen, and the `else` line below is what tells
+        // them the stage actually gave up.
+        await publishStageLog(
+          mastra,
+          postId,
+          "research",
+          `Response validation failed (attempt ${attempt}), retrying...`,
+          { level: "warning" },
+        )
+      }
+
+      if (!isValidResearch(text)) {
+        // Python keeps the last response rather than failing the run: degraded
+        // research still lets a human read the post detail page and rerun the
+        // stage, where a hard failure would leave the column empty.
+        mastra.getLogger()?.error("all research attempts returned meta-responses, using the last", {
+          postId,
+        })
+        await publishStageLog(mastra, postId, "research", DEGRADED_RESEARCH_MESSAGE, {
+          level: "error",
+        })
+      }
+
+      // Python summed every attempt's duration and reported the total, so a
+      // stage that retried twice reports what it actually spent.
+      const durationS = durationMs / 1000
+      await publishStageLog(
+        mastra,
+        postId,
+        "research",
+        `Received ${tokensOut} tokens in ${formatSeconds(durationS)}s`,
+      )
+
+      await saveStageOutput(postId, "research", text, { research: STATUS_COMPLETE })
+      await markRerunComplete(inputData)
+
+      const output = {
+        postId,
+        stages: inputData.stages,
+        stage: "research" as const,
+        skipped: false,
+        model,
+        tokensIn,
+        tokensOut,
+        durationS,
+        ...(reportedCostUsd === undefined ? {} : { reportedCostUsd }),
+      }
+      await announceStageComplete(mastra, output)
+      return output
+    } catch (error) {
+      // Python's `warning` / `retry` entry, from the `except` block that
+      // wrapped the whole stage loop. Only this side of the throw can see the
+      // attempt number, so the record is written here and the error is rethrown
+      // unchanged for the engine to retry or fail on.
+      await recordStageRetry("research", inputData.postId, retryCount, error, abortSignal)
+      throw error
+    }
+  },
+})

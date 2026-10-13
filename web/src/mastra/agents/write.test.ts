@@ -1,0 +1,238 @@
+// @vitest-environment node
+/**
+ * Item 3.3, provider half: the `write` agent is registered on the Mastra
+ * instance and reaches Anthropic with the request the Python stage sent.
+ *
+ * Same shape as `outline`'s provider test (see `agents/outline.test.ts` for why
+ * the outbound request is captured through `globalThis.fetch` rather than a
+ * `url` override). The one thing worth proving separately here is the token
+ * budget: `write` is the stage whose `max_tokens` argument, 16000, sits *above*
+ * the extended-thinking floor, so it exercises the other branch of
+ * `claudeEffectiveMaxTokens` than `outline` does.
+ *
+ * The live smoke test writes the real key into the `settings` table, makes one
+ * minimal call and removes the row, skipping when `ANTHROPIC_API_KEY` is absent
+ * so the default `pnpm test` needs no credentials.
+ *
+ * Requires `docker compose up -d db redis`.
+ */
+import fs from "node:fs"
+import path from "node:path"
+
+import { Agent } from "@mastra/core/agent"
+import { eq } from "drizzle-orm"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
+
+import { closeDb, getDb, settings } from "../../db"
+import { encryptWithKey } from "../../lib/crypto"
+import { API_KEYS_SETTING_KEY } from "../api-keys"
+import { STAGE_MODEL_DEFAULTS } from "../stage-models"
+import { mastra, pubsub } from "../index"
+import {
+  CLAUDE_MIN_TEXT_TOKENS,
+  CLAUDE_DEFAULT_EFFORT,
+  CLAUDE_PROVIDER,
+  CLAUDE_THINKING_BUDGET_TOKENS,
+  claudeEffectiveMaxTokens,
+} from "./claude"
+import { WRITE_MAX_TOKENS, WRITE_SYSTEM_MESSAGE, writeAgent } from "./write"
+
+import { borrowApiKeysRow, returnApiKeysRow } from "@/test/api-keys-row"
+import {
+  borrowGlobalStageModelsRow,
+  returnGlobalStageModelsRow,
+} from "@/test/stage-models-row"
+import { swapFetch } from "@/test/swapped-fetch"
+
+const GOLDEN_DIR = path.resolve(process.cwd(), "..", "docs", "mastra-port", "golden")
+const GOLDEN_SLUGS = ["how-to-choose-a-crm-for-a-small-team", "best-time-tracking-tools-for-agencies"]
+
+type WriteFixture = {
+  rendered_prompts: string[]
+  provider_calls: {
+    provider: string
+    request: {
+      model: string
+      max_tokens: number
+      thinking: { type: string; budget_tokens: number }
+      system: string
+      messages: { role: string; content: string }[]
+    }
+  }[]
+}
+
+function loadFixture(slug: string): WriteFixture {
+  return JSON.parse(fs.readFileSync(path.join(GOLDEN_DIR, slug, "write.json"), "utf8"))
+}
+
+/** A throwaway Fernet key, so no real `WP_ENCRYPTION_KEY` is needed to run this. */
+const TEST_KEY = "wDnmGSXAn3lPzz0GDW0jgcpn7XMDrnxLoO4XQb4Zwss"
+
+const LIVE_KEY = process.env.ANTHROPIC_API_KEY
+
+async function writeAnthropicKey(plaintext: string) {
+  const value = { [CLAUDE_PROVIDER]: encryptWithKey(plaintext, TEST_KEY) }
+  await getDb()
+    .insert(settings)
+    .values({ key: API_KEYS_SETTING_KEY, value })
+    .onConflictDoUpdate({ target: [settings.key, settings.userId], set: { value } })
+}
+
+async function clearKeys() {
+  await getDb().delete(settings).where(eq(settings.key, API_KEYS_SETTING_KEY))
+}
+
+beforeAll(async () => {
+  await borrowApiKeysRow({ encryptionKey: TEST_KEY })
+  // The model this file asserts on is the default, and it resolves through the
+  // global `stage_models` row, so the row is both borrowed (or another file
+  // answers for this one) and cleared (or a model a human chose does). Taken
+  // second, in the order `row-lock.ts` documents.
+  await borrowGlobalStageModelsRow({ clear: true })
+}, 30_000)
+
+afterAll(async () => {
+  await returnGlobalStageModelsRow()
+  await returnApiKeysRow()
+  await pubsub.close()
+  await closeDb()
+})
+
+describe("write agent registration", () => {
+  it("is registered on the Mastra instance under 'write'", () => {
+    expect(writeAgent).toBeInstanceOf(Agent)
+    expect(mastra.getAgent("write")).toBe(writeAgent)
+    expect(Object.keys(mastra.listAgents())).toContain("write")
+  })
+
+  it("sends the system message the Python stage sent, per the golden fixtures", async () => {
+    expect(await writeAgent.getInstructions()).toBe(WRITE_SYSTEM_MESSAGE)
+
+    for (const slug of GOLDEN_SLUGS) {
+      expect(loadFixture(slug).provider_calls[0].request.system).toBe(WRITE_SYSTEM_MESSAGE)
+    }
+  })
+
+  it("carries the model item 6.1 verified, on the provider the fixtures used", () => {
+    expect(STAGE_MODEL_DEFAULTS.write.model).toBe("claude-opus-5")
+    for (const slug of GOLDEN_SLUGS) {
+      const call = loadFixture(slug).provider_calls[0]
+      expect(call.provider).toBe(CLAUDE_PROVIDER)
+      // The provider is still the fixtures'; the model deliberately is not.
+      // Item 6.1 moved every Claude stage off `claude-opus-4-6`, so the
+      // fixtures pin the prompt and the token budget from here on, not the
+      // model id.
+      expect(call.request.model).not.toBe(STAGE_MODEL_DEFAULTS.write.model)
+    }
+  })
+})
+
+/**
+ * One captured outbound request, plus a canned Anthropic response shaped like
+ * the one the fixtures recorded (a thinking block followed by a text block, so
+ * the reasoning-stripping path runs rather than being skipped).
+ */
+function captureAnthropicRequests() {
+  const captured: { url: string; body: Record<string, unknown> }[] = []
+  swapFetch(async (input, init) => {
+    captured.push({
+      url: typeof input === "string" ? input : String(input),
+      body: JSON.parse(String(init?.body)),
+    })
+    return new Response(
+      JSON.stringify({
+        id: "msg_capture",
+        type: "message",
+        role: "assistant",
+        model: "claude-opus-5",
+        content: [
+          { type: "thinking", thinking: "planning the draft", signature: "sig" },
+          { type: "text", text: "# The Draft" },
+        ],
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: { input_tokens: 5542, output_tokens: 3423 },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )
+  })
+  return { captured }
+}
+
+describe("write agent provider request", () => {
+  it("puts item 6.1's model and thinking config on the wire, at Python's max_tokens", async () => {
+    await writeAnthropicKey("sk-ant-not-a-real-key")
+    const fixture = loadFixture(GOLDEN_SLUGS[0])
+    const recorded = fixture.provider_calls[0].request
+
+    const capture = captureAnthropicRequests()
+    const result = await writeAgent.generate(fixture.rendered_prompts[0])
+
+    expect(capture.captured).toHaveLength(1)
+    const sent = capture.captured[0]
+    expect(sent.url).toBe("https://api.anthropic.com/v1/messages")
+    // The model and the thinking parameter both moved in item 6.1: the fixed
+    // budget Python sent is rejected by `claude-opus-5`, and adaptive thinking
+    // plus `output_config.effort` replaces it.
+    expect(sent.body.model).toBe("claude-opus-5")
+    expect(sent.body.model).not.toBe(recorded.model)
+    expect(sent.body.thinking).toEqual({ type: "adaptive" })
+    expect(sent.body.output_config).toEqual({ effort: CLAUDE_DEFAULT_EFFORT })
+
+    // `max_tokens` did not move. Under adaptive thinking the provider stops
+    // adding a budget term to it, so passing Python's `effective_max` as
+    // `maxOutputTokens` puts the fixture's value back on the wire unchanged.
+    expect(sent.body.max_tokens).toBe(recorded.max_tokens)
+
+    // Python sends `system` as a bare string and the AI SDK sends the same text
+    // as a one-element block list, as recorded under item 3.2.
+    expect(sent.body.system).toEqual([{ type: "text", text: recorded.system }])
+    expect(sent.body.messages).toEqual([
+      { role: "user", content: [{ type: "text", text: recorded.messages[0].content }] },
+    ])
+
+    // The thinking block is stripped from the text, as Python's block filter did.
+    expect(result.text).toBe("# The Draft")
+  })
+
+  it("passes 16000 through untouched because it clears the thinking floor", () => {
+    // The complement of `outline`'s case: 8000 is raised to the floor, 16000 is
+    // not. If `claudeEffectiveMaxTokens` ever clamped downward instead, or the
+    // floor moved above 16000, this and the wire test both fail.
+    expect(WRITE_MAX_TOKENS).toBe(16_000)
+    expect(WRITE_MAX_TOKENS).toBeGreaterThan(CLAUDE_THINKING_BUDGET_TOKENS + CLAUDE_MIN_TEXT_TOKENS)
+    expect(claudeEffectiveMaxTokens(WRITE_MAX_TOKENS)).toBe(WRITE_MAX_TOKENS)
+    expect(claudeEffectiveMaxTokens(WRITE_MAX_TOKENS)).toBe(
+      loadFixture(GOLDEN_SLUGS[0]).provider_calls[0].request.max_tokens,
+    )
+  })
+})
+
+describe("write agent credential resolution", () => {
+  it("resolves its model from the encrypted key in the settings table", async () => {
+    await writeAnthropicKey("sk-ant-not-a-real-key")
+
+    const model = await writeAgent.getModel()
+    expect(model.modelId).toBe("claude-opus-5")
+    expect(model.provider).toContain("anthropic")
+  })
+
+  it("fails at model resolution with an actionable message when no key is stored", async () => {
+    await clearKeys()
+
+    await expect(writeAgent.getModel()).rejects.toThrow(/anthropic API key not configured/)
+  })
+})
+
+describe.skipIf(!LIVE_KEY)("write agent live smoke test", () => {
+  it("reaches Anthropic and reports back the configured model id", async () => {
+    await writeAnthropicKey(LIVE_KEY!)
+
+    const result = await writeAgent.generate("Reply with the single word OK.")
+    const response = await result.response
+
+    expect(response?.modelId).toBe("claude-opus-5")
+    expect(result.text.trim().length).toBeGreaterThan(0)
+    expect(result.usage?.outputTokens).toBeGreaterThan(0)
+  }, 300_000)
+})

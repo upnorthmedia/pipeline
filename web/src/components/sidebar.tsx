@@ -19,7 +19,9 @@ const NAV_ITEMS = [
   { href: "/", label: "Posts", icon: FileText },
   { href: "/profiles", label: "Profiles", icon: Globe },
   { href: "/monitor", label: "Observability", icon: BarChart3 },
-  { href: "/settings", label: "Settings", icon: Settings },
+  // "Account", not "Settings": every per-site setting lives under Profiles, so
+  // a nav item called Settings reads as the place all of them are.
+  { href: "/settings", label: "Account", icon: Settings },
 ];
 
 const NavLink = ({

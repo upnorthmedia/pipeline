@@ -1,0 +1,460 @@
+I001 [*] Import block is un-sorted or un-formatted
+  --> alembic/versions/003_add_ready_content.py:7:1
+   |
+ 5 |   """
+ 6 |
+ 7 | / from alembic import op
+ 8 | | import sqlalchemy as sa
+   | |_______________________^
+ 9 |
+10 |   revision = "003"
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> alembic/versions/011_add_nextjs_publishing_fields.py:7:1
+   |
+ 5 |   """
+ 6 |
+ 7 | / from __future__ import annotations
+ 8 | |
+ 9 | | from alembic import op
+10 | | import sqlalchemy as sa
+   | |_______________________^
+11 |
+12 |   revision = "011"
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/main.py:1:1
+   |
+ 1 | / from contextlib import asynccontextmanager
+ 2 | | from pathlib import Path
+ 3 | |
+ 4 | | from arq.connections import RedisSettings, create_pool
+ 5 | | from fastapi import FastAPI
+ 6 | | from fastapi.middleware.cors import CORSMiddleware
+ 7 | | from fastapi.staticfiles import StaticFiles
+ 8 | |
+ 9 | | from src.api.analytics import router as analytics_router
+10 | | from src.api.events import router as events_router
+11 | | from src.api.links import router as links_router
+12 | | from src.api.posts import router as posts_router
+13 | | from src.api.profiles import router as profiles_router
+14 | | from src.api.queue import router as queue_router
+15 | | from src.api.rules import router as rules_router
+16 | | from src.api.settings import router as settings_router
+17 | | from src.api.nextjs import router as nextjs_router
+18 | | from src.api.wordpress import router as wordpress_router
+19 | | from src.config import settings
+20 | | from src.database import engine
+   | |_______________________________^
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/models/profile.py:1:1
+   |
+ 1 | / from __future__ import annotations
+ 2 | |
+ 3 | | from datetime import datetime
+ 4 | | from typing import TYPE_CHECKING
+ 5 | |
+ 6 | | import sqlalchemy as sa
+ 7 | | from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text
+ 8 | | from sqlalchemy.dialects.postgresql import JSONB
+ 9 | | from sqlalchemy.orm import Mapped, mapped_column, relationship
+10 | |
+11 | | from src.models.base import Base, TimestampMixin, UUIDMixin
+   | |___________________________________________________________^
+12 |
+13 |   if TYPE_CHECKING:
+   |
+help: Organize imports
+
+E501 Line too long (104 > 88)
+  --> src/services/nextjs_publish.py:43:89
+   |
+41 |         )
+42 |         if not profile:
+43 |             await _fail(session, redis, post, "No profile linked to this post. Assign a profile first.")
+   |                                                                                         ^^^^^^^^^^^^^^^^
+44 |             return
+   |
+
+E501 Line too long (163 > 88)
+  --> src/services/nextjs_publish.py:49:89
+   |
+47 | …
+48 | …
+49 | …iles, select this post's profile, and add a Webhook URL and Secret in the Next.js Integration section.",
+   |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+50 | …
+51 | …
+   |
+
+E501 Line too long (96 > 88)
+  --> src/services/nextjs_publish.py:77:89
+   |
+76 |         # Read image files and encode as base64
+77 |         # Images stay at /media/{post_id}/filename.webp — committed to public/media/ in the repo
+   |                                                                                         ^^^^^^^^
+78 |         images = []
+79 |         media_dir = Path(settings.media_dir) / post_id
+   |
+
+E501 Line too long (96 > 88)
+  --> src/services/nextjs_publish.py:86:89
+   |
+84 |                 continue
+85 |
+86 |             # Derive actual filename from URL (e.g., /media/{id}/featured.webp -> featured.webp)
+   |                                                                                         ^^^^^^^^
+87 |             actual_filename = url.rsplit("/", 1)[-1] if "/" in url else ""
+88 |             if not actual_filename:
+   |
+
+E501 Line too long (92 > 88)
+  --> src/services/wordpress.py:65:89
+   |
+63 |         except Exception:
+64 |             raise WordPressError(
+65 |                 "WordPress returned non-JSON response — check that the site URL is correct",
+   |                                                                                         ^^^^
+66 |                 status_code=resp.status_code,
+67 |             )
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/worker.py:3:1
+   |
+ 1 |   """ARQ worker entry point for pipeline job processing."""
+ 2 |
+ 3 | / import json
+ 4 | | import logging
+ 5 | | import uuid
+ 6 | | from datetime import UTC, datetime
+ 7 | | from urllib.parse import urlparse
+ 8 | |
+ 9 | | from arq.connections import RedisSettings
+10 | | from arq.cron import cron
+11 | | from sqlalchemy import select
+12 | | from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+13 | |
+14 | | from src.api.events import publish_event
+15 | | from src.config import settings
+16 | | from src.models.link import InternalLink
+17 | | from src.models.post import Post
+18 | | from src.models.profile import WebsiteProfile
+19 | | from src.pipeline.helpers import (
+20 | |     append_execution_log,
+21 | |     clear_event_context,
+22 | |     log_stage_execution,
+23 | |     save_stage_output,
+24 | |     set_event_context,
+25 | | )
+26 | | from src.pipeline.publish import publish_to_wordpress
+27 | | from src.services.nextjs_publish import publish_to_nextjs
+28 | | from src.pipeline.stages.edit import edit_node
+29 | | from src.pipeline.stages.images import images_node
+30 | | from src.pipeline.stages.outline import outline_node
+31 | | from src.pipeline.stages.ready import ready_node
+32 | | from src.pipeline.stages.research import research_node
+33 | | from src.pipeline.stages.write import write_node
+34 | | from src.pipeline.state import STAGE_OUTPUT_KEY, STAGES, state_from_post
+35 | | from src.services.api_keys import get_api_keys
+36 | | from src.services.sitemap import crawl_sitemap
+   | |______________________________________________^
+37 |
+38 |   STAGE_NODE_FN = {
+   |
+help: Organize imports
+
+E501 Line too long (100 > 88)
+   --> src/worker.py:603:89
+    |
+601 | class WorkerSettings:
+602 |     redis_settings = RedisSettings.from_dsn(settings.redis_url)
+603 |     functions = [run_pipeline_stage, crawl_profile_sitemap, publish_to_wordpress, publish_to_nextjs]
+    |                                                                                         ^^^^^^^^^^^^
+604 |     cron_jobs = [cron(check_recrawl_schedules, hour=0, minute=0)]
+605 |     on_startup = startup
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> tests/phase3/test_images_stage.py:3:1
+   |
+ 1 |   """Tests for the images stage node."""
+ 2 |
+ 3 | / import io
+ 4 | | import json
+ 5 | | from unittest.mock import AsyncMock, patch
+ 6 | |
+ 7 | | import pytest
+ 8 | | from PIL import Image
+ 9 | |
+10 | | from src.pipeline.stages.images import _parse_manifest, images_node, optimize_image
+11 | | from src.services.llm import ImageGenResponse, LLMResponse
+   | |__________________________________________________________^
+   |
+help: Organize imports
+
+E501 Line too long (90 > 88)
+  --> tests/phase3/test_research_stage.py:23:89
+   |
+21 | META_RESPONSE = (
+22 |     "I appreciate the detailed instructions, but I need to clarify my role here. "
+23 |     "I'm **Perplexity**, a search assistant designed to synthesize and answer questions. "
+   |                                                                                         ^^
+24 |     "I'm not a blog research agent that can create custom research documents."
+25 | )
+   |
+
+E501 Line too long (110 > 88)
+ --> tests/phase3/test_strip_leading_h1.py:7:89
+  |
+6 | def test_strips_matching_h1():
+7 |     content = '---\ntitle: "My Blog Post"\n---\n\n# My Blog Post\n\nFirst paragraph here.\n\n## Section One\n'
+  |                                                                                         ^^^^^^^^^^^^^^^^^^^^^^
+8 |     result = strip_leading_h1(content)
+9 |     assert "# My Blog Post" not in result
+  |
+
+E501 Line too long (92 > 88)
+  --> tests/phase3/test_strip_leading_h1.py:22:89
+   |
+21 | def test_preserves_content_without_h1():
+22 |     content = '---\ntitle: "My Blog Post"\n---\n\nFirst paragraph here.\n\n## Section One\n'
+   |                                                                                         ^^^^
+23 |     result = strip_leading_h1(content)
+24 |     assert result == content
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> tests/phase6/test_ready_node.py:3:1
+  |
+1 |   """Tests for the ready stage node."""
+2 |
+3 | / import json
+4 | | from unittest.mock import AsyncMock, patch
+5 | |
+6 | | import pytest
+7 | |
+8 | | from src.pipeline.stages.ready import ready_node
+  | |________________________________________________^
+  |
+help: Organize imports
+
+F401 [*] `json` imported but unused
+ --> tests/phase6/test_ready_node.py:3:8
+  |
+1 | """Tests for the ready stage node."""
+2 |
+3 | import json
+  |        ^^^^
+4 | from unittest.mock import AsyncMock, patch
+  |
+help: Remove unused import: `json`
+
+E501 Line too long (380 > 88)
+  --> tests/phase6/test_ready_node.py:19:89
+   |
+17 | …
+18 | …
+19 | …n\n# Best AR15 Optics\n\nIntro paragraph.\n\n## Budget Picks\n\nBudget content here.\n\n## Mid-Range\n\nMid-range content.\n\n---\n\n<!--\nPUBLISHING NOTES\n================\nSEO INFORMATION\n---------------\nMeta Description: Find the best AR15 optics.\nPrimary Keyword: best AR15 optics\n-->\n',
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+20 | …
+21 | …
+   |
+
+E501 Line too long (96 > 88)
+  --> tests/phase6/test_ready_node.py:37:89
+   |
+35 |                     "url": "/media/test-post-123/budget-optics.png",
+36 |                     "alt_text": "Budget AR15 optics comparison",
+37 |                     "placement": {"location": "after_heading", "after_section": "Budget Picks"},
+   |                                                                                         ^^^^^^^^
+38 |                     "generated": True,
+39 |                 },
+   |
+
+E501 Line too long (503 > 88)
+  --> tests/phase6/test_ready_node.py:52:89
+   |
+50 | …
+51 | …
+52 | …s"\ndescription: "Find the best AR15 optics."\ndate: "2026-02-26"\nauthor: "team"\ncategory: "Optics"\nfeaturedImage: "/media/test-post-123/featured.png"\nfeaturedImageAlt: "AR15 with mounted optic"\npublished: true\n---\n\n# Best AR15 Optics\n\nIntro paragraph.\n\n## Budget Picks\n\nBudget content here.\n\n![Budget AR15 optics comparison](/media/test-post-123/budget-optics.png)\n\n## Mid-Range\n\nMid-range content.'
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+53 | …
+54 | …
+   |
+
+F841 Local variable `prompt` is assigned to but never used
+   --> tests/phase6/test_ready_node.py:102:5
+    |
+100 |     # Verify the prompt sent to Claude doesn't include the failed image
+101 |     call_args = instance.chat.call_args
+102 |     prompt = call_args.kwargs.get("prompt") or call_args[1].get("prompt") or call_args[0][0] if call_args[0] else ""
+    |     ^^^^^^
+103 |     # The prompt should be a string that was sent to Claude
+104 |     assert result["ready"] == "assembled content"
+    |
+help: Remove assignment to unused variable `prompt`
+
+E501 Line too long (116 > 88)
+   --> tests/phase6/test_ready_node.py:102:89
+    |
+100 |     # Verify the prompt sent to Claude doesn't include the failed image
+101 |     call_args = instance.chat.call_args
+102 |     prompt = call_args.kwargs.get("prompt") or call_args[1].get("prompt") or call_args[0][0] if call_args[0] else ""
+    |                                                                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+103 |     # The prompt should be a string that was sent to Claude
+104 |     assert result["ready"] == "assembled content"
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> tests/phase_nextjs/test_models.py:1:1
+   |
+ 1 | / from __future__ import annotations
+ 2 | |
+ 3 | | from datetime import datetime, timezone
+ 4 | |
+ 5 | | import pytest
+ 6 | | from sqlalchemy.ext.asyncio import AsyncSession
+ 7 | |
+ 8 | | from src.models.auth import AuthUser
+ 9 | | from src.models.profile import WebsiteProfile
+10 | | from src.models.post import Post
+   | |________________________________^
+11 |
+12 |   TEST_USER_ID = "test-user-nextjs-models"
+   |
+help: Organize imports
+
+UP017 [*] Use `datetime.UTC` alias
+  --> tests/phase_nextjs/test_models.py:22:33
+   |
+20 |         email="test@example.com",
+21 |         email_verified=False,
+22 |         created_at=datetime.now(timezone.utc),
+   |                                 ^^^^^^^^^^^^
+23 |         updated_at=datetime.now(timezone.utc),
+24 |     )
+   |
+help: Convert to `datetime.UTC` alias
+
+UP017 [*] Use `datetime.UTC` alias
+  --> tests/phase_nextjs/test_models.py:23:33
+   |
+21 |         email_verified=False,
+22 |         created_at=datetime.now(timezone.utc),
+23 |         updated_at=datetime.now(timezone.utc),
+   |                                 ^^^^^^^^^^^^
+24 |     )
+25 |     db_session.add(user)
+   |
+help: Convert to `datetime.UTC` alias
+
+E501 Line too long (105 > 88)
+  --> tests/phase_nextjs/test_models.py:38:89
+   |
+36 |         nextjs_webhook_url="https://test.com/api/jena-webhook",
+37 |         nextjs_webhook_secret="encrypted-secret",
+38 |         nextjs_frontmatter_map={"title": "title", "category": {"key": "category", "transform": "array"}},
+   |                                                                                         ^^^^^^^^^^^^^^^^^
+39 |     )
+40 |     db_session.add(profile)
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> tests/phase_nextjs/test_nextjs_publish.py:1:1
+   |
+ 1 | / from __future__ import annotations
+ 2 | |
+ 3 | | from contextlib import asynccontextmanager
+ 4 | | from datetime import datetime, timezone
+ 5 | | from unittest.mock import AsyncMock, MagicMock, patch
+ 6 | |
+ 7 | | import pytest
+ 8 | | from cryptography.fernet import Fernet
+ 9 | | from sqlalchemy.ext.asyncio import AsyncSession
+10 | |
+11 | | from src.models.auth import AuthUser
+12 | | from src.models.post import Post
+13 | | from src.models.profile import WebsiteProfile
+   | |_____________________________________________^
+14 |
+15 |   TEST_USER_ID = "test-user-nextjs-publish"
+   |
+help: Organize imports
+
+UP017 [*] Use `datetime.UTC` alias
+  --> tests/phase_nextjs/test_nextjs_publish.py:33:33
+   |
+31 |         email="publish@example.com",
+32 |         email_verified=False,
+33 |         created_at=datetime.now(timezone.utc),
+   |                                 ^^^^^^^^^^^^
+34 |         updated_at=datetime.now(timezone.utc),
+35 |     )
+   |
+help: Convert to `datetime.UTC` alias
+
+UP017 [*] Use `datetime.UTC` alias
+  --> tests/phase_nextjs/test_nextjs_publish.py:34:33
+   |
+32 |         email_verified=False,
+33 |         created_at=datetime.now(timezone.utc),
+34 |         updated_at=datetime.now(timezone.utc),
+   |                                 ^^^^^^^^^^^^
+35 |     )
+36 |     db_session.add(user)
+   |
+help: Convert to `datetime.UTC` alias
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> tests/phase_nextjs/test_schemas.py:1:1
+  |
+1 | / from __future__ import annotations
+2 | |
+3 | | from src.models.schemas import ProfileCreate, ProfileUpdate, ProfileRead, PostRead
+  | |__________________________________________________________________________________^
+  |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> tests/phase_nextjs/test_worker_trigger.py:1:1
+   |
+ 1 | / from __future__ import annotations
+ 2 | |
+ 3 | | from datetime import datetime, timezone
+ 4 | | from unittest.mock import patch
+ 5 | |
+ 6 | | import pytest
+ 7 | | from cryptography.fernet import Fernet
+ 8 | | from sqlalchemy.ext.asyncio import AsyncSession
+ 9 | |
+10 | | from src.models.post import Post
+11 | | from src.models.profile import WebsiteProfile
+   | |_____________________________________________^
+12 |
+13 |   _FERNET_KEY = Fernet.generate_key().decode()
+   |
+help: Organize imports
+
+UP017 [*] Use `datetime.UTC` alias
+  --> tests/phase_nextjs/test_worker_trigger.py:30:24
+   |
+28 |     from src.services.crypto import encrypt
+29 |
+30 |     now = datetime.now(timezone.utc)
+   |                        ^^^^^^^^^^^^
+31 |     user = AuthUser(
+32 |         id="test-worker-user",
+   |
+help: Convert to `datetime.UTC` alias
+
+Found 32 errors.
+[*] 17 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).
+exit=1

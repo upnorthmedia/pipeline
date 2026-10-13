@@ -1,4 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { STAGES } from "@/lib/api";
 
 export default function Loading() {
   return (
@@ -21,7 +22,7 @@ export default function Loading() {
         <div className="px-6 pb-6 space-y-4">
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="space-y-2">
-              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-4.5 w-40" />
               <div className="flex gap-2">
                 <Skeleton className="h-10 flex-1" />
                 <Skeleton className="h-10 w-10" />
@@ -30,8 +31,32 @@ export default function Loading() {
           ))}
           <Skeleton className="h-px w-full" />
           <div className="flex justify-end">
-            <Skeleton className="h-9 w-32" />
+            <Skeleton className="h-9 w-[137px]" />
           </div>
+        </div>
+      </div>
+
+      {/* Stage Models Card. One box per stage, in the shape the card's own
+          placeholder uses, so this and the client render agree on the height. */}
+      <div className="rounded-md border border-border">
+        <div className="p-6 space-y-1.5">
+          <Skeleton className="h-5 w-32" />
+          <Skeleton className="h-4 w-80" />
+        </div>
+        <div className="px-6 pb-6 space-y-4">
+          {STAGES.map((stage) => (
+            <div key={stage} className="rounded-md border p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Skeleton className="h-5.5 w-40" />
+                <Skeleton className="h-5.5 w-20" />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Skeleton className="h-9 w-[230px]" />
+                <Skeleton className="h-9 w-[110px]" />
+                <Skeleton className="ml-auto h-9 w-[76px]" />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -42,11 +67,12 @@ export default function Loading() {
           <Skeleton className="h-4 w-64" />
         </div>
         <div className="px-6 pb-6 space-y-4">
-          <div className="flex gap-2">
-            {Array.from({ length: 5 }).map((_, i) => (
+          <div className="flex flex-wrap gap-2">
+            {Array.from({ length: 6 }).map((_, i) => (
               <Skeleton key={i} className="h-8 w-28" />
             ))}
           </div>
+          <Skeleton className="h-4 w-32" />
           <Skeleton className="h-[400px] w-full" />
           <Skeleton className="h-px w-full" />
           <div className="flex justify-end">

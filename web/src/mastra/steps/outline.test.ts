@@ -1,0 +1,385 @@
+// @vitest-environment node
+/**
+ * Parity for the `outline` step (item 3.2).
+ *
+ * Same gate as `research`: the fixture's `post_spec` goes into the real
+ * Alembic-owned database, the step reads it back through drizzle, and the
+ * prompt it hands the agent is compared byte for byte against the fixture's
+ * `rendered_prompts[0]`.
+ *
+ * The difference from `research` is the chain input. `outline`'s prompt embeds
+ * the research document, so the post is seeded with the fixture's
+ * `state_input.research` in `research_content` and with the `stage_status` the
+ * research stage left behind. That is exactly what a resumed run would find in
+ * the table, so the seeding is the contract under test rather than a shortcut
+ * around it.
+ *
+ * The provider call is replayed from the fixture; the live Anthropic smoke test
+ * and the wire-payload assertions live in `agents/outline.test.ts`.
+ *
+ * Requires `docker compose up -d db redis`.
+ */
+import { readFileSync } from "node:fs"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+
+import type { RequestContext } from "@mastra/core/request-context"
+import { eq, inArray } from "drizzle-orm"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+
+import { closeDb, getDb, posts, websiteProfiles } from "../../db"
+import { ABSENT_POST_ID } from "../../test/absent-ids"
+import { stageRequestContextUserId } from "../stage-models"
+import { stageStepOutputSchema } from "./stage-io"
+import { outlineStep } from "./outline"
+
+const goldenDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../docs/mastra-port/golden",
+)
+
+const FIXTURE_SLUGS = [
+  "how-to-choose-a-crm-for-a-small-team",
+  "best-time-tracking-tools-for-agencies",
+] as const
+
+type Fixture = {
+  captured_at: string
+  post_spec: Record<string, never>
+  state_input: { research: string; stage_status: Record<string, string> }
+  rendered_prompts: string[]
+  provider_calls: {
+    request: { model: string }
+    response: { usage: { input_tokens: number; output_tokens: number } }
+  }[]
+  stage_output: {
+    outline: string
+    current_stage: string
+    stage_status: Record<string, string>
+    _stage_meta: { model: string; tokens_in: number; tokens_out: number }
+  }
+}
+
+function loadFixture(slug: string): Fixture {
+  return JSON.parse(readFileSync(path.join(goldenDir, slug, "outline.json"), "utf8"))
+}
+
+const db = getDb()
+const fixtures = FIXTURE_SLUGS.map(loadFixture)
+/**
+ * Every stage's parity test seeds the same golden-fixture posts, so left under
+ * the fixture's own id these files collide on the posts primary key whenever
+ * vitest runs them in parallel. A post id never reaches a rendered prompt, so
+ * each file namespaces its rows by rewriting the fixture id's second-to-last
+ * byte, keeping the last one so the two fixtures stay distinct inside the file.
+ */
+const ID_NAMESPACE = "a2"
+const fixtureIds = fixtures.map(
+  (f) => String(f.post_spec.id).slice(0, -3) + ID_NAMESPACE + String(f.post_spec.id).slice(-1),
+)
+
+/** One replayed provider response, shaped like the agent's `generate` result. */
+function replayOf(fixture: Fixture) {
+  const call = fixture.provider_calls[0]
+  return {
+    text: fixture.stage_output.outline,
+    response: { modelId: call.request.model },
+    usage: {
+      inputTokens: call.response.usage.input_tokens,
+      outputTokens: call.response.usage.output_tokens,
+    },
+  }
+}
+
+type Replay = ReturnType<typeof replayOf>
+
+/** Records the prompts the step sends and replies with the queued response. */
+function replayMastra(reply: Replay) {
+  const prompts: string[] = []
+  const agentOptions: ({ requestContext?: RequestContext } | undefined)[] = []
+  const announced: unknown[] = []
+  const mastra = {
+    /**
+     * The step announces itself on the event bus before it calls its provider
+     * (item 5.5a). Stubbed here because this file is about prompt parity;
+     * `pipeline-events.test.ts` makes the same call against a real Redis
+     * Streams topic and asserts the payload it carries.
+     */
+    pubsub: {
+      publish: async (_topic: string, event: { data: unknown }) => {
+        announced.push(event.data)
+      },
+    },
+    getAgent: () => ({
+      generate: async (prompt: string, options?: { requestContext?: RequestContext }) => {
+        prompts.push(prompt)
+        agentOptions.push(options)
+        return reply
+      },
+    }),
+    getLogger: () => undefined,
+  }
+  return { mastra, prompts, agentOptions, announced }
+}
+
+type ExecuteParams = Parameters<typeof outlineStep.execute>[0]
+
+async function runStep(postId: string, reply: Replay) {
+  const harness = replayMastra(reply)
+  const output = await outlineStep.execute({
+    inputData: { postId },
+    mastra: harness.mastra,
+  } as unknown as ExecuteParams)
+  return { ...harness, output: stageStepOutputSchema.parse(output) }
+}
+
+async function insertFixturePosts() {
+  for (const [index, fixture] of fixtures.entries()) {
+    const spec = fixture.post_spec
+    await db.insert(posts).values({
+      id: fixtureIds[index],
+      slug: spec.slug,
+      topic: spec.topic,
+      targetAudience: spec.target_audience,
+      niche: spec.niche,
+      intent: spec.intent,
+      articleType: spec.article_type,
+      outputFormat: spec.output_format,
+      wordCount: spec.word_count,
+      tone: spec.tone,
+      websiteUrl: spec.website_url,
+      relatedKeywords: spec.related_keywords,
+      competitorUrls: spec.competitor_urls,
+      imageStyle: spec.image_style,
+      imageBrandColors: spec.image_brand_colors,
+      imageExclude: spec.image_exclude,
+      brandVoice: spec.brand_voice,
+      avoid: spec.avoid,
+      requiredMentions: spec.required_mentions,
+      additionalInfo: spec.additional_info,
+      // What the research stage committed before this one starts.
+      researchContent: fixture.state_input.research,
+      currentStage: "research",
+      stageSettings: null,
+      stageStatus: fixture.state_input.stage_status,
+    })
+  }
+}
+
+/**
+ * A profile owned by a known user, so the step's settings-user lookup (item
+ * 6.2b) has an owner to find. The id is this file's namespace so it cannot
+ * collide with another stage's parity file.
+ */
+const OWNED_PROFILE_ID = "a2000000-0000-4000-8000-00000000e01e"
+const OWNER_USER_ID = "outline-step-owner-a2"
+
+async function cleanup() {
+  await db.delete(posts).where(inArray(posts.id, fixtureIds))
+  await db.delete(websiteProfiles).where(eq(websiteProfiles.id, OWNED_PROFILE_ID))
+}
+
+beforeAll(cleanup)
+
+beforeEach(async () => {
+  await cleanup()
+  await insertFixturePosts()
+  // Only `Date` is faked: the prompt stamps TODAY_DATE from the clock and the
+  // fixtures were captured on a fixed day. Timers stay real so the postgres
+  // driver's own timeouts still fire.
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true })
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+afterAll(async () => {
+  await cleanup()
+  await closeDb()
+})
+
+describe("outline step prompt contract", () => {
+  for (const [index, slug] of FIXTURE_SLUGS.entries()) {
+    it(`sends the research packet with stage-scoped configuration for ${slug}`, async () => {
+      const fixture = fixtures[index]
+      vi.setSystemTime(new Date(fixture.captured_at))
+
+      const { prompts } = await runStep(fixtureIds[index], replayOf(fixture))
+
+      expect(prompts).toHaveLength(1)
+      expect(prompts[0]).toContain(fixture.state_input.research)
+      expect(prompts[0]).toContain(`- **TONE**: ${String(fixture.post_spec.tone)}`)
+      expect(prompts[0]).not.toContain(`- **OUTPUT_FORMAT**: ${String(fixture.post_spec.output_format)}`)
+    })
+  }
+
+  it("carries the research document the previous stage committed", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { prompts } = await runStep(fixtureIds[0], replayOf(fixture))
+
+    // A prompt that rendered without the chain input would still be byte-equal
+    // to a fixture captured the same way, so the chaining is asserted directly.
+    expect(prompts[0]).toContain(fixture.state_input.research)
+  })
+})
+
+describe("outline step persistence and output", () => {
+  it("commits the outline to its column and reports Python's stage meta", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { output } = await runStep(fixtureIds[0], replayOf(fixture))
+
+    expect(output).toMatchObject({
+      postId: fixtureIds[0],
+      stage: "outline",
+      model: fixture.stage_output._stage_meta.model,
+      tokensIn: fixture.stage_output._stage_meta.tokens_in,
+      tokensOut: fixture.stage_output._stage_meta.tokens_out,
+    })
+
+    const [row] = await db.select().from(posts).where(eq(posts.id, fixtureIds[0]))
+    expect(row.outlineContent).toBe(fixture.stage_output.outline)
+    expect(row.currentStage).toBe(fixture.stage_output.current_stage)
+    // Python merges into the map the previous stage left, so `research` survives.
+    expect(row.stageStatus).toEqual(fixture.stage_output.stage_status)
+    // The stage it chains from is untouched, and the ones after it stay empty.
+    expect(row.researchContent).toBe(fixture.state_input.research)
+    expect(row.draftContent).toBeNull()
+  })
+
+  it("fails loudly on a post that does not exist rather than billing a call", async () => {
+    const harness = replayMastra(replayOf(fixtures[0]))
+    await expect(
+      outlineStep.execute({
+        inputData: { postId: ABSENT_POST_ID },
+        mastra: harness.mastra,
+      } as unknown as ExecuteParams),
+    ).rejects.toThrow("not found")
+    expect(harness.prompts).toEqual([])
+  })
+
+  it("refuses to outline an explicitly blocked research packet", async () => {
+    await db
+      .update(posts)
+      .set({
+        researchContent: [
+          "## Research summary",
+          "The core chronology is not supported.",
+          "## Claim ledger",
+          "No publishable chronology was verified.",
+          "## Topic coverage",
+          "Background only.",
+          "## Risks and open questions",
+          "Primary sources are missing.",
+          "## Recommended article direction",
+          "Do not draft until the chronology is sourced.",
+          "## Coverage verdict",
+          "STATUS: blocked",
+        ].join("\n\n"),
+      })
+      .where(eq(posts.id, fixtureIds[0]))
+
+    const harness = replayMastra(replayOf(fixtures[0]))
+    await expect(
+      outlineStep.execute({
+        inputData: { postId: fixtureIds[0] },
+        mastra: harness.mastra,
+      } as unknown as ExecuteParams),
+    ).rejects.toThrow("research coverage is blocked")
+    expect(harness.prompts).toEqual([])
+  })
+})
+
+describe("outline step announcement", () => {
+  it("announces the stage on the event bus, in Python's payload shape", async () => {
+    const { announced } = await runStep(fixtureIds[0], replayOf(fixtures[0]))
+
+    expect(announced).toEqual([
+      {
+        event: "stage_start",
+        post_id: fixtureIds[0],
+        stage: "outline",
+        message: "Starting outline...",
+      },
+      // Python's three `publish_stage_log()` calls from inside the stage
+      // node, in the order they were written and between the two
+      // announcements the runner made around it.
+      {
+        event: "log",
+        post_id: fixtureIds[0],
+        stage: "outline",
+        level: "info",
+        message: "Rules loaded, building prompt...",
+        timestamp: expect.any(String),
+      },
+      {
+        event: "log",
+        post_id: fixtureIds[0],
+        stage: "outline",
+        level: "info",
+        message: "Calling Claude for outline...",
+        timestamp: expect.any(String),
+      },
+      {
+        event: "log",
+        post_id: fixtureIds[0],
+        stage: "outline",
+        level: "info",
+        message: expect.stringMatching(
+          new RegExp(`^Received ${replayOf(fixtures[0]).usage.outputTokens} tokens in \\d+\\.\\ds$`),
+        ),
+        timestamp: expect.any(String),
+      },
+      {
+        event: "stage_complete",
+        post_id: fixtureIds[0],
+        stage: "outline",
+        model: replayOf(fixtures[0]).response.modelId,
+        // Real elapsed time around a stubbed provider call; the rounding it
+        // goes through is pinned in `pipeline-events.test.ts`.
+        duration_s: expect.any(Number),
+      },
+    ])
+  })
+})
+
+/**
+ * Item 6.2b: the step tells the agent whose `stage_models` overrides apply.
+ *
+ * `posts` has no `user_id`, so the answer comes from the post's profile. The
+ * two cases that matter are an owned profile (the run uses that user's stored
+ * model) and no profile at all (the run falls back to the global row), and
+ * both are exercised against real rows rather than a stubbed lookup, because
+ * the join is the part that can be wrong.
+ */
+describe("outline step settings user", () => {
+  it("hands the agent a request context carrying the profile's owner", async () => {
+    await db.insert(websiteProfiles).values({
+      id: OWNED_PROFILE_ID,
+      name: "Owned profile",
+      websiteUrl: "https://owner.example.test",
+      userId: OWNER_USER_ID,
+    })
+    await db
+      .update(posts)
+      .set({ profileId: OWNED_PROFILE_ID })
+      .where(eq(posts.id, fixtureIds[0]))
+
+    const { agentOptions } = await runStep(fixtureIds[0], replayOf(fixtures[0]))
+
+    expect(agentOptions).toHaveLength(1)
+    const requestContext = agentOptions[0]?.requestContext
+    expect(requestContext).toBeDefined()
+    expect(stageRequestContextUserId(requestContext!)).toBe(OWNER_USER_ID)
+  })
+
+  it("carries a null user for a post with no profile, so the global row applies", async () => {
+    const { agentOptions } = await runStep(fixtureIds[0], replayOf(fixtures[0]))
+
+    expect(stageRequestContextUserId(agentOptions[0]!.requestContext!)).toBeNull()
+  })
+})

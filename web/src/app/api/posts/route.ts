@@ -1,0 +1,151 @@
+/**
+ * Port of `GET /api/posts` in `api/src/api/posts.py`.
+ *
+ * The Python query joined `posts` to `website_profiles` and filtered on
+ * `website_profiles.user_id`, so a post with a null `profile_id` never
+ * appeared in the list. That exclusion is preserved: it follows from the
+ * `user_id` predicate rather than from the join strategy, since an unowned row
+ * cannot match any user, but the join is kept inner to mirror the original.
+ */
+import { and, asc, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm"
+
+import { getDb, posts, websiteProfiles } from "@/db"
+import { getRequestUser, unauthorized } from "@/lib/request-auth"
+import { withServerError } from "@/lib/route-error"
+import { logger } from "@/mastra"
+import { startPipeline } from "@/mastra/start-pipeline"
+import { STAGES, STATUS_RUNNING } from "@/mastra/state"
+
+import { applyProfilePrefill, submittedKeys } from "./prefill"
+import { parseListPostsQuery } from "./query"
+import { serializePost, type PostResponse } from "./serialize"
+import {
+  invalidJsonBody,
+  postCreateSchema,
+  toColumns,
+  unprocessableBody,
+  type PostWriteInput,
+} from "./validation"
+
+async function getHandler(request: Request): Promise<Response> {
+  const user = await getRequestUser(request)
+  if (!user) return unauthorized()
+
+  const query = parseListPostsQuery(new URL(request.url))
+  if (query instanceof Response) return query
+
+  const conditions: SQL[] = [eq(websiteProfiles.userId, user.id)]
+
+  // `status or stage`: either name filters `current_stage`, `status` first.
+  const stageFilter = query.status || query.stage
+  if (stageFilter) conditions.push(eq(posts.currentStage, stageFilter))
+  // The gate queue. `current_stage` cannot answer this: the worker suspends
+  // the run and leaves the column on the stage it suspended in, so a post
+  // waiting on a person is indistinguishable there from one on the provider.
+  // `stage_status` is where `markStageForReview()` writes the gate, so the
+  // filter is a containment test per stage key rather than one over the whole
+  // object: the column is bare jsonb with no check constraint, and a key that
+  // is not one of the six carrying the word "review" is not a gate.
+  if (query.awaitingReview) {
+    conditions.push(
+      or(
+        ...STAGES.map(
+          (stage) => sql`${posts.stageStatus} @> ${JSON.stringify({ [stage]: "review" })}::jsonb`,
+        ),
+      ) as SQL,
+    )
+  }
+  if (query.profileId) conditions.push(eq(posts.profileId, query.profileId))
+  if (query.q) {
+    const pattern = `%${query.q}%`
+    conditions.push(or(ilike(posts.topic, pattern), ilike(posts.slug, pattern)) as SQL)
+  }
+
+  const rows = await getDb()
+    .select({ post: posts })
+    .from(posts)
+    .innerJoin(websiteProfiles, eq(posts.profileId, websiteProfiles.id))
+    .where(and(...conditions))
+    .orderBy(query.order === "desc" ? desc(query.sort) : asc(query.sort))
+    .offset((query.page - 1) * query.perPage)
+    .limit(query.perPage)
+
+  const body: PostResponse[] = rows.map((row) => serializePost(row.post))
+  return Response.json(body)
+}
+
+export const GET = withServerError(getHandler)
+
+/**
+ * Port of `POST /api/posts`.
+ *
+ * The row is written with the full `model_dump()` of `PostCreate` folded
+ * through `prefill.ts`, so every pydantic default is materialised rather than
+ * left to the column default. The two still disagree for `stage_settings`
+ * (six "auto" stages against the column's five "review" ones), and the
+ * pydantic value is the one the Python stack wrote. They disagreed for
+ * `output_format` too until `drizzle/0003` moved the column default off
+ * `both`, a value no publish step handles and the picker cannot render.
+ *
+ * A `profile_id` the caller does not own is a 404, which is what keeps another
+ * account's settings from being read through the prefill. A body with no
+ * `profile_id` at all is a 422, which Python did not do: the row it would write
+ * is invisible to every read handler, because they all join through
+ * `website_profiles` to reach `user_id`, so nothing could list, read, update or
+ * delete it afterwards. Ledger item P2.97; the deviation is declared on
+ * `postCreateSchema`.
+ *
+ * `current_stage` and `stage_status` are stamped after the prefill, so a body
+ * or profile cannot set them.
+ *
+ * The pipeline is started on success, replacing
+ * `enqueue_job("run_pipeline_stage", post.id)`. Python let a queue failure
+ * escape as a 500 here, which would report a create that in fact succeeded, so
+ * the failure is logged and the 201 returned instead. That is the same
+ * treatment `POST /api/profiles` already gives its crawl enqueue, where Python
+ * itself swallowed the error.
+ */
+async function postHandler(request: Request): Promise<Response> {
+  const user = await getRequestUser(request)
+  if (!user) return unauthorized()
+
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    return invalidJsonBody()
+  }
+
+  const parsed = postCreateSchema.safeParse(body)
+  if (!parsed.success) return unprocessableBody(parsed.error.issues, body)
+
+  const [profile] = await getDb()
+    .select()
+    .from(websiteProfiles)
+    .where(and(eq(websiteProfiles.id, parsed.data.profile_id), eq(websiteProfiles.userId, user.id)))
+    .limit(1)
+  if (!profile) return Response.json({ detail: "Profile not found" }, { status: 404 })
+  const values: PostWriteInput = applyProfilePrefill(parsed.data, profile, submittedKeys(body))
+
+  const [row] = await getDb()
+    .insert(posts)
+    .values({
+      ...toColumns(values),
+      currentStage: STAGES[0],
+      stageStatus: { [STAGES[0]]: STATUS_RUNNING },
+    })
+    .returning()
+
+  try {
+    await startPipeline(row.id)
+  } catch (error) {
+    logger.warn("Post created but the pipeline could not be started", {
+      postId: row.id,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+
+  return Response.json(serializePost(row), { status: 201 })
+}
+
+export const POST = withServerError(postHandler)

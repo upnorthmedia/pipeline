@@ -1,0 +1,279 @@
+/**
+ * The pieces of pydantic behaviour every ported write endpoint needs: its lax
+ * scalar coercions and the 422 body FastAPI answered a bad request with.
+ *
+ * This started life inside `profiles/validation.ts` and moved here when the
+ * post handlers needed the same rules. Nothing router-specific belongs in this
+ * file: a field list or a column mapping lives next to the router that owns it.
+ *
+ * Every shape here was read off a real pydantic model rather than assumed, and
+ * only the `type`/`loc`/`msg`/`input` keys are reproduced. pydantic's `ctx` and
+ * `url` keys are not, and nothing in `web/src/lib/api.ts` reads them.
+ */
+import { z } from "zod"
+
+/**
+ * An unconstrained `dict` field. Both stacks land these in a jsonb or json
+ * column, so the value shape is not narrowed here either. A `$type` on the
+ * column is a convention the writers follow, not a check the database makes.
+ */
+export const jsonObject = z.record(z.string(), z.unknown())
+
+/**
+ * pydantic's lax mode parses an `int` out of a string that holds nothing but an
+ * optionally signed run of digits, surrounding whitespace allowed, and rejects
+ * anything else. A float is accepted only when it is integral, which
+ * `z.number().int()` already enforces.
+ */
+const INTEGRAL_STRING = /^[+-]?\d+$/
+
+export const pydanticInt = z.preprocess(
+  (value) =>
+    typeof value === "string" && INTEGRAL_STRING.test(value.trim()) ? Number(value) : value,
+  z.number().int(),
+)
+
+/**
+ * A `uuid.UUID` body field. pydantic splits its two failures: a value that is
+ * not a string at all is `uuid_type`, while a string it cannot parse is
+ * `uuid_parsing`. Zod reports both as one issue shape, so the exact pydantic
+ * error is attached to the issue instead and read back in `detailFor`.
+ *
+ * The `uuid_parsing` message drops pydantic's `ctx.error` tail, which comes
+ * from the Rust uuid crate's parser and cannot be reproduced faithfully. That
+ * is the same choice `posts/params.ts` already made for the path parameter.
+ */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+type UnknownRefinement = Parameters<ReturnType<typeof z.unknown>["superRefine"]>[0]
+
+const checkUuid: UnknownRefinement = (value, ctx) => {
+  if (typeof value !== "string") {
+    ctx.addIssue({
+      code: "custom",
+      message: "UUID input should be a string, bytes or UUID object",
+      params: { type: "uuid_type" },
+    })
+    return
+  }
+  if (!UUID_PATTERN.test(value)) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Input should be a valid UUID",
+      params: { type: "uuid_parsing" },
+    })
+  }
+}
+
+export const pydanticUuid = z.unknown().superRefine(checkUuid) as unknown as z.ZodType<string>
+
+/**
+ * The same field where pydantic declared it without a default, so an absent key
+ * is `missing` rather than a type error. `z.unknown()` leaves the key optional,
+ * but the check still runs with `undefined`, and an `invalid_type` issue over a
+ * value that is not there is what `detailFor` reads back as pydantic's
+ * `{"type": "missing", "msg": "Field required"}`.
+ */
+export const pydanticRequiredUuid = z.unknown().superRefine((value, ctx) => {
+  if (value === undefined) {
+    ctx.addIssue({ code: "invalid_type", expected: "string", input: value, message: "Field required" })
+    return
+  }
+  checkUuid(value, ctx)
+}) as unknown as z.ZodType<string>
+
+export interface ValidationErrorDetail {
+  type: string
+  loc: (string | number)[]
+  msg: string
+  input: unknown
+  /** pydantic's bound for a `greater_than_equal` / `less_than_equal` error. */
+  ctx?: Record<string, number>
+}
+
+/** pydantic's error type and message for each type zod reports as `expected`. */
+const TYPE_ERRORS: Record<string, { type: string; msg: string }> = {
+  string: { type: "string_type", msg: "Input should be a valid string" },
+  number: { type: "int_type", msg: "Input should be a valid integer" },
+  array: { type: "list_type", msg: "Input should be a valid list" },
+  record: { type: "dict_type", msg: "Input should be a valid dictionary" },
+}
+
+/** pydantic separates a string it could not read as an int from a wrong type. */
+const INT_PARSING = {
+  type: "int_parsing",
+  msg: "Input should be a valid integer, unable to parse string as an integer",
+}
+
+/**
+ * The submitted value a zod issue points at. Zod 4 drops `input` from the
+ * finalised issues it exposes on `ZodError`, keeping only `code`, `expected`,
+ * `path` and `message`, so the value has to be walked out of the body instead.
+ */
+function valueAt(body: unknown, path: readonly PropertyKey[]): unknown {
+  let value = body
+  for (const segment of path) {
+    if (value === null || typeof value !== "object") return undefined
+    value = (value as Record<PropertyKey, unknown>)[segment]
+  }
+  return value
+}
+
+function detailFor(issue: z.core.$ZodIssue, body: unknown): ValidationErrorDetail {
+  const loc = ["body", ...issue.path.map((segment) => segment as string | number)]
+  if (issue.code === "invalid_type") {
+    if (valueAt(body, issue.path) === undefined) {
+      // pydantic reports the containing object as the input of a missing key.
+      return {
+        type: "missing",
+        loc,
+        msg: "Field required",
+        input: valueAt(body, issue.path.slice(0, -1)),
+      }
+    }
+    const input = valueAt(body, issue.path)
+    if (issue.expected === "number" && typeof input === "string") {
+      return { ...INT_PARSING, loc, input }
+    }
+    const expected = TYPE_ERRORS[issue.expected]
+    if (expected) return { ...expected, loc, input }
+  }
+  if (issue.code === "custom") {
+    // A schema that knows its own pydantic error attaches it to the issue.
+    const type = (issue.params as { type?: string } | undefined)?.type
+    if (type) return { type, loc, msg: issue.message, input: valueAt(body, issue.path) }
+  }
+  return { type: "value_error", loc, msg: issue.message, input: valueAt(body, issue.path) }
+}
+
+/**
+ * The `detail` entries for a set of zod issues, for a handler that has to
+ * report path errors in the same 422 rather than answering the body alone.
+ */
+export function bodyDetails(
+  issues: readonly z.core.$ZodIssue[],
+  body: unknown,
+): ValidationErrorDetail[] {
+  return issues.map((issue) => detailFor(issue, body))
+}
+
+/** FastAPI's `RequestValidationError` response for a set of zod issues. */
+export function unprocessableBody(issues: readonly z.core.$ZodIssue[], body: unknown): Response {
+  return Response.json({ detail: bodyDetails(issues, body) }, { status: 422 })
+}
+
+/**
+ * FastAPI answered a body that is not JSON with a 422 carrying a single
+ * `json_invalid` entry, not a 400, so a client cannot tell a malformed body
+ * from an invalid one by status alone.
+ */
+export function invalidJsonBody(): Response {
+  return Response.json(
+    { detail: [{ type: "json_invalid", loc: ["body", 0], msg: "JSON decode error", input: {} }] },
+    { status: 422 },
+  )
+}
+
+/**
+ * A `uuid.UUID` path parameter. FastAPI validated these before the endpoint
+ * ran and reported every bad one in the same 422 as the query and body errors,
+ * path parameters first, in declaration order.
+ *
+ * The message drops pydantic's `ctx.error` tail for the same reason
+ * `posts/params.ts` does: it comes from the Rust uuid crate's parser and
+ * cannot be reproduced faithfully.
+ */
+export function pathUuidIssue(name: string, input: string): ValidationErrorDetail {
+  return {
+    type: "uuid_parsing",
+    loc: ["path", name],
+    msg: "Input should be a valid UUID",
+    input,
+  }
+}
+
+/**
+ * Pydantic's lax parse of an `int` out of a query string, pinned against the
+ * installed pydantic 2.12 rather than assumed. It accepts surrounding
+ * whitespace, an optional sign, `_` separators between digits, and a trailing
+ * `.` followed by nothing but zeros: `"2.0"`, `"1_0_0"` and `" 2 "` are all
+ * integers to it, while `"2."`, `".0"`, `"1e3"`, `"1__0"` and `"2_"` are
+ * `int_parsing` errors.
+ *
+ * `ge` and `le` come from `Query(..., ge=, le=)` and carry pydantic's `ctx`,
+ * which the dashboard does not read but which is part of the wire shape.
+ */
+const PYDANTIC_INT = /^\s*[+-]?\d+(?:_\d+)*(?:\.0+)?\s*$/
+
+export function parseInt422(
+  raw: string,
+  name: string,
+  fallback: number,
+  ge: number,
+  le: number | null,
+  issues: ValidationErrorDetail[],
+): number {
+  if (!PYDANTIC_INT.test(raw)) {
+    issues.push({
+      type: "int_parsing",
+      loc: ["query", name],
+      msg: "Input should be a valid integer, unable to parse string as an integer",
+      input: raw,
+    })
+    return fallback
+  }
+  const value = Math.trunc(Number(raw.replace(/_/g, "")))
+  if (value < ge) {
+    issues.push({
+      type: "greater_than_equal",
+      loc: ["query", name],
+      msg: `Input should be greater than or equal to ${ge}`,
+      input: raw,
+      ctx: { ge },
+    })
+    return fallback
+  }
+  if (le !== null && value > le) {
+    issues.push({
+      type: "less_than_equal",
+      loc: ["query", name],
+      msg: `Input should be less than or equal to ${le}`,
+      input: raw,
+      ctx: { le },
+    })
+    return fallback
+  }
+  return value
+}
+
+/** FastAPI's `RequestValidationError` response for a set of collected issues. */
+export function unprocessableRequest(issues: ValidationErrorDetail[]): Response {
+  return Response.json({ detail: issues }, { status: 422 })
+}
+
+/**
+ * Pydantic renders an aware datetime with a `Z` suffix, six fractional digits,
+ * and no fractional part at all when the microsecond is zero:
+ * `2026-08-22T12:34:56.700000Z` and `2026-08-22T12:34:56Z`. It never trims a
+ * trailing zero. JavaScript's `toISOString()` instead always writes exactly
+ * three fractional digits and never omits them, so it is reformatted here.
+ *
+ * Every column this is applied to is `timestamptz`, which SQLAlchemy read back
+ * as an aware datetime, so `Z` rather than a naive `...T12:34:56` is the right
+ * suffix. Measured against pydantic 2.12.5 and FastAPI 0.141.1 rather than
+ * assumed; the transcript is in `docs/polish/evidence/p2.md#p230`, and
+ * `pydantic.test.ts` pins each case.
+ *
+ * Sub-millisecond precision is lost regardless: `pg` parses a Postgres
+ * timestamp into a `Date`, which has no microseconds. A value stored as
+ * `...789012` therefore reads back as `...789000`. Nothing in the dashboard
+ * does more than hand these strings to `new Date()`, which parses both.
+ */
+export function toPydanticIso(value: Date | null): string | null {
+  if (value === null) return null
+  // `toISOString()` always writes exactly three fractional digits, so the
+  // pattern always matches and the padding to six is a constant `000`.
+  return value.toISOString().replace(/\.(\d{3})Z$/, (_match, millis: string) =>
+    millis === "000" ? "Z" : `.${millis}000Z`,
+  )
+}

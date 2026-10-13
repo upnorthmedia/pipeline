@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { RefreshCw, Cpu } from "lucide-react";
+import Link from "next/link";
+import { RefreshCw, Cpu, Plus } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -13,16 +14,11 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import { analytics, type ModelAnalytics } from "@/lib/api";
+import { analytics, apiErrorMessage, type ModelAnalytics } from "@/lib/api";
+import { stageLabel } from "@/lib/stages";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
-
-const MODEL_FILTERS = [
-  { label: "All Models", value: "" },
-  { label: "Perplexity", value: "sonar-pro" },
-  { label: "Anthropic", value: "claude-opus-4-6" },
-  { label: "Gemini", value: "gemini-3.1-flash-image-preview" },
-] as const;
+import { MODEL_FILTERS } from "./model-filters";
+import { TabError, TabEmpty } from "./tab-states";
 
 const durationChartConfig = {
   avg_duration_s: { label: "Avg Duration (s)", color: "hsl(35, 85%, 55%)" },
@@ -51,13 +47,16 @@ export function ModelsTab() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [modelFilter, setModelFilter] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = async (m: string) => {
     try {
       const result = await analytics.models({ model: m || undefined });
       setData(result);
-    } catch {
-      toast.error("Failed to load model analytics");
+      setError(null);
+    } catch (err) {
+      setData(null);
+      setError(apiErrorMessage(err, "Could not load model analytics."));
     } finally {
       setLoading(false);
     }
@@ -80,6 +79,9 @@ export function ModelsTab() {
     runs: s.runs,
   })) ?? [];
 
+  const activeModelLabel =
+    MODEL_FILTERS.find((m) => m.value === modelFilter)?.label ?? modelFilter;
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -97,9 +99,7 @@ export function ModelsTab() {
     );
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Header */}
+  const controls = (
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1 rounded-lg bg-muted/50 p-0.5">
           {MODEL_FILTERS.map((mf) => (
@@ -127,6 +127,28 @@ export function ModelsTab() {
           <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
         </Button>
       </div>
+  );
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        {controls}
+        <TabError
+          title="Could not load model analytics"
+          message={error}
+          retryLabel="Retry models"
+          onRetry={() => {
+            setLoading(true);
+            fetchData(modelFilter);
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {controls}
 
       {/* Model Cards */}
       {data?.models && data.models.length > 0 ? (
@@ -184,18 +206,34 @@ export function ModelsTab() {
             </Card>
           ))}
         </div>
+      ) : modelFilter ? (
+        <TabEmpty
+          icon={Cpu}
+          title={`No calls recorded for ${activeModelLabel}`}
+          description="Another model may have served these stages. Clear the filter to see every model this account has billed."
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setModelFilter("")}
+            aria-label="Clear model filter"
+          >
+            Clear filter
+          </Button>
+        </TabEmpty>
       ) : (
-        <Card>
-          <CardContent className="p-8">
-            <div className="flex flex-col items-center justify-center text-center">
-              <Cpu className="h-8 w-8 text-muted-foreground/40 mb-2" />
-              <p className="text-sm text-muted-foreground">No model data yet</p>
-              <p className="text-xs text-muted-foreground/60 mt-0.5">
-                Run the pipeline to see model performance metrics
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <TabEmpty
+          icon={Cpu}
+          title="No model data yet"
+          description="Token counts, durations and per-model cost appear here once a pipeline run has called a provider."
+        >
+          <Button asChild variant="outline" size="sm">
+            <Link href="/posts/new">
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
+              New post
+            </Link>
+          </Button>
+        </TabEmpty>
       )}
 
       {/* Stage Duration Chart */}
@@ -272,8 +310,8 @@ export function ModelsTab() {
                 <tbody>
                   {data.stage_success_rates.map((stage) => (
                     <tr key={stage.stage} className="border-b border-border/30 last:border-0">
-                      <td className="py-2.5 pr-4 font-medium capitalize">
-                        {stage.stage}
+                      <td className="py-2.5 pr-4 font-medium">
+                        {stageLabel(stage.stage)}
                       </td>
                       <td className="py-2.5 px-4 text-right tabular-nums text-muted-foreground">
                         {stage.total}

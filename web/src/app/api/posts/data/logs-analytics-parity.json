@@ -1,0 +1,1663 @@
+{
+  "logs": [
+    {
+      "name": "empty list",
+      "execution_logs": [],
+      "level": null,
+      "stage": null,
+      "since": null,
+      "expected": []
+    },
+    {
+      "name": "no filters returns every entry in order",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": null,
+      "stage": null,
+      "since": null,
+      "expected": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ]
+    },
+    {
+      "name": "single level",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": [
+        "info"
+      ],
+      "stage": null,
+      "since": null,
+      "expected": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        }
+      ]
+    },
+    {
+      "name": "two levels",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": [
+        "info",
+        "error"
+      ],
+      "stage": null,
+      "since": null,
+      "expected": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        }
+      ]
+    },
+    {
+      "name": "level matching nothing",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": [
+        "critical"
+      ],
+      "stage": null,
+      "since": null,
+      "expected": []
+    },
+    {
+      "name": "empty level list is falsy, so no filter",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": [],
+      "stage": null,
+      "since": null,
+      "expected": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ]
+    },
+    {
+      "name": "level of the empty string filters, matching nothing",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": [
+        ""
+      ],
+      "stage": null,
+      "since": null,
+      "expected": []
+    },
+    {
+      "name": "an entry with no level key never matches a level filter",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": [
+        "debug"
+      ],
+      "stage": null,
+      "since": null,
+      "expected": [
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        }
+      ]
+    },
+    {
+      "name": "a non-string level is compared by equality, not by str()",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": [
+        "1"
+      ],
+      "stage": null,
+      "since": null,
+      "expected": []
+    },
+    {
+      "name": "stage",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": null,
+      "stage": "write",
+      "since": null,
+      "expected": [
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        }
+      ]
+    },
+    {
+      "name": "stage matching nothing",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": null,
+      "stage": "images",
+      "since": null,
+      "expected": []
+    },
+    {
+      "name": "empty stage is falsy, so no filter",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": null,
+      "stage": "",
+      "since": null,
+      "expected": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ]
+    },
+    {
+      "name": "a null stage value never matches",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": null,
+      "stage": "None",
+      "since": null,
+      "expected": []
+    },
+    {
+      "name": "since is a strict string comparison",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": null,
+      "stage": null,
+      "since": "2026-08-02T09:00:00Z",
+      "expected": [
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ]
+    },
+    {
+      "name": "since before everything",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": null,
+      "stage": null,
+      "since": "2026-01-01T00:00:00Z",
+      "expected": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ]
+    },
+    {
+      "name": "since after everything",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": null,
+      "stage": null,
+      "since": "2027-01-01T00:00:00Z",
+      "expected": []
+    },
+    {
+      "name": "an entry with no ts defaults to the empty string and loses",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": null,
+      "stage": null,
+      "since": "a",
+      "expected": []
+    },
+    {
+      "name": "since is not parsed as a date, so a bare word filters",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": null,
+      "stage": null,
+      "since": "2026-08",
+      "expected": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ]
+    },
+    {
+      "name": "all three filters compose",
+      "execution_logs": [
+        {
+          "ts": "2026-08-01T10:00:00Z",
+          "level": "info",
+          "stage": "research",
+          "message": "start"
+        },
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        },
+        {
+          "ts": "2026-08-02T09:00:00Z",
+          "level": "error",
+          "stage": "write",
+          "message": "retry"
+        },
+        {
+          "ts": "2026-08-03T08:00:00Z",
+          "level": "info",
+          "stage": "write",
+          "message": "done"
+        },
+        {
+          "level": "debug",
+          "stage": "edit",
+          "message": "no ts"
+        },
+        {
+          "ts": "2026-08-04T07:00:00Z",
+          "stage": "edit",
+          "message": "no level"
+        },
+        {
+          "ts": "2026-08-05T06:00:00Z",
+          "level": 1,
+          "stage": null,
+          "message": "odd types"
+        }
+      ],
+      "level": [
+        "info",
+        "warning"
+      ],
+      "stage": "research",
+      "since": "2026-08-01T10:00:00Z",
+      "expected": [
+        {
+          "ts": "2026-08-01T10:05:00Z",
+          "level": "warning",
+          "stage": "research",
+          "message": "slow"
+        }
+      ]
+    }
+  ],
+  "analytics": [
+    {
+      "name": "no content at all",
+      "post": {
+        "topic": "Espresso machine descaling",
+        "website_url": "https://example.com/blog",
+        "related_keywords": null,
+        "draft_content": null,
+        "final_md_content": null,
+        "ready_content": null
+      },
+      "expected": {
+        "word_count": 0,
+        "sentence_count": 0,
+        "paragraph_count": 0,
+        "avg_sentence_length": 0.0,
+        "flesch_reading_ease": 0.0,
+        "keyword_density": {},
+        "seo_checklist": {}
+      }
+    },
+    {
+      "name": "draft only",
+      "post": {
+        "topic": "Espresso machine descaling",
+        "website_url": "https://example.com/blog",
+        "related_keywords": null,
+        "draft_content": "---\ntitle: Espresso Machine Descaling\ndescription: How often to descale an espresso machine.\n---\n\n# Espresso Machine Descaling\n\nDescaling an espresso machine is the single maintenance task owners skip most.\nScale builds in the boiler and the group head, and it changes the taste of the\nshot long before the machine fails outright.\n\n## When to descale an espresso machine\n\nWater hardness decides the interval. Read our [water hardness guide](/water)\nand the [manufacturer notes](https://example.org/manual) before you start.\n\n![A descaling kit](https://cdn.example.com/kit.png)\n\n## What descaling does not fix\n\nA worn group gasket leaks whatever you do. Replace it separately.\n",
+        "final_md_content": null,
+        "ready_content": null
+      },
+      "expected": {
+        "word_count": 80,
+        "sentence_count": 6,
+        "paragraph_count": 8,
+        "avg_sentence_length": 13.3,
+        "flesch_reading_ease": 64.3,
+        "keyword_density": {},
+        "seo_checklist": {
+          "keyword_in_title": false,
+          "keyword_in_first_100_words": false,
+          "keyword_in_h2": false,
+          "has_h2_headings": true,
+          "has_internal_links": true,
+          "has_external_links": true,
+          "internal_link_count": 2,
+          "external_link_count": 1,
+          "has_meta_description": true
+        }
+      }
+    },
+    {
+      "name": "final_md_content wins over draft_content",
+      "post": {
+        "topic": "Espresso machine descaling",
+        "website_url": "https://example.com/blog",
+        "related_keywords": null,
+        "draft_content": "# Other\n\nSomething else entirely.\n",
+        "final_md_content": "---\ntitle: Espresso Machine Descaling\ndescription: How often to descale an espresso machine.\n---\n\n# Espresso Machine Descaling\n\nDescaling an espresso machine is the single maintenance task owners skip most.\nScale builds in the boiler and the group head, and it changes the taste of the\nshot long before the machine fails outright.\n\n## When to descale an espresso machine\n\nWater hardness decides the interval. Read our [water hardness guide](/water)\nand the [manufacturer notes](https://example.org/manual) before you start.\n\n![A descaling kit](https://cdn.example.com/kit.png)\n\n## What descaling does not fix\n\nA worn group gasket leaks whatever you do. Replace it separately.\n",
+        "ready_content": null
+      },
+      "expected": {
+        "word_count": 80,
+        "sentence_count": 6,
+        "paragraph_count": 8,
+        "avg_sentence_length": 13.3,
+        "flesch_reading_ease": 64.3,
+        "keyword_density": {},
+        "seo_checklist": {
+          "keyword_in_title": false,
+          "keyword_in_first_100_words": false,
+          "keyword_in_h2": false,
+          "has_h2_headings": true,
+          "has_internal_links": true,
+          "has_external_links": true,
+          "internal_link_count": 2,
+          "external_link_count": 1,
+          "has_meta_description": true
+        }
+      }
+    },
+    {
+      "name": "empty final_md_content falls through to draft",
+      "post": {
+        "topic": "Espresso machine descaling",
+        "website_url": "https://example.com/blog",
+        "related_keywords": null,
+        "draft_content": "---\ntitle: Espresso Machine Descaling\ndescription: How often to descale an espresso machine.\n---\n\n# Espresso Machine Descaling\n\nDescaling an espresso machine is the single maintenance task owners skip most.\nScale builds in the boiler and the group head, and it changes the taste of the\nshot long before the machine fails outright.\n\n## When to descale an espresso machine\n\nWater hardness decides the interval. Read our [water hardness guide](/water)\nand the [manufacturer notes](https://example.org/manual) before you start.\n\n![A descaling kit](https://cdn.example.com/kit.png)\n\n## What descaling does not fix\n\nA worn group gasket leaks whatever you do. Replace it separately.\n",
+        "final_md_content": "",
+        "ready_content": null
+      },
+      "expected": {
+        "word_count": 80,
+        "sentence_count": 6,
+        "paragraph_count": 8,
+        "avg_sentence_length": 13.3,
+        "flesch_reading_ease": 64.3,
+        "keyword_density": {},
+        "seo_checklist": {
+          "keyword_in_title": false,
+          "keyword_in_first_100_words": false,
+          "keyword_in_h2": false,
+          "has_h2_headings": true,
+          "has_internal_links": true,
+          "has_external_links": true,
+          "internal_link_count": 2,
+          "external_link_count": 1,
+          "has_meta_description": true
+        }
+      }
+    },
+    {
+      "name": "ready_content is not consulted",
+      "post": {
+        "topic": "Espresso machine descaling",
+        "website_url": "https://example.com/blog",
+        "related_keywords": null,
+        "draft_content": "# Draft\n\nOnly this counts.\n",
+        "final_md_content": null,
+        "ready_content": "---\ntitle: Espresso Machine Descaling\ndescription: How often to descale an espresso machine.\n---\n\n# Espresso Machine Descaling\n\nDescaling an espresso machine is the single maintenance task owners skip most.\nScale builds in the boiler and the group head, and it changes the taste of the\nshot long before the machine fails outright.\n\n## When to descale an espresso machine\n\nWater hardness decides the interval. Read our [water hardness guide](/water)\nand the [manufacturer notes](https://example.org/manual) before you start.\n\n![A descaling kit](https://cdn.example.com/kit.png)\n\n## What descaling does not fix\n\nA worn group gasket leaks whatever you do. Replace it separately.\n"
+      },
+      "expected": {
+        "word_count": 4,
+        "sentence_count": 1,
+        "paragraph_count": 2,
+        "avg_sentence_length": 4.0,
+        "flesch_reading_ease": 97.0,
+        "keyword_density": {},
+        "seo_checklist": {
+          "keyword_in_title": false,
+          "keyword_in_first_100_words": false,
+          "keyword_in_h2": false,
+          "has_h2_headings": false,
+          "has_internal_links": false,
+          "has_external_links": false,
+          "internal_link_count": 0,
+          "external_link_count": 0,
+          "has_meta_description": false
+        }
+      }
+    },
+    {
+      "name": "no keywords",
+      "post": {
+        "topic": "Espresso machine descaling",
+        "website_url": "https://example.com/blog",
+        "related_keywords": null,
+        "draft_content": null,
+        "final_md_content": "---\ntitle: Espresso Machine Descaling\ndescription: How often to descale an espresso machine.\n---\n\n# Espresso Machine Descaling\n\nDescaling an espresso machine is the single maintenance task owners skip most.\nScale builds in the boiler and the group head, and it changes the taste of the\nshot long before the machine fails outright.\n\n## When to descale an espresso machine\n\nWater hardness decides the interval. Read our [water hardness guide](/water)\nand the [manufacturer notes](https://example.org/manual) before you start.\n\n![A descaling kit](https://cdn.example.com/kit.png)\n\n## What descaling does not fix\n\nA worn group gasket leaks whatever you do. Replace it separately.\n",
+        "ready_content": null
+      },
+      "expected": {
+        "word_count": 80,
+        "sentence_count": 6,
+        "paragraph_count": 8,
+        "avg_sentence_length": 13.3,
+        "flesch_reading_ease": 64.3,
+        "keyword_density": {},
+        "seo_checklist": {
+          "keyword_in_title": false,
+          "keyword_in_first_100_words": false,
+          "keyword_in_h2": false,
+          "has_h2_headings": true,
+          "has_internal_links": true,
+          "has_external_links": true,
+          "internal_link_count": 2,
+          "external_link_count": 1,
+          "has_meta_description": true
+        }
+      }
+    },
+    {
+      "name": "empty keyword list",
+      "post": {
+        "topic": "Espresso machine descaling",
+        "website_url": "https://example.com/blog",
+        "related_keywords": [],
+        "draft_content": null,
+        "final_md_content": "---\ntitle: Espresso Machine Descaling\ndescription: How often to descale an espresso machine.\n---\n\n# Espresso Machine Descaling\n\nDescaling an espresso machine is the single maintenance task owners skip most.\nScale builds in the boiler and the group head, and it changes the taste of the\nshot long before the machine fails outright.\n\n## When to descale an espresso machine\n\nWater hardness decides the interval. Read our [water hardness guide](/water)\nand the [manufacturer notes](https://example.org/manual) before you start.\n\n![A descaling kit](https://cdn.example.com/kit.png)\n\n## What descaling does not fix\n\nA worn group gasket leaks whatever you do. Replace it separately.\n",
+        "ready_content": null
+      },
+      "expected": {
+        "word_count": 80,
+        "sentence_count": 6,
+        "paragraph_count": 8,
+        "avg_sentence_length": 13.3,
+        "flesch_reading_ease": 64.3,
+        "keyword_density": {},
+        "seo_checklist": {
+          "keyword_in_title": false,
+          "keyword_in_first_100_words": false,
+          "keyword_in_h2": false,
+          "has_h2_headings": true,
+          "has_internal_links": true,
+          "has_external_links": true,
+          "internal_link_count": 2,
+          "external_link_count": 1,
+          "has_meta_description": true
+        }
+      }
+    },
+    {
+      "name": "one keyword is the primary and there are no secondaries",
+      "post": {
+        "topic": "Espresso machine descaling",
+        "website_url": "https://example.com/blog",
+        "related_keywords": [
+          "descaling an espresso machine"
+        ],
+        "draft_content": null,
+        "final_md_content": "---\ntitle: Espresso Machine Descaling\ndescription: How often to descale an espresso machine.\n---\n\n# Espresso Machine Descaling\n\nDescaling an espresso machine is the single maintenance task owners skip most.\nScale builds in the boiler and the group head, and it changes the taste of the\nshot long before the machine fails outright.\n\n## When to descale an espresso machine\n\nWater hardness decides the interval. Read our [water hardness guide](/water)\nand the [manufacturer notes](https://example.org/manual) before you start.\n\n![A descaling kit](https://cdn.example.com/kit.png)\n\n## What descaling does not fix\n\nA worn group gasket leaks whatever you do. Replace it separately.\n",
+        "ready_content": null
+      },
+      "expected": {
+        "word_count": 80,
+        "sentence_count": 6,
+        "paragraph_count": 8,
+        "avg_sentence_length": 13.3,
+        "flesch_reading_ease": 64.3,
+        "keyword_density": {
+          "descaling an espresso machine": 5.0
+        },
+        "seo_checklist": {
+          "keyword_in_title": false,
+          "keyword_in_first_100_words": true,
+          "keyword_in_h2": false,
+          "has_h2_headings": true,
+          "has_internal_links": true,
+          "has_external_links": true,
+          "internal_link_count": 2,
+          "external_link_count": 1,
+          "has_meta_description": true
+        }
+      }
+    },
+    {
+      "name": "the first keyword is primary and the rest are secondary",
+      "post": {
+        "topic": "Espresso machine descaling",
+        "website_url": "https://example.com/blog",
+        "related_keywords": [
+          "descaling an espresso machine",
+          "water hardness",
+          "group gasket"
+        ],
+        "draft_content": null,
+        "final_md_content": "---\ntitle: Espresso Machine Descaling\ndescription: How often to descale an espresso machine.\n---\n\n# Espresso Machine Descaling\n\nDescaling an espresso machine is the single maintenance task owners skip most.\nScale builds in the boiler and the group head, and it changes the taste of the\nshot long before the machine fails outright.\n\n## When to descale an espresso machine\n\nWater hardness decides the interval. Read our [water hardness guide](/water)\nand the [manufacturer notes](https://example.org/manual) before you start.\n\n![A descaling kit](https://cdn.example.com/kit.png)\n\n## What descaling does not fix\n\nA worn group gasket leaks whatever you do. Replace it separately.\n",
+        "ready_content": null
+      },
+      "expected": {
+        "word_count": 80,
+        "sentence_count": 6,
+        "paragraph_count": 8,
+        "avg_sentence_length": 13.3,
+        "flesch_reading_ease": 64.3,
+        "keyword_density": {
+          "descaling an espresso machine": 5.0,
+          "water hardness": 5.0,
+          "group gasket": 2.5
+        },
+        "seo_checklist": {
+          "keyword_in_title": false,
+          "keyword_in_first_100_words": true,
+          "keyword_in_h2": false,
+          "has_h2_headings": true,
+          "has_internal_links": true,
+          "has_external_links": true,
+          "internal_link_count": 2,
+          "external_link_count": 1,
+          "has_meta_description": true
+        }
+      }
+    },
+    {
+      "name": "a non-string first keyword yields an empty primary",
+      "post": {
+        "topic": "Espresso machine descaling",
+        "website_url": "https://example.com/blog",
+        "related_keywords": [
+          7,
+          "water hardness"
+        ],
+        "draft_content": null,
+        "final_md_content": "---\ntitle: Espresso Machine Descaling\ndescription: How often to descale an espresso machine.\n---\n\n# Espresso Machine Descaling\n\nDescaling an espresso machine is the single maintenance task owners skip most.\nScale builds in the boiler and the group head, and it changes the taste of the\nshot long before the machine fails outright.\n\n## When to descale an espresso machine\n\nWater hardness decides the interval. Read our [water hardness guide](/water)\nand the [manufacturer notes](https://example.org/manual) before you start.\n\n![A descaling kit](https://cdn.example.com/kit.png)\n\n## What descaling does not fix\n\nA worn group gasket leaks whatever you do. Replace it separately.\n",
+        "ready_content": null
+      },
+      "expected": {
+        "word_count": 80,
+        "sentence_count": 6,
+        "paragraph_count": 8,
+        "avg_sentence_length": 13.3,
+        "flesch_reading_ease": 64.3,
+        "keyword_density": {
+          "water hardness": 5.0
+        },
+        "seo_checklist": {
+          "keyword_in_title": false,
+          "keyword_in_first_100_words": false,
+          "keyword_in_h2": false,
+          "has_h2_headings": true,
+          "has_internal_links": true,
+          "has_external_links": true,
+          "internal_link_count": 2,
+          "external_link_count": 1,
+          "has_meta_description": true
+        }
+      }
+    },
+    {
+      "name": "non-string keywords are dropped from the secondaries",
+      "post": {
+        "topic": "Espresso machine descaling",
+        "website_url": "https://example.com/blog",
+        "related_keywords": [
+          "descaling an espresso machine",
+          7,
+          "water hardness"
+        ],
+        "draft_content": null,
+        "final_md_content": "---\ntitle: Espresso Machine Descaling\ndescription: How often to descale an espresso machine.\n---\n\n# Espresso Machine Descaling\n\nDescaling an espresso machine is the single maintenance task owners skip most.\nScale builds in the boiler and the group head, and it changes the taste of the\nshot long before the machine fails outright.\n\n## When to descale an espresso machine\n\nWater hardness decides the interval. Read our [water hardness guide](/water)\nand the [manufacturer notes](https://example.org/manual) before you start.\n\n![A descaling kit](https://cdn.example.com/kit.png)\n\n## What descaling does not fix\n\nA worn group gasket leaks whatever you do. Replace it separately.\n",
+        "ready_content": null
+      },
+      "expected": {
+        "word_count": 80,
+        "sentence_count": 6,
+        "paragraph_count": 8,
+        "avg_sentence_length": 13.3,
+        "flesch_reading_ease": 64.3,
+        "keyword_density": {
+          "descaling an espresso machine": 5.0,
+          "water hardness": 5.0
+        },
+        "seo_checklist": {
+          "keyword_in_title": false,
+          "keyword_in_first_100_words": true,
+          "keyword_in_h2": false,
+          "has_h2_headings": true,
+          "has_internal_links": true,
+          "has_external_links": true,
+          "internal_link_count": 2,
+          "external_link_count": 1,
+          "has_meta_description": true
+        }
+      }
+    },
+    {
+      "name": "topic feeds the title check",
+      "post": {
+        "topic": "Descaling an espresso machine",
+        "website_url": "https://example.com/blog",
+        "related_keywords": [
+          "descaling"
+        ],
+        "draft_content": null,
+        "final_md_content": "---\ntitle: Espresso Machine Descaling\ndescription: How often to descale an espresso machine.\n---\n\n# Espresso Machine Descaling\n\nDescaling an espresso machine is the single maintenance task owners skip most.\nScale builds in the boiler and the group head, and it changes the taste of the\nshot long before the machine fails outright.\n\n## When to descale an espresso machine\n\nWater hardness decides the interval. Read our [water hardness guide](/water)\nand the [manufacturer notes](https://example.org/manual) before you start.\n\n![A descaling kit](https://cdn.example.com/kit.png)\n\n## What descaling does not fix\n\nA worn group gasket leaks whatever you do. Replace it separately.\n",
+        "ready_content": null
+      },
+      "expected": {
+        "word_count": 80,
+        "sentence_count": 6,
+        "paragraph_count": 8,
+        "avg_sentence_length": 13.3,
+        "flesch_reading_ease": 64.3,
+        "keyword_density": {
+          "descaling": 5.0
+        },
+        "seo_checklist": {
+          "keyword_in_title": true,
+          "keyword_in_first_100_words": true,
+          "keyword_in_h2": true,
+          "has_h2_headings": true,
+          "has_internal_links": true,
+          "has_external_links": true,
+          "internal_link_count": 2,
+          "external_link_count": 1,
+          "has_meta_description": true
+        }
+      }
+    },
+    {
+      "name": "an empty topic is an empty title",
+      "post": {
+        "topic": "",
+        "website_url": "https://example.com/blog",
+        "related_keywords": [
+          "descaling"
+        ],
+        "draft_content": null,
+        "final_md_content": "---\ntitle: Espresso Machine Descaling\ndescription: How often to descale an espresso machine.\n---\n\n# Espresso Machine Descaling\n\nDescaling an espresso machine is the single maintenance task owners skip most.\nScale builds in the boiler and the group head, and it changes the taste of the\nshot long before the machine fails outright.\n\n## When to descale an espresso machine\n\nWater hardness decides the interval. Read our [water hardness guide](/water)\nand the [manufacturer notes](https://example.org/manual) before you start.\n\n![A descaling kit](https://cdn.example.com/kit.png)\n\n## What descaling does not fix\n\nA worn group gasket leaks whatever you do. Replace it separately.\n",
+        "ready_content": null
+      },
+      "expected": {
+        "word_count": 80,
+        "sentence_count": 6,
+        "paragraph_count": 8,
+        "avg_sentence_length": 13.3,
+        "flesch_reading_ease": 64.3,
+        "keyword_density": {
+          "descaling": 5.0
+        },
+        "seo_checklist": {
+          "keyword_in_title": false,
+          "keyword_in_first_100_words": true,
+          "keyword_in_h2": true,
+          "has_h2_headings": true,
+          "has_internal_links": true,
+          "has_external_links": true,
+          "internal_link_count": 2,
+          "external_link_count": 1,
+          "has_meta_description": true
+        }
+      }
+    },
+    {
+      "name": "website_url decides which links count as internal",
+      "post": {
+        "topic": "Espresso machine descaling",
+        "website_url": "https://example.org/blog",
+        "related_keywords": [
+          "descaling"
+        ],
+        "draft_content": null,
+        "final_md_content": "---\ntitle: Espresso Machine Descaling\ndescription: How often to descale an espresso machine.\n---\n\n# Espresso Machine Descaling\n\nDescaling an espresso machine is the single maintenance task owners skip most.\nScale builds in the boiler and the group head, and it changes the taste of the\nshot long before the machine fails outright.\n\n## When to descale an espresso machine\n\nWater hardness decides the interval. Read our [water hardness guide](/water)\nand the [manufacturer notes](https://example.org/manual) before you start.\n\n![A descaling kit](https://cdn.example.com/kit.png)\n\n## What descaling does not fix\n\nA worn group gasket leaks whatever you do. Replace it separately.\n",
+        "ready_content": null
+      },
+      "expected": {
+        "word_count": 80,
+        "sentence_count": 6,
+        "paragraph_count": 8,
+        "avg_sentence_length": 13.3,
+        "flesch_reading_ease": 64.3,
+        "keyword_density": {
+          "descaling": 5.0
+        },
+        "seo_checklist": {
+          "keyword_in_title": true,
+          "keyword_in_first_100_words": true,
+          "keyword_in_h2": true,
+          "has_h2_headings": true,
+          "has_internal_links": true,
+          "has_external_links": true,
+          "internal_link_count": 2,
+          "external_link_count": 1,
+          "has_meta_description": true
+        }
+      }
+    },
+    {
+      "name": "a null website_url leaves the domain empty",
+      "post": {
+        "topic": "Espresso machine descaling",
+        "website_url": null,
+        "related_keywords": [
+          "descaling"
+        ],
+        "draft_content": null,
+        "final_md_content": "---\ntitle: Espresso Machine Descaling\ndescription: How often to descale an espresso machine.\n---\n\n# Espresso Machine Descaling\n\nDescaling an espresso machine is the single maintenance task owners skip most.\nScale builds in the boiler and the group head, and it changes the taste of the\nshot long before the machine fails outright.\n\n## When to descale an espresso machine\n\nWater hardness decides the interval. Read our [water hardness guide](/water)\nand the [manufacturer notes](https://example.org/manual) before you start.\n\n![A descaling kit](https://cdn.example.com/kit.png)\n\n## What descaling does not fix\n\nA worn group gasket leaks whatever you do. Replace it separately.\n",
+        "ready_content": null
+      },
+      "expected": {
+        "word_count": 80,
+        "sentence_count": 6,
+        "paragraph_count": 8,
+        "avg_sentence_length": 13.3,
+        "flesch_reading_ease": 64.3,
+        "keyword_density": {
+          "descaling": 5.0
+        },
+        "seo_checklist": {
+          "keyword_in_title": true,
+          "keyword_in_first_100_words": true,
+          "keyword_in_h2": true,
+          "has_h2_headings": true,
+          "has_internal_links": true,
+          "has_external_links": true,
+          "internal_link_count": 1,
+          "external_link_count": 2,
+          "has_meta_description": true
+        }
+      }
+    }
+  ]
+}

@@ -11,9 +11,14 @@ vi.mock("@/lib/api", async () => {
     apiKeys: {
       get: vi.fn(),
       update: vi.fn(),
+      reveal: vi.fn(),
     },
     rules: {
       list: vi.fn(),
+      get: vi.fn(),
+      update: vi.fn(),
+    },
+    stageModels: {
       get: vi.fn(),
       update: vi.fn(),
     },
@@ -28,13 +33,14 @@ vi.mock("sonner", () => ({
   },
 }));
 
-const { apiKeys, rules } = await import("@/lib/api");
+const { apiKeys, rules, stageModels, STAGES } = await import("@/lib/api");
 const { toast } = await import("sonner");
 const mockApiKeysGet = vi.mocked(apiKeys.get);
 const mockApiKeysUpdate = vi.mocked(apiKeys.update);
 const mockRulesList = vi.mocked(rules.list);
 const mockRulesGet = vi.mocked(rules.get);
 const mockRulesUpdate = vi.mocked(rules.update);
+const mockStageModelsGet = vi.mocked(stageModels.get);
 
 const testKeyStatuses = {
   anthropic: { provider: "anthropic", configured: true, source: "db" as const, hint: "...ab12", valid: null },
@@ -56,15 +62,39 @@ beforeEach(() => {
   mockApiKeysGet.mockResolvedValue(testKeyStatuses);
   mockRulesList.mockResolvedValue(testRuleFiles);
   mockRulesGet.mockResolvedValue({ name: "blog-research", content: "# Research Rules\nContent here" });
+  mockStageModelsGet.mockResolvedValue({ stages: [], overrides: {} });
 });
 
 describe("SettingsPage", () => {
-  it("renders settings heading", async () => {
+  it("renders the account heading and says what an account owns", async () => {
     renderWithProviders(<SettingsPage />);
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
-      expect(screen.getByText("API keys and rule file editor")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Account" })).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Provider API keys, the model each stage runs on, and the rule files every stage prompts from. These apply to every site."
+        )
+      ).toBeInTheDocument();
     });
+  });
+
+  it("points at the other side of the boundary", async () => {
+    renderWithProviders(<SettingsPage />);
+    const link = await screen.findByRole("link", {
+      name: "Website profiles",
+    });
+    expect(link).toHaveAttribute("href", "/profiles");
+    expect(
+      screen.getByText(/voice, publishing connection and new post defaults/i)
+    ).toBeInTheDocument();
+  });
+
+  it("says on the stage models card that review gates are per site", async () => {
+    renderWithProviders(<SettingsPage />);
+    const link = await screen.findByRole("link", {
+      name: "set per site, on the website profile",
+    });
+    expect(link).toHaveAttribute("href", "/profiles");
   });
 
   it("calls apiKeys.get on mount", async () => {
@@ -133,7 +163,10 @@ describe("SettingsPage", () => {
     });
   });
 
-  it("shows validation failure toast", async () => {
+  // Was `shows validation failure toast`. The reason a save was rejected now
+  // stays inline next to the keys that were pasted rather than expiring in a
+  // toast, so the assertion moved with it.
+  it("keeps a validation failure inline", async () => {
     const user = userEvent.setup();
     mockApiKeysUpdate.mockResolvedValue({
       anthropic: { provider: "anthropic", configured: true, source: "db" as const, hint: "...newk", valid: false },
@@ -150,7 +183,9 @@ describe("SettingsPage", () => {
     await user.click(screen.getByText("Save & Validate"));
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("Some keys failed validation — check status badges");
+      expect(
+        screen.getByText("Some keys failed validation, see the status badges")
+      ).toBeInTheDocument();
     });
   });
 
@@ -192,5 +227,366 @@ describe("SettingsPage", () => {
       expect(mockRulesUpdate).toHaveBeenCalledWith("blog-research", expect.any(String));
       expect(toast.success).toHaveBeenCalledWith('Rule file "blog-research" saved');
     });
+  });
+});
+
+describe("SettingsPage async states", () => {
+  /**
+   * The API keys card is the first of three, so anything its placeholder does
+   * not reserve is space the two below jump by. Measured in Chrome: the card
+   * stood 350px while loading against 425px loaded, because the placeholder
+   * drew the three key rows and stopped, leaving out the separator and the save
+   * row the answer renders. jsdom has no layout, so the invariant is the shape.
+   */
+  it("reserves the separator and the save row while the key statuses load", async () => {
+    mockApiKeysGet.mockReturnValue(new Promise(() => {}));
+
+    renderWithProviders(<SettingsPage />);
+
+    const placeholder = screen.getByTestId("api-keys-loading");
+    // A label, an input and a reveal button for each of the three providers,
+    // then the save button under the separator.
+    expect(placeholder.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(
+      3 * 3 + 1
+    );
+    expect(placeholder.querySelector('[data-slot="separator"]')).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /save & validate/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it("holds the server's message with a Retry when the key status load fails", async () => {
+    mockApiKeysGet.mockRejectedValueOnce(
+      new Error('{"detail":"connection to server at \\"db\\" failed"}')
+    );
+    renderWithProviders(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Could not load API key status")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText('connection to server at "db" failed')
+    ).toBeInTheDocument();
+    // The three inputs are what made a failed load look like an unconfigured
+    // account, so they must not be on screen while the load is failing.
+    expect(screen.queryByLabelText("Anthropic")).not.toBeInTheDocument();
+  });
+
+  it("falls back to its own wording when the key failure body carries no detail", async () => {
+    mockApiKeysGet.mockRejectedValueOnce(new Error("Failed to fetch"));
+    renderWithProviders(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("The request failed and the server gave no reason.")
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("recovers the key statuses when Retry succeeds", async () => {
+    const user = userEvent.setup();
+    mockApiKeysGet.mockRejectedValueOnce(new Error('{"detail":"nope"}'));
+    renderWithProviders(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Could not load API key status")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Retry API keys" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Anthropic")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Could not load API key status")).not.toBeInTheDocument();
+  });
+
+  it("names the providers a run needs when nothing is configured", async () => {
+    mockApiKeysGet.mockResolvedValue({
+      anthropic: { provider: "anthropic", configured: false, source: "none" as const, hint: "", valid: null },
+      perplexity: { provider: "perplexity", configured: false, source: "none" as const, hint: "", valid: null },
+      gemini: { provider: "gemini", configured: false, source: "none" as const, hint: "", valid: null },
+    });
+    renderWithProviders(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/No provider keys are configured yet/)).toBeInTheDocument();
+    });
+    // The inputs are the action that fills the empty state, so they stay.
+    expect(screen.getByLabelText("Anthropic")).toBeInTheDocument();
+  });
+
+  it("does not claim an empty account when at least one key is set", async () => {
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Anthropic")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/No provider keys are configured yet/)).not.toBeInTheDocument();
+  });
+
+  it("keeps a rejected key save inline with the server's message", async () => {
+    const user = userEvent.setup();
+    mockApiKeysUpdate.mockRejectedValueOnce(
+      new Error('{"detail":"anthropic: invalid key format"}')
+    );
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Anthropic")).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByLabelText("Anthropic"), "sk-ant-test1234");
+    await user.click(screen.getByText("Save & Validate"));
+
+    await waitFor(() => {
+      expect(screen.getByText("anthropic: invalid key format")).toBeInTheDocument();
+    });
+  });
+
+  it("surfaces a failed reveal next to the key it belongs to", async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiKeys).reveal = vi.fn().mockRejectedValue(
+      new Error('{"detail":"decryption failed"}')
+    );
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Anthropic")).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Toggle Anthropic key visibility" })
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("decryption failed")).toBeInTheDocument();
+    });
+  });
+
+  it("shows an error with a Retry when the rule content fails to load", async () => {
+    mockRulesGet.mockRejectedValueOnce(new Error('{"detail":"rules directory missing"}'));
+    renderWithProviders(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Could not load blog-research")).toBeInTheDocument();
+    });
+    expect(screen.getByText("rules directory missing")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /blog-research/ })).not.toBeInTheDocument();
+  });
+
+  it("does not offer to save an empty editor over a rule file that failed to load", async () => {
+    mockRulesGet.mockRejectedValueOnce(new Error('{"detail":"rules directory missing"}'));
+    renderWithProviders(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Could not load blog-research")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: /Save blog-research/ })).toBeDisabled();
+  });
+
+  it("restores the editor when the rule Retry succeeds", async () => {
+    const user = userEvent.setup();
+    mockRulesGet.mockRejectedValueOnce(new Error('{"detail":"rules directory missing"}'));
+    renderWithProviders(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Could not load blog-research")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Retry blog-research" }));
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue(/# Research Rules/)).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: /Save blog-research/ })).toBeEnabled();
+  });
+
+  it("says a rule file does not exist yet rather than showing a blank editor", async () => {
+    const user = userEvent.setup();
+    mockRulesGet.mockResolvedValue({ name: "blog-images", content: "" });
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^blog-images/ })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /^blog-images/ }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/blog-images\.md does not exist yet/)
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("keeps a rejected rule save inline with the server's message", async () => {
+    const user = userEvent.setup();
+    mockRulesUpdate.mockRejectedValueOnce(new Error('{"detail":"rules directory is read only"}'));
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByText(/Save blog-research/)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText(/Save blog-research/));
+
+    await waitFor(() => {
+      expect(screen.getByText("rules directory is read only")).toBeInTheDocument();
+    });
+  });
+
+  it("says so when the rule file list cannot be checked, and offers a retry", async () => {
+    const user = userEvent.setup();
+    mockRulesList.mockRejectedValueOnce(new Error('{"detail":"rules directory missing"}'));
+    renderWithProviders(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Could not check which rule files exist/)
+      ).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Retry rule file list" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/Could not check which rule files exist/)
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("labels the rule editor rather than relying on its placeholder", async () => {
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("blog-research.md")).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText("blog-research.md")).toHaveAttribute("name", "rule-content");
+  });
+  // The eye next to a key the operator has just pasted is asking "did that
+  // paste land intact", which the browser can answer on its own. Calling the
+  // reveal endpoint for it returned the *stored* key over a typed one and
+  // failed outright when the endpoint said no.
+  it("shows a key typed into the field without asking the server for it", async () => {
+    const user = userEvent.setup();
+    const reveal = vi.fn();
+    vi.mocked(apiKeys).reveal = reveal;
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Anthropic")).toBeInTheDocument();
+    });
+
+    const input = screen.getByLabelText("Anthropic");
+    await user.type(input, "sk-ant-typed-1234");
+    expect(input).toHaveAttribute("type", "password");
+
+    await user.click(
+      screen.getByRole("button", { name: "Toggle Anthropic key visibility" })
+    );
+
+    expect(reveal).not.toHaveBeenCalled();
+    expect(input).toHaveAttribute("type", "text");
+    expect(input).toHaveValue("sk-ant-typed-1234");
+  });
+
+  // Google's current keys start `AQ.`, not the `AIza` of the AI Studio format
+  // this page was written against. A prefix guess that goes stale must not be
+  // able to refuse a key the provider itself accepts.
+  it("saves a current-format Gemini key rather than calling it malformed", async () => {
+    const user = userEvent.setup();
+    mockApiKeysUpdate.mockResolvedValue({
+      anthropic: { provider: "anthropic", configured: true, source: "db" as const, hint: "...ab12", valid: null },
+      perplexity: { provider: "perplexity", configured: false, source: "none" as const, hint: "", valid: null },
+      gemini: { provider: "gemini", configured: true, source: "db" as const, hint: "...alue", valid: true },
+    });
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Gemini")).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByLabelText("Gemini"), "AQ.Ab8RN6JTestKeyValue");
+    await user.tab();
+
+    expect(screen.queryByText(/Expected prefix/)).not.toBeInTheDocument();
+    const save = screen.getByRole("button", { name: /Save & Validate/ });
+    expect(save).toBeEnabled();
+
+    await user.click(save);
+    await waitFor(() => {
+      expect(mockApiKeysUpdate).toHaveBeenCalledWith({
+        gemini: "AQ.Ab8RN6JTestKeyValue",
+      });
+    });
+  });
+
+  // The same thought one step further: an unrecognised prefix is a warning,
+  // not a verdict. Only the provider can say whether a key works, and the save
+  // is what asks it.
+  it("warns about an unrecognised prefix without refusing to save", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Anthropic")).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByLabelText("Anthropic"), "bad-key");
+    await user.tab();
+
+    await waitFor(() => {
+      expect(screen.getByText("Expected prefix: sk-ant-")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: /Save & Validate/ })).toBeEnabled();
+  });
+
+  // A reveal that fails says nothing about the key in the box next to it, so
+  // it has no business disabling the save that would store it.
+  it("still saves a pasted key after a reveal failed", async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiKeys).reveal = vi
+      .fn()
+      .mockRejectedValue(new Error('{"detail":"Forbidden"}'));
+    mockApiKeysUpdate.mockResolvedValue({
+      anthropic: { provider: "anthropic", configured: true, source: "db" as const, hint: "...ab12", valid: null },
+      perplexity: { provider: "perplexity", configured: true, source: "db" as const, hint: "...wxyz", valid: true },
+      gemini: { provider: "gemini", configured: true, source: "db" as const, hint: "...xyz9", valid: true },
+    });
+    renderWithProviders(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Anthropic")).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Toggle Anthropic key visibility" })
+    );
+    await waitFor(() => {
+      expect(screen.getByText("Forbidden")).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByLabelText("Perplexity"), "pplx-pasted-wxyz");
+    const save = screen.getByRole("button", { name: /Save & Validate/ });
+    expect(save).toBeEnabled();
+
+    await user.click(save);
+    await waitFor(() => {
+      expect(mockApiKeysUpdate).toHaveBeenCalledWith({
+        perplexity: "pplx-pasted-wxyz",
+      });
+    });
+  });
+
+});
+
+describe("settings loading.tsx", () => {
+  it("mirrors all three cards the page renders", async () => {
+    const Loading = (await import("./loading")).default;
+    const { container } = renderWithProviders(<Loading />);
+
+    // One bordered block per card. It had two while the page had three, so the
+    // route-transition skeleton stopped short of the stage models table.
+    // Matched on `border-border`, the class only the card wrappers carry: the
+    // stage models placeholder now nests one bordered box per stage, because a
+    // loaded row is one and a flat bar reserved less than half its height.
+    expect(container.querySelectorAll(".rounded-md.border-border")).toHaveLength(3);
+    // The nested boxes are the stage models placeholder. The route transition
+    // and the card's own placeholder have to reserve the same height, or the
+    // page jumps once on the transition and again when the client answer lands.
+    expect(
+      container.querySelectorAll(".rounded-md.border:not(.border-border)")
+    ).toHaveLength(STAGES.length);
+    expect(
+      container.querySelectorAll('[data-slot="skeleton"]').length
+    ).toBeGreaterThan(20);
   });
 });

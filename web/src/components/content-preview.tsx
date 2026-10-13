@@ -4,14 +4,7 @@ import type { Components } from "react-markdown";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ScrollArea } from "@/components/ui/scroll-area";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8055";
-
-function resolveImageSrc(src: string | undefined): string {
-  if (!src) return "";
-  if (src.startsWith("/media/")) return `${API_BASE}${src}`;
-  return src;
-}
+import { ImageWithFallback } from "@/components/image-with-fallback";
 
 const markdownComponents: Components = {
   h1: ({ children }) => (
@@ -69,12 +62,25 @@ const markdownComponents: Components = {
     </pre>
   ),
   img: ({ src, alt }) => (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={resolveImageSrc(typeof src === "string" ? src : undefined)}
+    // The ready stage writes the images stage's own `/media/<post_id>/<file>`
+    // urls into the article, and those files can be absent (item P1.2b), so a
+    // load that fails has to say so rather than leave a broken-image glyph in
+    // the middle of the preview.
+    <ImageWithFallback
+      src={typeof src === "string" ? src : ""}
       alt={alt || ""}
       className="rounded-lg my-8 w-full shadow-sm"
       loading="lazy"
+      fallback={
+        <span className="my-8 flex flex-col items-center gap-1 rounded-lg border border-dashed border-destructive/40 bg-destructive/5 px-4 py-8 text-center">
+          <span className="text-sm text-destructive">
+            This image is missing from the server
+          </span>
+          {alt ? (
+            <span className="text-xs text-muted-foreground">{alt}</span>
+          ) : null}
+        </span>
+      }
     />
   ),
   table: ({ children }) => (

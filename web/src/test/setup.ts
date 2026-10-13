@@ -1,10 +1,57 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import { afterEach, vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
+import { assertFetchNotLeaked } from "./swapped-fetch";
 
 afterEach(() => {
   cleanup();
 });
+
+// A test that leaves `globalThis.fetch` swapped changes what every later test
+// in the file talks to without failing anything, so the suite stops being a
+// function of its own source. `beforeEach` is where this is checkable: it runs
+// after the previous test's `afterEach` hooks and after the enclosing suites'
+// `beforeAll` hooks, so a swap still standing here has outlived its scope.
+beforeEach(() => {
+  assertFetchNotLeaked();
+});
+
+// jsdom implements neither the Pointer Events capture API nor scrollIntoView,
+// and Radix's Select calls all three while opening. Without these a `<Select>`
+// throws "target.hasPointerCapture is not a function" the moment a test clicks
+// its trigger, which reads like a component bug rather than a missing DOM API.
+// This file is also the setup for the `node`-environment route suites, where
+// there is no DOM at all, hence the guard.
+if (typeof Element !== "undefined") {
+  for (const method of [
+    "hasPointerCapture",
+    "setPointerCapture",
+    "releasePointerCapture",
+    "scrollIntoView",
+  ] as const) {
+    if (!(method in Element.prototype)) {
+      Object.defineProperty(Element.prototype, method, {
+        value: () => undefined,
+        writable: true,
+      });
+    }
+  }
+}
+
+// jsdom implements no ResizeObserver, and Radix measures its trigger through
+// one the moment a Tooltip or a Popover opens. The failure surfaces as an
+// unhandled `ReferenceError` from inside a layout effect rather than as a
+// failing assertion, so the test that opened the tooltip passes and the run
+// reports an error nobody can attribute.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  Object.assign(globalThis, {
+    ResizeObserver: class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  });
+}
 
 // Mock next/navigation
 vi.mock("next/navigation", () => ({

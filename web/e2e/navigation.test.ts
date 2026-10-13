@@ -4,7 +4,7 @@ test.describe("Navigation", () => {
   test("homepage loads with sidebar and posts table", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator("h1:has-text('Posts')")).toBeVisible();
-    await expect(page.locator("aside").locator("text=Pipeline").first()).toBeVisible();
+    await expect(page.locator("aside").getByText("Content Crew")).toBeVisible();
     await expect(page.locator("th:has-text('Topic')")).toBeVisible();
     await expect(page.locator("th:has-text('Stage')")).toBeVisible();
     await expect(page.locator("th:has-text('Progress')")).toBeVisible();
@@ -15,8 +15,8 @@ test.describe("Navigation", () => {
     const sidebar = page.locator("aside");
     await expect(sidebar.getByText("Posts", { exact: true })).toBeVisible();
     await expect(sidebar.getByText("Profiles", { exact: true })).toBeVisible();
-    await expect(sidebar.getByText("Monitor", { exact: true })).toBeVisible();
-    await expect(sidebar.getByText("Settings", { exact: true })).toBeVisible();
+    await expect(sidebar.getByText("Observability", { exact: true })).toBeVisible();
+    await expect(sidebar.getByText("Account", { exact: true })).toBeVisible();
   });
 
   test("navigates to profiles page", async ({ page }) => {
@@ -28,16 +28,25 @@ test.describe("Navigation", () => {
 
   test("navigates to monitor page", async ({ page }) => {
     await page.goto("/");
-    await page.locator("aside").getByText("Monitor", { exact: true }).click();
+    await page.locator("aside").getByText("Observability", { exact: true }).click();
     await expect(page).toHaveURL("/monitor");
-    await expect(page.getByRole("heading", { name: "Queue Monitor" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Observability" })).toBeVisible();
   });
 
-  test("navigates to settings page", async ({ page }) => {
+  test("navigates to the account page", async ({ page }) => {
     await page.goto("/");
-    await page.locator("aside").getByText("Settings", { exact: true }).click();
+    await page.locator("aside").getByText("Account", { exact: true }).click();
     await expect(page).toHaveURL("/settings");
-    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Account" })).toBeVisible();
+    // The boundary the page states, checked in a real browser: the account
+    // page names where per-site settings live and links straight to them.
+    await page.getByRole("link", { name: "Website profiles" }).click();
+    await expect(page).toHaveURL("/profiles");
+    // Scoped to `main`, because the sidebar's own Account link is also
+    // href="/settings".
+    await expect(
+      page.locator("main").getByRole("link", { name: "Account" })
+    ).toBeVisible();
   });
 
   test("navigates to new post page via button", async ({ page }) => {
@@ -53,7 +62,7 @@ test.describe("Navigation", () => {
     await expect(page.locator("[data-slot='card-title']:has-text('Content')")).toBeVisible();
     await expect(page.getByText("Writing Config", { exact: true })).toBeVisible();
     await expect(page.getByText("SEO & Research", { exact: true })).toBeVisible();
-    await expect(page.getByText("Pipeline Settings", { exact: true })).toBeVisible();
+    await expect(page.locator("[data-slot='card-title']:has-text('Pipeline')")).toBeVisible();
   });
 
   test("new post form has required inputs", async ({ page }) => {
@@ -78,8 +87,8 @@ test.describe("Navigation", () => {
 
   test("empty state shows when no posts", async ({ page }) => {
     await page.goto("/");
-    // Without API, the table should show empty state
-    await expect(page.getByText("No posts found")).toBeVisible({ timeout: 5000 });
+    // auth.setup.ts deletes the e2e account's posts, so the list starts empty.
+    await expect(page.getByText("No posts yet")).toBeVisible({ timeout: 5000 });
   });
 
   test("search input is functional", async ({ page }) => {
@@ -88,6 +97,19 @@ test.describe("Navigation", () => {
     await expect(searchInput).toBeVisible();
     await searchInput.fill("test search");
     await expect(searchInput).toHaveValue("test search");
+  });
+
+  test("the waiting for review filter reaches the server", async ({ page }) => {
+    // The gate queue is the one filter that does not go out as `status`, so
+    // this is the case that proves the whole path: the option, the
+    // `awaiting_review` parameter and the jsonb predicate behind it. A filter
+    // the route handler choked on would render the "Could not load posts"
+    // panel instead. auth.setup.ts leaves the e2e account with no posts.
+    await page.goto("/");
+    await page.getByRole("combobox", { name: "Filter posts by state" }).click();
+    await page.getByRole("option", { name: "Waiting for review" }).click();
+    await expect(page.getByText("Nothing is waiting for your review")).toBeVisible();
+    await expect(page.getByText("0 posts waiting for your review")).toBeVisible();
   });
 
   test("all pages load without errors", async ({ page }) => {

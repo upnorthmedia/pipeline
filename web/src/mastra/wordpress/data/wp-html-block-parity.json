@@ -1,0 +1,368 @@
+{
+  "generated_by": "api/scripts/export_wp_html_block_parity.py",
+  "source": "api/src/services/wp_html.py::markdown_to_wp_html",
+  "mistune_version": "3.2.0",
+  "scope": "leaf blocks only: paragraph, atx and setext heading, thematic break, fenced and indented code, blank lines, frontmatter strip, newline normalisation",
+  "cases": [
+    {
+      "name": "empty string",
+      "markdown": "",
+      "html": ""
+    },
+    {
+      "name": "blank input",
+      "markdown": "\n\n\n",
+      "html": ""
+    },
+    {
+      "name": "one paragraph",
+      "markdown": "Hello world.\n",
+      "html": "<!-- wp:paragraph -->\n<p>Hello world.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "one paragraph, no trailing newline",
+      "markdown": "Hello world.",
+      "html": "<!-- wp:paragraph -->\n<p>Hello world.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "two paragraphs",
+      "markdown": "First para.\n\nSecond para.\n",
+      "html": "<!-- wp:paragraph -->\n<p>First para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>Second para.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "paragraph over two lines",
+      "markdown": "First line.\nSecond line.\n",
+      "html": "<!-- wp:paragraph -->\n<p>First line.\nSecond line.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "paragraph over three lines",
+      "markdown": "One.\nTwo.\nThree.\n",
+      "html": "<!-- wp:paragraph -->\n<p>One.\nTwo.\nThree.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "hard break, two trailing spaces",
+      "markdown": "First line.  \nSecond line.\n",
+      "html": "<!-- wp:paragraph -->\n<p>First line.<br />\nSecond line.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "hard break, three trailing spaces",
+      "markdown": "First line.   \nSecond line.\n",
+      "html": "<!-- wp:paragraph -->\n<p>First line.<br />\nSecond line.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "hard break, trailing backslash",
+      "markdown": "First line.\\\nSecond line.\n",
+      "html": "<!-- wp:paragraph -->\n<p>First line.<br />\nSecond line.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "several blank lines between paragraphs",
+      "markdown": "One.\n\n\n\nTwo.\n",
+      "html": "<!-- wp:paragraph -->\n<p>One.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>Two.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "leading blank lines",
+      "markdown": "\n\n\nOne.\n",
+      "html": "<!-- wp:paragraph -->\n<p>One.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "trailing blank lines",
+      "markdown": "One.\n\n\n",
+      "html": "<!-- wp:paragraph -->\n<p>One.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "crlf line endings",
+      "markdown": "One.\r\n\r\nTwo.\r\n",
+      "html": "<!-- wp:paragraph -->\n<p>One.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>Two.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "cr only line endings",
+      "markdown": "One.\r\rTwo.\r",
+      "html": "<!-- wp:paragraph -->\n<p>One.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>Two.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "ampersand and angle bracket in a paragraph",
+      "markdown": "Tom & Jerry go 5 < 6.\n",
+      "html": "<!-- wp:paragraph -->\n<p>Tom & Jerry go 5 < 6.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "frontmatter stripped",
+      "markdown": "---\ntitle: Hi\n---\nBody text.\n",
+      "html": "<!-- wp:paragraph -->\n<p>Body text.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "frontmatter with trailing spaces on the fences",
+      "markdown": "---   \ntitle: Hi\n---   \nBody text.\n",
+      "html": "<!-- wp:paragraph -->\n<p>Body text.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "frontmatter only",
+      "markdown": "---\ntitle: Hi\n---\n",
+      "html": ""
+    },
+    {
+      "name": "frontmatter not at the start",
+      "markdown": "Intro.\n\n---\ntitle: Hi\n---\nBody.\n",
+      "html": "<!-- wp:paragraph -->\n<p>Intro.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n<!-- wp:heading -->\n<h2>title: Hi</h2>\n<!-- /wp:heading -->\n\n<!-- wp:paragraph -->\n<p>Body.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "unterminated frontmatter",
+      "markdown": "---\ntitle: Hi\nBody.\n",
+      "html": "<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n<!-- wp:paragraph -->\n<p>title: Hi\nBody.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "heading level 1",
+      "markdown": "# Title\n",
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>Title</h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "heading level 2",
+      "markdown": "## Title\n",
+      "html": "<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "heading level 3",
+      "markdown": "### Title\n",
+      "html": "<!-- wp:heading {\"level\":3} -->\n<h3>Title</h3>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "heading level 4",
+      "markdown": "#### Title\n",
+      "html": "<!-- wp:heading {\"level\":4} -->\n<h4>Title</h4>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "heading level 5",
+      "markdown": "##### Title\n",
+      "html": "<!-- wp:heading {\"level\":5} -->\n<h5>Title</h5>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "heading level 6",
+      "markdown": "###### Title\n",
+      "html": "<!-- wp:heading {\"level\":6} -->\n<h6>Title</h6>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "seven hashes is not a heading",
+      "markdown": "####### Title\n",
+      "html": "<!-- wp:paragraph -->\n<p>####### Title</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "hash with no space is not a heading",
+      "markdown": "#Title\n",
+      "html": "<!-- wp:paragraph -->\n<p>#Title</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "empty atx heading",
+      "markdown": "##\n",
+      "html": "<!-- wp:heading -->\n<h2></h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "atx heading, hash then spaces only",
+      "markdown": "##   \n",
+      "html": "<!-- wp:heading -->\n<h2></h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "atx heading with a closing sequence",
+      "markdown": "## Title ##\n",
+      "html": "<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "atx heading with a closing sequence and spaces",
+      "markdown": "## Title  ###   \n",
+      "html": "<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "atx heading whose text ends in a hash",
+      "markdown": "## Title#\n",
+      "html": "<!-- wp:heading -->\n<h2>Title#</h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "atx heading with trailing spaces",
+      "markdown": "## Title   \n",
+      "html": "<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "atx heading indented three spaces",
+      "markdown": "   ## Title\n",
+      "html": "<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "atx heading indented four spaces",
+      "markdown": "    ## Title\n",
+      "html": "<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "atx heading interrupting a paragraph",
+      "markdown": "Para.\n## Title\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "paragraph directly after a heading",
+      "markdown": "## Title\nPara.\n",
+      "html": "<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "setext heading level 1",
+      "markdown": "Title\n=====\n",
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>Title</h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "setext heading level 2",
+      "markdown": "Title\n-----\n",
+      "html": "<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "setext heading, single equals",
+      "markdown": "Title\n=\n",
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>Title</h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "setext heading, single dash",
+      "markdown": "Title\n-\n",
+      "html": "<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "setext heading over a two line paragraph",
+      "markdown": "One.\nTwo.\n=====\n",
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>One.\nTwo.</h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "setext underline with no paragraph above",
+      "markdown": "=====\n",
+      "html": "<!-- wp:paragraph -->\n<p>=====</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "setext underline after a blank line",
+      "markdown": "Title\n\n=====\n",
+      "html": "<!-- wp:paragraph -->\n<p>Title</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>=====</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "setext underline indented three spaces",
+      "markdown": "Title\n   =====\n",
+      "html": "<!-- wp:heading {\"level\":1} -->\n<h1>Title</h1>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "thematic break, three dashes",
+      "markdown": "Para.\n\n---\n\nPara two.\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n<!-- wp:paragraph -->\n<p>Para two.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "thematic break, three asterisks",
+      "markdown": "***\n",
+      "html": "<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n"
+    },
+    {
+      "name": "thematic break, three underscores",
+      "markdown": "___\n",
+      "html": "<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n"
+    },
+    {
+      "name": "thematic break, spaced dashes",
+      "markdown": "Para.\n\n- - -\n\nPara two.\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n<!-- wp:paragraph -->\n<p>Para two.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "thematic break, many dashes",
+      "markdown": "Para.\n\n--------\n\nPara two.\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n<!-- wp:paragraph -->\n<p>Para two.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "two dashes after a paragraph",
+      "markdown": "Para.\n--\n",
+      "html": "<!-- wp:heading -->\n<h2>Para.</h2>\n<!-- /wp:heading -->\n\n"
+    },
+    {
+      "name": "fenced code with a language",
+      "markdown": "```python\nprint(1)\n```\n",
+      "html": "<!-- wp:code {\"language\":\"python\"} -->\n<pre class=\"wp-block-code\"><code>print(1)\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "fenced code with no language",
+      "markdown": "```\nplain\n```\n",
+      "html": "<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>plain\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "fenced code with tildes",
+      "markdown": "~~~js\nlet a = 1;\n~~~\n",
+      "html": "<!-- wp:code {\"language\":\"js\"} -->\n<pre class=\"wp-block-code\"><code>let a = 1;\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "fenced code, unclosed",
+      "markdown": "```python\nprint(1)\n",
+      "html": "<!-- wp:code {\"language\":\"python\"} -->\n<pre class=\"wp-block-code\"><code>print(1)\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "fenced code indented two spaces",
+      "markdown": "  ```py\n  print(1)\n  ```\n",
+      "html": "<!-- wp:code {\"language\":\"py\"} -->\n<pre class=\"wp-block-code\"><code>  print(1)\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "fenced code, info string with trailing spaces",
+      "markdown": "```python   \nprint(1)\n```\n",
+      "html": "<!-- wp:code {\"language\":\"python\"} -->\n<pre class=\"wp-block-code\"><code>print(1)\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "fenced code, info string with two words",
+      "markdown": "```python title\nprint(1)\n```\n",
+      "html": "<!-- wp:code {\"language\":\"python title\"} -->\n<pre class=\"wp-block-code\"><code>print(1)\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "fenced code, empty body",
+      "markdown": "```\n```\n",
+      "html": "<!-- wp:code -->\n<pre class=\"wp-block-code\"><code></code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "fenced code containing angle brackets",
+      "markdown": "```html\n<p>a & b</p>\n```\n",
+      "html": "<!-- wp:code {\"language\":\"html\"} -->\n<pre class=\"wp-block-code\"><code><p>a & b</p>\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "fenced code with four backticks",
+      "markdown": "````\n```\n````\n",
+      "html": "<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>```\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "fenced code with a blank line inside",
+      "markdown": "```\na\n\nb\n```\n",
+      "html": "<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>a\n\nb\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "indented code block",
+      "markdown": "Para.\n\n    code line\n\nPara two.\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>code line</code></pre>\n<!-- /wp:code -->\n\n<!-- wp:paragraph -->\n<p>Para two.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "indented code, two lines",
+      "markdown": "Para.\n\n    line one\n    line two\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>line one\nline two</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "indented code with a blank line inside",
+      "markdown": "Para.\n\n    a\n\n    b\n\nEnd.\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>a\n\nb</code></pre>\n<!-- /wp:code -->\n\n<!-- wp:paragraph -->\n<p>End.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "indented code absorbed by the paragraph above",
+      "markdown": "Para.\n    code line\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.\ncode line</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "tab indented code",
+      "markdown": "Para.\n\n\tcode line\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>code line</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "indented code at the very start",
+      "markdown": "    code line\n",
+      "html": "<!-- wp:paragraph -->\n<p>code line</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "heading then fence then paragraph",
+      "markdown": "## Title\n\n```\ncode\n```\n\nPara.\n",
+      "html": "<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>code\n</code></pre>\n<!-- /wp:code -->\n\n<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "thematic break directly after a paragraph",
+      "markdown": "Para.\n\n***\nPara two.\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n<!-- wp:paragraph -->\n<p>Para two.</p>\n<!-- /wp:paragraph -->\n\n"
+    }
+  ]
+}

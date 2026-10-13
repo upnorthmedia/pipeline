@@ -1,4 +1,12 @@
-import type { Post, Profile, PostAnalytics, StageSettings, StageStatusMap } from "@/lib/api";
+import type {
+  Post,
+  Profile,
+  ProfileListItem,
+  PostAnalytics,
+  QueueStatus,
+  StageSettings,
+  StageStatusMap,
+} from "@/lib/api";
 
 export const defaultStageSettings: StageSettings = {
   research: "auto",
@@ -36,12 +44,25 @@ export function makeProfile(overrides?: Partial<Profile>): Profile {
     wp_default_author_id: null,
     wp_default_category_id: null,
     wp_default_status: "publish",
+    wp_app_password_set: false,
     nextjs_webhook_url: null,
+    nextjs_webhook_secret_set: false,
     nextjs_frontmatter_map: null,
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
     ...overrides,
   };
+}
+
+/**
+ * A row as `GET /api/profiles` returns it. `post_count` only exists on the
+ * list, so the two fixtures are separate rather than one with an optional
+ * field: a test that reads the count should be using the list shape.
+ */
+export function makeProfileListItem(
+  overrides?: Partial<ProfileListItem>
+): ProfileListItem {
+  return { ...makeProfile(overrides), post_count: 0, ...overrides };
 }
 
 export function makePost(overrides?: Partial<Post>): Post {
@@ -71,7 +92,7 @@ export function makePost(overrides?: Partial<Post>): Post {
     current_stage: "research",
     stage_status: {},
     stage_logs: {},
-    thread_id: null,
+    execution_logs: [],
     priority: 5,
     research_content: null,
     outline_content: null,
@@ -94,7 +115,7 @@ export function makePost(overrides?: Partial<Post>): Post {
   };
 }
 
-export function makeCompletedPost(): Post {
+export function makeCompletedPost(overrides?: Partial<Post>): Post {
   const stageStatus: StageStatusMap = {
     research: "complete",
     outline: "complete",
@@ -115,8 +136,24 @@ export function makeCompletedPost(): Post {
     draft_content: "# Draft\nDraft content here",
     final_md_content: "# Final\nFinal markdown content",
     final_html_content: "<p>Final HTML content</p>",
-    image_manifest: { featured: { prompt: "A test image" } },
+    image_manifest: {
+      style_brief: { overall_style: "photorealistic" },
+      images: [
+        {
+          id: "featured",
+          type: "featured",
+          prompt: "A test image",
+          alt_text: "A test image",
+          url: "/media/post-1/featured-022726-47.webp",
+          generated: true,
+          index: 0,
+        },
+      ],
+      total_generated: 1,
+      total_failed: 0,
+    },
     completed_at: "2025-01-16T12:00:00Z",
+    ...overrides,
   });
 }
 
@@ -128,14 +165,44 @@ export function makeAnalytics(overrides?: Partial<PostAnalytics>): PostAnalytics
     avg_sentence_length: 19.9,
     flesch_reading_ease: 64.2,
     keyword_density: { "primary keyword": 1.5, "secondary keyword": 0.8 },
+    // The nine keys `_seo_checklist` actually produces, seven booleans and two
+    // integer counts. Shape taken from the parity oracle at
+    // src/app/api/posts/data/logs-analytics-parity.json.
     seo_checklist: {
-      title_contains_keyword: true,
-      meta_description: true,
-      h1_keyword: true,
-      keyword_density_ok: true,
-      internal_links: false,
-      external_links: true,
+      keyword_in_title: true,
+      keyword_in_first_100_words: true,
+      keyword_in_h2: true,
+      has_h2_headings: true,
+      has_internal_links: false,
+      has_external_links: true,
+      internal_link_count: 0,
+      external_link_count: 3,
+      has_meta_description: true,
     },
+    ...overrides,
+  };
+}
+
+/**
+ * A `GET /api/queue` answer with every `RunStateKind` bucket at zero.
+ *
+ * The endpoint answers one count per kind, so a suite that spelled the whole
+ * object out had to be revisited every time a kind was added. Overrides name
+ * only the buckets the case is about; `total` is not derived, so a case can
+ * also express the sum going wrong.
+ */
+export function makeQueueStatus(overrides?: Partial<QueueStatus>): QueueStatus {
+  return {
+    running: 0,
+    in_progress: 0,
+    review: 0,
+    failed: 0,
+    finished_with_errors: 0,
+    paused: 0,
+    not_started: 0,
+    complete: 0,
+    total: 0,
+    publish_stalled: [],
     ...overrides,
   };
 }

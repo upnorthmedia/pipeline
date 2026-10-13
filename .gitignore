@@ -1,5 +1,6 @@
 # Environment
 .env
+.env.bak
 .env.local
 .env.*.local
 
@@ -28,6 +29,11 @@ playwright-report/
 test-results/
 blob-report/
 
+# Generated images. `mediaRoot()` defaults to this directory for `pnpm -C web dev`;
+# compose and Railway both mount a volume instead, and the test suite writes to a
+# temp directory (see web/src/test/test-media-root.ts). Nothing here is source.
+/media/
+
 # IDE
 .vscode/
 .idea/
@@ -45,7 +51,6 @@ docker-compose.override.yml
 # Misc
 *.log
 plan.md
-CLAUDE.md
 repomix*
 
 # Worktrees
@@ -54,5 +59,7 @@ repomix*
 # Superpowers
 .superpowers/
 
-# Docs (local only)
-docs/
+# Docs (local only), except the port record and the polish record, both deliverables
+docs/*
+!docs/mastra-port/
+!docs/polish/

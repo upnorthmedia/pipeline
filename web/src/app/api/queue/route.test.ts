@@ -1,0 +1,382 @@
+// @vitest-environment node
+/**
+ * `GET /api/queue`.
+ *
+ * Runs against the real database and real BetterAuth sessions, so the
+ * `website_profiles.user_id` scoping and the inner join are exercised for
+ * real rather than asserted against a stub.
+ *
+ * The counts are one bucket per `RunStateKind`, so every case here is also a
+ * statement about what the posts list calls the same row: both read
+ * `deriveRunState()`. The pairs that used to disagree (a post sitting on a
+ * stage it has not started, a post whose stage failed without the run being
+ * marked failed) are the first two cases below.
+ *
+ * Requires `docker compose up -d db`.
+ */
+import { randomUUID } from "node:crypto"
+
+import { like } from "drizzle-orm"
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
+
+import { closeDb, getDb, posts, websiteProfiles } from "@/db"
+import type { QueueStatus, StageStatusMap } from "@/lib/api"
+import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
+
+import { GET } from "./route"
+
+const PREFIX = "queue-status-test-"
+const URL = "http://test/api/queue"
+
+/** Discard port on loopback: nothing here should ever reach a real site. */
+const SITE = "http://127.0.0.1:9/site"
+
+/** Every bucket empty, so a case can name only the ones it cares about. */
+const ZERO_COUNTS = {
+  not_started: 0,
+  running: 0,
+  in_progress: 0,
+  review: 0,
+  paused: 0,
+  failed: 0,
+  finished_with_errors: 0,
+  complete: 0,
+  total: 0,
+}
+
+/**
+ * The whole response with nothing in it. `publish_stalled` is a list of the
+ * rows whose publish has stopped, not a bucket: a post can be counted as
+ * Complete and be in it at the same time.
+ */
+const ZERO = { ...ZERO_COUNTS, publish_stalled: [] }
+
+/** The count keys on their own, for the cases about the buckets. */
+function countsOf(response: QueueStatus): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(response).filter(([key]) => key !== "publish_stalled"),
+  ) as Record<string, number>
+}
+
+const db = getDb()
+
+let user: TestSession
+let other: TestSession
+let profileId: string
+let otherProfileId: string
+
+/** The two profiles outlive the posts: `afterEach` clears only the posts. */
+async function clearPosts() {
+  await db.delete(posts).where(like(posts.slug, `${PREFIX}%`))
+}
+
+async function clearFixtures() {
+  await clearPosts()
+  await db.delete(websiteProfiles).where(like(websiteProfiles.userId, `${PREFIX}%`))
+}
+
+async function createProfile(userId: string): Promise<string> {
+  const [profile] = await db
+    .insert(websiteProfiles)
+    .values({ userId, name: "Test Blog", websiteUrl: SITE })
+    .returning()
+  return profile.id
+}
+
+/** `stage` is passed straight through, so `null` and unknown values are expressible. */
+async function insertPost(owner: string | null, stage?: string | null, status?: StageStatusMap) {
+  await db.insert(posts).values({
+    slug: `${PREFIX}${randomUUID()}`,
+    topic: "A topic",
+    profileId: owner,
+    ...(stage === undefined ? {} : { currentStage: stage }),
+    ...(status === undefined ? {} : { stageStatus: status }),
+  })
+}
+
+function status(cookie?: string) {
+  return GET(apiRequest(URL, { cookie }))
+}
+
+async function body(cookie: string): Promise<QueueStatus> {
+  const response = await status(cookie)
+  expect(response.status).toBe(200)
+  return (await response.json()) as QueueStatus
+}
+
+beforeAll(async () => {
+  await clearFixtures()
+  await deleteTestSessions(PREFIX)
+  user = await createTestSession(PREFIX)
+  other = await createTestSession(PREFIX)
+  profileId = await createProfile(user.userId)
+  otherProfileId = await createProfile(other.userId)
+})
+
+afterEach(clearPosts)
+
+afterAll(async () => {
+  await clearFixtures()
+  await deleteTestSessions(PREFIX)
+  await closeDb()
+})
+
+describe("GET /api/queue", () => {
+  it("rejects an unauthenticated request", async () => {
+    const response = await status()
+    expect(response.status).toBe(401)
+    expect(await response.json()).toEqual({ detail: "Not authenticated" })
+  })
+
+  it("answers every bucket at zero when the caller has no posts", async () => {
+    expect(await body(user.cookie)).toEqual(ZERO)
+  })
+
+  it("does not call a post running because its row names a stage it has not started", async () => {
+    await insertPost(profileId, "research", {})
+    await insertPost(profileId, "images", {})
+
+    expect(await body(user.cookie)).toEqual({ ...ZERO, not_started: 2, total: 2 })
+  })
+
+  it("calls a post whose stage failed failed, the way the posts list names it", async () => {
+    await insertPost(profileId, "research", { research: "failed" })
+
+    expect(await body(user.cookie)).toEqual({ ...ZERO, failed: 1, total: 1 })
+  })
+
+  it("counts a post with a stage in flight as running", async () => {
+    await insertPost(profileId, "write", {
+      research: "complete",
+      outline: "complete",
+      write: "running",
+    })
+
+    expect(await body(user.cookie)).toEqual({ ...ZERO, running: 1, total: 1 })
+  })
+
+  it("counts a post parked at a review gate as review, not as running", async () => {
+    await insertPost(profileId, "write", { research: "complete", outline: "review" })
+
+    expect(await body(user.cookie)).toEqual({ ...ZERO, review: 1, total: 1 })
+  })
+
+  it("counts a run stamped complete with a failed stage as finished with errors", async () => {
+    await insertPost(profileId, "complete", { images: "failed", ready: "complete" })
+
+    expect(await body(user.cookie)).toEqual({ ...ZERO, finished_with_errors: 1, total: 1 })
+  })
+
+  it("counts a post between two stages as in progress", async () => {
+    await insertPost(profileId, "outline", { research: "complete" })
+
+    expect(await body(user.cookie)).toEqual({ ...ZERO, in_progress: 1, total: 1 })
+  })
+
+  it("counts the three row states written over a run into their own buckets", async () => {
+    await insertPost(profileId, "complete", { ready: "complete" })
+    await insertPost(profileId, "failed", { research: "running" })
+    await insertPost(profileId, "paused", { research: "running" })
+
+    expect(await body(user.cookie)).toEqual({
+      ...ZERO,
+      complete: 1,
+      failed: 1,
+      paused: 1,
+      total: 3,
+    })
+  })
+
+  it("uses the column default when no stage is given, so a fresh post has not started", async () => {
+    await insertPost(profileId)
+
+    expect(await body(user.cookie)).toEqual({ ...ZERO, not_started: 1, total: 1 })
+  })
+
+  it("counts only the caller's posts", async () => {
+    await insertPost(profileId, "pending")
+    await insertPost(otherProfileId, "complete", { ready: "complete" })
+    await insertPost(otherProfileId, "write", { write: "running" })
+
+    expect(await body(user.cookie)).toEqual({ ...ZERO, not_started: 1, total: 1 })
+    expect(await body(other.cookie)).toEqual({ ...ZERO, complete: 1, running: 1, total: 2 })
+  })
+
+  it("excludes a post with no profile, which matches no user", async () => {
+    await insertPost(profileId, "pending")
+    await insertPost(null, "pending")
+
+    expect(await body(user.cookie)).toEqual({ ...ZERO, not_started: 1, total: 1 })
+  })
+
+  it("counts a null stage as not started rather than into no bucket at all", async () => {
+    await insertPost(profileId, "pending")
+    await insertPost(profileId, null)
+
+    expect(await body(user.cookie)).toEqual({ ...ZERO, not_started: 2, total: 2 })
+  })
+
+  it("counts an unrecognised stage by what its stage map says the run did", async () => {
+    await insertPost(profileId, "publishing", {})
+    await insertPost(profileId, "publishing", { research: "failed" })
+
+    expect(await body(user.cookie)).toEqual({ ...ZERO, not_started: 1, failed: 1, total: 2 })
+  })
+
+  it("reports a total that is the sum of the buckets", async () => {
+    await insertPost(profileId, "pending")
+    await insertPost(profileId, null)
+    await insertPost(profileId, "publishing", {})
+    await insertPost(profileId, "write", { write: "running" })
+    await insertPost(profileId, "complete", { images: "failed" })
+
+    const { total, ...buckets } = countsOf(await body(user.cookie))
+    expect(Object.values(buckets).reduce((sum, value) => sum + value, 0)).toBe(total)
+    expect(total).toBe(5)
+  })
+
+  it("returns numbers, not the bigint strings the driver reports counts as", async () => {
+    await insertPost(profileId, "pending")
+
+    for (const [key, value] of Object.entries(countsOf(await body(user.cookie)))) {
+      expect(typeof value, key).toBe("number")
+    }
+  })
+})
+
+/**
+ * A post carrying a publish attempt. `updatedAt` is the clock
+ * `publishStall()` reads, so a case sets it rather than letting the column
+ * default put every row inside the window.
+ */
+async function insertPublishing(fields: {
+  owner?: string | null
+  topic?: string
+  outputFormat: string
+  wpPublishStatus?: string | null
+  nextjsPublishStatus?: string | null
+  minutesAgo: number
+  executionLogs?: Record<string, unknown>[]
+}): Promise<string> {
+  const [row] = await db
+    .insert(posts)
+    .values({
+      slug: `${PREFIX}${randomUUID()}`,
+      topic: fields.topic ?? "A topic",
+      profileId: fields.owner === undefined ? profileId : fields.owner,
+      outputFormat: fields.outputFormat,
+      wpPublishStatus: fields.wpPublishStatus ?? null,
+      nextjsPublishStatus: fields.nextjsPublishStatus ?? null,
+      updatedAt: new Date(Date.now() - fields.minutesAgo * 60_000),
+      ...(fields.executionLogs === undefined ? {} : { executionLogs: fields.executionLogs }),
+    })
+    .returning()
+  return row.id
+}
+
+describe("GET /api/queue publish_stalled", () => {
+  it("reports a queued publish nobody picked up, with the post it belongs to", async () => {
+    const id = await insertPublishing({
+      topic: "Stuck in the queue",
+      outputFormat: "wordpress",
+      wpPublishStatus: "pending",
+      minutesAgo: 20,
+    })
+
+    const { publish_stalled } = await body(user.cookie)
+    expect(publish_stalled).toEqual([
+      {
+        id,
+        topic: "Stuck in the queue",
+        target: "wordpress",
+        label: "WordPress",
+        short: "This publish has been queued for over 15 minutes and no worker has picked it up.",
+      },
+    ])
+  })
+
+  it("says a worker had it when an execution log says one picked it up", async () => {
+    await insertPublishing({
+      outputFormat: "nextjs",
+      nextjsPublishStatus: "publishing",
+      minutesAgo: 40,
+      executionLogs: [
+        {
+          event: "publish_start",
+          message: "Publishing to Next.js...",
+          ts: new Date(Date.now() - 30 * 60_000).toISOString(),
+        },
+      ],
+    })
+
+    const { publish_stalled } = await body(user.cookie)
+    expect(publish_stalled).toHaveLength(1)
+    expect(publish_stalled[0].target).toBe("nextjs")
+    expect(publish_stalled[0].label).toBe("Next.js")
+    expect(publish_stalled[0].short).toBe(
+      "A worker picked this publish up and then stopped reporting on it for over 15 minutes."
+    )
+  })
+
+  it("leaves a publish inside the window alone", async () => {
+    await insertPublishing({
+      outputFormat: "wordpress",
+      wpPublishStatus: "publishing",
+      minutesAgo: 14,
+    })
+
+    expect((await body(user.cookie)).publish_stalled).toEqual([])
+  })
+
+  it("leaves a finished or failed publish alone however old the row is", async () => {
+    await insertPublishing({
+      outputFormat: "wordpress",
+      wpPublishStatus: "published",
+      minutesAgo: 90,
+    })
+    await insertPublishing({
+      outputFormat: "nextjs",
+      nextjsPublishStatus: "failed",
+      minutesAgo: 90,
+    })
+
+    expect((await body(user.cookie)).publish_stalled).toEqual([])
+  })
+
+  it("reads the status column the post's own format names, not the other one", async () => {
+    // Nothing clears the other destination's column, so a post that was
+    // switched back to markdown still carries a `publishing` from before it.
+    await insertPublishing({
+      outputFormat: "markdown",
+      wpPublishStatus: "publishing",
+      minutesAgo: 90,
+    })
+
+    expect((await body(user.cookie)).publish_stalled).toEqual([])
+  })
+
+  it("reports only the caller's stalled publishes", async () => {
+    await insertPublishing({
+      owner: otherProfileId,
+      outputFormat: "wordpress",
+      wpPublishStatus: "pending",
+      minutesAgo: 90,
+    })
+    await insertPublishing({ owner: null, outputFormat: "wordpress", wpPublishStatus: "pending", minutesAgo: 90 })
+
+    expect((await body(user.cookie)).publish_stalled).toEqual([])
+    expect((await body(other.cookie)).publish_stalled).toHaveLength(1)
+  })
+
+  it("counts a stalled publish into its run-state bucket as well", async () => {
+    await insertPublishing({
+      outputFormat: "wordpress",
+      wpPublishStatus: "pending",
+      minutesAgo: 90,
+    })
+
+    const response = await body(user.cookie)
+    expect(response.publish_stalled).toHaveLength(1)
+    expect(countsOf(response)).toEqual({ ...ZERO_COUNTS, not_started: 1, total: 1 })
+  })
+})

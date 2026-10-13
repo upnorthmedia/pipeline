@@ -1,0 +1,558 @@
+{
+  "generated_by": "api/scripts/export_wp_html_escape_url_parity.py",
+  "source": "mistune.util.escape_url and mistune.util.unescape",
+  "mistune_version": "3.2.0",
+  "python_version": "3.13.12",
+  "safe_set": ":/?#@!$&()*+,;=%",
+  "scope": "the CommonMark-flavoured html.unescape and urllib.parse.quote that escape_url composes, and the seam between them",
+  "cases": [
+    {
+      "name": "empty string",
+      "input": "",
+      "unescaped": "",
+      "escaped": ""
+    },
+    {
+      "name": "unreserved ascii",
+      "input": "abcXYZ019_.-~",
+      "unescaped": "abcXYZ019_.-~",
+      "escaped": "abcXYZ019_.-~"
+    },
+    {
+      "name": "a whole ordinary url",
+      "input": "https://example.com/a/b?c=d&e=f#frag",
+      "unescaped": "https://example.com/a/b?c=d&e=f#frag",
+      "escaped": "https://example.com/a/b?c=d&e=f#frag"
+    },
+    {
+      "name": "safe colon",
+      "input": "a:b",
+      "unescaped": "a:b",
+      "escaped": "a:b"
+    },
+    {
+      "name": "safe slash",
+      "input": "a/b",
+      "unescaped": "a/b",
+      "escaped": "a/b"
+    },
+    {
+      "name": "safe question mark",
+      "input": "a?b",
+      "unescaped": "a?b",
+      "escaped": "a?b"
+    },
+    {
+      "name": "safe hash",
+      "input": "a#b",
+      "unescaped": "a#b",
+      "escaped": "a#b"
+    },
+    {
+      "name": "safe at",
+      "input": "a@b",
+      "unescaped": "a@b",
+      "escaped": "a@b"
+    },
+    {
+      "name": "safe bang",
+      "input": "a!b",
+      "unescaped": "a!b",
+      "escaped": "a!b"
+    },
+    {
+      "name": "safe dollar",
+      "input": "a$b",
+      "unescaped": "a$b",
+      "escaped": "a$b"
+    },
+    {
+      "name": "safe ampersand alone",
+      "input": "a&b",
+      "unescaped": "a&b",
+      "escaped": "a&b"
+    },
+    {
+      "name": "safe parens",
+      "input": "a(b)c",
+      "unescaped": "a(b)c",
+      "escaped": "a(b)c"
+    },
+    {
+      "name": "safe star",
+      "input": "a*b",
+      "unescaped": "a*b",
+      "escaped": "a*b"
+    },
+    {
+      "name": "safe plus",
+      "input": "a+b",
+      "unescaped": "a+b",
+      "escaped": "a+b"
+    },
+    {
+      "name": "safe comma",
+      "input": "a,b",
+      "unescaped": "a,b",
+      "escaped": "a,b"
+    },
+    {
+      "name": "safe semicolon",
+      "input": "a;b",
+      "unescaped": "a;b",
+      "escaped": "a;b"
+    },
+    {
+      "name": "safe equals",
+      "input": "a=b",
+      "unescaped": "a=b",
+      "escaped": "a=b"
+    },
+    {
+      "name": "safe percent is left alone",
+      "input": "a%20b",
+      "unescaped": "a%20b",
+      "escaped": "a%20b"
+    },
+    {
+      "name": "space",
+      "input": "a b",
+      "unescaped": "a b",
+      "escaped": "a%20b"
+    },
+    {
+      "name": "double quote",
+      "input": "a\"b",
+      "unescaped": "a\"b",
+      "escaped": "a%22b"
+    },
+    {
+      "name": "single quote is not safe",
+      "input": "a'b",
+      "unescaped": "a'b",
+      "escaped": "a%27b"
+    },
+    {
+      "name": "angle brackets",
+      "input": "a<b>c",
+      "unescaped": "a<b>c",
+      "escaped": "a%3Cb%3Ec"
+    },
+    {
+      "name": "square brackets",
+      "input": "a[b]c",
+      "unescaped": "a[b]c",
+      "escaped": "a%5Bb%5Dc"
+    },
+    {
+      "name": "curly braces",
+      "input": "a{b}c",
+      "unescaped": "a{b}c",
+      "escaped": "a%7Bb%7Dc"
+    },
+    {
+      "name": "pipe",
+      "input": "a|b",
+      "unescaped": "a|b",
+      "escaped": "a%7Cb"
+    },
+    {
+      "name": "backslash",
+      "input": "a\\b",
+      "unescaped": "a\\b",
+      "escaped": "a%5Cb"
+    },
+    {
+      "name": "caret",
+      "input": "a^b",
+      "unescaped": "a^b",
+      "escaped": "a%5Eb"
+    },
+    {
+      "name": "backtick",
+      "input": "a`b",
+      "unescaped": "a`b",
+      "escaped": "a%60b"
+    },
+    {
+      "name": "tab",
+      "input": "a\tb",
+      "unescaped": "a\tb",
+      "escaped": "a%09b"
+    },
+    {
+      "name": "newline",
+      "input": "a\nb",
+      "unescaped": "a\nb",
+      "escaped": "a%0Ab"
+    },
+    {
+      "name": "nul byte",
+      "input": "a\u0000b",
+      "unescaped": "a\u0000b",
+      "escaped": "a%00b"
+    },
+    {
+      "name": "del byte",
+      "input": "a\u007fb",
+      "unescaped": "a\u007fb",
+      "escaped": "a%7Fb"
+    },
+    {
+      "name": "latin-1 supplement",
+      "input": "caf\u00e9",
+      "unescaped": "caf\u00e9",
+      "escaped": "caf%C3%A9"
+    },
+    {
+      "name": "cjk",
+      "input": "\u4e2d\u6587",
+      "unescaped": "\u4e2d\u6587",
+      "escaped": "%E4%B8%AD%E6%96%87"
+    },
+    {
+      "name": "astral emoji",
+      "input": "\ud83d\ude00",
+      "unescaped": "\ud83d\ude00",
+      "escaped": "%F0%9F%98%80"
+    },
+    {
+      "name": "combining mark",
+      "input": "e\u0301",
+      "unescaped": "e\u0301",
+      "escaped": "e%CC%81"
+    },
+    {
+      "name": "idn host",
+      "input": "https://\u4f8b\u3048.jp/\u30d1\u30b9",
+      "unescaped": "https://\u4f8b\u3048.jp/\u30d1\u30b9",
+      "escaped": "https://%E4%BE%8B%E3%81%88.jp/%E3%83%91%E3%82%B9"
+    },
+    {
+      "name": "named entity amp stays safe",
+      "input": "&amp;",
+      "unescaped": "&",
+      "escaped": "&"
+    },
+    {
+      "name": "named entity lt becomes percent 3c",
+      "input": "&lt;",
+      "unescaped": "<",
+      "escaped": "%3C"
+    },
+    {
+      "name": "named entity gt",
+      "input": "&gt;",
+      "unescaped": ">",
+      "escaped": "%3E"
+    },
+    {
+      "name": "named entity quot",
+      "input": "&quot;",
+      "unescaped": "\"",
+      "escaped": "%22"
+    },
+    {
+      "name": "named entity nbsp",
+      "input": "&nbsp;",
+      "unescaped": "\u00a0",
+      "escaped": "%C2%A0"
+    },
+    {
+      "name": "named entity uppercase GT",
+      "input": "&GT;",
+      "unescaped": ">",
+      "escaped": "%3E"
+    },
+    {
+      "name": "named entity not",
+      "input": "&not;",
+      "unescaped": "\u00ac",
+      "escaped": "%C2%AC"
+    },
+    {
+      "name": "longest prefix notit",
+      "input": "&notit;",
+      "unescaped": "\u00acit;",
+      "escaped": "%C2%ACit;"
+    },
+    {
+      "name": "longest prefix noti",
+      "input": "&noti;",
+      "unescaped": "\u00aci;",
+      "escaped": "%C2%ACi;"
+    },
+    {
+      "name": "longest prefix gtx",
+      "input": "&gtx;",
+      "unescaped": ">x;",
+      "escaped": "%3Ex;"
+    },
+    {
+      "name": "no semicolon is not a reference",
+      "input": "&gt",
+      "unescaped": "&gt",
+      "escaped": "&gt"
+    },
+    {
+      "name": "unknown one character name",
+      "input": "&a;",
+      "unescaped": "&a;",
+      "escaped": "&a;"
+    },
+    {
+      "name": "unknown name",
+      "input": "&nope;",
+      "unescaped": "&nope;",
+      "escaped": "&nope;"
+    },
+    {
+      "name": "bare ampersand semicolon",
+      "input": "&;",
+      "unescaped": "&;",
+      "escaped": "&;"
+    },
+    {
+      "name": "entity name at the 32 character bound",
+      "input": "&xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;",
+      "unescaped": "&xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;",
+      "escaped": "&xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;"
+    },
+    {
+      "name": "entity name past the 32 character bound",
+      "input": "&xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;",
+      "unescaped": "&xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;",
+      "escaped": "&xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;"
+    },
+    {
+      "name": "two references in one string",
+      "input": "&lt;a&gt;",
+      "unescaped": "<a>",
+      "escaped": "%3Ca%3E"
+    },
+    {
+      "name": "reference inside a url",
+      "input": "https://example.com/?a=1&amp;b=2",
+      "unescaped": "https://example.com/?a=1&b=2",
+      "escaped": "https://example.com/?a=1&b=2"
+    },
+    {
+      "name": "decimal reference to percent",
+      "input": "&#37;",
+      "unescaped": "%",
+      "escaped": "%"
+    },
+    {
+      "name": "decimal reference to space",
+      "input": "&#32;",
+      "unescaped": " ",
+      "escaped": "%20"
+    },
+    {
+      "name": "hex reference lowercase x",
+      "input": "&#x26;",
+      "unescaped": "&",
+      "escaped": "&"
+    },
+    {
+      "name": "hex reference uppercase X",
+      "input": "&#X26;",
+      "unescaped": "&",
+      "escaped": "&"
+    },
+    {
+      "name": "hex reference with leading zeros",
+      "input": "&#x0000026;",
+      "unescaped": "&",
+      "escaped": "&"
+    },
+    {
+      "name": "decimal digits past the 1 to 7 bound",
+      "input": "&#00000037;",
+      "unescaped": "&#00000037;",
+      "escaped": "&#00000037;"
+    },
+    {
+      "name": "hex reference with no digits",
+      "input": "&#x;",
+      "unescaped": "&#x;",
+      "escaped": "&#x;"
+    },
+    {
+      "name": "hash with no digits",
+      "input": "&#",
+      "unescaped": "&#",
+      "escaped": "&#"
+    },
+    {
+      "name": "invalid charref zero",
+      "input": "&#0;",
+      "unescaped": "\ufffd",
+      "escaped": "%EF%BF%BD"
+    },
+    {
+      "name": "invalid charref carriage return",
+      "input": "&#13;",
+      "unescaped": "\r",
+      "escaped": "%0D"
+    },
+    {
+      "name": "invalid charref windows 1252 euro",
+      "input": "&#128;",
+      "unescaped": "\u20ac",
+      "escaped": "%E2%82%AC"
+    },
+    {
+      "name": "invalid charref 159",
+      "input": "&#159;",
+      "unescaped": "\u0178",
+      "escaped": "%C5%B8"
+    },
+    {
+      "name": "surrogate low bound",
+      "input": "&#xD800;",
+      "unescaped": "\ufffd",
+      "escaped": "%EF%BF%BD"
+    },
+    {
+      "name": "surrogate high bound",
+      "input": "&#xDFFF;",
+      "unescaped": "\ufffd",
+      "escaped": "%EF%BF%BD"
+    },
+    {
+      "name": "above the unicode maximum",
+      "input": "&#x110000;",
+      "unescaped": "\ufffd",
+      "escaped": "%EF%BF%BD"
+    },
+    {
+      "name": "decimal above the unicode maximum",
+      "input": "&#9999999;",
+      "unescaped": "\ufffd",
+      "escaped": "%EF%BF%BD"
+    },
+    {
+      "name": "invalid codepoint one is dropped",
+      "input": "&#1;",
+      "unescaped": "",
+      "escaped": ""
+    },
+    {
+      "name": "invalid codepoint 0xFDD0 is dropped",
+      "input": "&#xFDD0;",
+      "unescaped": "",
+      "escaped": ""
+    },
+    {
+      "name": "invalid codepoint 0xFFFE is dropped",
+      "input": "&#xFFFE;",
+      "unescaped": "",
+      "escaped": ""
+    },
+    {
+      "name": "valid astral numeric reference",
+      "input": "&#x1F600;",
+      "unescaped": "\ud83d\ude00",
+      "escaped": "%F0%9F%98%80"
+    },
+    {
+      "name": "name containing a space",
+      "input": "&a b;",
+      "unescaped": "&a b;",
+      "escaped": "&a%20b;"
+    },
+    {
+      "name": "name containing a tab",
+      "input": "&a\tb;",
+      "unescaped": "&a\tb;",
+      "escaped": "&a%09b;"
+    },
+    {
+      "name": "name containing a newline",
+      "input": "&a\nb;",
+      "unescaped": "&a\nb;",
+      "escaped": "&a%0Ab;"
+    },
+    {
+      "name": "name containing a form feed",
+      "input": "&a\fb;",
+      "unescaped": "&a\fb;",
+      "escaped": "&a%0Cb;"
+    },
+    {
+      "name": "name containing a less than",
+      "input": "&a<b;",
+      "unescaped": "&a<b;",
+      "escaped": "&a%3Cb;"
+    },
+    {
+      "name": "name containing an ampersand",
+      "input": "&a&b;",
+      "unescaped": "&a&b;",
+      "escaped": "&a&b;"
+    },
+    {
+      "name": "name containing a hash",
+      "input": "&a#b;",
+      "unescaped": "&a#b;",
+      "escaped": "&a#b;"
+    },
+    {
+      "name": "name containing a carriage return is allowed",
+      "input": "&a\rb;",
+      "unescaped": "&a\rb;",
+      "escaped": "&a%0Db;"
+    },
+    {
+      "name": "double ampersand before a name",
+      "input": "&&amp;",
+      "unescaped": "&&",
+      "escaped": "&&"
+    },
+    {
+      "name": "prototype key constructor",
+      "input": "&constructor;",
+      "unescaped": "&constructor;",
+      "escaped": "&constructor;"
+    },
+    {
+      "name": "prototype key toString",
+      "input": "&toString;",
+      "unescaped": "&toString;",
+      "escaped": "&toString;"
+    },
+    {
+      "name": "prototype key valueOf",
+      "input": "&valueOf;",
+      "unescaped": "&valueOf;",
+      "escaped": "&valueOf;"
+    },
+    {
+      "name": "prototype key hasOwnProperty",
+      "input": "&hasOwnProperty;",
+      "unescaped": "&hasOwnProperty;",
+      "escaped": "&hasOwnProperty;"
+    },
+    {
+      "name": "prototype key dunder proto",
+      "input": "&__proto__;",
+      "unescaped": "&__proto__;",
+      "escaped": "&__proto__;"
+    }
+  ],
+  "raises": [
+    {
+      "name": "lone high surrogate",
+      "input": "\ud800",
+      "raises": "UnicodeEncodeError",
+      "message": "'utf-8' codec can't encode character '\\ud800' in position 0: surrogates not allowed"
+    },
+    {
+      "name": "lone low surrogate",
+      "input": "\udfff",
+      "raises": "UnicodeEncodeError",
+      "message": "'utf-8' codec can't encode character '\\udfff' in position 0: surrogates not allowed"
+    }
+  ]
+}

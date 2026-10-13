@@ -1,0 +1,799 @@
+{
+  "generated_by": "api/scripts/export_nextjs_router_parity.py",
+  "source": "api/src/api/nextjs.py::test_nextjs_connection",
+  "encryption_key": "CwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCws=",
+  "webhook_secret": "s3cret-webhook-signing-key",
+  "profile_id": "33333333-3333-4333-8333-333333333333",
+  "user_id": "user-under-test",
+  "hook_path": "/api/jena/webhook",
+  "scenarios": [
+    {
+      "name": "success-200-json",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEp_xlS5oI7fh_8BQwegN9gQNjrrEOruRjV0xpzrnn3_SpubWr4TNiJzqrQOq8CLHZe2-G0R0blwMz8eFqhOa__W2SbmxJXKFFLj2QxUT0nPU="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 200,
+          "body": "{\"ok\": true, \"received\": \"test\"}",
+          "content_type": "application/json"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "47b7b78ca647314d32f5c9841249a22e791149afad4505f5980022991f500559",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.878689+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": true
+        }
+      }
+    },
+    {
+      "name": "success-200-empty-body",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEI3DuNWuHvLmCnMOvrx01pHdCEXj4KJhH-X_k5KYyYXR2oLoiZCxf5TxuiKnsPbUDWQEqJzOuE5uGKykgsgMePnLBYXqdJ3SPLQA_1tdD4J4="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 200,
+          "body": "",
+          "content_type": "text/plain"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "44dafd3cdff3a3807b877298cf5b1876e3085a006ec9d49ec7a04805829753b6",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.898780+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": true
+        }
+      }
+    },
+    {
+      "name": "success-200-not-json",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJE0Q3EQrK3gmqj8mAB2uVAtU9lxQWzH78UZmO-ypQJQjsNbB_2dLCTHZkskcD7SGEBe7PNCva3UJfZju_dDRwMWuPYj1iNOwVOcXX0Fnzyy0Q="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 200,
+          "body": "<html>fine, actually</html>",
+          "content_type": "text/html"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "e0a809de403766e6ce73872534b2afe278a6c37ad212fa08f6b2715d5cc639ce",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.904293+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": true
+        }
+      }
+    },
+    {
+      "name": "created-201-is-a-failure",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJE2KgcOb3zB9cMdKq7Dh8sx2TPMDbB1_wvZ_wG9zcr0dzUCdLpLeOWOyFzGFvUdMXXQj5sjrOj6hkUwPRVbREv_GO3R_r2VvKOXTKsCLJSar8="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 201,
+          "body": "{\"ok\": true}",
+          "content_type": "application/json"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "e768622ce1fb877769350b63a55e38f00aa204ef1a36bac3eeffcc22a8152de7",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.909495+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 201: {\"ok\": true}"
+        }
+      }
+    },
+    {
+      "name": "no-content-204-is-a-failure",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEJH8kWfuHCAHOIIvZEcDjxb56ytbMqEX00EGc3r8cUFewMu_p1nd0psWhU7Er8JlPDSQ4n2SBfKjyP2jSpZduU2mZ9qB-7g_Z-pT-jzGhHSo="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 204,
+          "body": "",
+          "content_type": "text/plain"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "985ff1a17817b1eeb9f9ba848225dc7087b6e340edf9382ee04810ababf737c0",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.915621+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 204: "
+        }
+      }
+    },
+    {
+      "name": "redirect-302-is-not-followed",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEHk15bBrb5cwcVlhlrfZpgT-abO58zKQ00E0p9x8h3vtcyjjdV73b3dnPzYlOVk5KF4pLUWzb6gaS7ExvZBh7F7l9e6bM26mL0s84HquPPT0="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 302,
+          "body": "moved",
+          "content_type": "text/plain",
+          "location": "/api/jena/webhook/v2"
+        },
+        "POST /api/jena/webhook/v2": {
+          "status": 200,
+          "body": "{\"ok\": true}",
+          "content_type": "application/json"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "e39f560de18105853238bbd8a332932254c06aa133f53948f5bfd72e11c47f03",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.920597+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 302: moved"
+        }
+      }
+    },
+    {
+      "name": "401-json-error-key",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEbNN_XrUeB_hpMwJYd0tmsl-OG0p1zgdfOj8s8HV2zvjVc8fzvyBDkL1Xb5QWd-yTbgOFw-zb_bxiROlQNk4N_u7mH7G95kkGi-2QMXU4MGI="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 401,
+          "body": "{\"error\": \"Invalid signature\"}",
+          "content_type": "application/json"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "49ec39c7bf5340b8c82d78b09214907236ee9f59ac6edaed03ba9b0f55418736",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.925722+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 401: Invalid signature"
+        }
+      }
+    },
+    {
+      "name": "500-json-without-error-key",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEeMmFEXG5hbzWTe2mtU-dADGEeUlhkIupCj5wwK2hqJ4PnvqPyFgqB9dKcX3mvxaWw9uRjbN6tsPdG1eF_c6co2gmxc1C3qtmZygDpW1HKdY="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 500,
+          "body": "{\"message\": \"boom\", \"code\": 17}",
+          "content_type": "application/json"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "7bb07f5dddcc5b63cc90713246128e54bf3655473356bd3e8091fd0a81c3baa6",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.930963+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 500: {\"message\": \"boom\", \"code\": 17}"
+        }
+      }
+    },
+    {
+      "name": "404-long-html-truncated-to-200-chars",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEPoGp08W8zvTv0mlYA_ZSEnJqT2aqyP9yLMoHQlTIaQOBztmAq3LI8_SOr2-KOTgRzeVuCBAp1zozmcv5GoP_97DJEKjwxsV5afLh0rpJ5G0="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 404,
+          "body": "<html><body>vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. </body></html>",
+          "content_type": "text/html"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "13395238e41ded8493d8d4cd6583f9d0459af71341e189500b242b38d823ed53",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.936190+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 404: <html><body>vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found. vercel: this deployment is not found"
+        }
+      }
+    },
+    {
+      "name": "400-json-array-body",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEJDd8InE5YgKz6Odpzxoi3RAMdaZVNpZHvlZlFeNw57fmeCZpsYeAbeMOYa90zyw_abd7_ZFzuD69IORrHjvSBb5fo2NNg65uN3lyWCy50BI="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 400,
+          "body": "[{\"error\": \"not reached\"}]",
+          "content_type": "application/json"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "076448dfb914446191dfdfe0e94fdb72634b69080f692fcb2152919663681b62",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.941323+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 400: [{\"error\": \"not reached\"}]"
+        }
+      }
+    },
+    {
+      "name": "400-json-null-body",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEXYFaSwIYlTcTK3zY0ilAhppqAbCSnOJ5J1grODRDlzW7d-cZpRPzOR9cJhFlAGB0NxIIWxPWDDOqImZGI7cRfzp0Ksxh51jxjaD5rtVlpiM="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 400,
+          "body": "null",
+          "content_type": "application/json"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "d392f3186274e8392a4ae11d198718a299f66bd7bacdd25f86ae842e4b8c852f",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.946275+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 400: null"
+        }
+      }
+    },
+    {
+      "name": "400-json-string-body",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEwt_5jN9Gl1PzV-NhpDJIKsmekdQHwvILAUKYfV8Zz0dxV5B8UX3Bq2L9LDdEfTNGPkVJXvhX95tuH_QG8GpcjaNsf0w-P2Mm7q09nO1J5S4="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 400,
+          "body": "\"just a string\"",
+          "content_type": "application/json"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "e7b5dc3c73e7f29cc59592c65e80d7a0ed31dfeba0e356e815e19d2ea88996e9",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.950750+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 400: \"just a string\""
+        }
+      }
+    },
+    {
+      "name": "502-error-key-is-null",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEeb-1unU1FmQVs8t-WoB8OrEvSNrq8qkDBU4ZJuo8ZKYuVFra8Loh79TbBcdwmyAVPc3M6Km-qJ99TQ_H5ANfjGj4kL5NfF-O6Ok9KR1hf-8="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 502,
+          "body": "{\"error\": null}",
+          "content_type": "application/json"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "bba67313b595adb06b2f02926dbdd29e22165b4586e9587d6fb2dbd6884ebc7c",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.955848+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 502: None"
+        }
+      }
+    },
+    {
+      "name": "502-error-key-is-true",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEzXBOle7_qWN7fuC3eXUArhfPJx1KpiPQ270k_PxJfSeSTyR12l8z9N4Ef8KRuJxpZuP9T-NKJ3PvTZnDf92vMhPUN7q3AYWkVhR876DCyPA="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 502,
+          "body": "{\"error\": true}",
+          "content_type": "application/json"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "27453c32aab6d76e751f19bc174e08704226958122a81756c1567f9593c52432",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.960577+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 502: True"
+        }
+      }
+    },
+    {
+      "name": "502-error-key-is-an-int",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEvHX3IU7DaPuuxbXrfBEnBw1eRnS2_xmyG3TaON5sEnTlyzqaRmQNqyrlERV82dIeidExDFTd6ShWNIr84f9VgFhpMDIqa4kdG-uJsWhSV34="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 502,
+          "body": "{\"error\": 42}",
+          "content_type": "application/json"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "b6083e3df8953517372c6682e720b4cd943a6290e28c1575d25e7e06800ec521",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.965596+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 502: 42"
+        }
+      }
+    },
+    {
+      "name": "502-error-key-is-an-integral-float",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEdPBXZerk2xwGlFl8xK1-MSIqti72CgkQfDbZJFpVMWBkd5wvWyrbbL0Zta5OalqreRy4cul-F4rH6lrdG-GiOSQloWN-SHU4iYf21-JNu4U="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 502,
+          "body": "{\"error\": 1.0}",
+          "content_type": "application/json"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "a4c90aacbc3fa53316708e874cca6943836480babd979721cab1a1b1bba50db3",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.970438+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 502: 1.0"
+        }
+      }
+    },
+    {
+      "name": "502-error-key-is-a-list",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEb5YmyfR4ysFwB6hXlH2_R0fYR4B39eab6OwpqLnwE1Wf1J2B5bUNqRoFGc9Ws-IFOKTtMHR16mP8Nbxjxma_rEzhEZejefk3VxyzVdrNWeA="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 502,
+          "body": "{\"error\": [\"a\", 1, null]}",
+          "content_type": "application/json"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "1d1156e9abac4e9181049a97cc0fcdd19603558d97c850cbdbe7d6c3665042af",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.975162+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 502: ['a', 1, None]"
+        }
+      }
+    },
+    {
+      "name": "502-error-key-is-a-list-of-quoted-strings",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEI1KFzHsnnlmZrhHkD3pjS7bLAyJbfu07gSkRZM26uO0tNOYSZiGoKzJSkJXEYOZF2ETw7h9zJLsmVAnQYB1NuUDWDTCTsSuoOV6rEz8x8no="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 502,
+          "body": "{\"error\": [\"it's\", \"say \\\"hi\\\"\", \"both ' and \\\"\", \"back\\\\slash\"]}",
+          "content_type": "application/json"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "bba9c7d9c444c8bd197e542f808f55a1c239652d45bc96ad5e6e79d81d8e984a",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.979753+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 502: [\"it's\", 'say \"hi\"', 'both \\' and \"', 'back\\\\slash']"
+        }
+      }
+    },
+    {
+      "name": "502-error-key-is-an-object",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEjnfj8TgHWAerupp8VpvsPXUo_0UB_JytiCiIZXGqNcdTQOgY5MetmGGoiplitp6X7pf2jzSwEtcrJcu22Y4UToIJmbemeqmPh_1Gt8hNcjg="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 502,
+          "body": "{\"error\": {\"why\": \"nested\"}}",
+          "content_type": "application/json"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "fb5c7856a7fb13b0b24f7661d53f1fcc93d4c986a3b40571b24dbd50d522771e",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.984450+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 502: {'why': 'nested'}"
+        }
+      }
+    },
+    {
+      "name": "503-empty-body",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEboTYZxO7SzW5ELBVnmKCQo8yulmDdJMqdE7UDPSB1-3XLt-jkzIUDDT-TzrBhqF3z5FXMy-1WN9vJ-HdMw2AmWRzHvFJooXAuc6sDKFIQPY="
+      },
+      "unset_key": false,
+      "routes": {
+        "POST /api/jena/webhook": {
+          "status": 503,
+          "body": "",
+          "content_type": "text/plain"
+        }
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "path": "/api/jena/webhook",
+          "query": "",
+          "content_type": "application/json",
+          "signature": "d807d7d15d91fda3aa5af3b36f91ee45c464ad55ab17bce33538e0bbd40885a9",
+          "body": "{\"event\": \"test\", \"timestamp\": \"2026-08-23T07:33:24.989213+00:00\"}"
+        }
+      ],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook returned 503: "
+        }
+      }
+    },
+    {
+      "name": "connection-refused",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "http://127.0.0.1:9/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJERcuYxiThDauZhykoj6lkD9UX2BsdpTE4ITIkaqUN0Drc7_ossc9THFiR3pr2lT9MGQ69xH_midullXdSCh7Xri6bS_gh11ThrvntvYDd7Zo="
+      },
+      "unset_key": false,
+      "routes": {},
+      "requests": [],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "All connection attempts failed"
+        }
+      }
+    },
+    {
+      "name": "profile-not-found",
+      "profile": null,
+      "unset_key": false,
+      "routes": {},
+      "requests": [],
+      "expected": {
+        "http_status": 404,
+        "detail": "Profile not found"
+      }
+    },
+    {
+      "name": "profile-owned-by-another-user",
+      "profile": {
+        "user_id": "someone-else",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJEt2AW3uL5iIjAkUUULV9sO8VcmL5xd8p8NxnRPdHoQjvbk2ON4T1-khg_-ngGwUoJ4LxFDhxDKcQSb84xhXLokV8jythB-zSFm_QOu9Vqacc="
+      },
+      "unset_key": false,
+      "routes": {},
+      "requests": [],
+      "expected": {
+        "http_status": 404,
+        "detail": "Profile not found"
+      }
+    },
+    {
+      "name": "no-webhook-url",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": null,
+        "nextjs_webhook_secret": "gAAAAABqiqJEPuKdMk1VUoVYwczkDUkORNvcxxwJH5g2UvnXfhPHh7VJdsRTaPCnKY2AbpHvh1L4p2TtsYIR0Pu1fjBD2U0UIGvmhDT3emtp2Y6oNLGo07A="
+      },
+      "unset_key": false,
+      "routes": {},
+      "requests": [],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook URL or secret not configured"
+        }
+      }
+    },
+    {
+      "name": "empty-webhook-url",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "",
+        "nextjs_webhook_secret": "gAAAAABqiqJE-EhgTTRjjn7IYLS-fLKJrpaiP3q4uaEO-TuRW_dTFSgzg982vQ6vlL7daP0vVzkU9FWekzmUA7xkloNkq0uxLY3Q3Fnc6lAm3Jw3_PEgqlA="
+      },
+      "unset_key": false,
+      "routes": {},
+      "requests": [],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook URL or secret not configured"
+        }
+      }
+    },
+    {
+      "name": "no-webhook-secret",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": null
+      },
+      "unset_key": false,
+      "routes": {},
+      "requests": [],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook URL or secret not configured"
+        }
+      }
+    },
+    {
+      "name": "empty-webhook-secret",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": ""
+      },
+      "unset_key": false,
+      "routes": {},
+      "requests": [],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Webhook URL or secret not configured"
+        }
+      }
+    },
+    {
+      "name": "undecryptable-webhook-secret",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "not-a-fernet-token"
+      },
+      "unset_key": false,
+      "routes": {},
+      "requests": [],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Failed to decrypt webhook secret"
+        }
+      }
+    },
+    {
+      "name": "unset-encryption-key",
+      "profile": {
+        "user_id": "user-under-test",
+        "nextjs_webhook_url": "{BASE}/api/jena/webhook",
+        "nextjs_webhook_secret": "gAAAAABqiqJED0ibsZcgmBCjvQqGTuQ11W_XMt2o-yEPerP_X2OB1Wsgl2vaj2Lw82tk7OXmiDqex_mOXvxCG50vugM8N_8WyMpmfSCAU1hPSdYG8VR6SNk="
+      },
+      "unset_key": true,
+      "routes": {},
+      "requests": [],
+      "expected": {
+        "returned": {
+          "connected": false,
+          "error": "Failed to decrypt webhook secret"
+        }
+      }
+    }
+  ]
+}

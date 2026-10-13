@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import NewPostPage from "./page";
 import { renderWithProviders } from "@/test/render";
-import { makeProfile } from "@/test/fixtures";
+import { defaultStageSettings, makeProfileListItem } from "@/test/fixtures";
 
 const mockPush = vi.fn();
 
@@ -29,6 +29,8 @@ vi.mock("@/lib/api", async () => {
     },
     profiles: {
       list: vi.fn(),
+      wpCategories: vi.fn(),
+      wpAuthors: vi.fn(),
     },
   };
 });
@@ -44,8 +46,10 @@ const { posts, profiles } = await import("@/lib/api");
 const { toast } = await import("sonner");
 const mockCreate = vi.mocked(posts.create);
 const mockProfilesList = vi.mocked(profiles.list);
+const mockWpCategories = vi.mocked(profiles.wpCategories);
+const mockWpAuthors = vi.mocked(profiles.wpAuthors);
 
-const testProfile = makeProfile({
+const testProfile = makeProfileListItem({
   id: "prof-1",
   name: "Firearms Blog",
   niche: "Firearms",
@@ -61,13 +65,31 @@ const testProfile = makeProfile({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockProfilesList.mockResolvedValue([testProfile]);
+  // Pending by default: most cases here render and assert synchronously, and a
+  // profile list that resolves afterwards settles state outside act(...) and
+  // fills the run with warnings. Cases that need the list say so.
+  mockProfilesList.mockReturnValue(new Promise(() => {}));
   mockCreate.mockResolvedValue({
     id: "new-post-1",
     slug: "test",
     topic: "Test",
   } as never);
 });
+
+/**
+ * A post cannot be created without a profile since P2.97, so the cases that
+ * reach `posts.create` render against an account with exactly one, which the
+ * picker selects for the page.
+ */
+async function renderWithOneProfile() {
+  mockProfilesList.mockResolvedValue([makeProfileListItem({ id: "prof-1", name: "Test Site" })]);
+  renderWithProviders(<NewPostPage />);
+  await waitFor(() =>
+    expect(screen.getByRole("combobox", { name: "Website profile" })).toHaveTextContent(
+      "Test Site"
+    )
+  );
+}
 
 describe("NewPostPage", () => {
   it("renders the form title", async () => {
@@ -135,7 +157,7 @@ describe("NewPostPage", () => {
 
   it("submits form and redirects on success", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<NewPostPage />);
+    await renderWithOneProfile();
 
     const topicInput = screen.getByLabelText(/Topic/);
     await user.type(topicInput, "My Test Post");
@@ -157,23 +179,121 @@ describe("NewPostPage", () => {
     });
   });
 
-  it("shows error toast on submission failure", async () => {
-    mockCreate.mockRejectedValue(new Error("Server error"));
+  it("cannot submit until a profile is picked", async () => {
     const user = userEvent.setup();
+    mockProfilesList.mockResolvedValue([
+      makeProfileListItem({ id: "prof-1", name: "A" }),
+      makeProfileListItem({ id: "prof-2", name: "B" }),
+    ]);
     renderWithProviders(<NewPostPage />);
+    await user.type(screen.getByLabelText(/Topic/), "Test Post");
+
+    // A post reaches its owner only through its profile since P2.97, so the
+    // form says so rather than sending a body the endpoint answers with a 422.
+    expect(
+      await screen.findByText("Pick a website profile to create this post.")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Create Post").closest("button")).toBeDisabled();
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  // A toast would be gone in four seconds and the operator is still looking at
+  // a filled-in form, so the reason stays on the page next to the button.
+  it("shows the server's own reason inline on submission failure", async () => {
+    mockCreate.mockRejectedValue(
+      new Error(JSON.stringify({ detail: "Slug already in use" }))
+    );
+    const user = userEvent.setup();
+    await renderWithOneProfile();
 
     await user.type(screen.getByLabelText(/Topic/), "Test Post");
     await user.click(screen.getByText("Create Post"));
 
-    await waitFor(() => {
-      expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Failed to create post");
+    expect(await screen.findByText("Slug already in use")).toBeInTheDocument();
+    expect(screen.getByText("Could not create the post")).toBeInTheDocument();
+    expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
+  });
+
+  it("falls back to its own wording when the failure carries no message", async () => {
+    mockCreate.mockRejectedValue(new Error("Server error"));
+    const user = userEvent.setup();
+    await renderWithOneProfile();
+
+    await user.type(screen.getByLabelText(/Topic/), "Test Post");
+    await user.click(screen.getByText("Create Post"));
+
+    expect(await screen.findByText("Failed to create post")).toBeInTheDocument();
+  });
+
+  it("clears a previous failure when the form is submitted again", async () => {
+    mockCreate.mockRejectedValueOnce(
+      new Error(JSON.stringify({ detail: "Slug already in use" }))
+    );
+    const user = userEvent.setup();
+    await renderWithOneProfile();
+
+    await user.type(screen.getByLabelText(/Topic/), "Test Post");
+    await user.click(screen.getByText("Create Post"));
+    expect(await screen.findByText("Slug already in use")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Create Post"));
+    await waitFor(() =>
+      expect(screen.queryByText("Slug already in use")).not.toBeInTheDocument()
+    );
+  });
+
+  it("prefills the writing config from the chosen profile", async () => {
+    mockProfilesList.mockResolvedValue([testProfile]);
+    const user = userEvent.setup();
+    renderWithProviders(<NewPostPage />);
+
+    await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+    await user.click(await screen.findByRole("option", { name: "Firearms Blog" }));
+
+    expect(screen.getByLabelText("Niche")).toHaveValue("Firearms");
+    expect(screen.getByLabelText("Target Audience")).toHaveValue("Gun Enthusiasts");
+    expect(screen.getByLabelText("Tone")).toHaveValue("Expert");
+    expect(screen.getByLabelText("Word Count")).toHaveValue(3000);
+  });
+
+  // Categories and authors come from the profile's own WordPress site, so a
+  // wrong password fails here and nowhere else. Silent, it reads as a site
+  // with no categories.
+  it("surfaces a WordPress lookup failure with a retry", async () => {
+    const wpProfile = makeProfileListItem({
+      id: "prof-wp",
+      name: "WP Site",
+      wp_url: "https://wp.example.com",
+      wp_username: "editor",
+      wp_app_password_set: true,
     });
+    mockProfilesList.mockResolvedValue([wpProfile]);
+    mockWpCategories.mockRejectedValueOnce(
+      new Error(JSON.stringify({ detail: "WordPress rejected the credentials" }))
+    );
+    mockWpAuthors.mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderWithProviders(<NewPostPage />);
+
+    // The only profile is picked for the page, which is what loads the lists.
+    expect(
+      await screen.findByText("WordPress rejected the credentials")
+    ).toBeInTheDocument();
+
+    mockWpCategories.mockResolvedValue([{ id: 3, name: "Optics" } as never]);
+    await user.click(screen.getByRole("button", { name: /Retry/ }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Could not load categories and authors")
+      ).not.toBeInTheDocument()
+    );
   });
 
   it("disables submit button while submitting", async () => {
     mockCreate.mockReturnValue(new Promise(() => {})); // never resolves
     const user = userEvent.setup();
-    renderWithProviders(<NewPostPage />);
+    await renderWithOneProfile();
 
     await user.type(screen.getByLabelText(/Topic/), "Test Post");
     await user.click(screen.getByText("Create Post"));
@@ -193,5 +313,323 @@ describe("NewPostPage", () => {
     await waitFor(() => {
       expect(mockProfilesList).toHaveBeenCalled();
     });
+  });
+
+  /**
+   * `output_format` decides where the finished post goes, and both publish
+   * steps read their credentials off the linked profile. A form that offers
+   * WordPress with no profile, or with a profile that has none of the three
+   * WordPress credentials, sells a run that pays for six stages and then
+   * fails in the publish step.
+   */
+  describe("output format availability", () => {
+    it("offers no publishing format until a profile is chosen", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(screen.getByRole("combobox", { name: "Output Format" }));
+
+      expect(await screen.findByRole("option", { name: /WordPress/ })).toHaveAttribute(
+        "aria-disabled",
+        "true"
+      );
+      expect(await screen.findByRole("option", { name: /Next.js/ })).toHaveAttribute(
+        "aria-disabled",
+        "true"
+      );
+      expect(await screen.findByRole("option", { name: "Markdown" })).not.toHaveAttribute(
+        "aria-disabled",
+        "true"
+      );
+    });
+
+    it("says a profile is what is missing", () => {
+      renderWithProviders(<NewPostPage />);
+      expect(
+        screen.getByText(
+          "WordPress (Direct Publish): Choose a website profile to publish there."
+        )
+      ).toBeInTheDocument();
+    });
+
+    it("opens WordPress up for a profile that has all three credentials", async () => {
+      mockProfilesList.mockResolvedValue([
+        makeProfileListItem({
+          id: "prof-wp",
+          name: "WP Site",
+          wp_url: "https://wp.example.com",
+          wp_username: "editor",
+          wp_app_password_set: true,
+        }),
+      ]);
+      mockWpCategories.mockResolvedValue([]);
+      mockWpAuthors.mockResolvedValue([]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "WP Site" }));
+      await user.click(screen.getByRole("combobox", { name: "Output Format" }));
+
+      expect(await screen.findByRole("option", { name: /WordPress/ })).not.toHaveAttribute(
+        "aria-disabled",
+        "true"
+      );
+    });
+
+    /**
+     * The application password is the credential the profile response cannot
+     * show, so a URL and a username look like a finished setup. They are not:
+     * `wordpress-publish.ts` refuses on all three.
+     */
+    it("keeps WordPress closed for a profile whose app password was never saved", async () => {
+      mockProfilesList.mockResolvedValue([
+        makeProfileListItem({
+          id: "prof-half",
+          name: "Half Set Up",
+          wp_url: "https://wp.example.com",
+          wp_username: "editor",
+        }),
+      ]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Half Set Up" }));
+
+      expect(
+        await screen.findByText(
+          'WordPress (Direct Publish): "Half Set Up" has no WordPress connection. ' +
+            "Set one up in the profile."
+        )
+      ).toBeInTheDocument();
+    });
+
+    /**
+     * The profile's own `output_format` is prefilled, so a profile that names
+     * WordPress and cannot reach it lands the form on a format that will
+     * fail. Rewriting the value silently would hide that, so it is said out
+     * loud instead.
+     */
+    it("raises the prefilled format's reason to an alert instead of rewriting it", async () => {
+      mockProfilesList.mockResolvedValue([testProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Firearms Blog" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        'WordPress (Direct Publish): "Firearms Blog" has no WordPress connection. ' +
+          "Set one up in the profile."
+      );
+    });
+  });
+
+  /**
+   * `stage_settings` decides which stages park the run in front of a reviewer.
+   * The profile is where it comes from and a form that stays silent sells a
+   * run that stops halfway with nothing on screen that said it would, so the
+   * card names all six. Since P2.114 it also sets them: an omitted
+   * `stage_settings` inherits the profile's, a submitted one is kept as sent.
+   */
+  describe("pipeline gates", () => {
+    const gatedProfile = makeProfileListItem({
+      id: "prof-gated",
+      name: "Gated Blog",
+      default_stage_settings: {
+        ...defaultStageSettings,
+        outline: "review",
+        ready: "approve_only",
+      },
+    });
+
+    it("names what each of the six stages will do for this post", async () => {
+      mockProfilesList.mockResolvedValue([gatedProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Gated Blog" }));
+
+      await screen.findByTestId("gate-research");
+      const rows: [string, string, string][] = [
+        ["research", "Research", "Run automatically"],
+        ["outline", "Outline", "Wait for review"],
+        ["write", "Write", "Run automatically"],
+        ["edit", "Edit", "Run automatically"],
+        ["images", "Images", "Run automatically"],
+        ["ready", "Ready", "Wait for approval"],
+      ];
+      for (const [stage, label, mode] of rows) {
+        const row = within(screen.getByTestId(`gate-${stage}`));
+        expect(row.getByText(label)).toBeInTheDocument();
+        // The mode is read off the picker rather than off any text in the row:
+        // since P2.114 the row carries a select, and radix renders its value
+        // in the trigger and again in the hidden native control it shadows.
+        expect(row.getByRole("combobox", { name: label })).toHaveTextContent(mode);
+      }
+    });
+
+    it("summarises the stages that will stop the run", async () => {
+      mockProfilesList.mockResolvedValue([gatedProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Gated Blog" }));
+
+      expect(await screen.findByTestId("gate-summary")).toHaveTextContent(
+        "This run will stop at Outline and Ready and wait for you."
+      );
+    });
+
+    it("says the run will not stop when the profile gates nothing", async () => {
+      mockProfilesList.mockResolvedValue([testProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Firearms Blog" }));
+
+      expect(await screen.findByTestId("gate-summary")).toHaveTextContent(
+        "This run will go from Research to Ready without stopping."
+      );
+    });
+
+    // The gates on this form are the post's since P2.114, so the link is no
+    // longer where they are changed: it is where the default they started from
+    // is changed, which is the profile every later post will inherit.
+    it("points at the profile the gates were inherited from", async () => {
+      mockProfilesList.mockResolvedValue([gatedProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Gated Blog" }));
+
+      expect(
+        await screen.findByRole("link", {
+          name: "Change the default for new posts in Gated Blog",
+        })
+      ).toHaveAttribute("href", "/profiles/prof-gated?tab=defaults");
+    });
+
+    /**
+     * Ledger item P2.114. The card was read-only because the server discarded
+     * the edit: `applyProfilePrefill` copied the profile's gates over any
+     * submitted value equal to the schema default, and "no gates" is that
+     * default. A submitted `stage_settings` now wins, so the card is where a
+     * gate is set for one post.
+     */
+    it("sends no gates of its own when they are left alone", async () => {
+      mockProfilesList.mockResolvedValue([gatedProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Gated Blog" }));
+      await user.type(screen.getByLabelText(/Topic/), "Inherited gates");
+      await user.click(screen.getByText("Create Post"));
+
+      await waitFor(() => expect(mockCreate).toHaveBeenCalled());
+      expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("stage_settings");
+    });
+
+    it("sends the one gate this post changed, leaving the other five alone", async () => {
+      mockProfilesList.mockResolvedValue([gatedProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Gated Blog" }));
+      await user.click(await screen.findByRole("combobox", { name: "Research" }));
+      await user.click(await screen.findByRole("option", { name: "Wait for review" }));
+      await user.type(screen.getByLabelText(/Topic/), "One gate changed");
+      await user.click(screen.getByText("Create Post"));
+
+      await waitFor(() => expect(mockCreate).toHaveBeenCalled());
+      expect(mockCreate.mock.calls[0][0].stage_settings).toEqual({
+        ...gatedProfile.default_stage_settings,
+        research: "review",
+      });
+    });
+
+    // The case the old rule could not express: six "auto"s is the schema
+    // default, so Python wrote the profile's gates back over it.
+    it("can clear every gate for one post", async () => {
+      mockProfilesList.mockResolvedValue([gatedProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Gated Blog" }));
+      for (const stage of ["Outline", "Ready"]) {
+        await user.click(await screen.findByRole("combobox", { name: stage }));
+        await user.click(await screen.findByRole("option", { name: "Run automatically" }));
+      }
+
+      expect(screen.getByTestId("gate-summary")).toHaveTextContent(
+        "This run will go from Research to Ready without stopping."
+      );
+
+      await user.type(screen.getByLabelText(/Topic/), "No gates");
+      await user.click(screen.getByText("Create Post"));
+
+      await waitFor(() => expect(mockCreate).toHaveBeenCalled());
+      expect(mockCreate.mock.calls[0][0].stage_settings).toEqual(defaultStageSettings);
+    });
+
+    it("puts the profile's gates back when the edit is undone", async () => {
+      mockProfilesList.mockResolvedValue([gatedProfile]);
+      const user = userEvent.setup();
+      renderWithProviders(<NewPostPage />);
+
+      await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+      await user.click(await screen.findByRole("option", { name: "Gated Blog" }));
+      await user.click(await screen.findByRole("combobox", { name: "Research" }));
+      await user.click(await screen.findByRole("option", { name: "Wait for review" }));
+
+      await user.click(screen.getByRole("button", { name: "Use the profile's gates" }));
+      expect(
+        screen.queryByRole("button", { name: "Use the profile's gates" })
+      ).not.toBeInTheDocument();
+
+      await user.type(screen.getByLabelText(/Topic/), "Undone");
+      await user.click(screen.getByText("Create Post"));
+
+      await waitFor(() => expect(mockCreate).toHaveBeenCalled());
+      expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("stage_settings");
+    });
+
+    it("reads as an ungated run before a profile is chosen", async () => {
+      mockProfilesList.mockResolvedValue([]);
+      renderWithProviders(<NewPostPage />);
+
+      expect(await screen.findByTestId("gate-summary")).toHaveTextContent(
+        "This run will go from Research to Ready without stopping."
+      );
+      expect(screen.queryByRole("link", { name: /Change the default/ })).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * Every value in Writing Config and SEO & Research arrives from the profile
+   * and is then editable, so the form owes the reader both facts: where the
+   * value came from, and that changing it here does not change the profile.
+   */
+  it("says which profile the defaults were filled in from", async () => {
+    mockProfilesList.mockResolvedValue([testProfile]);
+    const user = userEvent.setup();
+    renderWithProviders(<NewPostPage />);
+
+    await user.click(await screen.findByRole("combobox", { name: "Website profile" }));
+    await user.click(await screen.findByRole("option", { name: "Firearms Blog" }));
+
+    expect(
+      await screen.findByText(
+        'Filled in from "Firearms Blog". Edits here apply to this post only.'
+      )
+    ).toBeInTheDocument();
   });
 });

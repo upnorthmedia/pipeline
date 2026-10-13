@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { posts, profiles, queue, settings, sseUrl } from "./api";
+import { apiErrorMessage, posts, profiles, queue, settings, sseUrl } from "./api";
+import { INTERNAL_SERVER_ERROR_DETAIL } from "./route-error";
 
-const API_BASE = "http://localhost:8055";
+// The dashboard and its route handlers are one Next.js app, so every request
+// the client makes is origin-relative. There is no base URL to configure.
+const API_BASE = "";
 
 // Track all fetch calls
 let fetchCalls: { url: string; init?: RequestInit }[] = [];
@@ -33,6 +36,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // `restoreAllMocks` puts spies back but leaves `vi.stubGlobal` in place, so
+  // without this the stubbed `fetch` outlives the test that installed it.
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -129,7 +135,7 @@ describe("api client", () => {
   describe("posts endpoints", () => {
     it("creates a post", async () => {
       mockResponse.body = { id: "new-1", topic: "Test" };
-      await posts.create({ slug: "test", topic: "Test" });
+      await posts.create({ slug: "test", topic: "Test", profile_id: "profile-1" });
       expect(fetchCalls[0].init?.method).toBe("POST");
       expect(fetchCalls[0].url).toBe(`${API_BASE}/api/posts`);
     });
@@ -167,6 +173,18 @@ describe("api client", () => {
       expect(fetchCalls[0].url).toBe(`${API_BASE}/api/posts/post-1/pause`);
     });
 
+    it("approves the gate a post is parked at", async () => {
+      mockResponse.body = {
+        status: "approved",
+        stage: "outline",
+        mode: "review",
+        post_id: "post-1",
+      };
+      await posts.approve("post-1");
+      expect(fetchCalls[0].url).toBe(`${API_BASE}/api/posts/post-1/approve`);
+      expect(fetchCalls[0].init?.method).toBe("POST");
+    });
+
     it("reruns from current stage", async () => {
       mockResponse.body = { status: "queued", mode: "rerun", rerun_from: "research" };
       await posts.rerun("post-1");
@@ -186,8 +204,8 @@ describe("api client", () => {
     it("batch creates posts", async () => {
       mockResponse.body = [{ id: "b1" }, { id: "b2" }];
       await posts.batchCreate([
-        { slug: "a", topic: "A" },
-        { slug: "b", topic: "B" },
+        { slug: "a", topic: "A", profile_id: "profile-1" },
+        { slug: "b", topic: "B", profile_id: "profile-1" },
       ]);
       expect(fetchCalls[0].url).toBe(`${API_BASE}/api/posts/batch`);
       expect(JSON.parse(fetchCalls[0].init?.body as string)).toHaveLength(2);
@@ -255,6 +273,53 @@ describe("api client", () => {
     });
   });
 
+  describe("same-origin addressing", () => {
+    it("sends every request as an origin-relative path", async () => {
+      mockResponse.body = [];
+      await profiles.list();
+      await posts.list();
+      await queue.status();
+      await settings.list();
+      expect(fetchCalls).toHaveLength(4);
+      for (const call of fetchCalls) {
+        expect(call.url.startsWith("/api/")).toBe(true);
+      }
+    });
+
+    it("exposes origin-relative export and SSE urls", () => {
+      const urls = [
+        posts.exportMarkdown("post-1"),
+        posts.exportHtml("post-1"),
+        posts.exportAll("post-1"),
+        sseUrl.post("post-1"),
+        sseUrl.global(),
+      ];
+      for (const url of urls) {
+        expect(url.startsWith("/api/")).toBe(true);
+      }
+    });
+
+    it("cannot be pointed at another host by NEXT_PUBLIC_API_URL", async () => {
+      // The env var was how the dashboard used to reach the Python API. It is
+      // gone, and no browser surface may resolve back onto a separate service.
+      vi.stubEnv("NEXT_PUBLIC_API_URL", "http://localhost:8055");
+      vi.resetModules();
+      try {
+        const reloaded = await import("./api");
+        expect(reloaded.sseUrl.global()).toBe("/api/events");
+        expect(reloaded.posts.exportAll("post-1")).toBe(
+          "/api/posts/post-1/export/all"
+        );
+        mockResponse.body = [];
+        await reloaded.profiles.list();
+        expect(fetchCalls[0].url).toBe("/api/profiles");
+      } finally {
+        vi.unstubAllEnvs();
+        vi.resetModules();
+      }
+    });
+  });
+
   describe("SSE URL helpers", () => {
     it("generates post-specific SSE URL", () => {
       expect(sseUrl.post("post-1")).toBe(`${API_BASE}/api/events/post-1`);
@@ -263,5 +328,78 @@ describe("api client", () => {
     it("generates global SSE URL", () => {
       expect(sseUrl.global()).toBe(`${API_BASE}/api/events`);
     });
+  });
+});
+
+describe("apiErrorMessage", () => {
+  /** `request()` throws with the raw response body, so that is what is passed. */
+  const thrown = (body: unknown) => new Error(JSON.stringify(body));
+
+  it("unwraps the string detail every ported handler answers with", () => {
+    expect(apiErrorMessage(thrown({ detail: "Post not found" }), "fallback")).toBe(
+      "Post not found"
+    );
+  });
+
+  it("unwraps a 422's field errors, which arrive as a list rather than a string", () => {
+    const message = apiErrorMessage(
+      thrown({
+        detail: [
+          {
+            type: "value_error",
+            loc: ["body", "wp_url"],
+            msg: "WordPress URL should start with http:// or https://",
+            input: "example.com",
+          },
+        ],
+      }),
+      "The profile could not be saved."
+    );
+
+    expect(message).toBe("WordPress URL should start with http:// or https://");
+  });
+
+  it("joins several field errors into one sentence run", () => {
+    const message = apiErrorMessage(
+      thrown({
+        detail: [
+          { type: "value_error", loc: ["body", "website_url"], msg: "First problem.", input: "" },
+          { type: "value_error", loc: ["body", "wp_url"], msg: "Second problem.", input: "" },
+        ],
+      }),
+      "fallback"
+    );
+
+    expect(message).toBe("First problem. Second problem.");
+  });
+
+  it("falls back for a detail list carrying no readable message", () => {
+    expect(apiErrorMessage(thrown({ detail: [{ loc: ["body", "x"] }] }), "fallback")).toBe(
+      "fallback"
+    );
+  });
+
+  it("falls back for an empty detail list", () => {
+    expect(apiErrorMessage(thrown({ detail: [] }), "fallback")).toBe("fallback");
+  });
+
+  it("falls back for a body that is not JSON", () => {
+    expect(apiErrorMessage(new Error("<html>502</html>"), "fallback")).toBe("fallback");
+  });
+
+  // `withServerError()` answers every unanticipated throw with Starlette's
+  // wording and deliberately keeps the cause out of the body, so the detail on
+  // a 500 names no complaint at all. The caller's fallback says which action
+  // failed, which is strictly more than "Internal Server Error" tells anyone.
+  it("falls back for the 500 placeholder, which names no complaint", () => {
+    expect(
+      apiErrorMessage(thrown({ detail: INTERNAL_SERVER_ERROR_DETAIL }), "The post could not be saved.")
+    ).toBe("The post could not be saved.");
+  });
+
+  it("still shows a handler's own wording that happens to mention the server", () => {
+    expect(
+      apiErrorMessage(thrown({ detail: "The internal server error log is empty" }), "fallback")
+    ).toBe("The internal server error log is empty");
   });
 });

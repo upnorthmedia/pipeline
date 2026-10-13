@@ -71,7 +71,7 @@ function logLevel(log: DebugLog): string {
 }
 
 export function DebugLogPanel({ logs, isRunning }: DebugLogPanelProps) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -83,7 +83,7 @@ export function DebugLogPanel({ logs, isRunning }: DebugLogPanelProps) {
   if (logs.length === 0 && !isRunning) return null;
 
   return (
-    <Card>
+    <Card className="gap-0 py-0 shadow-none">
       <Collapsible open={open} onOpenChange={setOpen}>
         <CardHeader className="py-3">
           <CollapsibleTrigger className="flex items-center justify-between w-full">

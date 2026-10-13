@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // `mastra dev` bundles the whole Mastra server and Studio UI into here.
+    // Linting that output OOMs the eslint process, and it is build output, not source.
+    ".mastra/**",
   ]),
 ]);
 

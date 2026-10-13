@@ -1,0 +1,644 @@
+// @vitest-environment node
+/**
+ * Parity for the `research` step (item 3.1c-ii).
+ *
+ * The gate the objective sets is the rendered prompt: the step must send the
+ * provider exactly what the Python stage sent, from a post row rather than from
+ * a hand-built state object. So the fixture's `post_spec` is inserted into the
+ * real Alembic-owned database, the step reads it back through drizzle, and the
+ * prompt it hands the agent is compared byte for byte against the fixture's
+ * `rendered_prompts[0]`.
+ *
+ * The provider call itself is replayed from the fixture's recorded response
+ * rather than made live: the live Perplexity smoke test lives in
+ * `agents/research.test.ts`, and re-billing a 6k-token research call on every
+ * `pnpm test` would buy nothing this replay does not already prove. Everything
+ * else in the step runs for real, including both database round trips.
+ *
+ * Requires `docker compose up -d db redis`.
+ */
+import { readFileSync } from "node:fs"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+
+import { eq, inArray } from "drizzle-orm"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+
+import { closeDb, getDb, posts } from "../../db"
+import { ABSENT_POST_ID } from "../../test/absent-ids"
+import { stageCostUsd } from "../execution-log"
+import { PERPLEXITY_AGENT_PROVIDER } from "../perplexity/agent-api"
+import { STATUS_COMPLETE } from "../state"
+import { stageStepOutputSchema } from "./stage-io"
+import {
+  MAX_RESEARCH_ATTEMPTS,
+  isValidResearch,
+  reinforcedPrompt,
+  researchCoverageStatus,
+  researchStep,
+} from "./research"
+
+const goldenDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../docs/mastra-port/golden",
+)
+
+const FIXTURE_SLUGS = [
+  "how-to-choose-a-crm-for-a-small-team",
+  "best-time-tracking-tools-for-agencies",
+] as const
+
+type Fixture = {
+  captured_at: string
+  post_spec: Record<string, never>
+  rendered_prompts: string[]
+  provider_calls: {
+    request: { model: string }
+    response: {
+      body: {
+        choices: { message: { content: string } }[]
+        usage: { prompt_tokens: number; completion_tokens: number }
+      }
+    }
+  }[]
+  stage_output: {
+    research: string
+    current_stage: string
+    stage_status: Record<string, string>
+    _stage_meta: { model: string; tokens_in: number; tokens_out: number }
+  }
+}
+
+function loadFixture(slug: string): Fixture {
+  return JSON.parse(readFileSync(path.join(goldenDir, slug, "research.json"), "utf8"))
+}
+
+const db = getDb()
+const fixtures = FIXTURE_SLUGS.map(loadFixture)
+/**
+ * Every stage's parity test seeds the same golden-fixture posts, so left under
+ * the fixture's own id these files collide on the posts primary key whenever
+ * vitest runs them in parallel. A post id never reaches a rendered prompt, so
+ * each file namespaces its rows by rewriting the fixture id's second-to-last
+ * byte, keeping the last one so the two fixtures stay distinct inside the file.
+ */
+const ID_NAMESPACE = "a1"
+const fixtureIds = fixtures.map(
+  (f) => String(f.post_spec.id).slice(0, -3) + ID_NAMESPACE + String(f.post_spec.id).slice(-1),
+)
+
+/** One replayed provider response, shaped like the agent's `generate` result. */
+function replayOf(fixture: Fixture) {
+  const call = fixture.provider_calls[0]
+  const capturedResearch = call.response.body.choices[0].message.content
+  return {
+    text: [
+      "## Research summary",
+      capturedResearch,
+      "## Claim ledger",
+      "- Claim: Archived fixture content is available for the port test.",
+      "  Source: https://example.com/source",
+      "## Topic coverage",
+      "The archived fixture covers the requested topic.",
+      "## Risks and open questions",
+      "The archived source packet predates the coverage contract.",
+      "## Recommended article direction",
+      "Use the fixture only to exercise stage persistence and accounting.",
+      "## Coverage verdict",
+      "STATUS: ready",
+    ].join("\n\n"),
+    response: { modelId: call.request.model },
+    usage: {
+      inputTokens: call.response.body.usage.prompt_tokens,
+      outputTokens: call.response.body.usage.completion_tokens,
+    },
+  }
+}
+
+type Replay = ReturnType<typeof replayOf> & { providerMetadata?: Record<string, unknown> }
+
+/**
+ * The same replay with a Perplexity Agent API bill attached, in the shape
+ * `mapAgentProviderMetadata` writes and Mastra passes through untouched.
+ */
+function billedAt(replay: Replay, totalCost: number): Replay {
+  return {
+    ...replay,
+    providerMetadata: {
+      [PERPLEXITY_AGENT_PROVIDER]: {
+        cost: { total_cost: totalCost, tool_calls_cost: 0.0025, currency: "USD" },
+      },
+    },
+  }
+}
+
+/**
+ * A stand-in for the Mastra instance that records the prompts the step sends
+ * and replies with the queued responses, the last one repeating.
+ *
+ * The logger is captured rather than passed through so the degraded-research
+ * path can be asserted on instead of printing a warning into the test output.
+ */
+function replayMastra(replies: Replay[]) {
+  const prompts: string[] = []
+  const warnings: string[] = []
+  const errors: string[] = []
+  const announced: Record<string, unknown>[] = []
+  /**
+   * The row as it stood at the moment each announcement was published, keyed by
+   * event name.
+   *
+   * Read from inside the publish callback on purpose: `publishPipelineEvent`
+   * awaits it, so the step cannot proceed past the announcement until this
+   * resolves. That makes "the write happened first" an ordering fact rather
+   * than a race the assertion happens to win, which is what the same check
+   * against a real Redis topic in `pipeline-events.test.ts` cannot promise.
+   */
+  const rowOnAnnounce: Record<string, Record<string, string>> = {}
+  const mastra = {
+    /**
+     * The step announces itself on the event bus before it calls its provider
+     * (item 5.5a). Stubbed here because this file is about prompt parity;
+     * `pipeline-events.test.ts` makes the same call against a real Redis
+     * Streams topic and asserts the payload it carries.
+     */
+    pubsub: {
+      publish: async (_topic: string, event: { data: { event: string; post_id: string } }) => {
+        announced.push(event.data)
+        const [row] = await db.select().from(posts).where(eq(posts.id, event.data.post_id))
+        rowOnAnnounce[event.data.event] = (row?.stageStatus ?? {}) as Record<string, string>
+      },
+    },
+    getAgent: () => ({
+      generate: async (prompt: string) => {
+        prompts.push(prompt)
+        return replies[Math.min(prompts.length - 1, replies.length - 1)]
+      },
+    }),
+    getLogger: () => ({
+      warn: (message: string) => warnings.push(message),
+      error: (message: string) => errors.push(message),
+    }),
+  }
+  return { mastra, prompts, announced, rowOnAnnounce, warnings, errors }
+}
+
+type ExecuteParams = Parameters<typeof researchStep.execute>[0]
+
+async function runStep(postId: string, replies: Replay[]) {
+  const harness = replayMastra(replies)
+  const output = await researchStep.execute({
+    inputData: { postId },
+    mastra: harness.mastra,
+  } as unknown as ExecuteParams)
+  return { ...harness, output: stageStepOutputSchema.parse(output) }
+}
+
+async function insertFixturePosts() {
+  for (const [index, fixture] of fixtures.entries()) {
+    const spec = fixture.post_spec
+    await db.insert(posts).values({
+      id: fixtureIds[index],
+      slug: spec.slug,
+      topic: spec.topic,
+      targetAudience: spec.target_audience,
+      niche: spec.niche,
+      intent: spec.intent,
+      articleType: spec.article_type,
+      outputFormat: spec.output_format,
+      wordCount: spec.word_count,
+      tone: spec.tone,
+      websiteUrl: spec.website_url,
+      relatedKeywords: spec.related_keywords,
+      competitorUrls: spec.competitor_urls,
+      imageStyle: spec.image_style,
+      imageBrandColors: spec.image_brand_colors,
+      imageExclude: spec.image_exclude,
+      brandVoice: spec.brand_voice,
+      avoid: spec.avoid,
+      requiredMentions: spec.required_mentions,
+      additionalInfo: spec.additional_info,
+      currentStage: null,
+      stageSettings: null,
+      stageStatus: null,
+    })
+  }
+}
+
+async function cleanup() {
+  await db.delete(posts).where(inArray(posts.id, fixtureIds))
+}
+
+beforeAll(cleanup)
+
+beforeEach(async () => {
+  await cleanup()
+  await insertFixturePosts()
+  // Only `Date` is faked: the prompt stamps TODAY_DATE from the clock, and the
+  // fixtures were captured on a fixed day. Timers stay real so the postgres
+  // driver's own timeouts still fire.
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true })
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+afterAll(async () => {
+  await cleanup()
+  await closeDb()
+})
+
+describe("research step prompt contract", () => {
+  for (const [index, slug] of FIXTURE_SLUGS.entries()) {
+    it(`sends stage-scoped configuration for ${slug}`, async () => {
+      const fixture = fixtures[index]
+      vi.setSystemTime(new Date(fixture.captured_at))
+
+      const { prompts } = await runStep(fixtureIds[index], [replayOf(fixture)])
+
+      expect(prompts).toHaveLength(1)
+      expect(prompts[0]).toContain(String(fixture.post_spec.additional_info))
+      expect(prompts[0]).not.toContain(`- **TONE**: ${String(fixture.post_spec.tone)}`)
+      expect(prompts[0]).not.toContain(`- **BRAND_VOICE**: ${String(fixture.post_spec.brand_voice)}`)
+    })
+  }
+})
+
+describe("research step persistence and output", () => {
+  it("commits the research to its column and reports Python's stage meta", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { output } = await runStep(fixtureIds[0], [replayOf(fixture)])
+
+    expect(output).toMatchObject({
+      postId: fixtureIds[0],
+      stage: "research",
+      model: fixture.stage_output._stage_meta.model,
+      tokensIn: fixture.stage_output._stage_meta.tokens_in,
+      tokensOut: fixture.stage_output._stage_meta.tokens_out,
+    })
+
+    const [row] = await db.select().from(posts).where(eq(posts.id, fixtureIds[0]))
+    expect(row.researchContent).toBe(replayOf(fixture).text)
+    expect(row.currentStage).toBe(fixture.stage_output.current_stage)
+    expect(row.stageStatus).toEqual(fixture.stage_output.stage_status)
+    // Later stages' columns stay untouched, which is what makes a resume safe.
+    expect(row.outlineContent).toBeNull()
+  })
+
+  it("fails loudly on a post that does not exist rather than billing a call", async () => {
+    const harness = replayMastra([replayOf(fixtures[0])])
+    await expect(
+      researchStep.execute({
+        inputData: { postId: ABSENT_POST_ID },
+        mastra: harness.mastra,
+      } as unknown as ExecuteParams),
+    ).rejects.toThrow("not found")
+    expect(harness.prompts).toEqual([])
+  })
+})
+
+/** Verbatim from `_reinforced_prompt` in `api/src/pipeline/stages/research.py`. */
+const PYTHON_RETRY_PREAMBLE =
+  "IMPORTANT: You must respond with ONLY the research document content. " +
+  "Do NOT describe yourself, your limitations, or ask questions. " +
+  "Do NOT say you are Perplexity or a search assistant. " +
+  "Simply produce the research document as specified.\n\n"
+
+const REFUSAL: Replay = {
+  text: "I'm Perplexity, a search assistant. I need to clarify my role.",
+  response: { modelId: "sonar-pro" },
+  usage: { inputTokens: 100, outputTokens: 20 },
+}
+
+describe("research step meta-response retry loop", () => {
+  it("retries a meta-response with the reinforced prompt and sums both calls' tokens", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+    const good = replayOf(fixture)
+
+    const { prompts, output, warnings } = await runStep(fixtureIds[0], [REFUSAL, good])
+
+    expect(prompts).toHaveLength(2)
+    // Pinned against the literal from `_reinforced_prompt`, not against
+    // `reinforcedPrompt()`, so editing the preamble fails here instead of
+    // moving both sides of the comparison together.
+    expect(prompts[1]).toBe(PYTHON_RETRY_PREAMBLE + prompts[0])
+    expect(reinforcedPrompt("x")).toBe(`${PYTHON_RETRY_PREAMBLE}x`)
+    expect(output.tokensIn).toBe(REFUSAL.usage.inputTokens + good.usage.inputTokens)
+    expect(output.tokensOut).toBe(REFUSAL.usage.outputTokens + good.usage.outputTokens)
+    expect(warnings).toHaveLength(1)
+
+    const [row] = await db.select().from(posts).where(eq(posts.id, fixtureIds[0]))
+    expect(row.researchContent).toBe(good.text)
+  })
+
+  it("stops after the attempt cap and keeps the last response, as Python does", async () => {
+    vi.setSystemTime(new Date(fixtures[0].captured_at))
+
+    const { prompts, errors } = await runStep(fixtureIds[0], [REFUSAL])
+
+    expect(prompts).toHaveLength(MAX_RESEARCH_ATTEMPTS)
+    expect(errors).toHaveLength(1)
+
+    const [row] = await db.select().from(posts).where(eq(posts.id, fixtureIds[0]))
+    expect(row.researchContent).toBe(REFUSAL.text)
+    expect(row.currentStage).toBe("research")
+  })
+})
+
+describe("isValidResearch", () => {
+  const readyPacket = [
+    "## Research summary",
+    "The available sources establish a usable chronology.",
+    "## Claim ledger",
+    "- Claim: The product launched in 2017.",
+    "  Source: https://example.com/source",
+    "## Topic coverage",
+    "Origins, major product changes, and current context are covered.",
+    "## Risks and open questions",
+    "One exact launch month remains unverified.",
+    "## Recommended article direction",
+    "Use a sourced chronology and qualify the unresolved month.",
+    "## Coverage verdict",
+    "STATUS: ready",
+  ].join("\n\n")
+
+  const blockedPacket = readyPacket
+    .replace("The available sources establish a usable chronology.", "The core chronology is not supported.")
+    .replace("STATUS: ready", "STATUS: blocked")
+
+  it("accepts a complete packet with a ready coverage verdict", () => {
+    expect(researchCoverageStatus(readyPacket)).toBe("ready")
+    expect(isValidResearch(readyPacket)).toBe(true)
+  })
+
+  it("preserves a complete blocked packet instead of retrying it as a refusal", () => {
+    expect(researchCoverageStatus(blockedPacket)).toBe("blocked")
+    expect(isValidResearch(blockedPacket)).toBe(true)
+  })
+
+  it("rejects a packet that omits the coverage verdict", () => {
+    expect(researchCoverageStatus(readyPacket.replace("## Coverage verdict\n\nSTATUS: ready", ""))).toBe("unknown")
+    expect(isValidResearch(readyPacket.replace("## Coverage verdict\n\nSTATUS: ready", ""))).toBe(false)
+  })
+
+  it("rejects every refusal phrasing Python listed", () => {
+    const refusals = [
+      "I'm **Perplexity**, here to help",
+      "I am a search assistant, not a writer",
+      "I need to clarify my role here",
+      "I'm not a blog research agent",
+      "I cannot generate that document",
+      "What I *can* do instead is search",
+      "To move forward, tell me more",
+      "Please provide either a topic or a URL",
+      "Which would be most helpful?",
+    ]
+    for (const refusal of refusals) {
+      // Each carries enough expected sections to pass the section check, so the
+      // rejection can only be coming from the refusal pattern.
+      const padded = `${readyPacket}\n\n${refusal}`
+      expect(isValidResearch(padded)).toBe(false)
+    }
+  })
+
+  it("rejects legacy keyword notes that do not satisfy the research contract", () => {
+    expect(isValidResearch("# Notes\n\nkeyword ideas and pain point analysis.")).toBe(false)
+  })
+})
+
+describe("research step announcement", () => {
+  it("announces the stage on the event bus, in Python's payload shape", async () => {
+    const { announced } = await runStep(fixtureIds[0], [replayOf(fixtures[0])])
+
+    // Filtered, because item 5.5c-iv-b interleaved three `log` events between
+    // these two. The whole ordered sequence, announcements and progress lines
+    // together, is asserted in the progress-line suite below.
+    expect(announced.filter((event) => event.event !== "log")).toEqual([
+      {
+        event: "stage_start",
+        post_id: fixtureIds[0],
+        stage: "research",
+        message: "Starting research...",
+      },
+      {
+        event: "stage_complete",
+        post_id: fixtureIds[0],
+        stage: "research",
+        model: replayOf(fixtures[0]).response.modelId,
+        // Real elapsed time around a stubbed provider call; the rounding it
+        // goes through is pinned in `pipeline-events.test.ts`.
+        duration_s: expect.any(Number),
+      },
+    ])
+  })
+
+  it("commits the stage before it reports it complete, and not before it starts", async () => {
+    const { rowOnAnnounce } = await runStep(fixtureIds[0], [replayOf(fixtures[0])])
+
+    // Python's order, both times: the row is written, then the browser is told.
+    expect(rowOnAnnounce.stage_start.research).toBe("running")
+    expect(rowOnAnnounce.stage_complete.research).toBe(STATUS_COMPLETE)
+  })
+})
+
+/**
+ * Verbatim from the `else` clause of the retry loop in
+ * `api/src/pipeline/stages/research.py:109`.
+ *
+ * The em dash is written as an escape rather than as the character because
+ * this port's own writing rule forbids the character in source; the value it
+ * builds is byte-identical to Python's, which is what matters, because
+ * `debug-log-panel.tsx` renders this message straight into the run log.
+ */
+const PYTHON_DEGRADED_MESSAGE =
+  "WARNING: Research quality may be degraded \u2014 Perplexity returned unexpected responses."
+
+/** The stored progress lines for a post, in the order the step wrote them. */
+async function progressLines(postId: string) {
+  const [row] = await db.select({ logs: posts.executionLogs }).from(posts).where(eq(posts.id, postId))
+  return ((row?.logs ?? []) as Record<string, unknown>[])
+    .filter((entry) => entry.event === "log")
+    .map((entry) => [entry.level, entry.message])
+}
+
+describe("research step progress lines", () => {
+  it("writes Python's three lines when the first attempt validates", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    await runStep(fixtureIds[0], [replayOf(fixture)])
+
+    const lines = await progressLines(fixtureIds[0])
+    expect(lines.slice(0, 2)).toEqual([
+      ["info", "Rules loaded, building prompt..."],
+      // Python named the model in the message. P2.71b moved the stage onto a
+      // different model, which the line would have gone on misreporting, so it
+      // now names the stage's job the way the four Claude stages do.
+      ["info", "Calling Perplexity for research..."],
+    ])
+    expect(lines[2][0]).toBe("info")
+    // The token count is the fixture's; the duration is real elapsed time
+    // around the replayed call, rendered to one decimal the way Python's
+    // `f"{total_duration:.1f}"` did.
+    expect(lines[2][1]).toMatch(
+      new RegExp(`^Received ${fixture.stage_output._stage_meta.tokens_out} tokens in \\d+\\.\\ds$`),
+    )
+    expect(lines).toHaveLength(3)
+  })
+
+  it("names the attempt only after the first, and warns on each failure", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    await runStep(fixtureIds[0], [REFUSAL, replayOf(fixture)])
+
+    const lines = await progressLines(fixtureIds[0])
+    expect(lines.slice(0, 4)).toEqual([
+      ["info", "Rules loaded, building prompt..."],
+      // Python's ternary: the bare form on attempt 1, the counted form after.
+      ["info", "Calling Perplexity for research..."],
+      ["warning", "Response validation failed (attempt 1), retrying..."],
+      ["info", `Calling Perplexity for research (attempt 2/${MAX_RESEARCH_ATTEMPTS})...`],
+    ])
+    expect(lines[4][0]).toBe("info")
+    expect(lines[4][1]).toMatch(
+      new RegExp(
+        `^Received ${REFUSAL.usage.outputTokens + replayOf(fixture).usage.outputTokens} tokens in \\d+\\.\\ds$`,
+      ),
+    )
+    expect(lines).toHaveLength(5)
+  })
+
+  it("warns on the last attempt too, then reports the stage degraded", async () => {
+    vi.setSystemTime(new Date(fixtures[0].captured_at))
+
+    await runStep(fixtureIds[0], [REFUSAL])
+
+    const lines = await progressLines(fixtureIds[0])
+    // Python wrote the failure line inside the loop body, so the final attempt
+    // gets one as well and it still says "retrying..." when nothing follows.
+    // The `else` clause's line is what tells a reader the stage gave up.
+    expect(lines.slice(0, 8)).toEqual([
+      ["info", "Rules loaded, building prompt..."],
+      ["info", "Calling Perplexity for research..."],
+      ["warning", "Response validation failed (attempt 1), retrying..."],
+      ["info", `Calling Perplexity for research (attempt 2/${MAX_RESEARCH_ATTEMPTS})...`],
+      ["warning", "Response validation failed (attempt 2), retrying..."],
+      ["info", `Calling Perplexity for research (attempt 3/${MAX_RESEARCH_ATTEMPTS})...`],
+      ["warning", "Response validation failed (attempt 3), retrying..."],
+      ["error", PYTHON_DEGRADED_MESSAGE],
+    ])
+    expect(lines).toHaveLength(9)
+  })
+
+  it("publishes each line, interleaved with the two announcements", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { announced } = await runStep(fixtureIds[0], [replayOf(fixture)])
+
+    // The stub records inside `publish`, which the step awaits, so this array
+    // is in publish order rather than in whatever order a subscriber's reads
+    // resolved. That makes the position of each progress line assertable here
+    // in a way `pipeline-events.test.ts` cannot promise.
+    expect(announced.map((event) => [event.event, event.level ?? event.message])).toEqual([
+      ["stage_start", "Starting research..."],
+      ["log", "info"],
+      ["log", "info"],
+      ["log", "info"],
+      ["stage_complete", undefined],
+    ])
+  })
+
+  it("carries Python's payload on a progress line and stores no data key", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { announced } = await runStep(fixtureIds[0], [replayOf(fixture)])
+
+    expect(announced.find((event) => event.event === "log")).toEqual({
+      event: "log",
+      post_id: fixtureIds[0],
+      stage: "research",
+      message: "Rules loaded, building prompt...",
+      level: "info",
+      timestamp: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T[\d:.]+\+00:00$/),
+    })
+
+    const [row] = await db
+      .select({ logs: posts.executionLogs })
+      .from(posts)
+      .where(eq(posts.id, fixtureIds[0]))
+    for (const entry of ((row?.logs ?? []) as Record<string, unknown>[]).filter(
+      (item) => item.event === "log",
+    )) {
+      // Python's `**({"data": data} if data else {})`: none of research's five
+      // call sites passes `data`, so no entry carries the key at all.
+      expect(Object.keys(entry).sort()).toEqual(["event", "level", "message", "stage", "ts"])
+    }
+  })
+})
+
+
+/**
+ * Ledger item P2.71b-ii. `MODEL_COSTS` prices tokens, and the Agent API bills
+ * `web_search` per invocation on top of them, so the table is short of the
+ * actual bill on every grounded call. The provider reports its own total in
+ * the response; these cases pin that it is what the run's record says the
+ * stage cost, summed over the attempts the stage actually paid for.
+ */
+describe("research step cost accounting", () => {
+  /** The `data` on the stage's own `stage_complete` execution log entry. */
+  async function stageCompleteMeta(postId: string) {
+    const [row] = await db
+      .select({ logs: posts.executionLogs })
+      .from(posts)
+      .where(eq(posts.id, postId))
+    const entry = ((row?.logs ?? []) as Record<string, unknown>[]).find(
+      (item) => item.event === "stage_complete",
+    )
+    return entry?.data as Record<string, number | string> | undefined
+  }
+
+  it("records the price the provider reported rather than the token estimate", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { output } = await runStep(fixtureIds[0], [billedAt(replayOf(fixture), 0.00405)])
+
+    expect(output.reportedCostUsd).toBe(0.00405)
+    const meta = await stageCompleteMeta(fixtureIds[0])
+    expect(meta?.cost_usd).toBe(0.00405)
+    // The estimate the table would have written, which the bill replaces.
+    expect(meta?.cost_usd).not.toBe(
+      stageCostUsd(output.tokensIn, output.tokensOut, output.model),
+    )
+  })
+
+  it("sums the bill over every attempt, the way it sums the tokens", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    await runStep(fixtureIds[0], [billedAt(REFUSAL, 0.001), billedAt(replayOf(fixture), 0.00405)])
+
+    // A retried stage is billed for both calls, so reporting only the
+    // surviving one would understate what the run cost.
+    expect((await stageCompleteMeta(fixtureIds[0]))?.cost_usd).toBe(0.00505)
+  })
+
+  it("falls back to the table when the provider reported no price", async () => {
+    const fixture = fixtures[0]
+    vi.setSystemTime(new Date(fixture.captured_at))
+
+    const { output } = await runStep(fixtureIds[0], [replayOf(fixture)])
+
+    expect(output.reportedCostUsd).toBeUndefined()
+    expect((await stageCompleteMeta(fixtureIds[0]))?.cost_usd).toBe(
+      stageCostUsd(output.tokensIn, output.tokensOut, output.model),
+    )
+  })
+})

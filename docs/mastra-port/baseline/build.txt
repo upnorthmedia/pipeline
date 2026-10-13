@@ -1,0 +1,26 @@
+
+> content-pipeline-dashboard@0.1.0 build /Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web
+> next build
+
+▲ Next.js 16.1.6 (Turbopack)
+
+⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
+  Creating an optimized production build ...
+✓ Compiled successfully in 3.0s
+  Running TypeScript ...
+Failed to compile.
+
+./src/lib/auth.ts:5:22
+Type error: Could not find a declaration file for module 'pg'. '/Users/cody/Documents/code/jena-ai-gnhf-worktrees/objective-port-jena-46c1e6-1/web/node_modules/.pnpm/pg@8.20.0/node_modules/pg/esm/index.mjs' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/pg` if it exists or add a new declaration (.d.ts) file containing `declare module 'pg';`
+
+  3 | import Stripe from "stripe"
+  4 | import { Resend } from "resend"
+> 5 | import { Pool } from "pg"
+    |                      ^
+  6 |
+  7 | const resend = new Resend(process.env.RESEND_API_KEY || "re_mock_dev_key")
+  8 |
+Next.js build worker exited with code: 1 and signal: null
+ ELIFECYCLE  Command failed with exit code 1.
+exit=1

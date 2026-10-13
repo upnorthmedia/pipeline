@@ -1,9 +1,21 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8055";
+import { INTERNAL_SERVER_ERROR_DETAIL } from "./route-error";
+import type { PublishTarget } from "./publishing";
+import type { RunStateKind } from "./run-state";
 
 // --- Types ---
 
-export type StageMode = "auto";
-export type StageStatus = "pending" | "running" | "complete" | "failed";
+// The three values `stage_settings` holds. `review` and `approve_only` are the
+// two the pipeline's gate acts on (`REVIEW_MODES` in
+// `src/mastra/steps/stage-io.ts`, which `stage-modes.test.ts` cross-checks this
+// against); it parks the run in front of the stage for either one and runs
+// unattended for anything else. Typing this as `"auto"` alone meant a profile
+// whose column already said `review` had no expressible value in the dashboard.
+export type StageMode = "auto" | "review" | "approve_only";
+// `review` is what `markStageForReview()` writes to `stage_status` when a step
+// suspends at its gate. It was missing here while the value was only ever read
+// through `Record<string, ...>` lookups with a fallback; the run trace tells a
+// suspension apart from a stage that has not started, so it needs the name.
+export type StageStatus = "pending" | "running" | "review" | "complete" | "failed";
 export type PipelineStage = "research" | "outline" | "write" | "edit" | "images" | "ready";
 export type PostStage = PipelineStage | "pending" | "complete" | "failed" | "paused";
 
@@ -38,10 +50,29 @@ export interface Profile {
   wp_default_author_id: number | null;
   wp_default_category_id: number | null;
   wp_default_status: string | null;
+  /**
+   * Whether the encrypted `wp_app_password` / `nextjs_webhook_secret` columns
+   * hold anything. The ciphertext itself is never returned; these say whether
+   * the publish step would find a credential, which is what decides whether an
+   * output format is offered. See `src/app/api/profiles/serialize.ts`.
+   */
+  wp_app_password_set: boolean;
   nextjs_webhook_url: string | null;
+  nextjs_webhook_secret_set: boolean;
   nextjs_frontmatter_map: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * What `GET /api/profiles` answers, one field wider than a `Profile`. The list
+ * is the only screen that offers to delete a profile, and the delete either
+ * refuses over the attached posts or takes them with it, so the row has to say
+ * how many there are before the press. `GET /api/profiles/{id}` does not carry
+ * it: nothing on the detail page deletes.
+ */
+export interface ProfileListItem extends Profile {
+  post_count: number;
 }
 
 export interface ProfileCreate {
@@ -117,7 +148,7 @@ export interface Post {
   current_stage: PostStage;
   stage_status: StageStatusMap;
   stage_logs: Record<string, unknown>;
-  thread_id: string | null;
+  execution_logs: Record<string, unknown>[];
   priority: number;
   research_content: string | null;
   outline_content: string | null;
@@ -141,7 +172,11 @@ export interface Post {
 export interface PostCreate {
   slug: string;
   topic: string;
-  profile_id?: string | null;
+  /**
+   * Required: a post reaches its owner only through the profile, so
+   * `POST /api/posts` answers a body without one with a 422 (ledger P2.97).
+   */
+  profile_id: string;
   intent?: string | null;
   target_audience?: string | null;
   niche?: string | null;
@@ -181,7 +216,11 @@ export interface PostUpdate {
   brand_voice?: string | null;
   avoid?: string | null;
   required_mentions?: string | null;
+  article_type?: string | null;
+  additional_info?: string | null;
   stage_settings?: Partial<StageSettings>;
+  wp_category_id?: number | null;
+  wp_author_id?: number | null;
   research_content?: string | null;
   outline_content?: string | null;
   draft_content?: string | null;
@@ -210,19 +249,77 @@ export interface PaginatedLinks {
   pages: number;
 }
 
-export interface QueueStatus {
-  running: number;
-  pending: number;
-  complete: number;
-  failed: number;
-  paused: number;
-  total: number;
+/**
+ * `GET /api/queue`: one count per `RunStateKind`, plus a total that is their
+ * sum. The keys are the kinds rather than `posts.current_stage` values because
+ * the endpoint counts what `deriveRunState()` calls each row, which is what
+ * the posts list writes on that row's badge.
+ */
+/**
+ * One post whose publish attempt has stopped moving, as `GET /api/queue`
+ * reports it.
+ *
+ * The stall is derived on the server because the derivation needs
+ * `execution_logs`, and the monitor page holds no post rows: it reads two
+ * aggregates. The words come from `publishStall()`, the same derivation the
+ * posts list and the post page ask of a row they already have, so the three
+ * screens cannot describe the same dead publish differently.
+ */
+export interface StalledPublish {
+  id: string;
+  /** The post's own name, so the row reads as a post and not as an id. */
+  topic: string;
+  target: PublishTarget;
+  /** The destination's name, for a sentence that already says what happened. */
+  label: string;
+  /** `PublishStall.short`: what happened, in one clause. */
+  short: string;
 }
+
+/**
+ * `publish_stalled` is a list of rows, not a bucket: a post can be counted as
+ * Complete and still be carrying a publish that died, which is two facts about
+ * one row. Every other key is a count and they sum to `total`.
+ */
+export type QueueStatus = Record<RunStateKind, number> & {
+  total: number;
+  publish_stalled: StalledPublish[];
+};
 
 export interface Setting {
   key: string;
   value: Record<string, unknown>;
   updated_at: string;
+}
+
+/** One row of the settings page's per-stage model table (ledger item 6.3). */
+export interface StageModelRow {
+  stage: PipelineStage;
+  provider: string;
+  model: string;
+  effort: string | null;
+  /** Which layer supplied the effective value: default, global, or user. */
+  model_source: "default" | "global" | "user";
+  effort_source: "default" | "global" | "user";
+  /** Verified ids selectable for this stage; the only legal values on write. */
+  models: string[];
+  /** Empty where the provider documents no effort parameter. */
+  efforts: string[];
+  /** What the field resolves to once the caller's own override is removed. */
+  fallback_model: string;
+  fallback_effort: string | null;
+}
+
+/** One stage's stored overrides. An absent field falls back a layer. */
+export interface StageModelOverride {
+  model?: string;
+  effort?: string;
+}
+
+export interface StageModels {
+  stages: StageModelRow[];
+  /** The caller's own row, which the client edits and writes back whole. */
+  overrides: Partial<Record<PipelineStage, StageModelOverride>>;
 }
 
 export interface RuleFile {
@@ -252,7 +349,11 @@ export interface PostAnalytics {
   avg_sentence_length: number;
   flesch_reading_ease: number;
   keyword_density: Record<string, number>;
-  seo_checklist: Record<string, boolean>;
+  /**
+   * Mixed on purpose: `_seo_checklist` returns seven pass/fail booleans plus
+   * `internal_link_count` and `external_link_count` as integers.
+   */
+  seo_checklist: Record<string, boolean | number>;
 }
 
 // --- Analytics Types ---
@@ -261,6 +362,13 @@ export interface DashboardStats {
   by_status: Record<string, number>;
   total: number;
   complete: number;
+  /**
+   * Runs that reached the end cleanly and whose own publish then failed or
+   * stopped moving. Out of `complete` and out of `completion_rate`, because
+   * `/monitor` prints those directly under the card naming these same posts as
+   * stopped (polish ledger item P5.2).
+   */
+  publish_incomplete: number;
   completion_rate: number;
   avg_duration_s: number | null;
   by_profile: { name: string; count: number }[];
@@ -326,6 +434,27 @@ export interface PaginatedLogs {
 
 // --- Fetch wrapper ---
 
+/**
+ * A 401 from any handler means this browser is holding a session the server no
+ * longer accepts, so send it to sign in.
+ *
+ * `src/proxy.ts` gates pages on the presence of `better-auth.session_token`
+ * rather than its validity, which is the right call at the edge but means a
+ * stale cookie renders the entire authenticated shell while every request
+ * behind it answers 401. Without this the user is stranded on a dashboard
+ * whose data never loads, looking at a Retry button that cannot succeed, with
+ * no route back to the sign-in page because the proxy keeps letting them in.
+ *
+ * `replace` rather than `assign` so the dead page does not sit in history, and
+ * the auth routes are exempt so a failed sign-in attempt does not reload
+ * itself in a loop.
+ */
+function endStaleSession(): void {
+  if (typeof window === "undefined") return;
+  if (window.location.pathname.startsWith("/auth")) return;
+  window.location.replace("/auth/sign-in");
+}
+
 class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -333,8 +462,12 @@ class ApiError extends Error {
   }
 }
 
+/**
+ * Every path is origin-relative: the route handlers live in this same Next.js
+ * app, so there is no API base URL to configure.
+ */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(path, {
     ...init,
     credentials: "include",
     headers: {
@@ -344,6 +477,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!res.ok) {
+    if (res.status === 401) endStaleSession();
     const body = await res.text();
     throw new ApiError(res.status, body);
   }
@@ -352,10 +486,55 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+/**
+ * The human-readable reason behind a failed request.
+ *
+ * `request()` throws with the raw response body, and every ported handler
+ * answers `{"detail": "..."}` the way FastAPI did, so unwrapping it here is
+ * what lets a page show the server's actual complaint (an id off the
+ * allowlist, say) instead of a generic failure notice.
+ *
+ * A 422 answers with a list instead: one entry per field FastAPI refused. The
+ * `msg` values are joined and the `loc` is dropped, because the handlers that
+ * refuse a field a person typed word their `msg` to name that field already.
+ * The cost is that pydantic's own generic wordings ("Field required") arrive
+ * without one, which is thin but is still the server's actual complaint, and
+ * every form that can produce one checks its required fields before it
+ * submits.
+ *
+ * The one string detail that does not win is the 500 placeholder.
+ * `withServerError()` keeps the cause out of the body on purpose, so a throw
+ * nobody anticipated answers with Starlette's `Internal Server Error` and
+ * nothing else: that is the absence of a complaint rather than one, and it
+ * displaced every caller's fallback, which at least names the action that
+ * failed. The constant is imported from the module that writes it so the two
+ * cannot drift apart.
+ */
+export function apiErrorMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof Error) || !error.message) return fallback;
+  try {
+    const body = JSON.parse(error.message);
+    const detail = (body as { detail?: unknown }).detail;
+    if (typeof detail === "string" && detail && detail !== INTERNAL_SERVER_ERROR_DETAIL) {
+      return detail;
+    }
+    if (Array.isArray(detail)) {
+      const messages = detail
+        .map((entry) => (entry as { msg?: unknown }).msg)
+        .filter((msg): msg is string => typeof msg === "string" && msg.length > 0);
+      if (messages.length > 0) return messages.join(" ");
+    }
+  } catch {
+    // Not JSON: a network failure or an HTML error page. Neither is worth
+    // showing to a user, so the caller's own wording wins.
+  }
+  return fallback;
+}
+
 // --- Profiles ---
 
 export const profiles = {
-  list: () => request<Profile[]>("/api/profiles"),
+  list: () => request<ProfileListItem[]>("/api/profiles"),
 
   create: (data: ProfileCreate) =>
     request<Profile>("/api/profiles", {
@@ -371,8 +550,16 @@ export const profiles = {
       body: JSON.stringify(data),
     }),
 
-  delete: (id: string) =>
-    request<void>(`/api/profiles/${id}`, { method: "DELETE" }),
+  /**
+   * `withPosts` is the caller saying yes to a count it has already been shown.
+   * Without it the handler refuses a profile that still has posts, which is
+   * the safe default and the one every other caller wants.
+   */
+  delete: (id: string, options?: { withPosts?: boolean }) =>
+    request<void>(
+      `/api/profiles/${id}${options?.withPosts ? "?with_posts=true" : ""}`,
+      { method: "DELETE" }
+    ),
 
   crawl: (id: string) =>
     request<{ status: string }>(`/api/profiles/${id}/crawl`, {
@@ -412,6 +599,8 @@ export const profiles = {
 export const posts = {
   list: (params?: {
     status?: string;
+    /** `"true"` asks for the review-gate queue only. See `api/posts/query.ts`. */
+    awaiting_review?: string;
     profile_id?: string;
     q?: string;
     sort?: string;
@@ -421,6 +610,7 @@ export const posts = {
   }) => {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
+    if (params?.awaiting_review) search.set("awaiting_review", params.awaiting_review);
     if (params?.profile_id) search.set("profile_id", params.profile_id);
     if (params?.q) search.set("q", params.q);
     if (params?.sort) search.set("sort", params.sort);
@@ -483,14 +673,26 @@ export const posts = {
       method: "POST",
     }),
 
+  /**
+   * Release the run this post is parked on. 202, because what was accepted is
+   * the resume: the stage it releases then runs in the worker for minutes. A
+   * post with nothing waiting answers 409, which is what a second click looks
+   * like.
+   */
+  approve: (id: string) =>
+    request<{ status: string; stage: PipelineStage; mode: StageMode; post_id: string }>(
+      `/api/posts/${id}/approve`,
+      { method: "POST" }
+    ),
+
   // Publish
   publish: (id: string) =>
     request<{ status: string }>(`/api/posts/${id}/publish`, { method: "POST" }),
 
   // Export
-  exportMarkdown: (id: string) => `${API_BASE}/api/posts/${id}/export/markdown`,
-  exportHtml: (id: string) => `${API_BASE}/api/posts/${id}/export/html`,
-  exportAll: (id: string) => `${API_BASE}/api/posts/${id}/export/all`,
+  exportMarkdown: (id: string) => `/api/posts/${id}/export/markdown`,
+  exportHtml: (id: string) => `/api/posts/${id}/export/html`,
+  exportAll: (id: string) => `/api/posts/${id}/export/all`,
 
   // Analytics
   analytics: (id: string) => request<PostAnalytics>(`/api/posts/${id}/analytics`),
@@ -522,6 +724,29 @@ export const settings = {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
+};
+
+// --- Stage models ---
+
+/**
+ * Per-stage model configuration. Reads come from a dedicated endpoint because
+ * the effective value is a merge of three layers and only the server has the
+ * global row; writes go through `PATCH /api/settings` under the `stage_models`
+ * key, which is where the allowlist is enforced.
+ *
+ * `update` sends the whole overrides map, not a patch, because the setting is
+ * stored as one row value: omitting a stage is how it is reverted.
+ */
+export const stageModels = {
+  get: () => request<StageModels>("/api/settings/stage-models"),
+
+  update: async (overrides: StageModels["overrides"]) => {
+    await request<Setting[]>("/api/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ stage_models: overrides }),
+    });
+    return request<StageModels>("/api/settings/stage-models");
+  },
 };
 
 // --- API Keys ---
@@ -604,6 +829,6 @@ export const analytics = {
 // --- SSE URL helpers ---
 
 export const sseUrl = {
-  post: (id: string) => `${API_BASE}/api/events/${id}`,
-  global: () => `${API_BASE}/api/events`,
+  post: (id: string) => `/api/events/${id}`,
+  global: () => `/api/events`,
 };

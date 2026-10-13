@@ -1,0 +1,1275 @@
+// @vitest-environment node
+/**
+ * The TypeScript replacement for `api/tests/phase2/test_profile_crud.py`, plus
+ * the multi-tenancy and credential-leak cases that suite never had.
+ *
+ * The handlers are called directly with a `Request` against the real database
+ * and a real BetterAuth session, so the `user_id` scoping is genuinely
+ * exercised. Read fixtures are inserted with Drizzle rather than through
+ * `POST`, so a create bug cannot hide a read bug.
+ */
+import { eq, like } from "drizzle-orm"
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
+
+import { closeDb, getDb, internalLinks, posts, websiteProfiles } from "@/db"
+import { decryptWithKey } from "@/lib/crypto"
+import { ABSENT_PROFILE_ID } from "@/test/absent-ids"
+import { apiRequest, createTestSession, deleteTestSessions, type TestSession } from "@/test/session"
+
+import { DELETE as deleteProfile, GET as getProfile, PATCH as patchProfile } from "./[id]/route"
+import { GET as listProfiles, POST as createProfile } from "./route"
+import { OUTPUT_FORMAT_INVALID } from "../output-format"
+import type { ValidationErrorDetail } from "../pydantic"
+import {
+  WEBSITE_URL_INVALID,
+  WEBSITE_URL_SCHEME,
+  WP_URL_INVALID,
+  WP_URL_SCHEME,
+  WP_URL_SPACES,
+  WP_URL_QUERY_OR_FRAGMENT,
+  WEBSITE_URL_CREDENTIALS,
+  WP_URL_CREDENTIALS,
+} from "./validation"
+
+const PREFIX = "profiles-route-test-"
+const URL = "http://test/api/profiles"
+
+/**
+ * Fixture `website_url`s point at the discard port on loopback rather than at
+ * plausible domains, because `POST /api/profiles` now starts a real
+ * `sitemapCrawl` run. Nothing in this file runs a worker, so the run is only
+ * published, but another test file that calls `startWorkers()` on the shared
+ * instance can consume it, and a crawl of somebody else's domain is not
+ * something a unit test should be able to cause. Port 9 refuses immediately.
+ */
+
+/** A throwaway Fernet key, so no real `WP_ENCRYPTION_KEY` is needed to run this. */
+const TEST_KEY = Buffer.alloc(32, 7).toString("base64url")
+
+const db = getDb()
+
+let user: TestSession
+let other: TestSession
+let savedEncryptionKey: string | undefined
+
+async function clearProfiles() {
+  // posts_profile_id_fkey has no ON DELETE action, so the posts a test attached
+  // to a profile have to go first.
+  await db.delete(posts).where(like(posts.slug, `${PREFIX}%`))
+  await db.delete(websiteProfiles).where(like(websiteProfiles.userId, `${PREFIX}%`))
+}
+
+/** A row owned by `userId`, with everything but the two required columns left to the caller. */
+async function insertProfile(
+  userId: string,
+  values: Partial<typeof websiteProfiles.$inferInsert> = {},
+): Promise<string> {
+  const [row] = await db
+    .insert(websiteProfiles)
+    .values({
+      userId,
+      name: "Test Blog",
+      websiteUrl: "http://127.0.0.1:9/testblog",
+      ...values,
+    })
+    .returning({ id: websiteProfiles.id })
+  return row.id
+}
+
+/** A `GET /api/profiles/{id}` request, wired up the way Next.js calls the handler. */
+function getById(id: string, cookie?: string) {
+  return getProfile(apiRequest(`${URL}/${id}`, { cookie }), {
+    params: Promise.resolve({ id }),
+  })
+}
+
+/** `POST /api/profiles`. `body` is sent raw so a malformed one can be tested. */
+function post(body: unknown, cookie?: string) {
+  return createProfile(
+    apiRequest(URL, {
+      method: "POST",
+      cookie,
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    }),
+  )
+}
+
+/** `PATCH /api/profiles/{id}`. */
+function patch(id: string, body: unknown, cookie?: string) {
+  return patchProfile(
+    apiRequest(`${URL}/${id}`, {
+      method: "PATCH",
+      cookie,
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    }),
+    { params: Promise.resolve({ id }) },
+  )
+}
+
+/** `DELETE /api/profiles/{id}`, optionally asking for the posts to go with it. */
+function del(id: string, cookie?: string, withPosts = false) {
+  const query = withPosts ? "?with_posts=true" : ""
+  return deleteProfile(apiRequest(`${URL}/${id}${query}`, { method: "DELETE", cookie }), {
+    params: Promise.resolve({ id }),
+  })
+}
+
+/** The stored row, straight from the database rather than through a handler. */
+async function readRow(id: string) {
+  const [row] = await db.select().from(websiteProfiles).where(eq(websiteProfiles.id, id)).limit(1)
+  return row
+}
+
+beforeAll(async () => {
+  savedEncryptionKey = process.env.WP_ENCRYPTION_KEY
+  process.env.WP_ENCRYPTION_KEY = TEST_KEY
+  await clearProfiles()
+  await deleteTestSessions(PREFIX)
+  user = await createTestSession(PREFIX)
+  other = await createTestSession(PREFIX)
+})
+
+afterEach(clearProfiles)
+
+afterAll(async () => {
+  await clearProfiles()
+  await deleteTestSessions(PREFIX)
+  if (savedEncryptionKey === undefined) delete process.env.WP_ENCRYPTION_KEY
+  else process.env.WP_ENCRYPTION_KEY = savedEncryptionKey
+  await closeDb()
+})
+
+describe("GET /api/profiles", () => {
+  it("401s without a session", async () => {
+    const response = await listProfiles(apiRequest(URL))
+
+    expect(response.status).toBe(401)
+    expect(await response.json()).toEqual({ detail: "Not authenticated" })
+  })
+
+  it("lists nothing for a user with no profiles", async () => {
+    const response = await listProfiles(apiRequest(URL, { cookie: user.cookie }))
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual([])
+  })
+
+  it("orders newest first, matching created_at desc", async () => {
+    await insertProfile(user.userId, {
+      name: "Older",
+      createdAt: new Date("2024-01-01T00:00:00Z"),
+    })
+    await insertProfile(user.userId, {
+      name: "Newer",
+      createdAt: new Date("2025-01-01T00:00:00Z"),
+    })
+
+    const body = await (await listProfiles(apiRequest(URL, { cookie: user.cookie }))).json()
+
+    expect(body.map((row: { name: string }) => row.name)).toEqual(["Newer", "Older"])
+  })
+
+  it("serves every timestamp through toPydanticIso", async () => {
+    // ProfileRead's three datetime fields used to go out through a bare
+    // `Date.toISOString()`, which always writes exactly three fractional
+    // digits, where pydantic writes six or none. The format itself is pinned
+    // against a measured pydantic in `src/app/api/pydantic.test.ts`; this
+    // asserts the route reaches it, for both branches and for a null column.
+    const id = await insertProfile(user.userId, {
+      createdAt: new Date("2026-08-22T12:34:56.000Z"),
+      updatedAt: new Date("2026-08-22T12:34:56.700Z"),
+      lastCrawledAt: null,
+    })
+
+    const body = (await (await getById(id, user.cookie)).json()) as Record<string, unknown>
+
+    expect(body.created_at).toBe("2026-08-22T12:34:56Z")
+    expect(body.updated_at).toBe("2026-08-22T12:34:56.700000Z")
+    expect(body.last_crawled_at).toBeNull()
+  })
+
+  it("never returns another user's profile", async () => {
+    await insertProfile(other.userId, { name: "Not yours" })
+
+    const body = await (await listProfiles(apiRequest(URL, { cookie: user.cookie }))).json()
+
+    expect(body).toEqual([])
+  })
+
+  it("returns the ProfileRead fields plus the two set flags, and no ciphertext", async () => {
+    await insertProfile(user.userId, {
+      niche: "technology",
+      targetAudience: "developers",
+      tone: "Professional",
+      wordCount: 2500,
+      outputFormat: "markdown",
+      wpAppPassword: "ciphertext-should-never-be-returned",
+      nextjsWebhookSecret: "ciphertext-should-never-be-returned",
+    })
+
+    const [profile] = await (
+      await listProfiles(apiRequest(URL, { cookie: user.cookie }))
+    ).json()
+
+    expect(Object.keys(profile).sort()).toEqual([
+      "avoid",
+      "brand_voice",
+      "crawl_status",
+      "created_at",
+      "default_stage_settings",
+      "id",
+      "image_brand_colors",
+      "image_exclude",
+      "image_style",
+      "last_crawled_at",
+      "name",
+      "nextjs_frontmatter_map",
+      "nextjs_webhook_secret_set",
+      "nextjs_webhook_url",
+      "niche",
+      "output_format",
+      "post_count",
+      "recrawl_interval",
+      "related_keywords",
+      "required_mentions",
+      "sitemap_urls",
+      "target_audience",
+      "tone",
+      "updated_at",
+      "website_url",
+      "word_count",
+      "wp_app_password_set",
+      "wp_default_author_id",
+      "wp_default_category_id",
+      "wp_default_status",
+      "wp_url",
+      "wp_username",
+    ])
+    expect(JSON.stringify(profile)).not.toContain("ciphertext-should-never-be-returned")
+    expect(profile.wp_app_password_set).toBe(true)
+    expect(profile.nextjs_webhook_secret_set).toBe(true)
+    expect(profile.niche).toBe("technology")
+    expect(profile.word_count).toBe(2500)
+    expect(profile.crawl_status).toBe("pending")
+    expect(profile.wp_default_status).toBe("publish")
+  })
+
+  /**
+   * The dashboard has to tell a configured publishing target from a
+   * half-configured one, and both publish steps refuse on the ciphertext
+   * column rather than on the URL: `wordpress-publish.ts` checks `wp_url`,
+   * `wp_username` and `wp_app_password`, `nextjs-publish.ts` checks
+   * `nextjs_webhook_url` and `nextjs_webhook_secret`. Without these two flags
+   * a profile carrying a URL and no secret reads as ready to publish and the
+   * run dies after paying for six stages.
+   */
+  it("reports a stored secret as absent when the column is empty", async () => {
+    await insertProfile(user.userId, {
+      wpUrl: "https://wp.example.com",
+      wpUsername: "editor",
+      nextjsWebhookUrl: "https://blog.example/api/jena-webhook",
+    })
+
+    const [profile] = await (
+      await listProfiles(apiRequest(URL, { cookie: user.cookie }))
+    ).json()
+
+    expect(profile.wp_app_password_set).toBe(false)
+    expect(profile.nextjs_webhook_secret_set).toBe(false)
+  })
+
+  /**
+   * `encryptCredentials` guards on truthiness, so an empty string is stored
+   * verbatim rather than encrypted, and both publish steps read it as missing.
+   * A `!== null` flag would report that row as configured.
+   */
+  it("reports an empty-string secret as absent, the way the publish step reads it", async () => {
+    await insertProfile(user.userId, {
+      wpUrl: "https://wp.example.com",
+      wpUsername: "editor",
+      wpAppPassword: "",
+      nextjsWebhookUrl: "https://blog.example/api/jena-webhook",
+      nextjsWebhookSecret: "",
+    })
+
+    const [profile] = await (
+      await listProfiles(apiRequest(URL, { cookie: user.cookie }))
+    ).json()
+
+    expect(profile.wp_app_password_set).toBe(false)
+    expect(profile.nextjs_webhook_secret_set).toBe(false)
+  })
+
+  it("substitutes the ProfileRead defaults for null columns", async () => {
+    await insertProfile(user.userId, {
+      tone: null,
+      wordCount: null,
+      outputFormat: null,
+      imageBrandColors: null,
+      imageExclude: null,
+      relatedKeywords: null,
+      sitemapUrls: null,
+      defaultStageSettings: null,
+      crawlStatus: null,
+      // Optional in ProfileRead, so the null is carried through instead.
+      wpDefaultStatus: null,
+    })
+
+    const [profile] = await (
+      await listProfiles(apiRequest(URL, { cookie: user.cookie }))
+    ).json()
+
+    expect(profile.tone).toBe("Conversational and friendly")
+    expect(profile.word_count).toBe(2000)
+    expect(profile.output_format).toBe("markdown")
+    expect(profile.image_brand_colors).toEqual([])
+    expect(profile.image_exclude).toEqual([])
+    expect(profile.related_keywords).toEqual([])
+    expect(profile.sitemap_urls).toEqual([])
+    expect(profile.default_stage_settings).toEqual({
+      research: "auto",
+      outline: "auto",
+      write: "auto",
+      edit: "auto",
+      images: "auto",
+      ready: "auto",
+    })
+    expect(profile.crawl_status).toBe("pending")
+    expect(profile.wp_default_status).toBeNull()
+  })
+})
+
+/**
+ * The list is the only screen that offers to delete a profile, and until this
+ * count existed the row said nothing about what the press would take with it.
+ * The refusal (and now the cascade) is counted server side inside the delete's
+ * own transaction; this is the same number read ahead of the press, so the
+ * dialog can name it.
+ */
+describe("GET /api/profiles post_count", () => {
+  it("reports how many posts each profile has", async () => {
+    const empty = await insertProfile(user.userId, { name: "Empty" })
+    const busy = await insertProfile(user.userId, { name: "Busy" })
+    await db.insert(posts).values([
+      { profileId: busy, slug: `${PREFIX}count-one`, topic: "One" },
+      { profileId: busy, slug: `${PREFIX}count-two`, topic: "Two" },
+    ])
+
+    const body = (await (
+      await listProfiles(apiRequest(URL, { cookie: user.cookie }))
+    ).json()) as Array<{ id: string; post_count: number }>
+
+    const counts = Object.fromEntries(body.map((p) => [p.id, p.post_count]))
+    expect(counts[busy]).toBe(2)
+    expect(counts[empty]).toBe(0)
+  })
+
+  it("does not count another user's posts", async () => {
+    const mine = await insertProfile(user.userId, { name: "Mine" })
+    const theirs = await insertProfile(other.userId, { name: "Theirs" })
+    await db.insert(posts).values([
+      { profileId: mine, slug: `${PREFIX}mine`, topic: "Mine" },
+      { profileId: theirs, slug: `${PREFIX}theirs-count`, topic: "Theirs" },
+    ])
+
+    const body = (await (
+      await listProfiles(apiRequest(URL, { cookie: user.cookie }))
+    ).json()) as Array<{ id: string; post_count: number }>
+
+    expect(body).toHaveLength(1)
+    expect(body[0].post_count).toBe(1)
+  })
+})
+
+describe("GET /api/profiles/[id]", () => {
+  it("401s without a session", async () => {
+    const id = await insertProfile(user.userId)
+
+    const response = await getById(id)
+
+    expect(response.status).toBe(401)
+    expect(await response.json()).toEqual({ detail: "Not authenticated" })
+  })
+
+  it("returns the profile by id", async () => {
+    const id = await insertProfile(user.userId, { niche: "technology" })
+
+    const response = await getById(id, user.cookie)
+
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.id).toBe(id)
+    expect(body.name).toBe("Test Blog")
+    expect(body.niche).toBe("technology")
+  })
+
+  it("404s for an id that does not exist", async () => {
+    const response = await getById(ABSENT_PROFILE_ID, user.cookie)
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ detail: "Profile not found" })
+  })
+
+  it("404s for another user's profile rather than revealing it exists", async () => {
+    const id = await insertProfile(other.userId, { name: "Not yours" })
+
+    const response = await getById(id, user.cookie)
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ detail: "Profile not found" })
+  })
+
+  it("422s on a malformed uuid instead of letting Postgres raise", async () => {
+    const response = await getById("not-a-uuid", user.cookie)
+
+    expect(response.status).toBe(422)
+    const body = await response.json()
+    expect(body.detail[0]).toMatchObject({
+      type: "uuid_parsing",
+      loc: ["path", "profile_id"],
+      input: "not-a-uuid",
+    })
+  })
+})
+
+describe("POST /api/profiles", () => {
+  it("401s without a session", async () => {
+    const response = await post({ name: "Test Blog", website_url: "http://127.0.0.1:9/testblog" })
+
+    expect(response.status).toBe(401)
+    expect(await response.json()).toEqual({ detail: "Not authenticated" })
+  })
+
+  it("creates the profile and returns it with a 201", async () => {
+    const response = await post(
+      {
+        name: "Test Blog",
+        website_url: "http://127.0.0.1:9/testblog",
+        niche: "technology",
+        target_audience: "developers",
+        tone: "Professional",
+        word_count: 2500,
+        output_format: "markdown",
+      },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(201)
+    const body = await response.json()
+    expect(body.name).toBe("Test Blog")
+    expect(body.website_url).toBe("http://127.0.0.1:9/testblog")
+    expect(body.niche).toBe("technology")
+    expect(body.word_count).toBe(2500)
+    expect(body.crawl_status).toBe("pending")
+    expect(body.id).toEqual(expect.any(String))
+  })
+
+  it("fills in the ProfileCreate defaults for a minimal body", async () => {
+    const response = await post(
+      { name: "Minimal", website_url: "http://127.0.0.1:9/minimal" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(201)
+    const body = await response.json()
+    expect(body.tone).toBe("Conversational and friendly")
+    expect(body.word_count).toBe(2000)
+    // pydantic's default, materialised on the row; the column default agrees
+    // with it since drizzle/0003.
+    expect(body.output_format).toBe("markdown")
+    expect(body.wp_default_status).toBe("publish")
+    expect(body.default_stage_settings).toEqual({
+      research: "auto",
+      outline: "auto",
+      write: "auto",
+      edit: "auto",
+      images: "auto",
+      ready: "auto",
+    })
+    expect(body.image_brand_colors).toEqual([])
+    expect(body.related_keywords).toEqual([])
+    expect(body.niche).toBeNull()
+  })
+
+  it("owns the row by the session user, not by anything in the body", async () => {
+    const body = await (
+      await post(
+        { name: "Mine", website_url: "http://127.0.0.1:9/mine", user_id: other.userId },
+        user.cookie,
+      )
+    ).json()
+
+    expect((await readRow(body.id)).userId).toBe(user.userId)
+    expect(await (await getById(body.id, other.cookie)).status).toBe(404)
+  })
+
+  it("422s when name is missing", async () => {
+    const response = await post({ website_url: "http://127.0.0.1:9/example" }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect((await response.json()).detail).toContainEqual({
+      type: "missing",
+      loc: ["body", "name"],
+      msg: "Field required",
+      // pydantic reported the containing object as the input of a missing key.
+      input: { website_url: "http://127.0.0.1:9/example" },
+    })
+  })
+
+  it("422s when website_url is missing", async () => {
+    const response = await post({ name: "No URL" }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect((await response.json()).detail).toContainEqual({
+      type: "missing",
+      loc: ["body", "website_url"],
+      msg: "Field required",
+      input: { name: "No URL" },
+    })
+  })
+
+  it("422s with pydantic's own error type and message on a bad integer", async () => {
+    const response = await post(
+      { name: "Bad", website_url: "http://127.0.0.1:9/bad", word_count: "lots" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect((await response.json()).detail).toContainEqual({
+      type: "int_parsing",
+      loc: ["body", "word_count"],
+      msg: "Input should be a valid integer, unable to parse string as an integer",
+      input: "lots",
+    })
+  })
+
+  it("422s with int_type, not int_parsing, when the integer is the wrong type", async () => {
+    const response = await post(
+      { name: "Bad", website_url: "http://127.0.0.1:9/bad", word_count: null },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect((await response.json()).detail).toContainEqual({
+      type: "int_type",
+      loc: ["body", "word_count"],
+      msg: "Input should be a valid integer",
+      input: null,
+    })
+  })
+
+  it("422s with list_type and dict_type for the collection fields", async () => {
+    const response = await post(
+      {
+        name: "Bad",
+        website_url: "http://127.0.0.1:9/bad",
+        related_keywords: "no",
+        nextjs_frontmatter_map: "{}",
+      },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    const detail = (await response.json()).detail
+    expect(detail).toContainEqual({
+      type: "list_type",
+      loc: ["body", "related_keywords"],
+      msg: "Input should be a valid list",
+      input: "no",
+    })
+    expect(detail).toContainEqual({
+      type: "dict_type",
+      loc: ["body", "nextjs_frontmatter_map"],
+      msg: "Input should be a valid dictionary",
+      input: "{}",
+    })
+  })
+
+  it("coerces an integral string the way pydantic's lax mode did", async () => {
+    const response = await post(
+      { name: "Coerced", website_url: "http://127.0.0.1:9/coerced", word_count: " 2500 " },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(201)
+    expect((await response.json()).word_count).toBe(2500)
+  })
+
+  it("422s on a body that is not JSON", async () => {
+    const response = await post("{not json", user.cookie)
+
+    expect(response.status).toBe(422)
+    expect((await response.json()).detail[0]).toMatchObject({
+      type: "json_invalid",
+      msg: "JSON decode error",
+    })
+  })
+
+  it("drops unknown fields instead of rejecting them", async () => {
+    const response = await post(
+      { name: "Extra", website_url: "http://127.0.0.1:9/extra", not_a_column: "ignored" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(201)
+    expect(JSON.stringify(await response.json())).not.toContain("ignored")
+  })
+
+  it("stores the two credential fields encrypted and never echoes them", async () => {
+    const response = await post(
+      {
+        name: "Secrets",
+        website_url: "http://127.0.0.1:9/secrets",
+        wp_app_password: "wp-plaintext-secret",
+        nextjs_webhook_secret: "nextjs-plaintext-secret",
+      },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(201)
+    const body = await response.json()
+    expect(JSON.stringify(body)).not.toContain("plaintext-secret")
+
+    const row = await readRow(body.id)
+    expect(row.wpAppPassword).not.toBe("wp-plaintext-secret")
+    expect(decryptWithKey(row.wpAppPassword!, TEST_KEY)).toBe("wp-plaintext-secret")
+    expect(decryptWithKey(row.nextjsWebhookSecret!, TEST_KEY)).toBe("nextjs-plaintext-secret")
+  })
+
+  it("writes an empty credential through rather than encrypting nothing", async () => {
+    const body = await (
+      await post(
+        { name: "Empty", website_url: "http://127.0.0.1:9/empty", wp_app_password: "" },
+        user.cookie,
+      )
+    ).json()
+
+    expect((await readRow(body.id)).wpAppPassword).toBe("")
+  })
+})
+
+describe("PATCH /api/profiles/[id]", () => {
+  it("401s without a session", async () => {
+    const id = await insertProfile(user.userId)
+
+    const response = await patch(id, { name: "Updated" })
+
+    expect(response.status).toBe(401)
+    expect(await response.json()).toEqual({ detail: "Not authenticated" })
+  })
+
+  it("updates the submitted fields and preserves the rest", async () => {
+    const id = await insertProfile(user.userId, { niche: "technology", wordCount: 2500 })
+
+    const response = await patch(id, { name: "Updated Blog", word_count: 3000 }, user.cookie)
+
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.name).toBe("Updated Blog")
+    expect(body.word_count).toBe(3000)
+    expect(body.niche).toBe("technology")
+  })
+
+  it("clears a column when the key is sent as null", async () => {
+    const id = await insertProfile(user.userId, { niche: "technology" })
+
+    const body = await (await patch(id, { niche: null }, user.cookie)).json()
+
+    expect(body.niche).toBeNull()
+  })
+
+  it("leaves a column alone when its key is absent, matching exclude_unset", async () => {
+    const id = await insertProfile(user.userId, { niche: "technology" })
+
+    const body = await (await patch(id, { name: "Renamed" }, user.cookie)).json()
+
+    expect(body.niche).toBe("technology")
+  })
+
+  it("returns the row untouched for an empty body", async () => {
+    const id = await insertProfile(user.userId, { niche: "technology" })
+    const before = await readRow(id)
+
+    const response = await patch(id, {}, user.cookie)
+
+    expect(response.status).toBe(200)
+    expect((await response.json()).niche).toBe("technology")
+    expect((await readRow(id)).updatedAt).toEqual(before.updatedAt)
+  })
+
+  it("re-encrypts a credential on update", async () => {
+    const id = await insertProfile(user.userId)
+
+    const response = await patch(id, { wp_app_password: "rotated-secret" }, user.cookie)
+
+    expect(response.status).toBe(200)
+    expect(JSON.stringify(await response.json())).not.toContain("rotated-secret")
+    expect(decryptWithKey((await readRow(id)).wpAppPassword!, TEST_KEY)).toBe("rotated-secret")
+  })
+
+  it("clears a credential sent as null without encrypting it", async () => {
+    const id = await insertProfile(user.userId, { wpAppPassword: "existing-ciphertext" })
+
+    await patch(id, { wp_app_password: null }, user.cookie)
+
+    expect((await readRow(id)).wpAppPassword).toBeNull()
+  })
+
+  it("accepts the save payload the profile detail page sends", async () => {
+    const id = await insertProfile(user.userId)
+
+    // Copied from the `data` object in web/src/app/profiles/[id]/page.tsx, which
+    // sends explicit nulls for every cleared field including the two nullable
+    // integers, and omits the credentials unless the user typed one.
+    const response = await patch(
+      id,
+      {
+        name: "Saved",
+        website_url: "http://127.0.0.1:9/saved",
+        niche: null,
+        target_audience: null,
+        tone: "Professional",
+        brand_voice: null,
+        word_count: 1800,
+        output_format: "markdown",
+        image_style: null,
+        image_brand_colors: [],
+        image_exclude: [],
+        avoid: null,
+        required_mentions: null,
+        related_keywords: ["a", "b"],
+        default_stage_settings: { research: "auto", write: "review" },
+        recrawl_interval: null,
+        wp_url: null,
+        wp_username: null,
+        wp_default_status: "publish",
+        wp_default_category_id: null,
+        wp_default_author_id: null,
+        nextjs_webhook_url: null,
+        nextjs_frontmatter_map: null,
+      },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.name).toBe("Saved")
+    expect(body.word_count).toBe(1800)
+    expect(body.related_keywords).toEqual(["a", "b"])
+    expect(body.default_stage_settings).toEqual({ research: "auto", write: "review" })
+    expect(body.wp_default_author_id).toBeNull()
+    expect(body.wp_default_category_id).toBeNull()
+  })
+
+  it("404s for an id that does not exist", async () => {
+    const response = await patch(
+      ABSENT_PROFILE_ID,
+      { name: "Ghost" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ detail: "Profile not found" })
+  })
+
+  it("404s for another user's profile and leaves it unchanged", async () => {
+    const id = await insertProfile(other.userId, { name: "Not yours" })
+
+    const response = await patch(id, { name: "Hijacked" }, user.cookie)
+
+    expect(response.status).toBe(404)
+    expect((await readRow(id)).name).toBe("Not yours")
+  })
+
+  it("422s on a malformed uuid", async () => {
+    const response = await patch("not-a-uuid", { name: "Ghost" }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect((await response.json()).detail[0]).toMatchObject({ type: "uuid_parsing" })
+  })
+})
+
+describe("DELETE /api/profiles/[id]", () => {
+  it("401s without a session", async () => {
+    const id = await insertProfile(user.userId)
+
+    const response = await del(id)
+
+    expect(response.status).toBe(401)
+    expect(await response.json()).toEqual({ detail: "Not authenticated" })
+  })
+
+  it("deletes the profile and returns 204 with no body", async () => {
+    const id = await insertProfile(user.userId)
+
+    const response = await del(id, user.cookie)
+
+    expect(response.status).toBe(204)
+    expect(await response.text()).toBe("")
+    expect(await (await getById(id, user.cookie)).status).toBe(404)
+  })
+
+  it("deletes the profile's internal links with it", async () => {
+    const id = await insertProfile(user.userId)
+    await db.insert(internalLinks).values({ profileId: id, url: "http://127.0.0.1:9/testblog/a" })
+
+    expect((await del(id, user.cookie)).status).toBe(204)
+
+    expect(await db.select().from(internalLinks).where(eq(internalLinks.profileId, id))).toEqual([])
+  })
+
+  /**
+   * The handler used to answer 204 here and set `profile_id` to null on the
+   * way out, which is where every unreachable post in the table came from:
+   * `posts` carries no `user_id`, so a row with no profile has no owner, and
+   * every read handler inner-joins `website_profiles` to find one. The refusal
+   * is the whole fix. The count is in the sentence because "delete its posts
+   * first" is not actionable without knowing how many there are.
+   */
+  it("refuses to delete a profile that still has posts, and writes nothing", async () => {
+    const id = await insertProfile(user.userId)
+    const [post] = await db
+      .insert(posts)
+      .values({ profileId: id, slug: `${PREFIX}orphan`, topic: "Kept" })
+      .returning({ id: posts.id })
+    await db.insert(internalLinks).values({ profileId: id, url: "http://127.0.0.1:9/testblog/a" })
+
+    const response = await del(id, user.cookie)
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({
+      detail: "This profile still has 1 post. Delete it before deleting the profile.",
+    })
+    const [kept] = await db.select().from(posts).where(eq(posts.id, post.id))
+    expect(kept.profileId).toBe(id)
+    expect(await readRow(id)).toBeDefined()
+    expect(
+      await db.select().from(internalLinks).where(eq(internalLinks.profileId, id)),
+    ).toHaveLength(1)
+  })
+
+  it("counts the posts it refused over, in the plural", async () => {
+    const id = await insertProfile(user.userId)
+    await db.insert(posts).values([
+      { profileId: id, slug: `${PREFIX}one`, topic: "One" },
+      { profileId: id, slug: `${PREFIX}two`, topic: "Two" },
+    ])
+
+    const response = await del(id, user.cookie)
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({
+      detail: "This profile still has 2 posts. Delete them before deleting the profile.",
+    })
+  })
+
+  it("counts only this profile's posts", async () => {
+    const id = await insertProfile(user.userId)
+    const other = await insertProfile(user.userId, { name: "Another" })
+    await db.insert(posts).values({ profileId: other, slug: `${PREFIX}elsewhere`, topic: "Else" })
+
+    expect((await del(id, user.cookie)).status).toBe(204)
+  })
+
+  /**
+   * The refusal above is the safe default, but it left an account with fifty
+   * posts on one profile clearing them from `/` twenty at a time. `with_posts`
+   * is the deliberate second answer: the caller has read the count and said
+   * yes to it, so the posts go in the same transaction as the profile rather
+   * than being stranded with a null `profile_id` the way the pre-P4.7 handler
+   * left them.
+   */
+  it("deletes the profile and its posts when with_posts is asked for", async () => {
+    const id = await insertProfile(user.userId)
+    const [post] = await db
+      .insert(posts)
+      .values([
+        { profileId: id, slug: `${PREFIX}cascade-one`, topic: "One" },
+        { profileId: id, slug: `${PREFIX}cascade-two`, topic: "Two" },
+      ])
+      .returning({ id: posts.id })
+
+    const response = await del(id, user.cookie, true)
+
+    expect(response.status).toBe(204)
+    expect(await readRow(id)).toBeUndefined()
+    expect(await db.select().from(posts).where(eq(posts.profileId, id))).toEqual([])
+    expect(await db.select().from(posts).where(eq(posts.id, post.id))).toEqual([])
+  })
+
+  it("deletes a profile with no posts when with_posts is asked for", async () => {
+    const id = await insertProfile(user.userId)
+
+    expect((await del(id, user.cookie, true)).status).toBe(204)
+    expect(await readRow(id)).toBeUndefined()
+  })
+
+  it("leaves other profiles' posts alone when cascading", async () => {
+    const id = await insertProfile(user.userId)
+    const keep = await insertProfile(user.userId, { name: "Keep" })
+    await db.insert(posts).values({ profileId: id, slug: `${PREFIX}goes`, topic: "Goes" })
+    const [kept] = await db
+      .insert(posts)
+      .values({ profileId: keep, slug: `${PREFIX}stays`, topic: "Stays" })
+      .returning({ id: posts.id })
+
+    expect((await del(id, user.cookie, true)).status).toBe(204)
+
+    expect(await db.select().from(posts).where(eq(posts.id, kept.id))).toHaveLength(1)
+  })
+
+  it("404s on another user's profile even with with_posts, and deletes none of their posts", async () => {
+    const id = await insertProfile(other.userId, { name: "Not yours" })
+    const [post] = await db
+      .insert(posts)
+      .values({ profileId: id, slug: `${PREFIX}theirs-cascade`, topic: "Theirs" })
+      .returning({ id: posts.id })
+
+    const response = await del(id, user.cookie, true)
+
+    expect(response.status).toBe(404)
+    expect(await readRow(id)).toBeDefined()
+    const [untouched] = await db.select().from(posts).where(eq(posts.id, post.id))
+    expect(untouched.profileId).toBe(id)
+  })
+
+  it("404s for an id that does not exist", async () => {
+    const response = await del(ABSENT_PROFILE_ID, user.cookie)
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ detail: "Profile not found" })
+  })
+
+  it("404s for another user's profile and leaves their posts attached", async () => {
+    const id = await insertProfile(other.userId, { name: "Not yours" })
+    const [post] = await db
+      .insert(posts)
+      .values({ profileId: id, slug: `${PREFIX}theirs`, topic: "Theirs" })
+      .returning({ id: posts.id })
+
+    const response = await del(id, user.cookie)
+
+    expect(response.status).toBe(404)
+    expect(await readRow(id)).toBeDefined()
+    const [untouched] = await db.select().from(posts).where(eq(posts.id, post.id))
+    expect(untouched.profileId).toBe(id)
+  })
+
+  it("422s on a malformed uuid", async () => {
+    const response = await del("not-a-uuid", user.cookie)
+
+    expect(response.status).toBe(422)
+    expect((await response.json()).detail[0]).toMatchObject({ type: "uuid_parsing" })
+  })
+})
+
+/**
+ * The two URL columns are validated at this boundary rather than where they
+ * are consumed, because both are read by code that cannot report a reason to
+ * anyone: `WordPressClient` string-concatenates its REST paths onto `wp_url`,
+ * and the sitemap crawl hands `website_url` to `fetch`. A value that cannot
+ * work has to be refused while the person who typed it is still looking at it.
+ */
+describe("profile URL validation", () => {
+  /** The `detail` entry for one field of a 422, or `undefined`. */
+  async function issueFor(response: Response, field: string) {
+    const { detail } = (await response.json()) as { detail: ValidationErrorDetail[] }
+    return detail.find((entry) => entry.loc[1] === field)
+  }
+
+  it("rejects a wp_url carrying a query string, which the REST path is appended to", async () => {
+    const response = await post(
+      {
+        name: "Query",
+        website_url: "http://127.0.0.1:9/query",
+        wp_url: "https://example.com/?a=1",
+      },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect(await issueFor(response, "wp_url")).toEqual({
+      type: "value_error",
+      loc: ["body", "wp_url"],
+      msg: WP_URL_QUERY_OR_FRAGMENT,
+      input: "https://example.com/?a=1",
+    })
+  })
+
+  it("rejects a wp_url carrying a fragment", async () => {
+    const response = await post(
+      { name: "Hash", website_url: "http://127.0.0.1:9/hash", wp_url: "https://example.com#top" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "wp_url"))?.msg).toBe(WP_URL_QUERY_OR_FRAGMENT)
+  })
+
+  it("rejects a wp_url with whitespace around it, which lands inside the REST path", async () => {
+    const response = await post(
+      { name: "Space", website_url: "http://127.0.0.1:9/space", wp_url: "https://example.com " },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "wp_url"))?.msg).toBe(WP_URL_SPACES)
+  })
+
+  it("rejects a wp_url that is not an absolute URL", async () => {
+    const response = await post(
+      { name: "Bare", website_url: "http://127.0.0.1:9/bare", wp_url: "example.com" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "wp_url"))?.msg).toBe(WP_URL_INVALID)
+  })
+
+  it("rejects a wp_url on a scheme the client cannot speak", async () => {
+    const response = await post(
+      { name: "Ftp", website_url: "http://127.0.0.1:9/ftp", wp_url: "ftp://example.com" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "wp_url"))?.msg).toBe(WP_URL_SCHEME)
+  })
+
+  /**
+   * `https://user:pass@example.com` is refused on both URL columns for two
+   * reasons, neither of them the REST-path concatenation the cases above are
+   * about.
+   *
+   * It cannot work. `fetch` refuses a credentialed URL outright, with
+   * `Request cannot be constructed from a URL that includes credentials`, so
+   * every WordPress call raises a `TypeError` no handler here catches and the
+   * three `/wordpress/*` endpoints answer 500. `discoverSitemaps` rebuilds its
+   * base from `protocol` and `host`, so a credentialed `website_url` silently
+   * drops the credential instead.
+   *
+   * And it is a secret in a plaintext column: both are `text`, both come back
+   * out of `GET /api/profiles`, and `wp_app_password` in the same row is
+   * Fernet-encrypted.
+   */
+  it("rejects a wp_url carrying a username and password", async () => {
+    const wpUrl = "https://wp-user:s3cret@example.com"
+    const response = await post(
+      { name: "Userinfo", website_url: "http://127.0.0.1:9/userinfo", wp_url: wpUrl },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect(await issueFor(response, "wp_url")).toEqual({
+      type: "value_error",
+      loc: ["body", "wp_url"],
+      msg: WP_URL_CREDENTIALS,
+      input: wpUrl,
+    })
+  })
+
+  it("rejects a wp_url carrying a username on its own", async () => {
+    const response = await post(
+      { name: "User", website_url: "http://127.0.0.1:9/user", wp_url: "https://wp-user@example.com" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "wp_url"))?.msg).toBe(WP_URL_CREDENTIALS)
+  })
+
+  it("writes no row for a create rejected for credentials, so the password is not stored", async () => {
+    await post(
+      {
+        name: "Userinfo",
+        website_url: "http://127.0.0.1:9/userinfo",
+        wp_url: "https://wp-user:s3cret@example.com",
+      },
+      user.cookie,
+    )
+
+    const rows = await db
+      .select()
+      .from(websiteProfiles)
+      .where(eq(websiteProfiles.userId, user.userId))
+    expect(rows).toEqual([])
+  })
+
+  it("rejects a website_url carrying credentials, which the crawl drops unsent", async () => {
+    const websiteUrl = "https://crawler:s3cret@example.com"
+    const response = await post({ name: "Userinfo", website_url: websiteUrl }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect(await issueFor(response, "website_url")).toEqual({
+      type: "value_error",
+      loc: ["body", "website_url"],
+      msg: WEBSITE_URL_CREDENTIALS,
+      input: websiteUrl,
+    })
+  })
+
+  it("accepts a bare @ with nothing before it, which is not a credential", async () => {
+    const response = await post(
+      { name: "At", website_url: "http://127.0.0.1:9/at", wp_url: "https://@example.com" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(201)
+  })
+
+  it("writes no row for a rejected create", async () => {
+    await post(
+      { name: "Nothing", website_url: "http://127.0.0.1:9/nothing", wp_url: "example.com" },
+      user.cookie,
+    )
+
+    const rows = await db
+      .select()
+      .from(websiteProfiles)
+      .where(eq(websiteProfiles.userId, user.userId))
+    expect(rows).toEqual([])
+  })
+
+  it.each([
+    ["https://example.com", "a bare host"],
+    ["https://example.com/", "a trailing slash"],
+    ["https://example.com/blog", "a subdirectory install"],
+    ["http://127.0.0.1:8003", "a port"],
+    ["https://example.com/wp-json", "a suffix the client strips"],
+  ])("accepts %s (%s)", async (wpUrl) => {
+    const response = await post(
+      { name: "Fine", website_url: "http://127.0.0.1:9/fine", wp_url: wpUrl },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(201)
+    expect((await response.json()).wp_url).toBe(wpUrl)
+  })
+
+  it.each([null, ""])(
+    "accepts %j, which every reader already treats as unconfigured",
+    async (wpUrl) => {
+      const response = await post(
+        { name: "Blank", website_url: "http://127.0.0.1:9/blank", wp_url: wpUrl },
+        user.cookie,
+      )
+
+      expect(response.status).toBe(201)
+      expect((await response.json()).wp_url).toBe(wpUrl)
+    },
+  )
+
+  it("rejects a website_url that is not a URL at all", async () => {
+    const response = await post({ name: "Bad", website_url: "not a url" }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect(await issueFor(response, "website_url")).toEqual({
+      type: "value_error",
+      loc: ["body", "website_url"],
+      msg: WEBSITE_URL_INVALID,
+      input: "not a url",
+    })
+  })
+
+  it("rejects a website_url on a scheme nothing here can follow", async () => {
+    const response = await post({ name: "File", website_url: "file:///etc/passwd" }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "website_url"))?.msg).toBe(WEBSITE_URL_SCHEME)
+  })
+
+  it("rejects the same values on PATCH and leaves the stored row alone", async () => {
+    const id = await insertProfile(user.userId, { wpUrl: "https://example.com" })
+
+    const response = await patch(id, { wp_url: "https://example.com/?a=1" }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "wp_url"))?.msg).toBe(WP_URL_QUERY_OR_FRAGMENT)
+    expect((await readRow(id)).wpUrl).toBe("https://example.com")
+  })
+
+  it("still clears wp_url when PATCH sends it as null", async () => {
+    const id = await insertProfile(user.userId, { wpUrl: "https://example.com" })
+
+    const response = await patch(id, { wp_url: null }, user.cookie)
+
+    expect(response.status).toBe(200)
+    expect((await readRow(id)).wpUrl).toBeNull()
+  })
+
+  it("rejects credentials on PATCH and leaves the stored row alone", async () => {
+    const id = await insertProfile(user.userId, { wpUrl: "https://example.com" })
+
+    const response = await patch(id, { wp_url: "https://wp-user:s3cret@example.com" }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "wp_url"))?.msg).toBe(WP_URL_CREDENTIALS)
+    expect((await readRow(id)).wpUrl).toBe("https://example.com")
+  })
+
+  it("rejects a bad website_url on PATCH", async () => {
+    const id = await insertProfile(user.userId)
+
+    const response = await patch(id, { website_url: "not a url" }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "website_url"))?.msg).toBe(WEBSITE_URL_INVALID)
+  })
+})
+
+/**
+ * `output_format` is the third column validated at this boundary, for the same
+ * reason as the two URLs: it is read by a publish step that cannot report a
+ * reason to anyone. A value outside the three the app produces reaches the
+ * post's Output Format picker as "Unrecognised format" and the publish
+ * endpoint as a refusal, both of them after the six stages have been paid for.
+ */
+describe("profile output_format validation", () => {
+  async function issueFor(response: Response, field: string) {
+    const { detail } = (await response.json()) as { detail: ValidationErrorDetail[] }
+    return detail.find((entry) => entry.loc[1] === field)
+  }
+
+  it("rejects the retired `both` on create", async () => {
+    const response = await post(
+      { name: "Both", website_url: "https://example.com", output_format: "both" },
+      user.cookie,
+    )
+
+    expect(response.status).toBe(422)
+    expect(await issueFor(response, "output_format")).toEqual({
+      type: "value_error",
+      loc: ["body", "output_format"],
+      msg: OUTPUT_FORMAT_INVALID,
+      input: "both",
+    })
+  })
+
+  it("rejects it on PATCH and leaves the stored value alone", async () => {
+    const id = await insertProfile(user.userId, { outputFormat: "wordpress" })
+
+    const response = await patch(id, { output_format: "nonsense" }, user.cookie)
+
+    expect(response.status).toBe(422)
+    expect((await issueFor(response, "output_format"))?.msg).toBe(OUTPUT_FORMAT_INVALID)
+    expect((await readRow(id)).outputFormat).toBe("wordpress")
+  })
+
+  it("still clears output_format when PATCH sends it as null", async () => {
+    const id = await insertProfile(user.userId, { outputFormat: "wordpress" })
+
+    const response = await patch(id, { output_format: null }, user.cookie)
+
+    expect(response.status).toBe(200)
+    expect((await readRow(id)).outputFormat).toBeNull()
+  })
+
+  it.each(["markdown", "wordpress", "nextjs"])("takes %s", async (format) => {
+    const id = await insertProfile(user.userId)
+
+    const response = await patch(id, { output_format: format }, user.cookie)
+
+    expect(response.status).toBe(200)
+    expect((await readRow(id)).outputFormat).toBe(format)
+  })
+})

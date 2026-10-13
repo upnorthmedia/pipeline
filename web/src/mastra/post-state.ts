@@ -1,0 +1,507 @@
+/**
+ * The bridge between the `posts` table and a pipeline run, ported from
+ * `state_from_post()` in `api/src/pipeline/state.py` and `save_stage_output()`
+ * in `api/src/pipeline/helpers.py`.
+ *
+ * Every stage step reads its inputs through `stateFromPost` and writes its
+ * output through `saveStageOutput`, which is what makes a crash resumable: the
+ * stage's column is committed the moment the stage finishes, so a restarted run
+ * rebuilds its state from the table rather than from anything held in memory.
+ *
+ * Kept out of `state.ts` so that module stays free of database imports: the
+ * prompt assembly and the stage vocabulary are pure, this file is not.
+ */
+import { and, eq, getTableColumns, inArray, sql } from "drizzle-orm"
+
+import { getDb, internalLinks, posts } from "../db"
+import {
+  CURRENT_STAGE_COMPLETE,
+  CURRENT_STAGE_FAILED,
+  CURRENT_STAGE_PAUSED,
+  STAGE_CONTENT_MAP,
+  STAGES,
+  STATUS_COMPLETE,
+  STATUS_FAILED,
+  STATUS_REVIEW,
+  STATUS_RUNNING,
+  pipelineContextSchema,
+} from "./state"
+import type { InternalLink, Stage } from "./state"
+import { z } from "zod"
+
+/**
+ * A run's full state: the prompt-visible context plus the identity and
+ * run-control fields a step needs but a prompt never sees.
+ *
+ * This mirrors Python's `PipelineState` minus `api_keys`, which stays out
+ * deliberately so a credential cannot reach a provider payload by being carried
+ * in the same object as the prompt inputs.
+ */
+export const pipelineStateSchema = pipelineContextSchema.extend({
+  postId: z.string(),
+  slug: z.string(),
+  profileId: z.string(),
+  imageStyle: z.string(),
+  imageBrandColors: z.array(z.string()),
+  imageExclude: z.array(z.string()),
+  finalHtml: z.string(),
+  currentStage: z.string(),
+  stageSettings: z.record(z.string(), z.string()),
+  stageStatus: z.record(z.string(), z.string()),
+})
+
+export type PipelineState = z.infer<typeof pipelineStateSchema>
+
+/** The shape `stateFromPost` reads: a row selected from `posts`. */
+export type PostRow = typeof posts.$inferSelect
+
+/**
+ * Python's defaults for the three columns whose absence would otherwise change
+ * the rendered prompt. Note `or`, not `??`: Python coalesces falsy values, so a
+ * `word_count` of 0 becomes 2000 rather than staying 0, and `||` reproduces
+ * that. The other columns coalesce to `""` / `[]` / `{}`.
+ */
+const DEFAULT_WORD_COUNT = 2000
+const DEFAULT_TONE = "Conversational and friendly"
+const DEFAULT_OUTPUT_FORMAT = "markdown"
+
+/** `{research: "auto", ...}` for all six stages, Python's `stage_settings` fallback. */
+function defaultStageSettings(): Record<string, string> {
+  return Object.fromEntries(STAGES.map((stage) => [stage, "auto"]))
+}
+
+/**
+ * Build a run's state from a post row and the internal links offered to `edit`.
+ *
+ * `internalLinks` is a parameter rather than a join because the links belong to
+ * the post's profile and are crawled on their own schedule; the caller decides
+ * whether to spend that query. Python's signature does the same.
+ */
+export function stateFromPost(post: PostRow, internalLinks: InternalLink[] = []): PipelineState {
+  return {
+    postId: String(post.id),
+    slug: post.slug,
+    profileId: post.profileId ? String(post.profileId) : "",
+    topic: post.topic || "",
+    targetAudience: post.targetAudience || "",
+    niche: post.niche || "",
+    intent: post.intent || "",
+    wordCount: post.wordCount || DEFAULT_WORD_COUNT,
+    tone: post.tone || DEFAULT_TONE,
+    outputFormat: post.outputFormat || DEFAULT_OUTPUT_FORMAT,
+    websiteUrl: post.websiteUrl || "",
+    relatedKeywords: post.relatedKeywords || [],
+    competitorUrls: post.competitorUrls || [],
+    imageStyle: post.imageStyle || "",
+    imageBrandColors: post.imageBrandColors || [],
+    imageExclude: post.imageExclude || [],
+    brandVoice: post.brandVoice || "",
+    avoid: post.avoid || "",
+    requiredMentions: post.requiredMentions || "",
+    articleType: post.articleType || "",
+    additionalInfo: post.additionalInfo || "",
+    internalLinks,
+    research: post.researchContent || "",
+    outline: post.outlineContent || "",
+    draft: post.draftContent || "",
+    finalMd: post.finalMdContent || "",
+    finalHtml: post.finalHtmlContent || "",
+    imageManifest: post.imageManifest || {},
+    ready: post.readyContent || "",
+    currentStage: post.currentStage || "pending",
+    stageSettings: post.stageSettings || defaultStageSettings(),
+    stageStatus: post.stageStatus || {},
+  }
+}
+
+/**
+ * Drizzle property name for each stage's content column, resolved from the
+ * table definition by the database column name in `STAGE_CONTENT_MAP`.
+ *
+ * Resolving it rather than writing a second hand-maintained map means the two
+ * cannot drift: rename a column in `schema.ts` and this throws at import time
+ * instead of silently writing to the wrong place.
+ */
+const contentColumnByStage: Record<Stage, string> = (() => {
+  const propByDbName = new Map(
+    Object.entries(getTableColumns(posts)).map(([prop, column]) => [column.name, prop]),
+  )
+  return Object.fromEntries(
+    STAGES.map((stage) => {
+      const prop = propByDbName.get(STAGE_CONTENT_MAP[stage])
+      if (!prop) {
+        throw new Error(
+          `posts has no column '${STAGE_CONTENT_MAP[stage]}' for stage '${stage}'`,
+        )
+      }
+      return [stage, prop]
+    }),
+  ) as Record<Stage, string>
+})()
+
+/**
+ * A `stage_status` update that merges the caller's entries into whatever the
+ * column holds *at the moment the statement runs*, rather than into the copy
+ * the caller read earlier.
+ *
+ * Python passed the whole map, having read it at the start of the stage, and
+ * every call site in this port did the same. That is a read-modify-write over a
+ * column two runs share: start a run for `research` and a run for `outline` on
+ * one post and both steps read `stage_status` before either finishes, so the
+ * one that writes second erases the other's entry and the dashboard reports a
+ * finished stage as never run. Doing the merge in SQL keeps the whole operation
+ * inside the single `UPDATE`, where Postgres' row lock serializes it.
+ *
+ * `coalesce` because the column is nullable: `null || '{...}'` is null, which
+ * would blank the map rather than seed it.
+ */
+function mergeStageStatus(patch: Record<string, string>) {
+  return sql`coalesce(${posts.stageStatus}, '{}'::jsonb) || ${JSON.stringify(patch)}::jsonb`
+}
+
+/**
+ * `current_stage = <stage>`, unless an operator has paused the run.
+ *
+ * Every write a run makes to `current_stage` goes through this, and that is
+ * what makes the pause the run reads (`pauseGate()` in `steps/stage-io.ts`)
+ * survive long enough to be read. Ledger item P2.115 called the pause a label
+ * because nothing consumed it; the deeper half, found by putting a probe in
+ * front of each stage, is that nothing *could*: a pause pressed while a stage
+ * was executing was erased by that same stage's own completion write, which
+ * set `current_stage` back to the stage name. The column went
+ * `research` -> `paused` -> `research` inside one stage, so the next stage read
+ * a value the operator had already overwritten.
+ *
+ * A `case` expression rather than a predicate on the statement, because these
+ * writes also carry the stage's content and its `stage_status` entry and those
+ * must land whether the run was paused or not: the stage did the work and the
+ * post must keep it.
+ *
+ * `"paused"` therefore moves only when a request moves it. Every start
+ * endpoint writes `current_stage` before it starts anything, which is what
+ * releases the pause.
+ */
+function currentStageUnlessPaused(stage: string) {
+  return sql`case when ${posts.currentStage} = ${CURRENT_STAGE_PAUSED} then ${CURRENT_STAGE_PAUSED} else ${stage} end`
+}
+
+/**
+ * Whether an operator has paused this run, read from the row rather than from
+ * a `PipelineState` because the one caller that asks without one is
+ * `pipeline-complete`, which holds only the previous step's output.
+ */
+export async function isRunPaused(postId: string): Promise<boolean> {
+  const [row] = await getDb()
+    .select({ currentStage: posts.currentStage })
+    .from(posts)
+    .where(eq(posts.id, postId))
+  return row?.currentStage === CURRENT_STAGE_PAUSED
+}
+
+/**
+ * Commit a stage's output to its column, advance `current_stage`, and (when the
+ * caller has one) merge its `stage_status` entries in so the dashboard's
+ * progress view stays in step.
+ *
+ * `updatedAt` is stamped explicitly because SQLAlchemy's `onupdate` stamped it
+ * on every Python write; leaving it to the database's default would freeze it at
+ * insert time and make the posts list sort wrongly.
+ */
+export async function saveStageOutput(
+  postId: string,
+  stage: Stage,
+  content: string | Record<string, unknown>,
+  stageStatusPatch?: Record<string, string>,
+): Promise<void> {
+  const values: Record<string, unknown> = {
+    // Strings land in text columns, objects in the `image_manifest` JSONB
+    // column, exactly as Python passed content through untouched.
+    [contentColumnByStage[stage]]: content,
+    currentStage: currentStageUnlessPaused(stage),
+    updatedAt: new Date(),
+  }
+  if (stageStatusPatch !== undefined) values.stageStatus = mergeStageStatus(stageStatusPatch)
+
+  await getDb().update(posts).set(values).where(eq(posts.id, postId))
+}
+
+/**
+ * Move the row onto a stage that is about to execute, ported from the
+ * "Persist running to DB before SSE so fetchPost reads correct state" block in
+ * `_run_pipeline()`: `stage_status[stage] = "running"` and `current_stage` set
+ * to the stage now in flight.
+ *
+ * Until this landed, nothing in the port wrote `"running"` at all: the row went
+ * straight from the previous stage's `"complete"` to this stage's, so a post
+ * spent every provider call looking, to the dashboard, like it was still parked
+ * on the stage before. `saveStageOutput` advances `current_stage` on the way
+ * out; this is the matching write on the way in.
+ *
+ * The two writes are separate statements rather than one merged patch because
+ * they happen either side of the provider call, which is the whole point of the
+ * value: `"running"` means "started, not finished".
+ */
+export async function markStageRunning(postId: string, stage: Stage): Promise<void> {
+  await getDb()
+    .update(posts)
+    .set({
+      stageStatus: mergeStageStatus({ [stage]: STATUS_RUNNING }),
+      currentStage: currentStageUnlessPaused(stage),
+      updatedAt: new Date(),
+    })
+    .where(eq(posts.id, postId))
+}
+
+/**
+ * Park the row at a stage's review gate, ported from the pause branch of
+ * `_run_pipeline()`: `stage_status[stage] = "review"` and `current_stage` set
+ * to the stage the run stopped in front of.
+ *
+ * Deliberately not `saveStageOutput`: the gate fires before the stage runs, so
+ * there is no content to commit, and writing the content column here would let
+ * a resumed run mistake an empty string for a stage that produced nothing.
+ */
+export async function markStageForReview(postId: string, stage: Stage): Promise<void> {
+  await getDb()
+    .update(posts)
+    .set({
+      stageStatus: mergeStageStatus({ [stage]: STATUS_REVIEW }),
+      currentStage: currentStageUnlessPaused(stage),
+      updatedAt: new Date(),
+    })
+    .where(eq(posts.id, postId))
+}
+
+/**
+ * Promote `current_stage` to `"complete"` if `stage_status` now calls every
+ * stage complete, ported from the single-stage rerun check in
+ * `api/src/worker.py`. Returns whether it promoted.
+ *
+ * The status map is re-read from the table rather than taken from the caller
+ * because the caller only knows the stage it just wrote; the question here is
+ * what the other five say once that write committed.
+ */
+export async function markCompleteIfAllStagesComplete(postId: string): Promise<boolean> {
+  const [row] = await getDb()
+    .select({ stageStatus: posts.stageStatus })
+    .from(posts)
+    .where(eq(posts.id, postId))
+  if (!row) return false
+
+  const stageStatus = (row.stageStatus ?? {}) as Record<string, string>
+  if (!STAGES.every((stage) => stageStatus[stage] === STATUS_COMPLETE)) return false
+
+  await getDb()
+    .update(posts)
+    .set({ currentStage: CURRENT_STAGE_COMPLETE, updatedAt: new Date() })
+    .where(eq(posts.id, postId))
+  return true
+}
+
+/**
+ * Stamp a post finished, ported from `_post_completion_hook` in
+ * `api/src/worker.py:426`: `current_stage = "complete"` and `completed_at` now.
+ *
+ * Deliberately unconditional, unlike `markCompleteIfAllStagesComplete`. Python
+ * ran this at the end of a full pipeline without consulting `stage_status`,
+ * which matters because a stage can finish without succeeding: the `images`
+ * stage writes `images: failed` and returns rather than raising, and the run
+ * carries on to `ready` and ends. Checking the map here would leave such a run
+ * with `completed_at` null and `current_stage` stuck on the last stage, which
+ * is not what the dashboard showed before the port.
+ *
+ * The auto-publish half of Python's hook (queueing WordPress and Next.js
+ * publishes) depends on those two routers and belongs to Phase 5.
+ */
+export async function markPipelineComplete(postId: string): Promise<void> {
+  const now = new Date()
+  await getDb()
+    .update(posts)
+    .set({ currentStage: CURRENT_STAGE_COMPLETE, completedAt: now, updatedAt: now })
+    .where(eq(posts.id, postId))
+}
+
+/**
+ * Stamp a post as failed for good, ported from the post-writing half of
+ * `_move_to_dlq()` in `api/src/worker.py:389`: `current_stage = "failed"` and
+ * an `_error` entry merged into `stage_logs`.
+ *
+ * The three keys and their names are Python's, so a row written by either stack
+ * reads the same: `message` is the exception text, `attempts` how many times the
+ * run was executed before it was given up on, `failed_at` when that happened.
+ * `_error` is a reserved key in that map rather than a stage name, which is why
+ * the analytics cost query filters it out with `sl.key NOT LIKE '\_%'`.
+ *
+ * The merge is `||` against `coalesce(stage_logs, '{}')` for the same reason
+ * `mergeStageStatus` is: the column is nullable, and every stage's own log
+ * entry has to survive the write.
+ *
+ * `stage` is the one thing here Python had no equivalent for, and it closes the
+ * lie the two-column split left behind. `markStageRunning()` writes
+ * `stage_status[stage] = "running"` on the way into a step and only
+ * `saveStageOutput()` moves it, so a step that threw its last attempt left the
+ * stage recorded as executing forever: the post page's progress dots span, its
+ * stage tab said "Running Write...", and the run trace counted an elapsed clock
+ * up under a header that already read "Failed". The stamp is merged rather than
+ * written over the map so the stages that did finish keep their record, and it
+ * is skipped when the engine's terminal event names no step, which is the case
+ * `resolveStageStatus()` in `src/lib/run-state.ts` covers for every reader.
+ *
+ * A named stage already recorded as complete belongs to a newer successful
+ * run. In that case the conditional update applies to no row and returns
+ * false, so a delayed terminal event cannot roll the post back to failed.
+ */
+export async function markPipelineFailed(
+  postId: string,
+  message: string,
+  attempts: number,
+  stage: Stage | "" = "",
+): Promise<boolean> {
+  const now = new Date()
+  const error = { message, attempts, failed_at: now.toISOString() }
+  const rows = await getDb()
+    .update(posts)
+    .set({
+      currentStage: CURRENT_STAGE_FAILED,
+      stageLogs: sql`coalesce(${posts.stageLogs}, '{}'::jsonb) || ${JSON.stringify({ _error: error })}::jsonb`,
+      ...(stage ? { stageStatus: mergeStageStatus({ [stage]: STATUS_FAILED }) } : {}),
+      updatedAt: now,
+    })
+    .where(
+      stage
+        ? and(
+            eq(posts.id, postId),
+            sql`coalesce(${posts.stageStatus} ->> ${stage}, '') <> ${STATUS_COMPLETE}`,
+          )
+        : eq(posts.id, postId),
+    )
+    .returning({ id: posts.id })
+  return rows.length > 0
+}
+
+/**
+ * The internal links offered to the `edit` stage, ported from
+ * `_fetch_internal_links()` in `api/src/worker.py`: every link crawled for the
+ * post's profile, or none when the post has no profile.
+ *
+ * Python also carries each link's `slug`, which no prompt reads; only `url` and
+ * `title` reach `buildStagePrompt`, so only those are selected here.
+ */
+export async function loadInternalLinks(profileId: string | null): Promise<InternalLink[]> {
+  if (!profileId) return []
+  const rows = await getDb()
+    .select({ url: internalLinks.url, title: internalLinks.title })
+    .from(internalLinks)
+    .where(eq(internalLinks.profileId, profileId))
+  return rows.map((row) => ({ url: row.url, title: row.title ?? undefined }))
+}
+
+/**
+ * Read a run's state straight from the database, which is what makes a stage
+ * resumable: a step never trusts what an earlier step held in memory, it reads
+ * the columns those steps committed.
+ *
+ * Throws on a missing post rather than returning a default state, because every
+ * caller is a step that would otherwise render a prompt full of empty strings
+ * and bill a provider for it.
+ */
+export async function loadPipelineState(postId: string): Promise<PipelineState> {
+  const rows = await getDb().select().from(posts).where(eq(posts.id, postId)).limit(1)
+  const post = rows[0]
+  if (!post) throw new Error(`post ${postId} not found`)
+  return stateFromPost(post, await loadInternalLinks(post.profileId))
+}
+
+/**
+ * The dead-letter acknowledgement itself: drop `_error` and leave every other
+ * key in `stage_logs` as the statement finds it.
+ *
+ * Shared by the two endpoints that retire an entry, so "what removal means"
+ * has one definition rather than a copy per route.
+ */
+const dropErrorLog = sql`coalesce(${posts.stageLogs}, '{}'::jsonb) - '_error'`
+
+/**
+ * Take a post out of the dead-letter queue and back to the front of the
+ * pipeline, ported from the post-writing half of `retry_dead_letter()` in
+ * `api/src/api/queue.py:190`: `current_stage = "pending"` and
+ * `logs.pop("_error", None)`.
+ *
+ * The pop is done in SQL, as `stage_logs - '_error'`, for the reason
+ * `mergeStageStatus` gives: Python read the map, mutated the copy and wrote the
+ * whole thing back, which erases anything a concurrently running stage logged
+ * between the read and the write. `-` on the column removes one key and leaves
+ * the rest of the map as the statement finds it.
+ *
+ * `stage_status` is deliberately untouched. Python left it alone too, and it is
+ * what makes the retried run resume rather than restart: the run started after
+ * this write executes the stages `stage_status` does not already call complete.
+ */
+export async function retryFailedPost(postId: string): Promise<void> {
+  await getDb()
+    .update(posts)
+    .set({
+      // The column's own default, and the value the queue status route counts
+      // in its `pending` bucket.
+      currentStage: "pending",
+      stageLogs: dropErrorLog,
+      updatedAt: new Date(),
+    })
+    .where(eq(posts.id, postId))
+}
+
+/**
+ * Retire a post's dead-letter entries without retrying them, the post-writing
+ * half of `DELETE /api/queue/dead-letter`.
+ *
+ * `current_stage` is deliberately left where the failure put it. Python's clear
+ * deleted a Redis list and never touched a post at all, so a cleared post stayed
+ * `failed`; under the acknowledgement rule item 5.4d-iii-a settled, popping
+ * `_error` is the whole of the removal, and moving the stage as well would take
+ * a post out of the `failed` bucket `GET /api/queue` counts.
+ *
+ * One statement for the whole batch, so a clear is atomic the way Python's
+ * single `DELETE` was.
+ */
+export async function clearFailureMarkers(postIds: string[]): Promise<void> {
+  if (postIds.length === 0) return
+  await getDb()
+    .update(posts)
+    .set({ stageLogs: dropErrorLog, updatedAt: new Date() })
+    .where(inArray(posts.id, postIds))
+}
+
+/**
+ * Move a row off its review gate, but only if it is still parked on one.
+ *
+ * `markStageForReview` is what put it there, and the worker's
+ * `announceStageStart` is what would normally take it back off: a released run
+ * re-enters the step, the gate short-circuits on `resumeData`, and the row is
+ * written `running`. That write happens in the worker, milliseconds to seconds
+ * after the resume is accepted, and the dashboard polls in between. So the
+ * process that accepted the approval makes the same write itself rather than
+ * leaving the reviewer looking at a stage that still says it is waiting for
+ * them.
+ *
+ * The `stage_status[stage] = 'review'` predicate is the whole point of the
+ * statement: by the time this runs the worker may already have written
+ * `running`, or (for a stage that is nothing but a skip) `complete`, and an
+ * unconditional write would put a finished stage back to `running`. Postgres
+ * evaluates the predicate under the row lock, so the two writers cannot
+ * interleave. Returns whether it moved the row.
+ */
+export async function releaseStageFromReview(postId: string, stage: Stage): Promise<boolean> {
+  const moved = await getDb()
+    .update(posts)
+    .set({
+      stageStatus: mergeStageStatus({ [stage]: STATUS_RUNNING }),
+      currentStage: stage,
+      updatedAt: new Date(),
+    })
+    .where(
+      sql`${posts.id} = ${postId} and ${posts.stageStatus} ->> ${stage} = ${STATUS_REVIEW}`,
+    )
+    .returning({ id: posts.id })
+
+  return moved.length > 0
+}

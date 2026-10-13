@@ -1,0 +1,977 @@
+{
+  "generated_by": "api/scripts/export_sitemap_parity.py",
+  "source": "api/src/services/sitemap.py",
+  "python_version": "3.13.12",
+  "fixture_host": "https://example.com",
+  "parse_cases": [
+    {
+      "name": "simple_sitemap.xml",
+      "fixture": "simple_sitemap.xml",
+      "sub_sitemaps": [],
+      "entries": [
+        {
+          "url": "https://example.com/page-1/",
+          "title": null,
+          "lastmod": "2024-01-15"
+        },
+        {
+          "url": "https://example.com/page-2/",
+          "title": null,
+          "lastmod": "2024-02-20"
+        },
+        {
+          "url": "https://example.com/blog/hello-world/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/about/",
+          "title": null,
+          "lastmod": "2024-03-01"
+        },
+        {
+          "url": "https://example.com/contact/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/products/widget-a/",
+          "title": null,
+          "lastmod": "2024-04-10"
+        },
+        {
+          "url": "https://example.com/products/widget-b/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/faq/",
+          "title": null,
+          "lastmod": "2024-05-01"
+        },
+        {
+          "url": "https://example.com/blog/second-post/",
+          "title": null,
+          "lastmod": "2024-06-15"
+        },
+        {
+          "url": "https://example.com/terms/",
+          "title": null,
+          "lastmod": null
+        }
+      ]
+    },
+    {
+      "name": "sitemap_index.xml",
+      "fixture": "sitemap_index.xml",
+      "sub_sitemaps": [
+        "https://example.com/sitemap-pages.xml",
+        "https://example.com/sitemap-posts.xml",
+        "https://example.com/sitemap-products.xml"
+      ],
+      "entries": []
+    },
+    {
+      "name": "sub_sitemap_pages.xml",
+      "fixture": "sub_sitemap_pages.xml",
+      "sub_sitemaps": [],
+      "entries": [
+        {
+          "url": "https://example.com/about/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/contact/",
+          "title": null,
+          "lastmod": null
+        }
+      ]
+    },
+    {
+      "name": "sub_sitemap_posts.xml",
+      "fixture": "sub_sitemap_posts.xml",
+      "sub_sitemaps": [],
+      "entries": [
+        {
+          "url": "https://example.com/blog/post-1/",
+          "title": null,
+          "lastmod": "2024-06-10"
+        },
+        {
+          "url": "https://example.com/blog/post-2/",
+          "title": null,
+          "lastmod": "2024-06-15"
+        }
+      ]
+    },
+    {
+      "name": "sub_sitemap_products.xml",
+      "fixture": "sub_sitemap_products.xml",
+      "sub_sitemaps": [],
+      "entries": [
+        {
+          "url": "https://example.com/products/alpha/",
+          "title": null,
+          "lastmod": null
+        }
+      ]
+    },
+    {
+      "name": "malformed_sitemap.xml",
+      "fixture": "malformed_sitemap.xml",
+      "sub_sitemaps": [],
+      "entries": [
+        {
+          "url": "https://example.com/valid-page/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/another-page/",
+          "title": null,
+          "lastmod": null
+        }
+      ]
+    },
+    {
+      "name": "empty_sitemap.xml",
+      "fixture": "empty_sitemap.xml",
+      "sub_sitemaps": [],
+      "entries": []
+    },
+    {
+      "name": "gzipped-simple",
+      "fixture": "simple_sitemap.xml",
+      "gzipped": true,
+      "sub_sitemaps": [],
+      "entries": [
+        {
+          "url": "https://example.com/page-1/",
+          "title": null,
+          "lastmod": "2024-01-15"
+        },
+        {
+          "url": "https://example.com/page-2/",
+          "title": null,
+          "lastmod": "2024-02-20"
+        },
+        {
+          "url": "https://example.com/blog/hello-world/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/about/",
+          "title": null,
+          "lastmod": "2024-03-01"
+        },
+        {
+          "url": "https://example.com/contact/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/products/widget-a/",
+          "title": null,
+          "lastmod": "2024-04-10"
+        },
+        {
+          "url": "https://example.com/products/widget-b/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/faq/",
+          "title": null,
+          "lastmod": "2024-05-01"
+        },
+        {
+          "url": "https://example.com/blog/second-post/",
+          "title": null,
+          "lastmod": "2024-06-15"
+        },
+        {
+          "url": "https://example.com/terms/",
+          "title": null,
+          "lastmod": null
+        }
+      ]
+    },
+    {
+      "name": "broken-xml",
+      "xml": "<not valid xml at all>>>",
+      "error": "Malformed XML: Specification mandates value for attribute valid, line 1, column 12 (<string>, line 1)"
+    },
+    {
+      "name": "unknown-root",
+      "xml": "<?xml version=\"1.0\"?><unknown><item>test</item></unknown>",
+      "error": "Unknown root element: unknown"
+    },
+    {
+      "name": "no-namespace-urlset",
+      "xml": "<urlset><url><loc>https://example.com/a/</loc></url></urlset>",
+      "sub_sitemaps": [],
+      "entries": []
+    },
+    {
+      "name": "prefixed-namespace",
+      "xml": "<sm:urlset xmlns:sm=\"http://www.sitemaps.org/schemas/sitemap/0.9\"><sm:url><sm:loc>https://example.com/b/</sm:loc><sm:lastmod>2024-07-04</sm:lastmod></sm:url></sm:urlset>",
+      "sub_sitemaps": [],
+      "entries": [
+        {
+          "url": "https://example.com/b/",
+          "title": null,
+          "lastmod": "2024-07-04"
+        }
+      ]
+    },
+    {
+      "name": "wrong-namespace-urlset",
+      "xml": "<urlset xmlns=\"https://example.com/not-sitemaps\"><url><loc>https://example.com/c/</loc></url></urlset>",
+      "sub_sitemaps": [],
+      "entries": []
+    },
+    {
+      "name": "empty-loc",
+      "xml": "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"><url><loc></loc></url><url><loc>https://example.com/d/</loc></url></urlset>",
+      "sub_sitemaps": [],
+      "entries": [
+        {
+          "url": "https://example.com/d/",
+          "title": null,
+          "lastmod": null
+        }
+      ]
+    },
+    {
+      "name": "whitespace-around-loc",
+      "xml": "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"><url><loc>\n  https://example.com/e/\n  </loc><lastmod>  2024-08-09  </lastmod></url></urlset>",
+      "sub_sitemaps": [],
+      "entries": [
+        {
+          "url": "https://example.com/e/",
+          "title": null,
+          "lastmod": "2024-08-09"
+        }
+      ]
+    },
+    {
+      "name": "nested-index-in-urlset",
+      "xml": "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"><url><loc>https://example.com/f/</loc></url><sitemap><loc>https://example.com/nested.xml</loc></sitemap></urlset>",
+      "sub_sitemaps": [],
+      "entries": [
+        {
+          "url": "https://example.com/f/",
+          "title": null,
+          "lastmod": null
+        }
+      ]
+    }
+  ],
+  "robots_cases": [
+    {
+      "name": "single-sitemap",
+      "content": "User-agent: *\nDisallow: /admin/\nSitemap: https://example.com/sitemap.xml\n",
+      "expected": [
+        "https://example.com/sitemap.xml"
+      ]
+    },
+    {
+      "name": "multiple-sitemaps",
+      "content": "User-agent: *\nSitemap: https://example.com/sitemap-posts.xml\nSitemap: https://example.com/sitemap-pages.xml\n",
+      "expected": [
+        "https://example.com/sitemap-posts.xml",
+        "https://example.com/sitemap-pages.xml"
+      ]
+    },
+    {
+      "name": "no-sitemaps",
+      "content": "User-agent: *\nDisallow: /admin/\n",
+      "expected": []
+    },
+    {
+      "name": "case-insensitive",
+      "content": "SITEMAP: https://example.com/sitemap.xml\n",
+      "expected": [
+        "https://example.com/sitemap.xml"
+      ]
+    },
+    {
+      "name": "empty",
+      "content": "",
+      "expected": []
+    },
+    {
+      "name": "bare-directive",
+      "content": "Sitemap:\n",
+      "expected": []
+    },
+    {
+      "name": "crlf-line-endings",
+      "content": "User-agent: *\r\nSitemap: https://example.com/a.xml\r\n",
+      "expected": [
+        "https://example.com/a.xml"
+      ]
+    },
+    {
+      "name": "indented",
+      "content": "   Sitemap:   https://example.com/b.xml   \n",
+      "expected": [
+        "https://example.com/b.xml"
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "discover-from-robots-txt",
+      "routes": {
+        "/robots.txt": {
+          "status": 200,
+          "body": "User-agent: *\nSitemap: https://example.com/sitemap-posts.xml\nSitemap: https://example.com/sitemap-pages.xml\n",
+          "fixture": null,
+          "content_type": "text/plain",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        }
+      },
+      "call": {
+        "fn": "discover_sitemaps",
+        "url": "{BASE}"
+      },
+      "expected": [
+        "https://example.com/sitemap-posts.xml",
+        "https://example.com/sitemap-pages.xml"
+      ]
+    },
+    {
+      "name": "discover-falls-back-to-sitemap-xml",
+      "routes": {
+        "/robots.txt": {
+          "status": 404,
+          "body": "",
+          "fixture": null,
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        },
+        "/sitemap.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "simple_sitemap.xml",
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        }
+      },
+      "call": {
+        "fn": "discover_sitemaps",
+        "url": "{BASE}"
+      },
+      "expected": [
+        "{BASE}/sitemap.xml"
+      ]
+    },
+    {
+      "name": "discover-falls-back-to-sitemap-index-xml",
+      "routes": {
+        "/robots.txt": {
+          "status": 200,
+          "body": "User-agent: *\n",
+          "fixture": null,
+          "content_type": "text/plain",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        },
+        "/sitemap.xml": {
+          "status": 404,
+          "body": "",
+          "fixture": null,
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        },
+        "/sitemap_index.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "sitemap_index.xml",
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        }
+      },
+      "call": {
+        "fn": "discover_sitemaps",
+        "url": "{BASE}"
+      },
+      "expected": [
+        "{BASE}/sitemap_index.xml"
+      ]
+    },
+    {
+      "name": "discover-finds-nothing",
+      "routes": {},
+      "call": {
+        "fn": "discover_sitemaps",
+        "url": "{BASE}"
+      },
+      "expected": []
+    },
+    {
+      "name": "discover-survives-robots-hangup",
+      "routes": {
+        "/robots.txt": {
+          "status": 200,
+          "body": null,
+          "fixture": null,
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": true
+        },
+        "/sitemap.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "simple_sitemap.xml",
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        }
+      },
+      "call": {
+        "fn": "discover_sitemaps",
+        "url": "{BASE}"
+      },
+      "expected": [
+        "{BASE}/sitemap.xml"
+      ]
+    },
+    {
+      "name": "discover-from-path-keeps-origin",
+      "routes": {
+        "/robots.txt": {
+          "status": 200,
+          "body": "User-agent: *\nDisallow: /admin/\nSitemap: https://example.com/sitemap.xml\n",
+          "fixture": null,
+          "content_type": "text/plain",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        }
+      },
+      "call": {
+        "fn": "discover_sitemaps",
+        "url": "{BASE}/blog/some-post/?a=1"
+      },
+      "expected": [
+        "https://example.com/sitemap.xml"
+      ]
+    },
+    {
+      "name": "fetch-simple-sitemap",
+      "routes": {
+        "/sitemap.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "simple_sitemap.xml",
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        }
+      },
+      "call": {
+        "fn": "fetch_and_parse_sitemap",
+        "url": "{BASE}/sitemap.xml"
+      },
+      "expected": [
+        {
+          "url": "https://example.com/page-1/",
+          "title": null,
+          "lastmod": "2024-01-15"
+        },
+        {
+          "url": "https://example.com/page-2/",
+          "title": null,
+          "lastmod": "2024-02-20"
+        },
+        {
+          "url": "https://example.com/blog/hello-world/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/about/",
+          "title": null,
+          "lastmod": "2024-03-01"
+        },
+        {
+          "url": "https://example.com/contact/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/products/widget-a/",
+          "title": null,
+          "lastmod": "2024-04-10"
+        },
+        {
+          "url": "https://example.com/products/widget-b/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/faq/",
+          "title": null,
+          "lastmod": "2024-05-01"
+        },
+        {
+          "url": "https://example.com/blog/second-post/",
+          "title": null,
+          "lastmod": "2024-06-15"
+        },
+        {
+          "url": "https://example.com/terms/",
+          "title": null,
+          "lastmod": null
+        }
+      ]
+    },
+    {
+      "name": "fetch-index-recursively",
+      "routes": {
+        "/sitemap.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "sitemap_index.xml",
+          "content_type": "application/xml",
+          "template_base": true,
+          "gzipped": false,
+          "reset": false
+        },
+        "/sitemap-pages.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "sub_sitemap_pages.xml",
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        },
+        "/sitemap-posts.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "sub_sitemap_posts.xml",
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        },
+        "/sitemap-products.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "sub_sitemap_products.xml",
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        }
+      },
+      "call": {
+        "fn": "fetch_and_parse_sitemap",
+        "url": "{BASE}/sitemap.xml"
+      },
+      "expected": [
+        {
+          "url": "https://example.com/about/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/contact/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/blog/post-1/",
+          "title": null,
+          "lastmod": "2024-06-10"
+        },
+        {
+          "url": "https://example.com/blog/post-2/",
+          "title": null,
+          "lastmod": "2024-06-15"
+        },
+        {
+          "url": "https://example.com/products/alpha/",
+          "title": null,
+          "lastmod": null
+        }
+      ]
+    },
+    {
+      "name": "fetch-index-stops-at-max-depth",
+      "routes": {
+        "/sitemap.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "sitemap_index.xml",
+          "content_type": "application/xml",
+          "template_base": true,
+          "gzipped": false,
+          "reset": false
+        },
+        "/sitemap-pages.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "sub_sitemap_pages.xml",
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        },
+        "/sitemap-posts.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "sub_sitemap_posts.xml",
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        },
+        "/sitemap-products.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "sub_sitemap_products.xml",
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        }
+      },
+      "call": {
+        "fn": "fetch_and_parse_sitemap",
+        "url": "{BASE}/sitemap.xml",
+        "max_depth": 1
+      },
+      "expected": []
+    },
+    {
+      "name": "fetch-missing-sitemap",
+      "routes": {},
+      "call": {
+        "fn": "fetch_and_parse_sitemap",
+        "url": "{BASE}/missing.xml"
+      },
+      "expected": []
+    },
+    {
+      "name": "fetch-server-error",
+      "routes": {
+        "/sitemap.xml": {
+          "status": 500,
+          "body": "boom",
+          "fixture": null,
+          "content_type": "text/plain",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        }
+      },
+      "call": {
+        "fn": "fetch_and_parse_sitemap",
+        "url": "{BASE}/sitemap.xml"
+      },
+      "expected": []
+    },
+    {
+      "name": "fetch-malformed-sitemap",
+      "routes": {
+        "/sitemap.xml": {
+          "status": 200,
+          "body": "<not valid xml at all>>>",
+          "fixture": null,
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        }
+      },
+      "call": {
+        "fn": "fetch_and_parse_sitemap",
+        "url": "{BASE}/sitemap.xml"
+      },
+      "expected": []
+    },
+    {
+      "name": "fetch-gzipped-sitemap",
+      "routes": {
+        "/sitemap.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "simple_sitemap.xml",
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": true,
+          "reset": false
+        }
+      },
+      "call": {
+        "fn": "fetch_and_parse_sitemap",
+        "url": "{BASE}/sitemap.xml"
+      },
+      "expected": [
+        {
+          "url": "https://example.com/page-1/",
+          "title": null,
+          "lastmod": "2024-01-15"
+        },
+        {
+          "url": "https://example.com/page-2/",
+          "title": null,
+          "lastmod": "2024-02-20"
+        },
+        {
+          "url": "https://example.com/blog/hello-world/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/about/",
+          "title": null,
+          "lastmod": "2024-03-01"
+        },
+        {
+          "url": "https://example.com/contact/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/products/widget-a/",
+          "title": null,
+          "lastmod": "2024-04-10"
+        },
+        {
+          "url": "https://example.com/products/widget-b/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/faq/",
+          "title": null,
+          "lastmod": "2024-05-01"
+        },
+        {
+          "url": "https://example.com/blog/second-post/",
+          "title": null,
+          "lastmod": "2024-06-15"
+        },
+        {
+          "url": "https://example.com/terms/",
+          "title": null,
+          "lastmod": null
+        }
+      ]
+    },
+    {
+      "name": "fetch-hangup",
+      "routes": {
+        "/sitemap.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": null,
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": true
+        }
+      },
+      "call": {
+        "fn": "fetch_and_parse_sitemap",
+        "url": "{BASE}/sitemap.xml"
+      },
+      "expected": []
+    },
+    {
+      "name": "crawl-full",
+      "routes": {
+        "/robots.txt": {
+          "status": 200,
+          "body": "Sitemap: {BASE}/sitemap.xml",
+          "fixture": null,
+          "content_type": "text/plain",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        },
+        "/sitemap.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "simple_sitemap.xml",
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        }
+      },
+      "call": {
+        "fn": "crawl_sitemap",
+        "url": "{BASE}"
+      },
+      "expected": [
+        {
+          "url": "https://example.com/page-1/",
+          "title": null,
+          "lastmod": "2024-01-15"
+        },
+        {
+          "url": "https://example.com/page-2/",
+          "title": null,
+          "lastmod": "2024-02-20"
+        },
+        {
+          "url": "https://example.com/blog/hello-world/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/about/",
+          "title": null,
+          "lastmod": "2024-03-01"
+        },
+        {
+          "url": "https://example.com/contact/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/products/widget-a/",
+          "title": null,
+          "lastmod": "2024-04-10"
+        },
+        {
+          "url": "https://example.com/products/widget-b/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/faq/",
+          "title": null,
+          "lastmod": "2024-05-01"
+        },
+        {
+          "url": "https://example.com/blog/second-post/",
+          "title": null,
+          "lastmod": "2024-06-15"
+        },
+        {
+          "url": "https://example.com/terms/",
+          "title": null,
+          "lastmod": null
+        }
+      ]
+    },
+    {
+      "name": "crawl-two-sitemaps-from-robots",
+      "routes": {
+        "/robots.txt": {
+          "status": 200,
+          "body": "Sitemap: {BASE}/sitemap-pages.xml\nSitemap: {BASE}/sitemap-posts.xml\n",
+          "fixture": null,
+          "content_type": "text/plain",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        },
+        "/sitemap-pages.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "sub_sitemap_pages.xml",
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        },
+        "/sitemap-posts.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "sub_sitemap_posts.xml",
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        }
+      },
+      "call": {
+        "fn": "crawl_sitemap",
+        "url": "{BASE}"
+      },
+      "expected": [
+        {
+          "url": "https://example.com/about/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/contact/",
+          "title": null,
+          "lastmod": null
+        },
+        {
+          "url": "https://example.com/blog/post-1/",
+          "title": null,
+          "lastmod": "2024-06-10"
+        },
+        {
+          "url": "https://example.com/blog/post-2/",
+          "title": null,
+          "lastmod": "2024-06-15"
+        }
+      ]
+    },
+    {
+      "name": "crawl-no-sitemaps",
+      "routes": {},
+      "call": {
+        "fn": "crawl_sitemap",
+        "url": "{BASE}"
+      },
+      "expected": []
+    },
+    {
+      "name": "crawl-empty-sitemap",
+      "routes": {
+        "/robots.txt": {
+          "status": 404,
+          "body": "",
+          "fixture": null,
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        },
+        "/sitemap.xml": {
+          "status": 200,
+          "body": null,
+          "fixture": "empty_sitemap.xml",
+          "content_type": "application/xml",
+          "template_base": false,
+          "gzipped": false,
+          "reset": false
+        }
+      },
+      "call": {
+        "fn": "crawl_sitemap",
+        "url": "{BASE}"
+      },
+      "expected": []
+    }
+  ]
+}

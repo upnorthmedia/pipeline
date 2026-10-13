@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import PostsPage from "./page";
 import { renderWithProviders } from "@/test/render";
-import { makePost, makeProfile } from "@/test/fixtures";
-import type { Post, Profile } from "@/lib/api";
+import { makePost, makeProfileListItem } from "@/test/fixtures";
+import type { Post, ProfileListItem } from "@/lib/api";
 
 // Mock the api module
 vi.mock("@/lib/api", async () => {
@@ -17,6 +17,7 @@ vi.mock("@/lib/api", async () => {
       duplicate: vi.fn(),
       run: vi.fn(),
       pause: vi.fn(),
+      runAll: vi.fn(),
     },
     profiles: {
       list: vi.fn(),
@@ -55,7 +56,7 @@ const testPosts: Post[] = [
   makePost({ id: "p3", topic: "Third Post", slug: "third-post", current_stage: "write", stage_status: { research: "complete", outline: "complete", write: "running" } }),
 ];
 
-const testProfiles: Profile[] = [makeProfile({ id: "prof-1", name: "Test Site" })];
+const testProfiles: ProfileListItem[] = [makeProfileListItem({ id: "prof-1", name: "Test Site" })];
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -88,7 +89,10 @@ describe("PostsPage", () => {
   });
 
   it("shows loading skeletons initially", () => {
+    // Both requests stay pending: a profile list resolving after the test body
+    // has finished updates state outside act() and prints a warning.
     mockPostsList.mockReturnValue(new Promise(() => {})); // never resolves
+    mockProfilesList.mockReturnValue(new Promise(() => {}));
     const { container } = renderWithProviders(<PostsPage />);
     const skeletons = container.querySelectorAll("[class*='animate-pulse']");
     expect(skeletons.length).toBeGreaterThan(0);
@@ -98,8 +102,67 @@ describe("PostsPage", () => {
     mockPostsList.mockResolvedValue([]);
     renderWithProviders(<PostsPage />);
     await waitFor(() => {
-      expect(screen.getByText("No posts found")).toBeInTheDocument();
+      expect(screen.getByText("No posts yet")).toBeInTheDocument();
       expect(screen.getByText("Create your first post")).toBeInTheDocument();
+    });
+  });
+
+  it("tells a filtered empty result apart from an empty account", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+
+    mockPostsList.mockResolvedValue([]);
+    await user.type(screen.getByPlaceholderText("Search posts..."), "zzz");
+
+    await waitFor(() => {
+      expect(screen.getByText("No posts match these filters")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Create your first post")).not.toBeInTheDocument();
+
+    mockPostsList.mockResolvedValue(testPosts);
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+    expect(screen.getByPlaceholderText("Search posts...")).toHaveValue("");
+  });
+
+  it("shows the server's own message and a retry when the list fails", async () => {
+    const user = userEvent.setup();
+    mockPostsList.mockRejectedValueOnce(
+      new Error(JSON.stringify({ detail: "profile 9 does not belong to you" }))
+    );
+    renderWithProviders(<PostsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Could not load posts")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("profile 9 does not belong to you")
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+    expect(screen.queryByText("Could not load posts")).not.toBeInTheDocument();
+  });
+
+  it("falls back to its own wording when the failure carries no message", async () => {
+    mockPostsList.mockRejectedValue(new Error("Failed to fetch"));
+    renderWithProviders(<PostsPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("The request failed and the server gave no reason.")
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("counts one post without a plural", async () => {
+    mockPostsList.mockResolvedValue([testPosts[0]]);
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("1 total post")).toBeInTheDocument();
     });
   });
 
@@ -114,6 +177,89 @@ describe("PostsPage", () => {
     renderWithProviders(<PostsPage />);
     await waitFor(() => {
       expect(screen.getByText("All Posts")).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * The gate queue. `current_stage` stays on the stage the worker suspended
+   * in, so the `status` parameter every other option uses cannot ask for the
+   * posts holding in front of a person: this one option has to reach the
+   * server's `awaiting_review` filter instead.
+   */
+  describe("waiting for review filter", () => {
+    async function openStateFilter() {
+      const user = userEvent.setup();
+      renderWithProviders(<PostsPage />);
+      await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+      await user.click(screen.getByRole("combobox", { name: "Filter posts by state" }));
+      return user;
+    }
+
+    it("offers Waiting for review among the states", async () => {
+      await openStateFilter();
+      expect(
+        await screen.findByRole("option", { name: "Waiting for review" })
+      ).toBeInTheDocument();
+    });
+
+    it("asks the server for the gate queue rather than for a stage", async () => {
+      const user = await openStateFilter();
+      await user.click(await screen.findByRole("option", { name: "Waiting for review" }));
+
+      await waitFor(() =>
+        expect(mockPostsList).toHaveBeenLastCalledWith({ awaiting_review: "true" })
+      );
+    });
+
+    it("counts the queue rather than calling it a total", async () => {
+      mockPostsList.mockResolvedValue([testPosts[0]]);
+      const user = await openStateFilter();
+      await user.click(await screen.findByRole("option", { name: "Waiting for review" }));
+
+      expect(await screen.findByText("1 post waiting for your review")).toBeInTheDocument();
+      expect(screen.queryByText("1 total post")).not.toBeInTheDocument();
+    });
+
+    it("says nothing is waiting rather than blaming the filters", async () => {
+      const user = await openStateFilter();
+      mockPostsList.mockResolvedValue([]);
+      await user.click(await screen.findByRole("option", { name: "Waiting for review" }));
+
+      expect(await screen.findByText("Nothing is waiting for your review")).toBeInTheDocument();
+      expect(screen.queryByText("No posts match these filters")).not.toBeInTheDocument();
+    });
+
+    /**
+     * The count and the empty state describe the rows on screen, and a filter
+     * change does not clear them: `fetchPosts` only swaps in skeletons for the
+     * first load and an explicit refresh. So the wording has to follow the
+     * request that produced the list rather than the control the user has just
+     * moved, or the unfiltered count reads as a queue depth for one round trip.
+     */
+    it("does not count the old list under the new heading", async () => {
+      const user = await openStateFilter();
+      let release: (value: Post[]) => void = () => {};
+      mockPostsList.mockImplementation(
+        () =>
+          new Promise<Post[]>((resolve) => {
+            release = resolve;
+          })
+      );
+
+      await user.click(await screen.findByRole("option", { name: "Waiting for review" }));
+      expect(screen.getByText("3 total posts")).toBeInTheDocument();
+
+      await act(async () => {
+        release([testPosts[0]]);
+      });
+      expect(screen.getByText("1 post waiting for your review")).toBeInTheDocument();
+    });
+
+    it("still filters current_stage for every other state", async () => {
+      const user = await openStateFilter();
+      await user.click(await screen.findByRole("option", { name: "Queued" }));
+
+      await waitFor(() => expect(mockPostsList).toHaveBeenLastCalledWith({ status: "pending" }));
     });
   });
 
@@ -147,6 +293,41 @@ describe("PostsPage", () => {
     expect(screen.getByText("1 selected")).toBeInTheDocument();
   });
 
+  describe("the delete confirmations", () => {
+    // `AlertDialogAction` renders a `Button` and puts the child's class inside
+    // it through a `Slot`, which concatenates rather than merging: the button
+    // keeps its own `bg-primary` and the override sits beside it, so which one
+    // paints is down to the order Tailwind emitted them in. The `variant` prop
+    // is the one way to say destructive here, and `/posts/[id]` already uses it.
+    it("paints the single confirm as destructive, not as the primary action", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<PostsPage />);
+      await screen.findByText("First Post");
+
+      await user.click(
+        screen.getByRole("button", { name: "Actions for First Post" })
+      );
+      await user.click(await screen.findByRole("menuitem", { name: /delete/i }));
+
+      const confirm = await screen.findByRole("button", { name: "Delete" });
+      expect(confirm.className).toContain("bg-destructive");
+      expect(confirm.className).not.toContain("bg-primary");
+    });
+
+    it("paints the bulk confirm as destructive, not as the primary action", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<PostsPage />);
+      await screen.findByText("First Post");
+
+      await user.click(screen.getAllByRole("checkbox")[1]);
+      await user.click(screen.getByRole("button", { name: /^delete$/i }));
+
+      const confirm = await screen.findByRole("button", { name: "Delete 1 posts" });
+      expect(confirm.className).toContain("bg-destructive");
+      expect(confirm.className).not.toContain("bg-primary");
+    });
+  });
+
   it("calls posts.list on mount", async () => {
     renderWithProviders(<PostsPage />);
     await waitFor(() => {
@@ -161,5 +342,380 @@ describe("PostsPage", () => {
       const counts = screen.getAllByText(/\d\/6/);
       expect(counts).toHaveLength(3);
     });
+  });
+
+  it("names the run's state in the list rather than echoing the stage column", async () => {
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Complete")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Running Write")).toBeInTheDocument();
+    // `p1` sits on `research` with an untouched `stage_status`, which is a post
+    // nothing has executed against, not a post in the research stage.
+    expect(screen.getByText("Not started")).toBeInTheDocument();
+  });
+
+  it("does not call a run with a failed stage complete", async () => {
+    mockPostsList.mockResolvedValue([
+      makePost({
+        id: "p4",
+        topic: "Broken Post",
+        slug: "broken-post",
+        current_stage: "complete",
+        stage_status: {
+          research: "complete",
+          outline: "complete",
+          write: "complete",
+          edit: "complete",
+          images: "failed",
+          ready: "complete",
+        },
+      }),
+    ]);
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("Broken Post")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Finished with errors")).toBeInTheDocument();
+    expect(screen.queryByText("Complete")).not.toBeInTheDocument();
+  });
+});
+
+describe("PostsPage search", () => {
+  /**
+   * A promise plus the handle that settles it, so a test can hold one list
+   * request open while a second one answers.
+   */
+  function deferredList(): {
+    promise: Promise<Post[]>;
+    resolve: (value: Post[]) => void;
+  } {
+    let resolve!: (value: Post[]) => void;
+    const promise = new Promise<Post[]>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  async function typeSearch(user: ReturnType<typeof userEvent.setup>, text: string) {
+    await user.type(screen.getByPlaceholderText("Search posts..."), text);
+  }
+
+  it("sends one request for a typed word, not one per keystroke", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+    expect(mockPostsList).toHaveBeenCalledTimes(1);
+
+    await typeSearch(user, "bread");
+
+    await waitFor(() =>
+      expect(mockPostsList).toHaveBeenLastCalledWith({ q: "bread" })
+    );
+    expect(mockPostsList).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not refetch the profile filter's options with every list request", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+    expect(mockProfilesList).toHaveBeenCalledTimes(1);
+
+    await typeSearch(user, "bread");
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole("button", { name: "Refresh posts" }));
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalledTimes(3));
+
+    // The options in the profile filter do not change because the rows under
+    // it did, so they are read once for the page rather than once per list.
+    expect(mockProfilesList).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let a slow answer overwrite the rows a newer search returned", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+
+    const slow = deferredList();
+    const fast = deferredList();
+    mockPostsList.mockReturnValueOnce(slow.promise);
+    mockPostsList.mockReturnValueOnce(fast.promise);
+
+    await typeSearch(user, "so");
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalledTimes(2));
+    await typeSearch(user, "up");
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      fast.resolve([makePost({ id: "soup", topic: "Soup Post" })]);
+    });
+    await waitFor(() => expect(screen.getByText("Soup Post")).toBeInTheDocument());
+
+    await act(async () => {
+      slow.resolve([makePost({ id: "so", topic: "Stale Post" })]);
+    });
+
+    expect(screen.queryByText("Stale Post")).not.toBeInTheDocument();
+    expect(screen.getByText("Soup Post")).toBeInTheDocument();
+    expect(screen.getByText("1 total post")).toBeInTheDocument();
+  });
+
+  it("does not let a slow failure replace the rows a newer search returned", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+
+    let rejectSlow!: (reason: Error) => void;
+    const slow = new Promise<Post[]>((_, reject) => {
+      rejectSlow = reject;
+    });
+    const fast = deferredList();
+    mockPostsList.mockReturnValueOnce(slow);
+    mockPostsList.mockReturnValueOnce(fast.promise);
+
+    await typeSearch(user, "so");
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalledTimes(2));
+    await typeSearch(user, "up");
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      fast.resolve([makePost({ id: "soup", topic: "Soup Post" })]);
+    });
+    await waitFor(() => expect(screen.getByText("Soup Post")).toBeInTheDocument());
+
+    await act(async () => {
+      rejectSlow(new Error(JSON.stringify({ detail: "gone" })));
+      await slow.catch(() => {});
+    });
+
+    expect(screen.queryByText("Could not load posts")).not.toBeInTheDocument();
+    expect(screen.getByText("Soup Post")).toBeInTheDocument();
+  });
+
+  it("keeps the skeletons up until the newest request answers", async () => {
+    const user = userEvent.setup({ delay: null });
+    const { container } = renderWithProviders(<PostsPage />);
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+
+    const slow = deferredList();
+    const fast = deferredList();
+    mockPostsList.mockReturnValueOnce(slow.promise);
+    mockPostsList.mockReturnValueOnce(fast.promise);
+
+    await user.click(screen.getByRole("button", { name: "Refresh posts" }));
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalledTimes(2));
+    const skeletons = () =>
+      container.querySelectorAll("[class*='animate-pulse']").length;
+    const rowSkeletons = skeletons();
+    expect(rowSkeletons).toBeGreaterThan(1);
+
+    await typeSearch(user, "soup");
+    await waitFor(() => expect(mockPostsList).toHaveBeenCalledTimes(3));
+
+    // The refresh is the superseded request now, so its answer neither draws
+    // rows nor takes the skeletons down.
+    await act(async () => {
+      slow.resolve(testPosts);
+    });
+    expect(skeletons()).toBe(rowSkeletons);
+
+    await act(async () => {
+      fast.resolve([makePost({ id: "soup", topic: "Soup Post" })]);
+    });
+    expect(screen.getByText("Soup Post")).toBeInTheDocument();
+    expect(skeletons()).toBeLessThan(rowSkeletons);
+  });
+
+  it("keeps the filtered empty state while a cleared search is still in flight", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(<PostsPage />);
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+
+    mockPostsList.mockResolvedValue([]);
+    await typeSearch(user, "zzz");
+    await waitFor(() =>
+      expect(screen.getByText("No posts match these filters")).toBeInTheDocument()
+    );
+
+    const slow = deferredList();
+    mockPostsList.mockReturnValueOnce(slow.promise);
+    await user.clear(screen.getByPlaceholderText("Search posts..."));
+
+    // The rows on screen are still the ones the search returned, so the empty
+    // state has to keep describing that search until its replacement lands.
+    expect(screen.queryByText("Create your first post")).not.toBeInTheDocument();
+    expect(screen.getByText("No posts match these filters")).toBeInTheDocument();
+
+    await act(async () => {
+      slow.resolve(testPosts);
+    });
+    await waitFor(() => expect(screen.getByText("First Post")).toBeInTheDocument());
+  });
+});
+
+/**
+ * Ledger item P4.9a. A publish that dies with its worker leaves the status
+ * column on `publishing` and publishes no further event, so the row it belongs
+ * to went on reading exactly like a finished post everywhere except the post's
+ * own page. This list is where an operator looks first, and it said nothing.
+ */
+describe("PostsPage stalled publishing", () => {
+  /** `appendExecutionLog`'s stored shape for the entry a worker writes on pickup. */
+  function startEntry(ts: string) {
+    return {
+      ts,
+      stage: "",
+      level: "info",
+      event: "publish_start",
+      message: "Publishing to WordPress...",
+    };
+  }
+
+  function minutesAgo(minutes: number): string {
+    return new Date(Date.now() - minutes * 60_000).toISOString();
+  }
+
+  function stalledPost(overrides: Partial<Post> = {}): Post {
+    return makePost({
+      id: "stalled",
+      topic: "Stalled Post",
+      slug: "stalled-post",
+      current_stage: "complete",
+      output_format: "wordpress",
+      wp_publish_status: "publishing",
+      updated_at: minutesAgo(40),
+      execution_logs: [startEntry(minutesAgo(38))],
+      ...overrides,
+    });
+  }
+
+  it("marks the row whose publish stopped moving, and says why", async () => {
+    mockPostsList.mockResolvedValue([stalledPost()]);
+    renderWithProviders(<PostsPage />);
+
+    const badge = await screen.findByText("Publish stalled");
+    expect(badge.closest("[title]")?.getAttribute("title")).toMatch(
+      /the worker died partway through/i
+    );
+  });
+
+  it("leaves a publish still inside its window alone", async () => {
+    mockPostsList.mockResolvedValue([
+      stalledPost({ updated_at: minutesAgo(2), execution_logs: [startEntry(minutesAgo(2))] }),
+    ]);
+    renderWithProviders(<PostsPage />);
+
+    await waitFor(() => expect(screen.getByText("Stalled Post")).toBeInTheDocument());
+    expect(screen.queryByText("Publish stalled")).not.toBeInTheDocument();
+  });
+
+  /**
+   * The two status columns are independent and neither publish step clears the
+   * other, so a post moved to `markdown` still carries WordPress's. Marking it
+   * would be raising an alarm about a destination the post no longer has.
+   */
+  it("says nothing about a status column the post's format no longer names", async () => {
+    mockPostsList.mockResolvedValue([stalledPost({ output_format: "markdown" })]);
+    renderWithProviders(<PostsPage />);
+
+    await waitFor(() => expect(screen.getByText("Stalled Post")).toBeInTheDocument());
+    expect(screen.queryByText("Publish stalled")).not.toBeInTheDocument();
+  });
+
+  /**
+   * The window closes with no event behind it, so the render that notices it
+   * is a render nothing else was going to schedule: this list has no poll.
+   */
+  it("marks a row that goes quiet while the tab is open, without a refetch", async () => {
+    vi.useFakeTimers();
+    try {
+      mockPostsList.mockResolvedValue([
+        stalledPost({ updated_at: minutesAgo(14), execution_logs: [startEntry(minutesAgo(14))] }),
+      ]);
+      renderWithProviders(<PostsPage />);
+      await vi.waitFor(() => expect(screen.getByText("Stalled Post")).toBeInTheDocument());
+      expect(screen.queryByText("Publish stalled")).not.toBeInTheDocument();
+
+      const callsBefore = mockPostsList.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2 * 60_000);
+      });
+      expect(screen.getByText("Publish stalled")).toBeInTheDocument();
+      expect(mockPostsList.mock.calls.length).toBe(callsBefore);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+/**
+ * Ledger item P5.5. A run paused after its last stage is finished by
+ * `POST /run-all`, which is the one action that reaches `pipeline-complete`
+ * and so the one that stamps `completed_at` and starts the publish. Until now
+ * the only place that action existed was `/posts/[id]`, so a reader who saw
+ * `Paused before finishing` on this list had to open the post to act on it,
+ * and the row menu offered `Pause` on a run that was already stopped.
+ */
+describe("a run paused after its last stage", () => {
+  const pausedBeforeFinish = makePost({
+    id: "pbf",
+    topic: "Paused Before Finish",
+    slug: "paused-before-finish",
+    current_stage: "paused",
+    stage_status: {
+      research: "complete",
+      outline: "complete",
+      write: "complete",
+      edit: "complete",
+      images: "complete",
+      ready: "complete",
+    },
+  });
+
+  it("offers Finish this run in the row menu", async () => {
+    const user = userEvent.setup();
+    mockPostsList.mockResolvedValue([pausedBeforeFinish]);
+    renderWithProviders(<PostsPage />);
+    await screen.findByText("Paused Before Finish");
+
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Paused Before Finish" })
+    );
+    await user.click(
+      await screen.findByRole("menuitem", { name: /finish this run/i })
+    );
+
+    expect(vi.mocked(posts.runAll)).toHaveBeenCalledWith("pbf");
+  });
+
+  it("does not offer Pause on a run that is already stopped", async () => {
+    const user = userEvent.setup();
+    mockPostsList.mockResolvedValue([pausedBeforeFinish]);
+    renderWithProviders(<PostsPage />);
+    await screen.findByText("Paused Before Finish");
+
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Paused Before Finish" })
+    );
+    await screen.findByRole("menuitem", { name: /finish this run/i });
+    expect(
+      screen.queryByRole("menuitem", { name: /^pause$/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it("leaves the menu of a run that is still going alone", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<PostsPage />);
+    await screen.findByText("Third Post");
+
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Third Post" })
+    );
+    expect(
+      await screen.findByRole("menuitem", { name: /^pause$/i })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: /finish this run/i })
+    ).not.toBeInTheDocument();
   });
 });

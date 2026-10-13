@@ -1,0 +1,222 @@
+{
+  "background": false,
+  "completed_at": 1787600340,
+  "created_at": 1787600340,
+  "error": null,
+  "frequency_penalty": 0,
+  "id": "resp_325f866e-0135-4b00-8806-716a95a06ac8",
+  "incomplete_details": null,
+  "instructions": null,
+  "max_output_tokens": null,
+  "max_tool_calls": null,
+  "metadata": {},
+  "model": "perplexity/sonar",
+  "object": "response",
+  "output": [
+    {
+      "queries": [
+        "Reykjavik population official statistics 2026",
+        "Reykjavík population Statistics Iceland municipality"
+      ],
+      "results": [
+        {
+          "date": "2026-08-20",
+          "id": 1,
+          "last_updated": "2026-08-21",
+          "snippet": "Reykjavik's 2026 population is now estimated at **249,228**.In 2000, the population of Reykjavik was **163,596**.Reykjavik has grown by 4,794 in the last year, which represents a 1.96% annual change.These population values and projections come from Statistics Iceland PX table MAN030102 localities population series and World Population Review Internal Projections.\n...\nThe city, which has an area of 200 square kilometers, has a population of approximately 123,000, with 216,940 living in the Capital Region (Greater Reykjavik, which refers to Reykjavik itself and the six municipalities around it).\n...\n|City|2026 Pop.↓|Growth|\n|--|--|--|\n|Reykjavik|249,228|1.96%|\n|Keflavik og Njardvik|23,732|4.22%|\n|Akureyri|20,483|1.59%|\n|Selfoss|10,597|3.61%|\n|Akranes|8,530|2.25%|\n|Vestmannaeyjar|4,537|1.05%|\n|Grindavik|3,658|1.16%|\n|Hveragerdi|3,622|5.14%|\n|Isafjordur|2,707|0.52%|\n|Egilsstadir|2,686|1.21%|\n|Saudarkrokur|2,612|0.08%|\n|Husavik|2,497|0.97%|\n|Alftanes|2,458|-0.57%|\n|Thorlakshofn|2,235|4.73%|\n|Borgarnes|2,204|1.33%|\n|Sandgerdi|2,077|2.16%|\n|Gardur|1,965|2.77%|\n|Hofn i Hornafirdi|1,795|0.79%|\n|Vogar|1,499|3.95%|\n|Neskaupstadur|1,466|0.21%|",
+          "source": "web",
+          "title": "Reykjavik Population 2026 - World Population Review",
+          "url": "https://worldpopulationreview.com/cities/iceland/reykjavik"
+        },
+        {
+          "date": "2001-08-03",
+          "id": 2,
+          "last_updated": "2026-08-01",
+          "snippet": "Reykjavík has a population of around 140,000 as of 2026, and the surrounding Capital Region has a population of around 252,000, constituting approximately 64% of Iceland's population.\n...\n|Population (2026)|Population (2026)|\n|• Capital city|138,753|\n|• Density|569/km^2^ (1,470/sq mi)|\n|• Metro|251,912|\n|• Municipality|139,804|\n...\n|Year|Pop.|±% p.a.|\n...\n|2026|139,804|+1.67%|\n|Source: Statistics Iceland|Source: Statistics Iceland|Source: Statistics Iceland|\nReykjavík is by far the largest and most populous urban area in Iceland.\nThe municipality of Reykjavík had a population of 139,804 on 1 January 2026, comprising 35.5% of the country's population.\nThe Capital Region, which includes the capital and six municipalities around it, was home to 251,912 people; that is about 64% of the country's population.\nOn 1 January 2026, of the city's population of 139,804, immigrants of the first and second generation numbered 37,348 (26.7%), increasing from 19,801 (16.1%) in 2018, 12,352 (10.4%) in 2008 and 3,106 (2.9%) in 1998.",
+          "source": "web",
+          "title": "Reykjavík - Wikipedia",
+          "url": "https://en.wikipedia.org/wiki/Reykjav%C3%ADk"
+        },
+        {
+          "id": 3,
+          "last_updated": "2026-03-27",
+          "snippet": "Urban Area\n221,815 Population [2020] – *estimate*\n247,162 Population [2026] – *estimate*\n...\n3,260/km² Density [2026]\n...\n|Name|Status|Population Estimate 2000-01-01|Population Estimate 2005-01-01|Population Estimate 2010-01-01|Population Estimate 2015-01-01|Population Estimate 2020-01-01|Population Estimate 2026-01-01| |\n...\n|Reykjavík|Urban Settlement|109,215|112,979|117,465|117,902|125,376|138,753|→|\n...\n|Reykjavík (Stór-Reykjavík)|Urban Area|168,848|180,878|196,916|202,677|221,815|247,162| |\n**Source:** Statistics Iceland.\n...\n|Gender (E 2026)|Gender (E 2026)|\n...\n|Age Groups (E 2026)|Age Groups (E 2026)|\n...\n|Age Distribution (E 2026)|Age Distribution (E 2026)|",
+          "source": "web",
+          "title": "Greater Reykjavik (Iceland): Settlements - City Population",
+          "url": "https://www.citypopulation.de/en/iceland/reykjavik/"
+        },
+        {
+          "id": 4,
+          "last_updated": "2026-01-18",
+          "snippet": "|Name|Status|Population Estimate 2000-01-01|Population Estimate 2005-01-01|Population Estimate 2010-01-01|Population Estimate 2015-01-01|Population Estimate 2020-01-01|Population Estimate 2024-01-01|\n|--|--|--|--|--|--|--|--|\n|Reykjavík (Reykjavíkurborg)|Municipality|109,887|113,848|118,326|118,789|126,549|136,894|\n|Ísland [Iceland]|Country|279,049|293,577|317,630|323,024|354,042|383,726|\n**Source:** Statistics Iceland.",
+          "source": "web",
+          "title": "Reykjavík (Municipality, Iceland)",
+          "url": "https://www.citypopulation.de/en/iceland/admin/h%C3%B6fu%C3%B0borgarsv%C3%A6%C3%B0/0000__reykjav%C3%ADk/"
+        },
+        {
+          "date": "2024-01-01",
+          "id": 5,
+          "last_updated": "2025-04-09",
+          "snippet": "|Name|Municipality|Population Estimate 2000-01-01|Population Estimate 2005-01-01|Population Estimate 2010-01-01|Population Estimate 2015-01-01|Population Estimate 2020-01-01|Population Estimate 2024-01-01|\n|--|--|--|--|--|--|--|--|\n|Reykjavík|Reykjavík|109,215|112,979|117,465|117,902|125,376|135,714|→|\n**Source:** Statistics Iceland.",
+          "source": "web",
+          "title": "Reykjavík (Reykjavík, All Urban Settlements, Iceland)",
+          "url": "https://www.citypopulation.de/en/iceland/towns/reykjav%C3%ADk/UA0050__reykjav%C3%ADk/"
+        },
+        {
+          "id": 6,
+          "last_updated": "2025-11-03",
+          "snippet": "|Name|Status|Population Estimate 2000-01-01|Population Estimate 2005-01-01|Population Estimate 2010-01-01|Population Estimate 2015-01-01|Population Estimate 2020-01-01|Population Estimate 2024-01-01|\n|--|--|--|--|--|--|--|--|\n|Reykjavík|Urban Settlement|109,215|112,979|117,465|117,902|125,376|135,714|\n|Reykjavík (Stór-Reykjavík)|Urban Area|168,848|180,878|196,916|202,677|221,815|239,733|\n**Source:** Statistics Iceland.",
+          "source": "web",
+          "title": "Reykjavík (Urban Settlement, Greater Reykjavik, Iceland)",
+          "url": "https://www.citypopulation.de/en/iceland/reykjavik/UA0050__reykjav%C3%ADk/"
+        },
+        {
+          "id": 7,
+          "last_updated": "2026-08-01",
+          "snippet": "|Name|Status|Population Estimate 2000-01-01|Population Estimate 2005-01-01|Population Estimate 2010-01-01|Population Estimate 2015-01-01|Population Estimate 2020-01-01|Population Estimate 2026-01-01| |\n|--|--|--|--|--|--|--|--|--|\n|Reykjavík|Urban Settlement|109,215|112,979|117,465|117,902|125,376|138,753| |\n|Reykjavík (Stór-Reykjavík)|Urban Area|168,848|180,878|196,916|202,677|221,815|247,162| |\n**Source:** Statistics Iceland.\n...\n|Gender (E 2026)|Gender (E 2026)|\n|--|--|\n|Males|70,498|\n|Females|68,134|\n|Non-binary/Other|121|\n|Age Groups (E 2026)|Age Groups (E 2026)|\n...\n|0-17 years|27,865|\n|18-64 years|89,654|\n|65+ years|21,234|\n|Age Distribution (E 2026)|Age Distribution (E 2026)|\n...\n|90+ years|963|\n|80-89 years|4,098|",
+          "source": "web",
+          "title": "Reykjavík (Urban Settlement, Greater Reykjavik, Iceland ...",
+          "url": "https://www.citypopulation.de/en/iceland/reykjavik/UA0050__reykjav%C3%83%C2%ADk/"
+        },
+        {
+          "date": "2026-01-01",
+          "id": 8,
+          "last_updated": "2026-08-24",
+          "snippet": "According to a new estimate by Statistics Iceland, the population in Iceland on 1 January 2026 was 394,324 and the population had increased by 4,880 from 1 January 2025, or by 1.3%.\n...\nA total of 2,858 more people lived in the Capital region on 1 January 2026 than a year ago.\nThat is equivalent to a 1.1% population increase in one year.\n...\nThere were a total of 62 municipalities in Iceland on January 1, 2026.\nReykjavík was the most populous municipality with 139,804 inhabitants, while Tjörneshreppur was the smallest municipalities with 54 inhabitants.\n...\nIn Reykjavík, the increase was below the national average or 0.7%.\nOf the eleven largest municipalities, only one experienced a population decrease, which was Fjarðabyggð (0.4%).\n...\nFor further information please contact 5281100 , email upplysingar@hagstofa.is",
+          "source": "web",
+          "title": "Iceland's population was 394324 at the beginning of 2026",
+          "url": "https://www.statice.is/publications/news-archive/inhabitants/population-1-january-2026/"
+        },
+        {
+          "date": "2026-07-20",
+          "id": 9,
+          "last_updated": "2026-08-15",
+          "snippet": "Iceland's population was 394,324 on 1 January 2026, up 4,880 (+1.3%) in a year, per Statistics Iceland.\nPreliminary figures put it at 395,050 by the end of March 2026.\nThat makes Iceland Europe's most sparsely populated country at roughly 3.8 people per km², with 63.9% of residents living in the capital region around Reykjavík and immigrants making up 19.6% of the population.\n...\nAll population figures on this page are from official Statistics Iceland releases and statistical tables.\nThe main reference date is 1 January 2026 (published 12 March 2026); quarterly figures through Q1 2026 are preliminary.\n...\n- Statistics Iceland: Population 1 January 2026\n- Statistics Iceland: Population in the 1st quarter 2026\n...\nOn 1 January 2026, up 4,880 (+1.3%) from a year earlier (Statistics Iceland).\n...\n251,912 people live in Greater Reykjavík (1 Jan 2026).\n...\n|Region|Population (1 Jan 2026)|Share|Change during 2025|\n...\n|Capital region|251,912|63.9%|+2,858 (+1.1%)|\n...\nIceland has 62 municipalities, ranging from Reykjavík (139,804 people) to Tjörneshreppur (54 people).\n...\n|Municipality|Population (1 Jan 2026)|Region|\n|--|--|--|\n|Reykjavík|139,804|Capital region|\n|Kópavogur|40,286|Capital region|\n|Hafnarfjörður|32,398|Capital region|\n|Reykjanesbær (Keflavík)|22,697|Southwest|\n|Garðabær|20,724|Capital region|\n|Akureyri|20,284|Northeast|\n|Mosfellsbær|13,772|Capital region|\n|Árborg (Selfoss)|12,671|South|",
+          "source": "web",
+          "title": "Iceland Population: Statistics, Demographics & Trends",
+          "url": "https://www.iceland.org/population"
+        },
+        {
+          "id": 10,
+          "last_updated": "2026-05-16",
+          "snippet": "The population of Reykjavik, Iceland is 117 576 for 2026.\nReykjavik ranks 1 in terms of population in Iceland from 30 cities.\n...\n### Population of Reykjavik\n117 576 people Flag of Iceland Data for 2026\nThe site chislennost.com uses information from official sources and is updated every month.\n...\nA population count in Reykjavik was carried out in 2026.",
+          "source": "web",
+          "title": "Reykjavik Population 2026 - Численность населения Земли",
+          "url": "https://chislennost.com/en/is/population_of_reykjavik_12010.html"
+        },
+        {
+          "date": "2024-01-01",
+          "id": 11,
+          "last_updated": "2026-08-24",
+          "snippet": "According to a new estimate by Statistics Iceland, the population in Iceland on 1 January 2024 was 383,726 and the population had increased by 8,508 from 1 January 2023, or by 2.3%.\n...\n4,888 more people lived in the Capital region on 1 January 2024 than a year ago.\n...\n**The population decreased in 15 out of 64 municipalities**<br Reykjavík was the most populous municipality with 136,894 inhabitants, while Tjörneshreppur and Skorradalshreppur were the smallest municipalities with 52 inhabitants each.\n...\nFor further information please contact 528 1030 , email mannfjoldi@hagstofa.is\n### Share",
+          "source": "web",
+          "title": "The population on 1 January 2024 - Statistics Iceland",
+          "url": "https://www.statice.is/publications/news-archive/inhabitants/the-population-on-1-january-2024/"
+        },
+        {
+          "date": "2024-01-01",
+          "id": 12,
+          "last_updated": "2025-04-21",
+          "snippet": "The population development of Reykjavík.\n|Name|Status|Population Estimate 2000-01-01|Population Estimate 2005-01-01|Population Estimate 2010-01-01|Population Estimate 2015-01-01|Population Estimate 2020-01-01|Population Estimate 2024-01-01|\n|--|--|--|--|--|--|--|--|\n|Reykjavík (Reykjavíkurborg)|Municipality|109,887|113,848|118,326|118,789|126,549|136,894|→|\n|Ísland [Iceland]|Country|279,049|293,577|317,630|323,024|354,042|383,726|\n...\n|Name|Status|Municipality|Population Estimate 2000-01-01|Population Estimate 2005-01-01|Population Estimate 2010-01-01|Population Estimate 2015-01-01|Population Estimate 2020-01-01|Population Estimate 2024-01-01|\n...\n|Reykjavík|Urban Settlement|Reykjavík|109,215|112,979|117,465|117,902|125,376|135,714|→|\n**Source:** Statistics Iceland.",
+          "source": "web",
+          "title": "Urban Localities in Reykjavík (All Urban Settlements, Iceland)",
+          "url": "https://www.citypopulation.de/en/iceland/towns/0000__reykjav%C3%ADk/"
+        },
+        {
+          "id": 13,
+          "last_updated": "2026-06-21",
+          "snippet": "138,772\nResidents (2026)\n...\nAccording to the latest available data (2026), the population of Reykjavík is approximately\n**138,772** residents, making it the second largest city in Iceland.\nGlobally, Reykjavík ranks **#12,029** among the world's most populated cities.\n## Reykjavík City Statistics\n|City|Reykjavík|\n|--|--|\n|Country|Iceland|\n|Population|138,772|\n...\n|Rank in Iceland|#2 of 2 cities|\n...\n|Data Year|2026|\n...\nThe population of Reykjavík is approximately 138,772 residents according to the latest available data (2026).",
+          "source": "web",
+          "title": "Population of Reykjavík, Iceland (2026) — citypopulationdata.com",
+          "url": "https://citypopulationdata.com/city/reykjavik-iceland"
+        },
+        {
+          "date": "2025-01-01",
+          "id": 14,
+          "last_updated": "2026-08-22",
+          "snippet": "Reykjavík was the most populous municipality with 138,772 inhabitants, while Tjörneshreppur was the smallest municipalities with 53 inhabitants.\n...\nFor further information please contact 528 1030 , email mannfjoldi@hagstofa.is",
+          "source": "web",
+          "title": "Iceland's population was 389444 at the beginning of 2025",
+          "url": "https://www.statice.is/publications/news-archive/inhabitants/the-population-on-1-january-2025/"
+        },
+        {
+          "date": "2026-04-27",
+          "id": 15,
+          "last_updated": "2026-08-23",
+          "snippet": "The municipality of Reykjavík had 139,804 inhabitants on 1 January 2026, according to Statistics Iceland.\nThe wider Reykjavík capital region is much larger and includes neighboring municipalities such as Kópavogur, Hafnarfjörður, Garðabær, Mosfellsbær, and Seltjarnarnes.\nVisit Reykjavík describes the capital region as Iceland’s largest and most populous urban area, with about 249,000 residents in 2025, roughly 64% of the country’s population.",
+          "source": "web",
+          "title": "Iceland's Capital, History, Districts, Culture, and Things to Do",
+          "url": "https://www.hiticeland.com/post/reykjavik-city-the-capital-of-iceland"
+        }
+      ],
+      "type": "search_results"
+    },
+    {
+      "content": [
+        {
+          "annotations": [],
+          "text": "Reykjavík municipality had **139,804 inhabitants on January 1, 2026**, according to Statistics Iceland ([source](https://www.statice.is/publications/news-archive/inhabitants/population-1-january-2026/)).",
+          "type": "output_text"
+        }
+      ],
+      "id": "msg_a9183b60-87ee-4678-b60a-1a6784b48a39",
+      "role": "assistant",
+      "status": "completed",
+      "type": "message"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "presence_penalty": 0,
+  "previous_response_id": null,
+  "prompt_cache_key": null,
+  "reasoning": null,
+  "safety_identifier": null,
+  "service_tier": "default",
+  "status": "completed",
+  "store": true,
+  "temperature": 1,
+  "text": {
+    "format": {
+      "type": "text"
+    }
+  },
+  "tool_choice": "auto",
+  "tools": [
+    {
+      "type": "web_search"
+    }
+  ],
+  "top_logprobs": 0,
+  "top_p": 1,
+  "truncation": "",
+  "usage": {
+    "cost": {
+      "cache_creation_cost": 0.00112,
+      "currency": "USD",
+      "input_cost": 0.00014,
+      "output_cost": 0.00029,
+      "tool_calls_cost": 0.0025,
+      "tool_calls_cost_details": {
+        "search_web": 0.0025
+      },
+      "total_cost": 0.00405
+    },
+    "input_tokens": 5043,
+    "input_tokens_details": {
+      "cache_creation_input_tokens": 4492,
+      "cache_read_input_tokens": 0,
+      "cached_tokens": 0
+    },
+    "output_tokens": 117,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "tool_calls_details": {
+      "search_web": {
+        "invocation": 1
+      }
+    },
+    "total_tokens": 5160
+  },
+  "user": null
+}

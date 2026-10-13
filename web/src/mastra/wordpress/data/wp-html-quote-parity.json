@@ -1,0 +1,288 @@
+{
+  "generated_by": "api/scripts/export_wp_html_quote_parity.py",
+  "source": "api/src/services/wp_html.py::markdown_to_wp_html",
+  "mistune_version": "3.2.0",
+  "scope": "block quotes: the require-marker and lazy-continuation scans, nesting depth, the blocks a quote may hold and the blocks that break out of one",
+  "cases": [
+    {
+      "name": "one line quote",
+      "markdown": "> quoted text\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted text</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote with no space after the marker",
+      "markdown": ">quoted text\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted text</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote with several spaces after the marker",
+      "markdown": ">    quoted text\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted text</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote with a tab after the marker",
+      "markdown": ">\tquoted text\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted text</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "empty quote marker",
+      "markdown": ">\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"></blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote marker then spaces only",
+      "markdown": ">   \n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"></blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "two marked lines",
+      "markdown": "> one\n> two\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>one\ntwo</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "three marked lines",
+      "markdown": "> one\n> two\n> three\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>one\ntwo\nthree</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "marked lines with a hard break",
+      "markdown": "> one  \n> two\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>one<br />\ntwo</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote indented one space",
+      "markdown": " > quoted\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote indented three spaces",
+      "markdown": "   > quoted\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote indented four spaces",
+      "markdown": "    > quoted\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote indented four spaces after a paragraph",
+      "markdown": "Para.\n\n    > quoted\n",
+      "html": "<!-- wp:paragraph -->\n<p>Para.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>> quoted</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "quote between two paragraphs",
+      "markdown": "Before.\n\n> quoted\n\nAfter.\n",
+      "html": "<!-- wp:paragraph -->\n<p>Before.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:paragraph -->\n<p>After.</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "quote interrupting a paragraph",
+      "markdown": "Before.\n> quoted\n",
+      "html": "<!-- wp:paragraph -->\n<p>Before.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "paragraph directly after a quote",
+      "markdown": "> quoted\nAfter.\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted\nAfter.</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "lazy continuation line",
+      "markdown": "> one\ntwo\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>one\ntwo</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "two lazy continuation lines",
+      "markdown": "> one\ntwo\nthree\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>one\ntwo\nthree</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "lazy continuation after a marked blank line",
+      "markdown": "> one\n>\ntwo\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:paragraph -->\n<p>two</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "blank line then paragraph after a quote",
+      "markdown": "> one\n\ntwo\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:paragraph -->\n<p>two</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "marked blank line inside a quote",
+      "markdown": "> one\n>\n> two\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>two</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote starting with a blank marker line",
+      "markdown": ">\n> text\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>text</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "two quotes separated by a blank line",
+      "markdown": "> one\n\n> two\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>two</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "two quotes separated by a paragraph",
+      "markdown": "> one\n\npara\n\n> two\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:paragraph -->\n<p>para</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>two</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "nested quote",
+      "markdown": "> > inner\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>inner</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "nested quote, marked outer line first",
+      "markdown": "> outer\n> > inner\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>outer</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>inner</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "nested quote, lazy inner",
+      "markdown": "> > inner\nlazy\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>inner\nlazy</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "three levels of nesting",
+      "markdown": "> > > deep\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>deep</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "five levels of nesting",
+      "markdown": "> > > > > deep\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>deep</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "six levels of nesting",
+      "markdown": "> > > > > > deep\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>deep</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "seven levels of nesting",
+      "markdown": "> > > > > > > deep\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>> deep</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote holding an atx heading",
+      "markdown": "> ## Title\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote holding an atx heading then text",
+      "markdown": "> ## Title\n> body\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n<!-- wp:paragraph -->\n<p>body</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote holding a setext heading",
+      "markdown": "> Title\n> =====\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:heading {\"level\":1} -->\n<h1>Title</h1>\n<!-- /wp:heading -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote holding a thematic break",
+      "markdown": "> ***\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote holding a fenced code block",
+      "markdown": "> ```\n> code\n> ```\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:code -->\n<pre class=\"wp-block-code\"><code>code\n</code></pre>\n<!-- /wp:code -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote holding a fenced code block with a language",
+      "markdown": "> ```py\n> x = 1\n> ```\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:code {\"language\":\"py\"} -->\n<pre class=\"wp-block-code\"><code>x = 1\n</code></pre>\n<!-- /wp:code -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote whose first line is a fence",
+      "markdown": "> ```\ncode\n```\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:code -->\n<pre class=\"wp-block-code\"><code></code></pre>\n<!-- /wp:code -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:paragraph -->\n<p>code</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:code -->\n<pre class=\"wp-block-code\"><code></code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "quote holding indented code",
+      "markdown": ">     code line\n>     more\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:code -->\n<pre class=\"wp-block-code\"><code>code line\nmore</code></pre>\n<!-- /wp:code -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote whose first line is indented code, unmarked next",
+      "markdown": ">     code\ntext\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:code -->\n<pre class=\"wp-block-code\"><code>code</code></pre>\n<!-- /wp:code -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:paragraph -->\n<p>text</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "quote holding two paragraphs",
+      "markdown": "> one\n>\n> two\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>two</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote holding a paragraph then a heading",
+      "markdown": "> one\n>\n> ## Title\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "lazy continuation broken by a thematic break",
+      "markdown": "> quoted\n***\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:separator -->\n<hr class=\"wp-block-separator\"/>\n<!-- /wp:separator -->\n\n"
+    },
+    {
+      "name": "lazy continuation broken by a fence",
+      "markdown": "> quoted\n```\ncode\n```\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>code\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "lazy continuation broken by a blank line then text",
+      "markdown": "> quoted\n\ntext\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:paragraph -->\n<p>text</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "lazy continuation not broken by an atx heading",
+      "markdown": "> quoted\n## Title\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote at the end with no trailing newline",
+      "markdown": "> quoted",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote as the only content, crlf",
+      "markdown": "> one\r\n> two\r\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>one\ntwo</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote after a heading",
+      "markdown": "## Title\n\n> quoted\n",
+      "html": "<!-- wp:heading -->\n<h2>Title</h2>\n<!-- /wp:heading -->\n\n<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote before a fence",
+      "markdown": "> quoted\n\n```\ncode\n```\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:code -->\n<pre class=\"wp-block-code\"><code>code\n</code></pre>\n<!-- /wp:code -->\n\n"
+    },
+    {
+      "name": "angle bracket mid line is not a quote",
+      "markdown": "a > b\n",
+      "html": "<!-- wp:paragraph -->\n<p>a > b</p>\n<!-- /wp:paragraph -->\n\n"
+    },
+    {
+      "name": "quote whose text ends in a hash",
+      "markdown": "> quoted #\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>quoted #</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote holding an ampersand",
+      "markdown": "> Tom & Jerry\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>Tom & Jerry</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote holding two dashes under text",
+      "markdown": "> Para.\n> --\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:heading -->\n<h2>Para.</h2>\n<!-- /wp:heading -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "marked line, blank line, marked line",
+      "markdown": "> one\n\n> two\n\n> three\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>one</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>two</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>three</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    },
+    {
+      "name": "quote with trailing whitespace on the marker line",
+      "markdown": "> one   \n> two\n",
+      "html": "<!-- wp:quote -->\n<blockquote class=\"wp-block-quote\"><!-- wp:paragraph -->\n<p>one<br />\ntwo</p>\n<!-- /wp:paragraph -->\n\n</blockquote>\n<!-- /wp:quote -->\n\n"
+    }
+  ]
+}

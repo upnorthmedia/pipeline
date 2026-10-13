@@ -2,10 +2,20 @@
 
 import { useEffect, useRef, useState } from "react";
 import { sseUrl } from "@/lib/api";
+import { LAST_EVENT_ID_PARAM } from "@/app/api/events/anchor";
 
 export interface SSEEvent {
   event: string;
   post_id?: string;
+  /**
+   * The post's topic, added by the endpoint rather than by the publisher.
+   *
+   * A step publishes a post id and no name for it, so a surface that receives
+   * a frame for a post it has not loaded has nothing to call it. Both event
+   * routes read the row to decide who may see the frame and put the topic on
+   * it from there (`src/app/api/events/scope.ts`).
+   */
+  topic?: string;
   stage?: string;
   status?: string;
   content?: string;
@@ -15,18 +25,55 @@ export interface SSEEvent {
 
 type SSECallback = (event: SSEEvent) => void;
 
+/**
+ * Every event name the pipeline publishes.
+ *
+ * `EventSource` delivers a frame carrying an `event:` field only to a listener
+ * registered for that exact name: it never reaches `onmessage`. So a name
+ * missing from this list is a frame the browser receives and discards, which
+ * is what happened to the two the `images` fan-out publishes
+ * (`web/src/mastra/steps/images-generate.ts`) for the whole of the port and
+ * the Python stack before it. They are the one stage's progress, one line per
+ * manifest entry, and nothing else reports it while the stage is running.
+ */
 const NAMED_EVENTS = [
   "stage_start",
+  "stage_review",
   "stage_complete",
   "stage_error",
   "pipeline_complete",
+  // The two pause endpoints publish this one from the `web` process rather
+  // than from a step: a pause stops the run without starting anything, so it
+  // is the one row change no stage frame accompanies.
+  "run_paused",
   "publish_start",
   "publish_complete",
   "publish_error",
+  "image_generated",
+  "image_failed",
   "log",
 ] as const;
 
-export function useSSE(postId?: string, onEvent?: SSECallback) {
+/**
+ * Options for {@link useSSE}.
+ */
+export interface UseSSEOptions {
+  /**
+   * Whether to hold a connection open. Defaults to `true`.
+   *
+   * Pass `false` while the caller has no authenticated session. `/api/events`
+   * answers 401 without one, `EventSource` surfaces that as `onerror` with no
+   * status code to branch on, and the reconnect below would then retry a
+   * request that cannot start succeeding until a session exists.
+   */
+  enabled?: boolean;
+}
+
+export function useSSE(
+  postId?: string,
+  onEvent?: SSECallback,
+  { enabled = true }: UseSSEOptions = {},
+) {
   const [connected, setConnected] = useState(false);
   const [lastEvent, setLastEvent] = useState<SSEEvent | null>(null);
   const callbackRef = useRef(onEvent);
@@ -35,23 +82,52 @@ export function useSSE(postId?: string, onEvent?: SSECallback) {
   }, [onEvent]);
 
   useEffect(() => {
+    if (!enabled) return;
     const url = postId ? sseUrl.post(postId) : sseUrl.global();
     let source: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let disposed = false;
+    // The `id:` of the last frame this feed delivered, or "" before the first
+    // one. It is scoped to the effect on purpose: a postId change is a
+    // different filter over the same topic, and replaying the new post's
+    // backlog from the old post's position would open the page on a flood of
+    // events the user never asked to re-read.
+    let lastEventId = "";
 
     function handleData(data: SSEEvent) {
       setLastEvent(data);
       callbackRef.current?.(data);
     }
 
+    /**
+     * Records the frame's position before anything else looks at it.
+     *
+     * This runs even for a frame whose `data` will not parse, which is what
+     * `EventSource`'s own `Last-Event-ID` buffer does: the spec advances it
+     * from the `id:` field, and a frame this hook cannot read is still a frame
+     * the server does not need to send again.
+     */
+    function trackAnchor(e: MessageEvent) {
+      if (e.lastEventId) lastEventId = e.lastEventId;
+    }
+
     function open() {
       if (disposed) return;
-      source = new EventSource(url);
+      // A fresh `EventSource` sends no `Last-Event-ID` header: the browser only
+      // sets it when it reconnects an object it already owns, and `onerror`
+      // below closes this one and builds another. So the anchor has to travel
+      // on the URL, which `requestAnchor()` reads as the fallback behind the
+      // header.
+      source = new EventSource(
+        lastEventId
+          ? `${url}${url.includes("?") ? "&" : "?"}${LAST_EVENT_ID_PARAM}=${encodeURIComponent(lastEventId)}`
+          : url
+      );
 
       source.onopen = () => setConnected(true);
 
       source.onmessage = (e) => {
+        trackAnchor(e);
         try {
           handleData(JSON.parse(e.data));
         } catch {
@@ -61,6 +137,7 @@ export function useSSE(postId?: string, onEvent?: SSECallback) {
 
       for (const eventType of NAMED_EVENTS) {
         source.addEventListener(eventType, (e) => {
+          trackAnchor(e as MessageEvent);
           try {
             const data: SSEEvent = JSON.parse((e as MessageEvent).data);
             data.event = eventType;
@@ -90,7 +167,10 @@ export function useSSE(postId?: string, onEvent?: SSECallback) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       setConnected(false);
     };
-  }, [postId]);
+  }, [postId, enabled]);
 
-  return { connected, lastEvent };
+  // Derived rather than set from the effect: flipping `enabled` off must not
+  // leave a stale `true` behind, and setting state synchronously in an effect
+  // triggers cascading renders (react-hooks/set-state-in-effect).
+  return { connected: enabled && connected, lastEvent };
 }
