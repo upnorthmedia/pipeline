@@ -4,7 +4,7 @@
 # `docker-compose.yml` and the Railway service definitions both point here.
 
 # Stage 1: Install dependencies
-FROM node:22-alpine AS deps
+FROM node:22.23.4-alpine@sha256:ebc216c22db53dbde85719a874978d5aec04e6e405ad26a3804c6f9abc4ca1a9 AS deps
 
 WORKDIR /app
 
@@ -35,7 +35,7 @@ RUN cp -RL node_modules/drizzle-orm /app/vendor-drizzle-orm
 COPY web/next.config.ts web/repo-env.ts web/tsconfig.json web/postcss.config.mjs web/eslint.config.mjs web/components.json ./
 
 # Stage 2: Build
-FROM node:22-alpine AS builder
+FROM node:22.23.4-alpine@sha256:ebc216c22db53dbde85719a874978d5aec04e6e405ad26a3804c6f9abc4ca1a9 AS builder
 
 WORKDIR /app
 
@@ -77,7 +77,7 @@ ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
 RUN pnpm build
 
 # Stage 3: Production runtime
-FROM node:22-alpine AS runner
+FROM node:22.23.4-alpine@sha256:ebc216c22db53dbde85719a874978d5aec04e6e405ad26a3804c6f9abc4ca1a9 AS runner
 
 WORKDIR /app
 
@@ -135,7 +135,7 @@ CMD ["node", "server.js"]
 # `mastra worker build` is a different resolution environment from `next build`,
 # so it gets its own stage rather than riding along in the builder above: a
 # dependency that resolves for Next.js can still be unresolvable in the bundle.
-FROM node:22-alpine AS worker-builder
+FROM node:22.23.4-alpine@sha256:ebc216c22db53dbde85719a874978d5aec04e6e405ad26a3804c6f9abc4ca1a9 AS worker-builder
 
 WORKDIR /app
 
@@ -154,7 +154,7 @@ RUN pnpm run worker:build
 # (its BundlerConfig is externals / sourcemap / minify / transpilePackages /
 # dynamicPackages), and every default path in the app resolves from the cwd,
 # which for the bundle is its own output directory.
-FROM node:22-alpine AS worker
+FROM node:22.23.4-alpine@sha256:ebc216c22db53dbde85719a874978d5aec04e6e405ad26a3804c6f9abc4ca1a9 AS worker
 
 WORKDIR /app
 
